@@ -127,26 +127,24 @@ impl WebScene {
         self.scene.update_elements_by_duration(delta_t, |_| {});
     }
 
-    pub fn render(&self, callback: Function) {
-        self.scene.render(|elements| {
-            elements.iter().for_each(|element| {
-                if let ElementShape::Rect(shape) = element.shape() {
-                    let this = JsValue::null();
-                    let result = js_sys::Array::new_with_length(8);
-                    shape
-                        .corner_iter()
-                        .map(|&v| Tuple2 { x: v.x(), y: v.y() })
-                        .enumerate()
-                        .for_each(|(i, p)| {
-                            let f = JsValue::from;
+    pub fn for_each_element(&self, callback: Function) {
+        self.scene.elements_iter().for_each(|element| {
+            if let ElementShape::Rect(shape) = element.shape() {
+                let this = JsValue::null();
+                let result = js_sys::Array::new_with_length(8);
+                shape
+                    .corner_iter()
+                    .map(|&v| Tuple2 { x: v.x(), y: v.y() })
+                    .enumerate()
+                    .for_each(|(i, p)| {
+                        let f = JsValue::from;
 
-                            result.set(2 * i as u32, f(p.x));
-                            result.set(2 * i as u32 + 1, f(p.y));
-                        });
+                        result.set(2 * i as u32, f(p.x));
+                        result.set(2 * i as u32 + 1, f(p.y));
+                    });
 
-                    callback.call1(&this, result.as_ref()).unwrap();
-                }
-            })
+                callback.call1(&this, result.as_ref()).unwrap();
+            }
         });
     }
 }

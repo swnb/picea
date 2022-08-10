@@ -145,16 +145,6 @@ impl Scene {
         });
     }
 
-    #[deprecated]
-    pub fn update_elements(&mut self, callback: impl FnMut(&mut Element)) {
-        self.elements.iter_mut().for_each(callback)
-    }
-
-    #[deprecated]
-    pub fn render(&self, callback: impl Fn(&[Element])) {
-        callback(&self.elements);
-    }
-
     pub fn elements_iter(&self) -> impl Iterator<Item = &Element> {
         self.elements.iter()
     }
