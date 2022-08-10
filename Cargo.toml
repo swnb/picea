@@ -1,0 +1,16 @@
+[package]
+name = "picea"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+console_error_panic_hook = "0.1.7"
+js-sys = "0.3.59"
+wasm-bindgen = { version = "0.2.63" }
+
+[dev-dependencies]
+nannou = "0.18.1"
+rand = "0.8.5"
