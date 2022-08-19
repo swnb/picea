@@ -88,28 +88,24 @@ fn create_model3(_app: &App) -> Model {
     let mut rng = rand::thread_rng();
     let mut scene = Scene::new();
 
-    let gravity_force = Force::new("gravity", (0., -G * 10.));
-
-    let shape = ElementShape::Rect(((-200., -300.), (150., 650.)).into());
+    let shape = ElementShape::Rect(((-200., -300.), (850., 150.)).into());
 
     let meta = MetaBuilder::new(1.)
-        .force("air", (0., 0.))
-        // .angular(std::f32::consts::FRAC_PI_3)
-        .velocity((20.0, 0.))
+        .angular(-std::f32::consts::FRAC_PI_8 / 2.)
         .is_fixed(true);
 
     let element = Element::new(shape, meta);
 
     scene.push_element(element);
 
-    let shape = ElementShape::Rect(((10., 100.), (-100., 100.)).into());
+    let shape = ElementShape::Rect(((200., -100.), (-100., 100.)).into());
 
     let meta = MetaBuilder::new(10.)
         // .angular_velocity(std::f32::consts::PI / 10.)
         // FIXME;
         .angular(-std::f32::consts::FRAC_PI_8)
-        .velocity((rng.gen_range(-50.0..-20.0), 0.))
-        .force("gravity", (-3000., 0.));
+        // .velocity((rng.gen_range(-50.0..-20.0), 0.))
+        .force("gravity", (0.0, -G * 300.));
 
     let element = Element::new(shape, meta);
 
@@ -118,7 +114,7 @@ fn create_model3(_app: &App) -> Model {
     Model {
         scene,
         time: time::Instant::now(),
-        gravity_force,
+        gravity_force: Force::new("", (0., 0.)),
         stop: false,
         data: vec![],
     }
