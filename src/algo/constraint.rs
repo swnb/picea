@@ -67,7 +67,12 @@ pub fn compute_constraint(element: &mut Element, delta_t: f32) {
             };
 
             let r: Vector<f32> = (center_point, contact_point).into();
-            let normal = collision_info.normal;
+            let mut normal = collision_info.normal;
+
+            if normal * r > 0. {
+                normal = -normal
+            }
+
             let mass_eff = element.meta().compute_mass_eff(normal, r);
             let inv_moment_of_inertia = element.meta().inv_moment_of_inertia();
             let depth = collision_info.depth;
