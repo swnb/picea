@@ -105,7 +105,7 @@ fn create_model3(_app: &App) -> Model {
         // FIXME;
         .angular(-std::f32::consts::FRAC_PI_8)
         // .velocity((rng.gen_range(-50.0..-20.0), 0.))
-        .force("gravity", (0.0, -G * 300.));
+        .force("gravity", (0.0, -G * 10.));
 
     let element = Element::new(shape, meta);
 
@@ -232,8 +232,8 @@ fn view(app: &App, model: &Model, frame: Frame) {
     // let center_point_b = shape_b.compute_center_point();
 
     // let compute_support_point = move |reference_vector: Vector<f32>| {
-    //     let (_, max_point_a) = shape_a.projection(reference_vector);
-    //     let (_, max_point_b) = shape_b.projection(-reference_vector);
+    //     let (_, max_point_a) = shape_a.projection_on_vector(reference_vector);
+    //     let (_, max_point_b) = shape_b.projection_on_vector(-reference_vector);
     //     Vector::<f32>::from((max_point_b, max_point_a))
     // };
 

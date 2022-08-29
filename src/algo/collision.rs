@@ -5,6 +5,7 @@ use crate::{
         vector::{Vector, Vector3},
     },
     meta::collision::{CollisionInfo, ContactType},
+    shape::Shape,
 };
 use std::ops::ControlFlow;
 
@@ -32,8 +33,8 @@ pub fn special_collision_detection(a: &mut Element, b: &mut Element) -> Option<C
     let first_approximation_vector: Vector<f32> = (center_point_a, center_point_b).into();
 
     let compute_support_point = |reference_vector| {
-        let (_, max_point_a) = shape_a.projection(reference_vector);
-        let (_, max_point_b) = shape_b.projection(-reference_vector);
+        let (_, max_point_a) = shape_a.projection_on_vector(reference_vector);
+        let (_, max_point_b) = shape_b.projection_on_vector(-reference_vector);
         (max_point_b, max_point_a).into()
     };
 
@@ -77,7 +78,38 @@ fn sweep_and_prune_collision_detection<Z>(elements: &mut [Element], mut handler:
 where
     Z: FnMut(&mut Element, &mut Element),
 {
-    use crate::scene::AxisDirection::*;
+    #[derive(Clone, Copy)]
+    enum AxisDirection {
+        X,
+        Y,
+    }
+
+    use AxisDirection::*;
+
+    trait ProjectionOnAxis {
+        fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32);
+    }
+
+    impl ProjectionOnAxis for ElementShape {
+        fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32) {
+            use ElementShape::*;
+            match self {
+                Rect(shape) => match axis_direction {
+                    X => shape.projection_on_x_axis(),
+                    Y => shape.projection_on_y_axis(),
+                },
+                Circle(shape) => {
+                    let center_point = shape.get_center_point();
+                    let (center_x, center_y): (f32, f32) = center_point.into();
+                    let radius = shape.radius();
+                    match axis_direction {
+                        X => (center_x - radius, center_x + radius),
+                        Y => (center_y - radius, center_y + radius),
+                    }
+                }
+            }
+        }
+    }
 
     // TODO use different sort algo
     elements.sort_by(|a, b| {
@@ -356,10 +388,32 @@ fn sat_collision_detective(a: &Element, b: &Element) -> Option<Vector<f32>> {
 
     let mut collision_normal: (f32, Option<Vector<f32>>) = (f32::MAX, None);
 
+    fn projection(shape: &ElementShape, axis: Vector<f32>) -> (f32, f32) {
+        use ElementShape::*;
+        match shape {
+            Rect(shape) => shape
+                .corner_iter()
+                .fold((f32::MAX, f32::MIN), |mut pre, &corner| {
+                    let size = corner >> axis;
+                    if size < pre.0 {
+                        pre.0 = size
+                    }
+                    if size > pre.1 {
+                        pre.1 = size
+                    }
+                    pre
+                }),
+            Circle(shape) => {
+                // TODO 实现圆的投影逻辑
+                unimplemented!()
+            }
+        }
+    }
+
     for edge in edge_iter {
         let normal = !edge;
-        let (a_min, a_max) = a.shape().project_on_axis(normal);
-        let (b_min, b_max) = b.shape().project_on_axis(normal);
+        let (a_min, a_max) = projection(a.shape(), normal);
+        let (b_min, b_max) = projection(b.shape(), normal);
 
         if a_min < b_min {
             if b_min > a_max {

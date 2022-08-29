@@ -40,12 +40,6 @@ impl SortableCollection for Scene {
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum AxisDirection {
-    X,
-    Y,
-}
-
 type ID = u32;
 
 /**

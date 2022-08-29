@@ -5,8 +5,7 @@ use crate::{
         vector::{Vector, Vector3},
     },
     meta::{Mass, Meta},
-    scene::AxisDirection,
-    shape::{circle::CircleShape, rect::RectShape},
+    shape::{circle::CircleShape, rect::RectShape, Shape},
 };
 
 type ID = u32;
@@ -17,50 +16,8 @@ pub enum ElementShape {
     Circle(CircleShape),
 }
 
-impl ElementShape {
-    pub fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32) {
-        use AxisDirection::*;
-        use ElementShape::*;
-        match self {
-            Rect(shape) => match axis_direction {
-                X => shape.projection_on_x_axis(),
-                Y => shape.projection_on_y_axis(),
-            },
-            Circle(shape) => {
-                let center_point = shape.get_center_point();
-                let (center_x, center_y): (f32, f32) = center_point.into();
-                let radius = shape.radius();
-                match axis_direction {
-                    X => (center_x - radius, center_x + radius),
-                    Y => (center_y - radius, center_y + radius),
-                }
-            }
-        }
-    }
-
-    pub fn project_on_axis(&self, axis: Vector<f32>) -> (f32, f32) {
-        use ElementShape::*;
-        match self {
-            Rect(shape) => shape
-                .corner_iter()
-                .fold((f32::MAX, f32::MIN), |mut pre, &corner| {
-                    let size = corner >> axis;
-                    if size < pre.0 {
-                        pre.0 = size
-                    }
-                    if size > pre.1 {
-                        pre.1 = size
-                    }
-                    pre
-                }),
-            Circle(shape) => {
-                // TODO 实现圆的投影逻辑
-                unimplemented!()
-            }
-        }
-    }
-
-    pub fn compute_center_point(&self) -> Point<f32> {
+impl Shape for ElementShape {
+    fn compute_center_point(&self) -> Point<f32> {
         use ElementShape::*;
         match self {
             Rect(shape) => shape.compute_center(),
@@ -68,7 +25,7 @@ impl ElementShape {
         }
     }
 
-    pub fn projection(&self, vector: Vector<f32>) -> (Point<f32>, Point<f32>) {
+    fn projection_on_vector(&self, vector: Vector<f32>) -> (Point<f32>, Point<f32>) {
         use ElementShape::*;
         match self {
             Rect(shape) => shape.projection(vector),
@@ -77,7 +34,7 @@ impl ElementShape {
         }
     }
 
-    pub fn translate(&mut self, vector: &Vector<f32>) {
+    fn translate(&mut self, vector: &Vector<f32>) {
         use ElementShape::*;
 
         match self {
@@ -86,7 +43,7 @@ impl ElementShape {
         }
     }
 
-    pub fn rotate(&mut self, deg: f32) {
+    fn rotate(&mut self, deg: f32) {
         use ElementShape::*;
 
         match self {

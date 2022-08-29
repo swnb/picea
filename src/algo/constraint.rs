@@ -1,4 +1,4 @@
-use crate::{element::Element, math::vector::Vector, meta::collision::ContactType};
+use crate::{element::Element, math::vector::Vector, meta::collision::ContactType, shape::Shape};
 
 pub fn update_elements_by_duration(element: &mut Element, delta_t: f32) {
     use std::f32::consts::TAU;
