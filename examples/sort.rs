@@ -32,7 +32,7 @@ pub(crate) trait SortableCollection {
         let mut k = start_index;
 
         for index in (start_index + 1)..=end_index {
-            if compare(self.get(index), unsafe { &*partial }).is_le() {
+            if !compare(self.get(index), unsafe { &*partial }).is_gt() {
                 k += 1;
                 self.swap(index, k);
             }
@@ -52,7 +52,7 @@ pub(crate) trait SortableCollection {
 
         for i in 1..self.len() {
             for j in (0..i).rev() {
-                if compare(self.get(i), self.get(j)).is_le() {
+                if !compare(self.get(i), self.get(j)).is_gt() {
                     self.swap(i, j);
                 } else {
                     break;
@@ -60,4 +60,28 @@ pub(crate) trait SortableCollection {
             }
         }
     }
+}
+
+impl SortableCollection for Vec<i32> {
+    type Item = i32;
+
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
+    fn get(&self, index: usize) -> &Self::Item {
+        &self[index]
+    }
+
+    fn swap(&mut self, i: usize, j: usize) {
+        let tmp = self[i];
+        self[i] = self[j];
+        self[j] = tmp;
+    }
+}
+
+fn main() {
+    let mut value = vec![43, 65, 87, -43, 56, -54, 76, -98, 867, 43, 6548];
+    value.select_sort_by(|a, b| a.partial_cmp(b).unwrap());
+    dbg!(value);
 }
