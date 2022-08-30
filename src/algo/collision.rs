@@ -5,17 +5,82 @@ use crate::{
         vector::{Vector, Vector3},
     },
     meta::collision::{CollisionInfo, ContactType},
+    scene::{AxisDirection, ProjectionOnAxis},
     shape::Shape,
 };
-use std::ops::ControlFlow;
+use std::{
+    cmp::Ordering,
+    ops::{ControlFlow, Index, IndexMut},
+};
 
-pub fn detect_collision(
-    elements: &mut [Element],
+pub trait ElementCollection {
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn get(&self, index: usize) -> &Element;
+
+    fn get_mut(&mut self, index: usize) -> &mut Element;
+
+    fn sort(&mut self, compare: impl Fn(&Element, &Element) -> Ordering + Copy);
+}
+
+// new type for ElementCollection , aim to add new method for it
+struct ElementCollectionWrapper<T>(T)
+where
+    T: ElementCollection;
+
+impl<T> Index<usize> for ElementCollectionWrapper<T>
+where
+    T: ElementCollection,
+{
+    type Output = Element;
+    fn index(&self, index: usize) -> &Self::Output {
+        self.0.get(index)
+    }
+}
+
+impl<T> IndexMut<usize> for ElementCollectionWrapper<T>
+where
+    T: ElementCollection,
+{
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.0.get_mut(index)
+    }
+}
+
+impl<T> ElementCollectionWrapper<T>
+where
+    T: ElementCollection,
+{
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn sort<F>(&mut self, compare: F)
+    where
+        F: Fn(&Element, &Element) -> Ordering + Copy,
+    {
+        self.0.sort(compare);
+    }
+}
+
+pub fn detect_collision<T>(
+    elements: T,
     mut handler: impl FnMut(&mut Element, &mut Element, CollisionInfo),
-) {
+) where
+    T: ElementCollection,
+{
     // let time = std::time::Instant::now();
 
-    sweep_and_prune_collision_detection(elements, |a, b| {
+    // TODO
+    let axis = AxisDirection::X;
+
+    let elements = ElementCollectionWrapper(elements);
+
+    sweep_and_prune_collision_detection(elements, axis, |a, b| {
         // TODO special collision algo for circle and circle
         if let Some(collision_info) = special_collision_detection(a, b) {
             handler(a, b, collision_info);
@@ -74,59 +139,29 @@ pub fn special_collision_detection(a: &mut Element, b: &mut Element) -> Option<C
  * 粗检测
  * find the elements that maybe collision
  */
-fn sweep_and_prune_collision_detection<Z>(elements: &mut [Element], mut handler: Z)
-where
+fn sweep_and_prune_collision_detection<T, Z>(
+    mut elements: ElementCollectionWrapper<T>,
+    axis: AxisDirection,
+    mut handler: Z,
+) where
+    T: ElementCollection,
     Z: FnMut(&mut Element, &mut Element),
 {
-    #[derive(Clone, Copy)]
-    enum AxisDirection {
-        X,
-        Y,
-    }
-
-    use AxisDirection::*;
-
-    trait ProjectionOnAxis {
-        fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32);
-    }
-
-    impl ProjectionOnAxis for ElementShape {
-        fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32) {
-            use ElementShape::*;
-            match self {
-                Rect(shape) => match axis_direction {
-                    X => shape.projection_on_x_axis(),
-                    Y => shape.projection_on_y_axis(),
-                },
-                Circle(shape) => {
-                    let center_point = shape.get_center_point();
-                    let (center_x, center_y): (f32, f32) = center_point.into();
-                    let radius = shape.radius();
-                    match axis_direction {
-                        X => (center_x - radius, center_x + radius),
-                        Y => (center_y - radius, center_y + radius),
-                    }
-                }
-            }
-        }
-    }
-
-    // TODO use different sort algo
-    elements.sort_by(|a, b| {
-        let (ref min_a_x, _) = a.shape().projection_on_axis(X);
-        let (ref min_b_x, _) = b.shape().projection_on_axis(X);
+    elements.0.sort(|a, b| {
+        let (ref min_a_x, _) = a.shape().projection_on_axis(axis);
+        let (ref min_b_x, _) = b.shape().projection_on_axis(axis);
         min_a_x.partial_cmp(min_b_x).unwrap()
     });
 
     for i in 1..elements.len() {
         let cur = &elements[i];
-        let (min_x, _) = cur.shape().projection_on_axis(X);
+        let (min_x, _) = cur.shape().projection_on_axis(axis);
         for j in (0..i).rev() {
-            let is_collision_on_x = elements[j].shape().projection_on_axis(X).1 >= min_x;
+            let is_collision_on_x = elements[j].shape().projection_on_axis(axis).1 >= min_x;
 
             if is_collision_on_x {
-                let (a_min_y, a_max_y) = elements[i].shape().projection_on_axis(Y);
-                let (b_min_y, b_max_y) = elements[j].shape().projection_on_axis(Y);
+                let (a_min_y, a_max_y) = elements[i].shape().projection_on_axis(!axis);
+                let (b_min_y, b_max_y) = elements[j].shape().projection_on_axis(!axis);
 
                 if !(a_max_y < b_min_y || b_max_y < a_min_y) {
                     // detective precise collision

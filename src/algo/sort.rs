@@ -9,6 +9,11 @@ trait PrivateSortableCollection: SortableCollection {
             return;
         }
 
+        if end_index - start_index <= 15 {
+            PrivateSortableCollection::insertion_sort(self, start_index, end_index, compare);
+            return;
+        }
+
         let partial = self.get(start_index) as *const Self::Item;
 
         let mut k = start_index;
@@ -27,6 +32,24 @@ trait PrivateSortableCollection: SortableCollection {
         }
 
         PrivateSortableCollection::quick_sort(self, k + 1, end_index, compare);
+    }
+
+    fn insertion_sort<F>(&mut self, start_index: usize, end_index: usize, compare: F)
+    where
+        F: Fn(&Self::Item, &Self::Item) -> Ordering,
+    {
+        for i in (start_index + 1)..=end_index {
+            let mut index = i;
+            for j in (start_index..index).rev() {
+                if !compare(self.get(index), self.get(j)).is_gt() {
+                    // TODO opt
+                    self.swap(index, j);
+                    index -= 1;
+                } else {
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -48,18 +71,7 @@ pub(crate) trait SortableCollection {
         PrivateSortableCollection::quick_sort(self, 0, self.len() - 1, compare);
     }
 
-    fn select_sort_by(&mut self, compare: impl Fn(&Self::Item, &Self::Item) -> Ordering) {
-        for i in 1..self.len() {
-            let mut index = i;
-            for j in (0..index).rev() {
-                if !compare(self.get(index), self.get(j)).is_gt() {
-                    // TODO opt
-                    self.swap(index, j);
-                    index -= 1;
-                } else {
-                    break;
-                }
-            }
-        }
+    fn insertion_sort(&mut self, compare: impl Fn(&Self::Item, &Self::Item) -> Ordering) {
+        PrivateSortableCollection::insertion_sort(self, 0, self.len() - 1, compare)
     }
 }

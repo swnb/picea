@@ -1,4 +1,4 @@
-mod store;
+pub(crate) mod store;
 
 use crate::{
     algo::constraint::update_elements_by_duration,
@@ -161,19 +161,5 @@ fn compute_moment_of_inertia(shape: &ElementShape, m: Mass) -> f32 {
             (width.powf(2.) + height.powf(2.)) * m * 12f32.recip()
         }
         Circle(shape) => m * shape.radius().powf(2.) * 0.5,
-    }
-}
-
-pub struct ElementStore {
-    vec: Vec<Element>,
-    sort_vec: Vec<ID>,
-    should_sort: bool, // should use quick sort;
-}
-
-impl ElementStore {
-    pub fn push(&mut self, element: Element) {
-        let id = element.id;
-        self.vec.push(element);
-        self.sort_vec.push(id);
     }
 }
