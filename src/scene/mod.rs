@@ -35,6 +35,7 @@ pub(crate) trait ProjectionOnAxis {
 
 impl ProjectionOnAxis for ElementShape {
     fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32) {
+        use AxisDirection::*;
         use ElementShape::*;
         match self {
             Rect(shape) => match axis_direction {
