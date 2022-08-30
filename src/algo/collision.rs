@@ -147,7 +147,7 @@ fn sweep_and_prune_collision_detection<T, Z>(
     T: ElementCollection,
     Z: FnMut(&mut Element, &mut Element),
 {
-    elements.0.sort(|a, b| {
+    elements.sort(|a, b| {
         let (ref min_a_x, _) = a.shape().projection_on_axis(axis);
         let (ref min_b_x, _) = b.shape().projection_on_axis(axis);
         min_a_x.partial_cmp(min_b_x).unwrap()
