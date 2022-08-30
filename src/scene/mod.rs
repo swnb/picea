@@ -1,58 +1,15 @@
 use crate::{
     algo::collision::detect_collision,
-    element::{store::ElementStore, Element, ElementShape},
+    element::{store::ElementStore, Element},
     math::point::Point,
     meta::collision::ContactType,
 };
-use std::{ops::Not, rc::Rc};
+use std::rc::Rc;
 
 #[derive(Default)]
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
-}
-
-#[derive(Clone, Copy)]
-pub enum AxisDirection {
-    X,
-    Y,
-}
-
-impl Not for AxisDirection {
-    type Output = Self;
-    fn not(self) -> Self::Output {
-        use AxisDirection::*;
-        match self {
-            X => Y,
-            Y => X,
-        }
-    }
-}
-
-pub(crate) trait ProjectionOnAxis {
-    fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32);
-}
-
-impl ProjectionOnAxis for ElementShape {
-    fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32) {
-        use AxisDirection::*;
-        use ElementShape::*;
-        match self {
-            Rect(shape) => match axis_direction {
-                X => shape.projection_on_x_axis(),
-                Y => shape.projection_on_y_axis(),
-            },
-            Circle(shape) => {
-                let center_point = shape.get_center_point();
-                let (center_x, center_y): (f32, f32) = center_point.into();
-                let radius = shape.radius();
-                match axis_direction {
-                    X => (center_x - radius, center_x + radius),
-                    Y => (center_y - radius, center_y + radius),
-                }
-            }
-        }
-    }
 }
 
 type ID = u32;

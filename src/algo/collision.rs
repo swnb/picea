@@ -1,10 +1,10 @@
 use crate::{
     math::{
+        axis::AxisDirection,
         point::Point,
         vector::{Vector, Vector3},
     },
     meta::collision::{CollisionInfo, ContactType},
-    scene::AxisDirection,
 };
 use std::{
     cmp::Ordering,

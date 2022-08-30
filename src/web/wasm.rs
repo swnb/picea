@@ -4,6 +4,7 @@ use crate::{
     element::{Element, ElementShape},
     meta::MetaBuilder,
     scene::Scene,
+    shape::shapes::ShapeUnion,
 };
 use js_sys::Function;
 use std::panic;
@@ -112,15 +113,15 @@ impl WebScene {
             force: Tuple2 { x: fx, y: fy },
         } = params;
 
-        self.scene.push_element(Element::new(
-            ElementShape::Rect(((x, y), (width, height)).into()),
-            MetaBuilder::new(weight)
-                .angular(angular)
-                .angular_velocity(angular_velocity)
-                .velocity((vx, vy))
-                .is_fixed(is_fixed)
-                .force("f", (fx, fy)),
-        ))
+        // self.scene.push_element(Element::new(
+        //     ElementShape::Rect(((x, y), (width, height)).into()),
+        //     MetaBuilder::new(weight)
+        //         .angular(angular)
+        //         .angular_velocity(angular_velocity)
+        //         .velocity((vx, vy))
+        //         .is_fixed(is_fixed)
+        //         .force("f", (fx, fy)),
+        // ))
     }
 
     pub fn tick(&mut self, delta_t: f32) {
@@ -128,24 +129,25 @@ impl WebScene {
     }
 
     pub fn for_each_element(&self, callback: Function) {
-        self.scene.elements_iter().for_each(|element| {
-            if let ElementShape::Rect(shape) = element.shape() {
-                let this = JsValue::null();
-                let result = js_sys::Array::new_with_length(8);
-                shape
-                    .corner_iter()
-                    .map(|&v| Tuple2 { x: v.x(), y: v.y() })
-                    .enumerate()
-                    .for_each(|(i, p)| {
-                        let f = JsValue::from;
+        // self.scene.elements_iter().for_each(|element| {
+        //     // TODO opt
+        //     if let ShapeUnion::Rect(shape) = element.shape() {
+        //         let this = JsValue::null();
+        //         let result = js_sys::Array::new_with_length(8);
+        //         shape
+        //             .corner_iter()
+        //             .map(|&v| Tuple2 { x: v.x(), y: v.y() })
+        //             .enumerate()
+        //             .for_each(|(i, p)| {
+        //                 let f = JsValue::from;
 
-                        result.set(2 * i as u32, f(p.x));
-                        result.set(2 * i as u32 + 1, f(p.y));
-                    });
+        //                 result.set(2 * i as u32, f(p.x));
+        //                 result.set(2 * i as u32 + 1, f(p.y));
+        //             });
 
-                callback.call1(&this, result.as_ref()).unwrap();
-            }
-        });
+        //         callback.call1(&this, result.as_ref()).unwrap();
+        //     }
+        // });
     }
 }
 
