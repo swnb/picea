@@ -1,12 +1,13 @@
 pub(crate) mod store;
 
 use crate::{
-    algo::constraint::update_elements_by_duration,
+    algo::{collision::Element as CollisionElement, constraint::update_elements_by_duration},
     math::{
         point::Point,
         vector::{Vector, Vector3},
     },
     meta::{Mass, Meta},
+    scene::ProjectionOnAxis,
     shape::{circle::CircleShape, rect::RectShape, Shape},
 };
 
@@ -147,6 +148,24 @@ impl Element {
         let angular_velocity = w ^ r.into();
         let velocity = self.meta().velocity();
         velocity + Vector::from(angular_velocity)
+    }
+}
+
+impl CollisionElement for Element {
+    fn center_point(&self) -> Point<f32> {
+        self.shape().compute_center_point()
+    }
+
+    fn id(&self) -> u32 {
+        self.id()
+    }
+
+    fn projection_on_axis(&self, axis: crate::scene::AxisDirection) -> (f32, f32) {
+        self.shape().projection_on_axis(axis)
+    }
+
+    fn projection_on_vector(&self, vector: Vector<f32>) -> (Point<f32>, Point<f32>) {
+        self.shape().projection_on_vector(vector)
     }
 }
 

@@ -1,33 +1,45 @@
 use crate::{
-    element::{Element, ElementShape},
     math::{
         point::Point,
         vector::{Vector, Vector3},
     },
     meta::collision::{CollisionInfo, ContactType},
-    scene::{AxisDirection, ProjectionOnAxis},
-    shape::Shape,
+    scene::AxisDirection,
 };
 use std::{
     cmp::Ordering,
     ops::{ControlFlow, Index, IndexMut},
 };
 
+// define element trait
+pub trait Element {
+    fn id(&self) -> u32;
+
+    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32);
+
+    fn projection_on_vector(&self, vector: Vector<f32>) -> (Point<f32>, Point<f32>);
+
+    fn center_point(&self) -> Point<f32>;
+}
+
+// define collection of elements
 pub trait ElementCollection {
+    type Element: Element;
+
     fn len(&self) -> usize;
 
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    fn get(&self, index: usize) -> &Element;
+    fn get(&self, index: usize) -> &Self::Element;
 
-    fn get_mut(&mut self, index: usize) -> &mut Element;
+    fn get_mut(&mut self, index: usize) -> &mut Self::Element;
 
-    fn sort(&mut self, compare: impl Fn(&Element, &Element) -> Ordering + Copy);
+    fn sort(&mut self, compare: impl Fn(&Self::Element, &Self::Element) -> Ordering + Copy);
 }
 
-// new type for ElementCollection , aim to add new method for it
+// new type for ElementCollection , aim to add method for it
 struct ElementCollectionWrapper<T>(T)
 where
     T: ElementCollection;
@@ -36,7 +48,7 @@ impl<T> Index<usize> for ElementCollectionWrapper<T>
 where
     T: ElementCollection,
 {
-    type Output = Element;
+    type Output = T::Element;
     fn index(&self, index: usize) -> &Self::Output {
         self.0.get(index)
     }
@@ -61,15 +73,16 @@ where
 
     fn sort<F>(&mut self, compare: F)
     where
-        F: Fn(&Element, &Element) -> Ordering + Copy,
+        F: Fn(&T::Element, &T::Element) -> Ordering + Copy,
     {
         self.0.sort(compare);
     }
 }
 
+// entry of collision check, if element is collision, handler will call
 pub fn detect_collision<T>(
     elements: T,
-    mut handler: impl FnMut(&mut Element, &mut Element, CollisionInfo),
+    mut handler: impl FnMut(&mut T::Element, &mut T::Element, CollisionInfo),
 ) where
     T: ElementCollection,
 {
@@ -90,16 +103,17 @@ pub fn detect_collision<T>(
     // dbg!(time.elapsed());
 }
 
-pub fn special_collision_detection(a: &mut Element, b: &mut Element) -> Option<CollisionInfo> {
-    let shape_a = a.shape();
-    let shape_b = b.shape();
-    let center_point_a = shape_a.compute_center_point();
-    let center_point_b = shape_b.compute_center_point();
+pub fn special_collision_detection<E>(a: &mut E, b: &mut E) -> Option<CollisionInfo>
+where
+    E: Element,
+{
+    let center_point_a = a.center_point();
+    let center_point_b = b.center_point();
     let first_approximation_vector: Vector<f32> = (center_point_a, center_point_b).into();
 
     let compute_support_point = |reference_vector| {
-        let (_, max_point_a) = shape_a.projection_on_vector(reference_vector);
-        let (_, max_point_b) = shape_b.projection_on_vector(-reference_vector);
+        let (_, max_point_a) = a.projection_on_vector(reference_vector);
+        let (_, max_point_b) = b.projection_on_vector(-reference_vector);
         (max_point_b, max_point_a).into()
     };
 
@@ -145,23 +159,23 @@ fn sweep_and_prune_collision_detection<T, Z>(
     mut handler: Z,
 ) where
     T: ElementCollection,
-    Z: FnMut(&mut Element, &mut Element),
+    Z: FnMut(&mut T::Element, &mut T::Element),
 {
     elements.sort(|a, b| {
-        let (ref min_a_x, _) = a.shape().projection_on_axis(axis);
-        let (ref min_b_x, _) = b.shape().projection_on_axis(axis);
+        let (ref min_a_x, _) = a.projection_on_axis(axis);
+        let (ref min_b_x, _) = b.projection_on_axis(axis);
         min_a_x.partial_cmp(min_b_x).unwrap()
     });
 
     for i in 1..elements.len() {
         let cur = &elements[i];
-        let (min_x, _) = cur.shape().projection_on_axis(axis);
+        let (min_x, _) = cur.projection_on_axis(axis);
         for j in (0..i).rev() {
-            let is_collision_on_x = elements[j].shape().projection_on_axis(axis).1 >= min_x;
+            let is_collision_on_x = elements[j].projection_on_axis(axis).1 >= min_x;
 
             if is_collision_on_x {
-                let (a_min_y, a_max_y) = elements[i].shape().projection_on_axis(!axis);
-                let (b_min_y, b_max_y) = elements[j].shape().projection_on_axis(!axis);
+                let (a_min_y, a_max_y) = elements[i].projection_on_axis(!axis);
+                let (b_min_y, b_max_y) = elements[j].projection_on_axis(!axis);
 
                 if !(a_max_y < b_min_y || b_max_y < a_min_y) {
                     // detective precise collision
@@ -404,73 +418,80 @@ fn epa_compute_collision_edge(
     }
 }
 
-fn sat_collision_detective(a: &Element, b: &Element) -> Option<Vector<f32>> {
-    let shape_a = a.shape();
-    let shape_b = b.shape();
+// fn sat_collision_detective<T>(a: &T::Element, b: &T::Element) -> Option<Vector<f32>>
+// where
+//     T: ElementCollection,
+// {
+//     let shape_a = a.shape();
+//     let shape_b = b.shape();
 
-    use ElementShape::*;
-    let (shape_a, shape_b) = match shape_a {
-        Rect(shape_a) => match shape_b {
-            Rect(shape_b) => (shape_a, shape_b),
-            // TODO impl
-            _ => return None,
-        },
-        // TODO impl
-        _ => return None,
-    };
+//     use ElementShape::*;
+//     let (shape_a, shape_b) = match shape_a {
+//         Rect(shape_a) => match shape_b {
+//             Rect(shape_b) => (shape_a, shape_b),
+//             // TODO impl
+//             _ => return None,
+//         },
+//         // TODO impl
+//         _ => return None,
+//     };
 
-    let edge_iter = shape_a.edge_iter().chain(shape_b.edge_iter());
+//     let edge_iter = shape_a.edge_iter().chain(shape_b.edge_iter());
 
-    let mut collision_normal: (f32, Option<Vector<f32>>) = (f32::MAX, None);
+//     let mut collision_normal: (f32, Option<Vector<f32>>) = (f32::MAX, None);
 
-    fn projection(shape: &ElementShape, axis: Vector<f32>) -> (f32, f32) {
-        use ElementShape::*;
-        match shape {
-            Rect(shape) => shape
-                .corner_iter()
-                .fold((f32::MAX, f32::MIN), |mut pre, &corner| {
-                    let size = corner >> axis;
-                    if size < pre.0 {
-                        pre.0 = size
-                    }
-                    if size > pre.1 {
-                        pre.1 = size
-                    }
-                    pre
-                }),
-            Circle(shape) => {
-                // TODO 实现圆的投影逻辑
-                unimplemented!()
-            }
-        }
-    }
+//     fn projection(shape: &ElementShape, axis: Vector<f32>) -> (f32, f32) {
+//         use ElementShape::*;
+//         match shape {
+//             Rect(shape) => shape
+//                 .corner_iter()
+//                 .fold((f32::MAX, f32::MIN), |mut pre, &corner| {
+//                     let size = corner >> axis;
+//                     if size < pre.0 {
+//                         pre.0 = size
+//                     }
+//                     if size > pre.1 {
+//                         pre.1 = size
+//                     }
+//                     pre
+//                 }),
+//             Circle(shape) => {
+//                 // TODO 实现圆的投影逻辑
+//                 unimplemented!()
+//             }
+//         }
+//     }
 
-    for edge in edge_iter {
-        let normal = !edge;
-        let (a_min, a_max) = projection(a.shape(), normal);
-        let (b_min, b_max) = projection(b.shape(), normal);
+//     for edge in edge_iter {
+//         let normal = !edge;
+//         let (a_min, a_max) = projection(a.shape(), normal);
+//         let (b_min, b_max) = projection(b.shape(), normal);
 
-        if a_min < b_min {
-            if b_min > a_max {
-                return None;
-            } else {
-                let cross_size = b_max.min(a_max) - b_min;
-                if collision_normal.0 > cross_size {
-                    collision_normal.0 = cross_size;
-                    collision_normal.1 = Some(normal)
-                }
-            }
-        } else if a_min > b_max {
-            return None;
-        } else {
-            let cross_size = b_max.min(a_max) - a_min;
-            if collision_normal.0 > cross_size {
-                collision_normal.0 = cross_size;
-                collision_normal.1 = Some(normal)
-            }
-        }
-    }
-    collision_normal.1
+//         if a_min < b_min {
+//             if b_min > a_max {
+//                 return None;
+//             } else {
+//                 let cross_size = b_max.min(a_max) - b_min;
+//                 if collision_normal.0 > cross_size {
+//                     collision_normal.0 = cross_size;
+//                     collision_normal.1 = Some(normal)
+//                 }
+//             }
+//         } else if a_min > b_max {
+//             return None;
+//         } else {
+//             let cross_size = b_max.min(a_max) - a_min;
+//             if collision_normal.0 > cross_size {
+//                 collision_normal.0 = cross_size;
+//                 collision_normal.1 = Some(normal)
+//             }
+//         }
+//     }
+//     collision_normal.1
+// }
+
+fn v_clip_collision_pointer_detective<T>(a: &T::Element, b: &T::Element, normal: Vector<f32>)
+where
+    T: ElementCollection,
+{
 }
-
-fn v_clip_collision_pointer_detective(a: &Element, b: &Element, normal: Vector<f32>) {}

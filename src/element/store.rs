@@ -106,6 +106,7 @@ impl ElementStore {
 }
 
 impl ElementCollection for &mut ElementStore {
+    type Element = Element;
     fn len(&self) -> usize {
         self.region_sort_result.len()
     }
