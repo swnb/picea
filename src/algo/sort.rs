@@ -1,25 +1,7 @@
 use std::cmp::Ordering;
 
-pub(crate) trait SortableCollection {
-    type Item;
-
-    fn init(&mut self) {}
-
-    fn len(&self) -> usize;
-
-    fn get(&self, index: usize) -> &Self::Item;
-
-    fn swap(&mut self, i: usize, j: usize);
-
-    fn quick_sort<F>(&mut self, compare: F)
-    where
-        F: Copy + Fn(&Self::Item, &Self::Item) -> Ordering,
-    {
-        self._quick_sort(0, self.len() - 1, compare)
-    }
-
-    #[doc(hidden)]
-    fn _quick_sort<F>(&mut self, start_index: usize, end_index: usize, compare: F)
+trait PrivateSortableCollection: SortableCollection {
+    fn quick_sort<F>(&mut self, start_index: usize, end_index: usize, compare: F)
     where
         F: Copy + Fn(&Self::Item, &Self::Item) -> Ordering,
     {
@@ -41,15 +23,32 @@ pub(crate) trait SortableCollection {
         self.swap(start_index, k);
 
         if k != 0 {
-            self._quick_sort(start_index, k - 1, compare);
+            PrivateSortableCollection::quick_sort(self, start_index, k - 1, compare);
         }
 
-        self._quick_sort(k + 1, end_index, compare);
+        PrivateSortableCollection::quick_sort(self, k + 1, end_index, compare);
+    }
+}
+
+impl<T: ?Sized> PrivateSortableCollection for T where T: SortableCollection {}
+
+pub(crate) trait SortableCollection {
+    type Item;
+
+    fn len(&self) -> usize;
+
+    fn get(&self, index: usize) -> &Self::Item;
+
+    fn swap(&mut self, i: usize, j: usize);
+
+    fn quick_sort<F>(&mut self, compare: F)
+    where
+        F: Copy + Fn(&Self::Item, &Self::Item) -> Ordering,
+    {
+        PrivateSortableCollection::quick_sort(self, 0, self.len() - 1, compare);
     }
 
     fn select_sort_by(&mut self, compare: impl Fn(&Self::Item, &Self::Item) -> Ordering) {
-        self.init();
-
         for i in 1..self.len() {
             let mut index = i;
             for j in (0..index).rev() {
