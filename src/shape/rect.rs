@@ -270,12 +270,12 @@ impl RectShape {
 
     pub fn compute_center(&self) -> Point<f32> {
         let mut iter = self.corner_iter();
-        let mut init = iter.next().unwrap().to_vector();
-        let center_vector = *iter.fold(&mut init, |acc, v| {
-            *acc += v.to_vector();
-            acc
-        }) * 0.25;
-        let (x, y) = (center_vector).into();
+        let mut point = iter.next().unwrap().to_vector();
+        iter.for_each(|v| {
+            point += v.to_vector();
+        });
+        let center_point = point * 0.25;
+        let (x, y) = (center_point).into();
         (x, y).into()
     }
 
