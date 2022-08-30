@@ -32,7 +32,7 @@ pub(crate) trait SortableCollection {
         let mut k = start_index;
 
         for index in (start_index + 1)..=end_index {
-            if compare(self.get(index), unsafe { &*partial }).is_le() {
+            if !compare(self.get(index), unsafe { &*partial }).is_gt() {
                 k += 1;
                 self.swap(index, k);
             }
@@ -51,9 +51,12 @@ pub(crate) trait SortableCollection {
         self.init();
 
         for i in 1..self.len() {
-            for j in (0..i).rev() {
-                if compare(self.get(i), self.get(j)).is_le() {
-                    self.swap(i, j);
+            let mut index = i;
+            for j in (0..index).rev() {
+                if !compare(self.get(index), self.get(j)).is_gt() {
+                    // TODO opt
+                    self.swap(index, j);
+                    index -= 1;
                 } else {
                     break;
                 }

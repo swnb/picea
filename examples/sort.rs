@@ -51,9 +51,12 @@ pub(crate) trait SortableCollection {
         self.init();
 
         for i in 1..self.len() {
-            for j in (0..i).rev() {
-                if !compare(self.get(i), self.get(j)).is_gt() {
-                    self.swap(i, j);
+            let mut index = i;
+            for j in (0..index).rev() {
+                if !compare(self.get(index), self.get(j)).is_gt() {
+                    // TODO opt
+                    self.swap(index, j);
+                    index -= 1;
                 } else {
                     break;
                 }
@@ -74,9 +77,8 @@ impl SortableCollection for Vec<i32> {
     }
 
     fn swap(&mut self, i: usize, j: usize) {
-        let tmp = self[i];
-        self[i] = self[j];
-        self[j] = tmp;
+        let this: &mut [i32] = self;
+        this.swap(i, j)
     }
 }
 
