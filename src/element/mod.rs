@@ -2,104 +2,37 @@ pub mod element;
 pub(crate) mod store;
 
 use crate::{
-    algo::{collision::Element as CollisionElement, constraint::update_elements_by_duration},
+    algo::{
+        collision::Element as CollisionElement,
+        constraint::{update_elements_by_duration, Element as ConstraintElement},
+    },
     math::{
         axis::AxisDirection,
         point::Point,
         vector::{Vector, Vector3},
     },
-    meta::{Mass, Meta},
-    shape::{shapes::ShapeUnion, ProjectionOnAxis, Shape},
+    meta::Meta,
+    shape::{shapes::ShapeUnion, ComputeMomentOfInertia, ProjectionOnAxis, Shape},
 };
 
 type ID = u32;
 
-#[derive(Clone, Debug)]
-pub struct ElementShape {
-    pub(crate) shape: ShapeUnion,
-    center_point_cache: Option<Point<f32>>, // if shape is translate , recompute center point
-}
-
-impl Shape for ElementShape {
-    fn compute_center_point(&self) -> Point<f32> {
-        if let Some(center_point) = self.center_point_cache {
-            center_point
-        } else {
-            use ShapeUnion::*;
-            let center_point = match self.shape {
-                Rect(shape) => shape.compute_center(),
-                Circle(shape) => shape.get_center_point(),
-            };
-            self.center_point_cache = Some(center_point);
-            center_point
-        }
-    }
-
-    fn projection_on_vector(&self, vector: Vector<f32>) -> (Point<f32>, Point<f32>) {
-        use ShapeUnion::*;
-        match self.shape {
-            Rect(shape) => shape.projection(vector),
-            // TODO implement this
-            Circle(shape) => unimplemented!(),
-        }
-    }
-
-    fn translate(&mut self, vector: &Vector<f32>) {
-        use ShapeUnion::*;
-
-        match self.shape {
-            Rect(shape) => shape.translate(vector),
-            Circle(shape) => shape.translate(vector),
-        }
-    }
-
-    fn rotate(&mut self, deg: f32) {
-        use ShapeUnion::*;
-
-        match self.shape {
-            Rect(mut shape) => shape.rotate(deg),
-            Circle(mut shape) => {
-                // TODO impl circle rotate deg
-            }
-        }
-    }
-}
-
-impl ProjectionOnAxis for ShapeUnion {
-    fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32) {
-        use AxisDirection::*;
-        use ShapeUnion::*;
-        match self {
-            Rect(shape) => match axis_direction {
-                X => shape.projection_on_x_axis(),
-                Y => shape.projection_on_y_axis(),
-            },
-            Circle(shape) => {
-                let center_point = shape.get_center_point();
-                let (center_x, center_y): (f32, f32) = center_point.into();
-                let radius = shape.radius();
-                match axis_direction {
-                    X => (center_x - radius, center_x + radius),
-                    Y => (center_y - radius, center_y + radius),
-                }
-            }
-        }
-    }
-}
-
 // TODO refactor element builder
 pub struct ElementBuilder {
-    shape: ElementShape,
+    shape: ShapeUnion,
     meta: Meta,
 }
 
 impl ElementBuilder {
-    pub fn new(shape: ElementShape, meta: Meta) -> Self {
-        Self { shape, meta }
+    pub fn new(shape: impl Into<ShapeUnion>, meta: Meta) -> Self {
+        Self {
+            shape: shape.into(),
+            meta,
+        }
     }
 
-    pub fn shape(mut self, shape: ElementShape) -> Self {
-        self.shape = shape;
+    pub fn shape(mut self, shape: impl Into<ShapeUnion>) -> Self {
+        self.shape = shape.into();
         self
     }
 
@@ -112,11 +45,13 @@ impl ElementBuilder {
 #[derive(Clone)]
 pub struct Element {
     id: ID,
-    shape: ElementShape,
     meta: Meta,
+    shape: ShapeUnion,
+    center_point_cache: Option<Point<f32>>, // if shape is translate , recompute center point
 }
 
 impl Element {
+    #[inline]
     pub fn id(&self) -> ID {
         self.id
     }
@@ -125,37 +60,64 @@ impl Element {
         self.id = id
     }
 
-    pub fn new(shape: impl Into<ElementShape>, meta: impl Into<Meta>) -> Self {
+    #[inline]
+    pub fn new(shape: impl Into<ShapeUnion>, meta: impl Into<Meta>) -> Self {
         let mut shape = shape.into();
         let mut meta = meta.into();
 
         shape.rotate(meta.angular());
 
-        let moment_of_inertia = compute_moment_of_inertia(&shape, meta.mass());
+        let moment_of_inertia = shape.compute_moment_of_inertia(meta.mass());
 
         meta.set_moment_of_inertia(|_| moment_of_inertia);
 
         let id = 0;
 
-        Self { id, shape, meta }
+        Self {
+            id,
+            shape,
+            meta,
+            center_point_cache: None,
+        }
     }
 
+    #[inline]
+    fn get_center_point(&self) -> Point<f32> {
+        if let Some(center_point) = self.center_point_cache {
+            center_point
+        } else {
+            let center_point = self.shape().compute_center_point();
+            // center_point is pure function , but i want to do some opt for it, it is not safe
+            // FIXME
+            let this = self as *const _ as *mut Self;
+            unsafe { (*this).center_point_cache = Some(center_point) };
+            center_point
+        }
+    }
+
+    #[inline]
     pub fn meta(&self) -> &Meta {
         &self.meta
     }
 
+    #[inline]
     pub fn meta_mut(&mut self) -> &mut Meta {
         &mut self.meta
     }
 
-    pub fn shape(&self) -> &(impl Shape + ProjectionOnAxis) {
-        &self.shape.shape
+    #[inline]
+    pub fn translate(&mut self, vector: &Vector<f32>) {
+        // translate will change center point
+        self.center_point_cache = None;
+        self.shape.translate(vector)
     }
 
-    pub fn shape_mut(&mut self) -> &mut (impl Shape + ProjectionOnAxis) {
-        &mut self.shape
+    #[inline]
+    pub fn rotate(&mut self, deg: f32) {
+        self.shape.rotate(deg)
     }
 
+    #[inline]
     pub fn tick(&mut self, secs: f32) {
         if !self.meta.is_fixed() {
             update_elements_by_duration(self, secs)
@@ -166,7 +128,7 @@ impl Element {
      * assume point is inside element
      */
     pub(crate) fn compute_point_velocity(&self, point: Point<f32>) -> Vector<f32> {
-        let center_point = self.shape.compute_center_point();
+        let center_point = self.get_center_point();
         let w = self.meta().angular_velocity();
         let w: Vector3<_> = (0., 0., w).into();
         let r: Vector<_> = (center_point, point).into();
@@ -174,36 +136,59 @@ impl Element {
         let velocity = self.meta().velocity();
         velocity + Vector::from(angular_velocity)
     }
+
+    fn shape(&self) -> &(impl Shape + ProjectionOnAxis) {
+        &self.shape
+    }
 }
 
 impl CollisionElement for Element {
+    #[inline]
     fn center_point(&self) -> Point<f32> {
-        self.shape().compute_center_point()
+        self.get_center_point()
     }
 
+    #[inline]
     fn id(&self) -> u32 {
         self.id()
     }
 
+    #[inline]
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
         self.shape().projection_on_axis(axis)
     }
 
+    #[inline]
     fn projection_on_vector(&self, vector: Vector<f32>) -> (Point<f32>, Point<f32>) {
         self.shape().projection_on_vector(vector)
     }
 }
 
-// compute moment of inertia;
-fn compute_moment_of_inertia(ElementShape { shape, .. }: &ElementShape, m: Mass) -> f32 {
-    use ShapeUnion::*;
+impl ConstraintElement for Element {
+    #[inline]
+    fn translate(&mut self, vector: &Vector<f32>) {
+        self.translate(vector);
+    }
 
-    match shape {
-        Rect(shape) => {
-            // m(x^2+y^2)/12;
-            let (width, height) = shape.compute_bounding();
-            (width.powf(2.) + height.powf(2.)) * m * 12f32.recip()
-        }
-        Circle(shape) => m * shape.radius().powf(2.) * 0.5,
+    #[inline]
+    fn rotate(&mut self, deg: f32) {
+        self.rotate(deg)
+    }
+
+    #[inline]
+    fn center_point(&self) -> Point<f32> {
+        self.get_center_point()
+    }
+
+    fn meta(&self) -> &Meta {
+        &self.meta
+    }
+
+    fn meta_mut(&mut self) -> &mut Meta {
+        &mut self.meta
+    }
+
+    fn compute_point_velocity(&self, concat_point: Point<f32>) -> Vector<f32> {
+        self.compute_point_velocity(concat_point)
     }
 }

@@ -1,4 +1,7 @@
-use crate::math::{axis::AxisDirection, point::Point, vector::Vector};
+use crate::{
+    math::{axis::AxisDirection, point::Point, vector::Vector},
+    meta::Mass,
+};
 
 pub mod circle;
 pub mod polygon;
@@ -17,4 +20,8 @@ pub trait Shape {
 
 pub trait ProjectionOnAxis {
     fn projection_on_axis(&self, axis_direction: AxisDirection) -> (f32, f32);
+}
+
+pub trait ComputeMomentOfInertia {
+    fn compute_moment_of_inertia(&self, m: Mass) -> f32;
 }

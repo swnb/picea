@@ -1,7 +1,7 @@
 use nannou::prelude::*;
 
 use picea::{
-    element::{Element, ElementShape},
+    element::Element,
     math::{
         point::Point,
         vector::{Vector, Vector3},
@@ -11,7 +11,7 @@ use picea::{
         MetaBuilder,
     },
     scene::Scene,
-    shape::rect::RectShape,
+    shape::{rect::RectShape, shapes::ShapeUnion},
 };
 
 use rand::prelude::*;
@@ -38,57 +38,11 @@ fn create_model(app: &App) -> Model {
     create_model3(app)
 }
 
-fn create_model1(_app: &App) -> Model {
-    let mut rng = rand::thread_rng();
-    let mut scene = Scene::new();
-
-    let gravity_force = Force::new("gravity", (0., -G));
-
-    for i in 0..70 {
-        let gravity_force = gravity_force.clone();
-
-        let speed_x: f32 = rng.gen_range(-20.0..20.0);
-        let speed_y: f32 = rng.gen_range(-20.0..20.0);
-
-        let mut force_group = ForceGroup::new();
-
-        force_group.add_force(Force::new("air", (0., 0.)));
-
-        let shape = ElementShape::Rect(
-            (
-                (
-                    -350. + ((i % 20) as f32 * 40.),
-                    100. - ((i / 20) * 50) as f32,
-                ),
-                (20., 20.),
-            )
-                .into(),
-        );
-
-        let meta = MetaBuilder::new(1.)
-            .force("air", (0., 0.))
-            .angular_velocity(std::f32::consts::PI / 10.)
-            .velocity((speed_x, speed_y));
-
-        let element = Element::new(shape, meta);
-
-        scene.push_element(element);
-    }
-
-    Model {
-        scene,
-        time: time::Instant::now(),
-        gravity_force,
-        data: vec![],
-        stop: false,
-    }
-}
-
 fn create_model3(_app: &App) -> Model {
     let mut rng = rand::thread_rng();
     let mut scene = Scene::new();
 
-    let shape = ElementShape::Rect(((-200., -300.), (850., 150.)).into());
+    let shape = ShapeUnion::Rect(((-200., -300.), (850., 150.)).into());
 
     let meta = MetaBuilder::new(1.)
         .angular(-std::f32::consts::FRAC_PI_8 / 2.)
@@ -98,7 +52,7 @@ fn create_model3(_app: &App) -> Model {
 
     scene.push_element(element);
 
-    let shape = ElementShape::Rect(((200., -100.), (-100., 100.)).into());
+    let shape = ShapeUnion::Rect(((200., -100.), (-100., 100.)).into());
 
     let meta = MetaBuilder::new(10.)
         // .angular_velocity(std::f32::consts::PI / 10.)
@@ -131,7 +85,7 @@ fn create_model4(_app: &App) -> Model {
     let p2 = (-26.027605, 98.52961);
     let p3 = (-45.200382, 104.22198);
     let p4 = (-50.892815, 85.04917);
-    let shape = ElementShape::Rect(RectShape::new([p1, p2, p3, p4]));
+    let shape = ShapeUnion::Rect(RectShape::new([p1, p2, p3, p4]));
 
     let meta = MetaBuilder::new(1.)
         .angular_velocity(-std::f32::consts::FRAC_PI_2)
@@ -145,7 +99,7 @@ fn create_model4(_app: &App) -> Model {
     let p3 = (-21.014877, 79.520325);
     let p4 = (-40.679382, 75.8724);
 
-    let shape = ElementShape::Rect(RectShape::new([p1, p2, p3, p4]));
+    let shape = ShapeUnion::Rect(RectShape::new([p1, p2, p3, p4]));
 
     let meta = MetaBuilder::new(1.)
         .angular_velocity(std::f32::consts::PI / 10.)
@@ -215,8 +169,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .map(|(x, y)| pt2(x, y))
             .unwrap()
     }
-
-    model.scene.elements_iter().for_each(|e| render1(e, &draw));
 
     model.data.iter().for_each(|p| {
         draw.ellipse().color(RED).radius(3.).x_y(p.x(), p.y());
@@ -373,63 +325,4 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     // put everything on the frame
     draw.to_frame(app, &frame).unwrap();
-}
-
-fn render1(element: &Element, draw: &Draw) {
-    fn p2pt2(p: impl Into<Point<f32>>) -> Point2 {
-        Some(p)
-            .map(|v| v.into())
-            .map(|v| v.into())
-            .map(|(x, y)| pt2(x, y))
-            .unwrap()
-    }
-
-    use ElementShape::*;
-    match element.shape() {
-        Rect(shape) => {
-            let points: Vec<_> = shape.corner_iter().map(|&v| p2pt2(v)).collect();
-
-            draw.quad()
-                .color(GREY)
-                .points(points[0], points[1], points[2], points[3]);
-
-            shape.segment_iter().for_each(|segment| {
-                let start_point = *segment.get_start_point();
-                let end_point = *segment.get_end_point();
-                draw.line()
-                    .color(ORANGE)
-                    .points(p2pt2(start_point), p2pt2(end_point));
-            });
-
-            shape.edge_iter().for_each(|edge| {
-                let start_point = Point::from((0., 0.));
-                let end_point = start_point + (-!edge * 100.);
-
-                // draw.arrow()
-                // .color(RED)
-                // .points(p2pt2(start_point), p2pt2(end_point));
-
-                let end_point = start_point + (!edge * 100.);
-
-                // draw.arrow()
-                // .color(RED)
-                // .points(p2pt2(start_point), p2pt2(end_point));
-
-                let reference_v: Vector<_> = !edge;
-
-                // shape.corner_iter().for_each(|&corner| {
-                //     let size = corner >> reference_v;
-                //     let rate = size / reference_v.abs();
-                //     draw.arrow().color(RED).points(
-                //         p2pt2(corner),
-                //         p2pt2(Point::<f32>::from((
-                //             (reference_v * rate).x(),
-                //             (reference_v * rate).y(),
-                //         ))),
-                //     );
-                // });
-            });
-        }
-        Circle(shape) => {}
-    }
 }

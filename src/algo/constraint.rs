@@ -1,6 +1,23 @@
-use crate::{element::Element, math::vector::Vector, meta::collision::ContactType, shape::Shape};
+use crate::{
+    math::{point::Point, vector::Vector},
+    meta::{collision::ContactType, Meta},
+};
 
-pub fn update_elements_by_duration(element: &mut Element, delta_t: f32) {
+pub trait Element {
+    fn translate(&mut self, vector: &Vector<f32>);
+
+    fn rotate(&mut self, deg: f32);
+
+    fn center_point(&self) -> Point<f32>;
+
+    fn meta(&self) -> &Meta;
+
+    fn meta_mut(&mut self) -> &mut Meta;
+
+    fn compute_point_velocity(&self, contact_point: Point<f32>) -> Vector<f32>;
+}
+
+pub fn update_elements_by_duration<T: Element>(element: &mut T, delta_t: f32) {
     use std::f32::consts::TAU;
 
     let meta = element.meta();
@@ -35,19 +52,18 @@ pub fn update_elements_by_duration(element: &mut Element, delta_t: f32) {
     element.meta_mut().set_angular(|pre| (pre + deg) % TAU);
     let delta_s = (current_v + (origin_v - current_v) * 0.5) * delta_t;
 
-    let shape = element.shape_mut();
-    shape.translate(&delta_s);
-    shape.rotate(deg);
+    element.translate(&delta_s);
+    element.rotate(deg);
 }
 
-pub fn compute_constraint(element: &mut Element, delta_t: f32) {
+pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
     if !element.meta().is_collision() {
         return;
     } else {
         element.meta_mut().mark_collision(false);
     }
 
-    let center_point = element.shape().compute_center_point();
+    let center_point = element.center_point();
 
     let collision_info = element.meta().collision_infos().next();
 

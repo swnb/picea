@@ -1,5 +1,7 @@
 use crate::math::{point::Point, segment::Segment, vector::Vector};
 
+use super::Shape;
+
 #[derive(Clone, Debug)]
 pub struct RectShape {
     top_left_point: Point<f32>,
@@ -384,5 +386,23 @@ impl RectShape {
         let y = size * aspect.hypot(1.).recip();
         let x = aspect * y;
         self.resize_by_vector((x, y), is_increase)
+    }
+}
+
+impl Shape for RectShape {
+    fn compute_center_point(&self) -> Point<f32> {
+        self.compute_center()
+    }
+
+    fn projection_on_vector(&self, vector: Vector<f32>) -> (Point<f32>, Point<f32>) {
+        self.projection(vector)
+    }
+
+    fn translate(&mut self, vector: &Vector<f32>) {
+        self.translate(vector)
+    }
+
+    fn rotate(&mut self, deg: f32) {
+        self.rotate(deg)
     }
 }
