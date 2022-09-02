@@ -41,6 +41,11 @@ impl<T: Clone + Copy> Vector<T> {
     pub fn set_y(&mut self, mut reducer: impl FnMut(T) -> T) {
         self.y = reducer(self.y);
     }
+
+    #[inline]
+    pub fn to_point(&self) -> Point<T> {
+        (self.x, self.y).into()
+    }
 }
 
 macro_rules! impl_vector {

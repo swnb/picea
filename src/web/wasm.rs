@@ -1,6 +1,6 @@
 extern crate console_error_panic_hook;
 extern crate wasm_bindgen;
-use crate::{element::Element, meta::MetaBuilder, scene::Scene, shape::shapes::ShapeUnion};
+use crate::{element::Element, meta::MetaBuilder, scene::Scene};
 use js_sys::Function;
 use std::panic;
 use wasm_bindgen::prelude::*;

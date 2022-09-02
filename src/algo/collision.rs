@@ -17,7 +17,7 @@ pub trait Element {
 
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32);
 
-    fn projection_on_vector(&self, vector: Vector<f32>) -> (Point<f32>, Point<f32>);
+    fn projection_on_vector(&self, vector: &Vector<f32>) -> (Point<f32>, Point<f32>);
 
     fn center_point(&self) -> Point<f32>;
 }
@@ -103,17 +103,14 @@ pub fn detect_collision<T>(
     // dbg!(time.elapsed());
 }
 
-pub fn special_collision_detection<E>(a: &mut E, b: &mut E) -> Option<CollisionInfo>
-where
-    E: Element,
-{
+pub fn special_collision_detection<E: Element>(a: &mut E, b: &mut E) -> Option<CollisionInfo> {
     let center_point_a = a.center_point();
     let center_point_b = b.center_point();
     let first_approximation_vector: Vector<f32> = (center_point_a, center_point_b).into();
 
     let compute_support_point = |reference_vector| {
-        let (_, max_point_a) = a.projection_on_vector(reference_vector);
-        let (_, max_point_b) = b.projection_on_vector(-reference_vector);
+        let (_, max_point_a) = a.projection_on_vector(&reference_vector);
+        let (_, max_point_b) = b.projection_on_vector(&-reference_vector);
         (max_point_b, max_point_a).into()
     };
 

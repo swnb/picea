@@ -1,3 +1,5 @@
+#![feature(generic_associated_types)]
+
 pub mod algo;
 pub mod element;
 pub mod math;
