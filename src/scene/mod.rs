@@ -54,11 +54,12 @@ impl Scene {
     }
 
     #[inline]
-    pub fn push_element(&mut self, element: impl Into<Element>) {
+    pub fn push_element(&mut self, element: impl Into<Element>) -> u32 {
         let mut element = element.into();
         let element_id = self.id_dispatcher.gen_id();
         element.inject_id(element_id);
         self.element_store.push(element);
+        element_id
     }
 
     pub fn update_elements_by_duration(

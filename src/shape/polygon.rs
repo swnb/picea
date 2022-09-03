@@ -3,11 +3,15 @@ use super::{
         compute_polygon_center_point, projection_polygon_on_vector, rotate_polygon,
         translate_polygon,
     },
-    ComputeMomentOfInertia, ProjectionOnAxis, Shape,
+    ComputeMomentOfInertia, Shape,
 };
-use crate::math::{axis::AxisDirection, point::Point, vector::Vector};
+use crate::{
+    math::{axis::AxisDirection, point::Point, vector::Vector},
+    meta::Mass,
+};
 use std::{mem::MaybeUninit, slice};
 
+// all polygon should impl trait CommonPolygon
 trait CommonPolygon {
     type PointIter<'a>: Iterator<Item = &'a Point<f32>>
     where
@@ -17,7 +21,7 @@ trait CommonPolygon {
     where
         Self: 'a;
 
-    fn center_point(&self) -> Point<f32>;
+    fn get_center_point(&self) -> Point<f32>;
 
     fn center_point_mut(&mut self) -> &mut Point<f32>;
 
@@ -28,51 +32,59 @@ trait CommonPolygon {
     fn point_iter_mut(&mut self) -> Self::PointIterMut<'_>;
 }
 
-impl<T> Shape for T
-where
-    T: CommonPolygon,
-{
-    #[inline]
-    fn center_point(&self) -> Point<f32> {
-        self.center_point()
-    }
-
-    #[inline]
-    fn projection_on_vector(&self, &vector: &Vector<f32>) -> (Point<f32>, Point<f32>) {
-        projection_polygon_on_vector(self.point_iter(), vector)
-    }
-
-    #[inline]
-    fn translate(&mut self, vector: &Vector<f32>) {
-        translate_polygon(self.point_iter_mut(), vector);
-        *self.center_point_mut() += vector;
-    }
-
-    #[inline]
-    fn rotate(&mut self, &origin_point: &Point<f32>, deg: f32) {
-        rotate_polygon(origin_point, self.point_iter_mut(), deg);
-    }
-}
-
-impl<'a, T: 'a> ProjectionOnAxis for T
-where
-    T: CommonPolygon,
-{
-    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
-        use AxisDirection::*;
-        match axis {
-            X => self.point_iter().fold((f32::MAX, f32::MIN), |mut pre, v| {
-                pre.0 = v.x().min(pre.0);
-                pre.1 = v.x().max(pre.1);
-                pre
-            }),
-            Y => self.point_iter().fold((f32::MAX, f32::MIN), |mut pre, v| {
-                pre.0 = v.y().min(pre.0);
-                pre.1 = v.y().max(pre.1);
-                pre
-            }),
+macro_rules! impl_shape_for_common_polygon {
+    (@inner_impl) => {
+        #[inline]
+        fn center_point(&self) -> Point<f32> {
+            self.get_center_point()
         }
-    }
+
+        #[inline]
+        fn projection_on_vector(&self, &vector: &Vector<f32>) -> (Point<f32>, Point<f32>) {
+            projection_polygon_on_vector(self.point_iter(), vector)
+        }
+
+        #[inline]
+        fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
+            use AxisDirection::*;
+            let point_iter = self.point_iter();
+            type Reducer<T> = fn((T, T), &Point<T>) -> (T, T);
+            let reducer: Reducer<f32> = match axis {
+                X => |mut pre, v| {
+                    pre.0 = v.x().min(pre.0);
+                    pre.1 = v.x().max(pre.1);
+                    pre
+                },
+                Y => |mut pre, v| {
+                    pre.0 = v.y().min(pre.0);
+                    pre.1 = v.y().max(pre.1);
+                    pre
+                },
+            };
+            point_iter.fold((f32::MAX, f32::MIN), reducer)
+        }
+
+        #[inline]
+        fn translate(&mut self, vector: &Vector<f32>) {
+            translate_polygon(self.point_iter_mut(), vector);
+            *self.center_point_mut() += vector;
+        }
+
+        #[inline]
+        fn rotate(&mut self, &origin_point: &Point<f32>, deg: f32) {
+            rotate_polygon(origin_point, self.point_iter_mut(), deg);
+        }
+    };
+    ($struct_name:ident) => {
+        impl Shape for $struct_name where Self:CommonPolygon {
+            impl_shape_for_common_polygon!(@inner_impl);
+        }
+    };
+    (@const,$struct_name:ident) => {
+        impl<const N:usize> Shape for $struct_name<N> where Self:CommonPolygon {
+            impl_shape_for_common_polygon!(@inner_impl);
+        }
+    };
 }
 
 #[derive(Clone, Debug)]
@@ -101,7 +113,7 @@ impl<const N: usize> CommonPolygon for ConstPolygon<N> {
     type PointIterMut<'a> = slice::IterMut<'a, Point<f32>>;
 
     #[inline]
-    fn center_point(&self) -> Point<f32> {
+    fn get_center_point(&self) -> Point<f32> {
         self.center_point
     }
 
@@ -124,6 +136,63 @@ impl<const N: usize> CommonPolygon for ConstPolygon<N> {
     fn point_iter_mut(&mut self) -> Self::PointIterMut<'_> {
         self.vertexes.iter_mut()
     }
+}
+
+macro_rules! impl_common_polygon {
+    (@inside_impl, $($field:tt),*) => {
+        type PointIter<'a> = slice::Iter<'a, Point<f32>>;
+
+        type PointIterMut<'a> = slice::IterMut<'a, Point<f32>>;
+
+        #[inline]
+        fn get_center_point(&self) -> Point<f32> {
+            self.$(
+                $field.
+            )*get_center_point()
+        }
+
+        #[inline]
+        fn center_point_mut(&mut self) -> &mut Point<f32> {
+            self.$(
+                $field.
+            )*center_point_mut()
+        }
+
+        #[inline]
+        fn edge_count(&self) -> usize {
+            self.$(
+                $field.
+            )*edge_count()
+        }
+
+        #[inline]
+        fn point_iter(&self) -> Self::PointIter<'_> {
+            self.$(
+                $field.
+            )*point_iter()
+        }
+
+        #[inline]
+        fn point_iter_mut(&mut self) -> Self::PointIterMut<'_> {
+            self.$(
+                $field.
+            )*point_iter_mut()
+        }
+    };
+    (@const,$struct_name:tt, $($field:tt),*) => {
+        impl<const N: usize> CommonPolygon for $struct_name<N> {
+            impl_common_polygon!(@inside_impl,$($field),*);
+        }
+
+        impl_shape_for_common_polygon!(@const,$struct_name);
+    };
+    ($struct_name:tt, $($field:tt),+) => {
+        impl CommonPolygon for $struct_name {
+            impl_common_polygon!(@inside_impl,$($field),*);
+        }
+
+        impl_shape_for_common_polygon!($struct_name);
+    };
 }
 
 #[derive(Clone, Debug)]
@@ -160,48 +229,23 @@ impl<const N: usize> ConstRegularPolygon<N> {
         };
 
         if Self::IS_EVENT {
-            this.rotate(&(0., 0.).into(), -Self::HALF_EDGE_ANGLE);
+            rotate_polygon(
+                (0., 0.).into(),
+                this.inner.point_iter_mut(),
+                -Self::HALF_EDGE_ANGLE,
+            );
         }
 
-        this.translate(&center.into().to_vector());
+        translate_polygon(this.inner.point_iter_mut(), &center.into().to_vector());
 
         this
     }
 }
 
-impl<const N: usize> CommonPolygon for ConstRegularPolygon<N> {
-    type PointIter<'a> = slice::Iter<'a, Point<f32>>;
-
-    type PointIterMut<'a> = slice::IterMut<'a, Point<f32>>;
-
-    #[inline]
-    fn center_point(&self) -> Point<f32> {
-        self.inner.center_point
-    }
-
-    #[inline]
-    fn center_point_mut(&mut self) -> &mut Point<f32> {
-        &mut self.inner.center_point
-    }
-
-    #[inline]
-    fn edge_count(&self) -> usize {
-        Self::EDGE_COUNT
-    }
-
-    #[inline]
-    fn point_iter(&self) -> Self::PointIter<'_> {
-        self.inner.vertexes.iter()
-    }
-
-    #[inline]
-    fn point_iter_mut(&mut self) -> Self::PointIterMut<'_> {
-        self.inner.vertexes.iter_mut()
-    }
-}
+impl_common_polygon!(@const,ConstRegularPolygon, inner);
 
 impl<const N: usize> ComputeMomentOfInertia for ConstRegularPolygon<N> {
-    fn compute_moment_of_inertia(&self, m: crate::meta::Mass) -> f32 {
+    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
         use std::f32::consts::PI;
 
         let radius = self.radius;
@@ -210,26 +254,120 @@ impl<const N: usize> ComputeMomentOfInertia for ConstRegularPolygon<N> {
     }
 }
 
-pub type Triangle = ConstPolygon<3>;
+// common shape  Rectangle
+pub struct Rect {
+    width: f32,
+    height: f32,
+    inner: ConstPolygon<4>,
+}
 
-pub type RegularTriangle = ConstRegularPolygon<3>;
+impl Rect {
+    pub fn new(top_left_x: f32, top_left_y: f32, width: f32, height: f32) -> Self {
+        let point = (top_left_x, top_left_y).into();
+        let vf = Vector::<_>::from;
+        Self {
+            width,
+            height,
+            inner: ConstPolygon::<4>::new([
+                point,
+                point + vf((width, 0.)),
+                point + vf((width, height)),
+                point + vf((0., height)),
+            ]),
+        }
+    }
 
-pub type Rect = ConstPolygon<4>;
+    pub fn width(&self) -> f32 {
+        self.width
+    }
 
-pub type Square = ConstRegularPolygon<4>;
+    pub fn height(&self) -> f32 {
+        self.height
+    }
+}
+
+impl ComputeMomentOfInertia for Rect {
+    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
+        m * (self.width().powf(2.) + self.height().powf(2.)) / 12f32
+    }
+}
+
+impl_common_polygon!(Rect, inner);
+
+pub struct RegularTriangle {
+    inner: ConstRegularPolygon<3>,
+}
+
+impl RegularTriangle {
+    #[inline]
+    pub fn new(center_point: impl Into<Point<f32>>, radius: f32) -> Self {
+        Self {
+            inner: ConstRegularPolygon::new(center_point, radius),
+        }
+    }
+
+    #[inline]
+    pub fn radius(&self) -> f32 {
+        self.inner.radius
+    }
+
+    #[inline]
+    pub fn point_iter(&self) -> impl Iterator<Item = &Point<f32>> {
+        self.inner.point_iter()
+    }
+}
+
+impl_common_polygon!(RegularTriangle, inner);
+
+impl ComputeMomentOfInertia for RegularTriangle {
+    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
+        0.25 * m * self.radius().powf(2.)
+    }
+}
+
+pub struct Square {
+    inner_rect: Rect,
+}
+
+impl Square {
+    #[inline]
+    pub fn new(top_left_x: f32, top_left_y: f32, size: f32) -> Self {
+        let inner_rect = Rect::new(top_left_x, top_left_y, size, size);
+        Self { inner_rect }
+    }
+}
+
+impl_common_polygon!(Square, inner_rect);
+
+impl ComputeMomentOfInertia for Square {
+    #[inline]
+    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
+        self.inner_rect.compute_moment_of_inertia(m)
+    }
+}
 
 pub struct NormalPolygon {
     vertexes: Vec<Point<f32>>,
     center_point: Point<f32>,
 }
 
+impl NormalPolygon {
+    #[inline]
+    pub fn new(center_point: impl Into<Point<f32>>, vertexes: Vec<Point<f32>>) -> Self {
+        let center_point = center_point.into();
+        Self {
+            vertexes,
+            center_point,
+        }
+    }
+}
 impl CommonPolygon for NormalPolygon {
     type PointIter<'a> = slice::Iter<'a, Point<f32>>;
 
     type PointIterMut<'a> = slice::IterMut<'a, Point<f32>>;
 
     #[inline]
-    fn center_point(&self) -> Point<f32> {
+    fn get_center_point(&self) -> Point<f32> {
         self.center_point
     }
 
@@ -256,42 +394,67 @@ impl CommonPolygon for NormalPolygon {
 
 pub struct RegularPolygon {
     inner_polygon: NormalPolygon,
+    edge_count: usize,
+    edge_angle: f32,
     radius: f32,
 }
 
-impl CommonPolygon for RegularPolygon {
-    type PointIter<'a> = slice::Iter<'a, Point<f32>>;
+impl RegularPolygon {
+    pub fn new(center_point: impl Into<Point<f32>>, edge_count: usize, radius: f32) -> Self {
+        use std::f32::consts::TAU;
 
-    type PointIterMut<'a> = slice::IterMut<'a, Point<f32>>;
+        let mut vertexes: Vec<Point<f32>> = Vec::with_capacity(edge_count);
 
-    #[inline]
-    fn center_point(&self) -> Point<f32> {
-        self.inner_polygon.center_point
+        let edge_angle = TAU / edge_count as f32;
+
+        let mut point: Vector<_> = (0., radius).into();
+        vertexes.push(point.to_point());
+
+        (1..edge_count).for_each(|_| {
+            point.affine_transformation_rotate_self(edge_angle);
+            vertexes.push(point.to_point());
+        });
+
+        let center_point = center_point.into();
+
+        let mut this = Self {
+            radius,
+            edge_count,
+            edge_angle,
+            inner_polygon: NormalPolygon::new(center_point, vertexes),
+        };
+
+        if edge_count & 1 == 0 {
+            rotate_polygon(
+                (0., 0.).into(),
+                this.inner_polygon.point_iter_mut(),
+                -edge_angle * 0.5,
+            );
+        }
+
+        translate_polygon(
+            this.inner_polygon.point_iter_mut(),
+            &center_point.to_vector(),
+        );
+
+        this
     }
 
     #[inline]
-    fn center_point_mut(&mut self) -> &mut Point<f32> {
-        &mut self.inner_polygon.center_point
+    pub fn edge_count(&self) -> usize {
+        self.edge_count
     }
 
     #[inline]
-    fn edge_count(&self) -> usize {
-        self.inner_polygon.edge_count()
-    }
-
-    #[inline]
-    fn point_iter(&self) -> Self::PointIter<'_> {
-        self.inner_polygon.point_iter()
-    }
-
-    #[inline]
-    fn point_iter_mut(&mut self) -> Self::PointIterMut<'_> {
-        self.inner_polygon.point_iter_mut()
+    pub fn edge_angle(&self) -> f32 {
+        self.edge_angle
     }
 }
 
+impl_common_polygon!(RegularPolygon, inner_polygon);
+
 impl ComputeMomentOfInertia for RegularPolygon {
-    fn compute_moment_of_inertia(&self, m: crate::meta::Mass) -> f32 {
+    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
         use std::f32::consts::PI;
 
         let radius = self.radius;

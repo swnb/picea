@@ -1,3 +1,4 @@
+pub mod alias;
 pub(crate) mod store;
 
 use crate::{
@@ -11,7 +12,7 @@ use crate::{
         vector::{Vector, Vector3},
     },
     meta::Meta,
-    shape::{ComputeMomentOfInertia, ProjectionOnAxis, Shape},
+    shape::{ComputeMomentOfInertia, Shape},
 };
 
 type ID = u32;
@@ -22,12 +23,13 @@ pub struct ElementBuilder {
     meta: Meta,
 }
 
-pub trait ElementShape: Shape + ProjectionOnAxis + ComputeMomentOfInertia {}
-impl<T> ElementShape for T where T: Shape + ProjectionOnAxis + ComputeMomentOfInertia {}
+pub trait ElementShape: Shape + ComputeMomentOfInertia {}
+impl<T> ElementShape for T where T: Shape + ComputeMomentOfInertia {}
 
 impl ElementBuilder {
-    pub fn new(shape: impl Into<Box<dyn ElementShape>>, meta: Meta) -> Self {
+    pub fn new(shape: impl Into<Box<dyn ElementShape>>, meta: impl Into<Meta>) -> Self {
         let shape = shape.into();
+        let meta = meta.into();
         Self { shape, meta }
     }
 
@@ -119,8 +121,18 @@ impl Element {
         velocity + Vector::from(angular_velocity)
     }
 
-    fn shape(&self) -> &dyn ElementShape {
+    pub fn shape(&self) -> &dyn ElementShape {
         &*self.shape
+    }
+}
+
+impl From<ElementBuilder> for Element {
+    fn from(builder: ElementBuilder) -> Self {
+        Self {
+            id: 0,
+            meta: builder.meta,
+            shape: builder.shape,
+        }
     }
 }
 

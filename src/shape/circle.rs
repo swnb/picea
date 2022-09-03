@@ -1,4 +1,4 @@
-use super::{ComputeMomentOfInertia, ProjectionOnAxis, Shape};
+use super::{ComputeMomentOfInertia, Shape};
 use crate::{
     math::{axis::AxisDirection, point::Point, vector::Vector},
     meta::Mass,
@@ -54,6 +54,16 @@ impl Shape for CircleShape {
         unimplemented!()
     }
 
+    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
+        let center_point = self.center_point();
+        let (center_x, center_y): (f32, f32) = center_point.into();
+        let radius = self.radius();
+        match axis {
+            X => (center_x - radius, center_x + radius),
+            Y => (center_y - radius, center_y + radius),
+        }
+    }
+
     fn translate(&mut self, vector: &Vector<f32>) {
         self.center += vector
     }
@@ -70,18 +80,6 @@ impl Shape for CircleShape {
         self.deg += deg;
         if self.deg > TAU {
             self.deg %= TAU
-        }
-    }
-}
-
-impl ProjectionOnAxis for CircleShape {
-    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
-        let center_point = self.center_point();
-        let (center_x, center_y): (f32, f32) = center_point.into();
-        let radius = self.radius();
-        match axis {
-            X => (center_x - radius, center_x + radius),
-            Y => (center_y - radius, center_y + radius),
         }
     }
 }
