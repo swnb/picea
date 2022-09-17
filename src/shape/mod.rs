@@ -1,5 +1,5 @@
 use crate::{
-    math::{axis::AxisDirection, point::Point, vector::Vector},
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
     meta::Mass,
 };
 
