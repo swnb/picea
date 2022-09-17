@@ -7,6 +7,10 @@ pub enum Edge<'a> {
         support_point: &'a Point<f32>,
         end_point: &'a Point<f32>,
     },
+    Circle {
+        center_point: Point<f32>,
+        radius: f32,
+    },
     Line {
         start_point: &'a Point<f32>,
         end_point: &'a Point<f32>,

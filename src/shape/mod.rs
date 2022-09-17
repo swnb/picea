@@ -14,16 +14,18 @@ pub trait Shape {
 
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
         use AxisDirection::*;
-        let result = self.projection_on_vector(&axis.into());
+        let (p1, p2) = self.projection_on_vector(&axis.into());
         match axis {
-            X => (result.0.x(), result.1.x()),
-            Y => (result.0.y(), result.1.y()),
+            X => (p1.x(), p2.x()),
+            Y => (p1.y(), p2.y()),
         }
     }
 
     fn translate(&mut self, vector: &Vector<f32>);
 
     fn rotate(&mut self, origin_point: &Point<f32>, deg: f32);
+
+    fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_>;
 }
 
 pub trait ComputeMomentOfInertia {

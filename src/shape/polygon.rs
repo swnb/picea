@@ -6,7 +6,7 @@ use super::{
     ComputeMomentOfInertia, Shape,
 };
 use crate::{
-    math::{axis::AxisDirection, point::Point, vector::Vector},
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
     meta::Mass,
 };
 use std::{mem::MaybeUninit, slice};
@@ -73,6 +73,14 @@ macro_rules! impl_shape_for_common_polygon {
         #[inline]
         fn rotate(&mut self, &origin_point: &Point<f32>, deg: f32) {
             rotate_polygon(origin_point, self.point_iter_mut(), deg);
+        }
+
+        #[inline]
+        fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
+            let iter = self.point_iter()
+                    .zip(self.point_iter().skip(1).chain(self.point_iter().take(1)))
+                    .map(|v| v.into());
+            Box::new(iter)
         }
     };
     ($struct_name:ident) => {
@@ -215,6 +223,8 @@ impl<const N: usize> ConstRegularPolygon<N> {
         #[allow(clippy::uninit_assumed_init)]
         let mut vertexes: [Point<f32>; N] = unsafe { MaybeUninit::uninit().assume_init() };
 
+        let center = center.into().to_vector();
+
         let mut point: Vector<_> = (0., radius).into();
         vertexes[0] = point.to_point();
 
@@ -236,7 +246,8 @@ impl<const N: usize> ConstRegularPolygon<N> {
             );
         }
 
-        translate_polygon(this.inner.point_iter_mut(), &center.into().to_vector());
+        translate_polygon(this.inner.point_iter_mut(), &center);
+        *this.inner.center_point_mut() += &center;
 
         this
     }
@@ -436,6 +447,8 @@ impl RegularPolygon {
             this.inner_polygon.point_iter_mut(),
             &center_point.to_vector(),
         );
+
+        *this.inner_polygon.center_point_mut() += &center_point.to_vector();
 
         this
     }

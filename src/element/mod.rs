@@ -128,11 +128,7 @@ impl Element {
 
 impl From<ElementBuilder> for Element {
     fn from(builder: ElementBuilder) -> Self {
-        Self {
-            id: 0,
-            meta: builder.meta,
-            shape: builder.shape,
-        }
+        Self::new(builder.shape, builder.meta)
     }
 }
 

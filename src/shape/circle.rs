@@ -1,6 +1,8 @@
+use std::marker::PhantomData;
+
 use super::{ComputeMomentOfInertia, Shape};
 use crate::{
-    math::{axis::AxisDirection, point::Point, vector::Vector},
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
     meta::Mass,
 };
 
@@ -81,6 +83,33 @@ impl Shape for CircleShape {
         if self.deg > TAU {
             self.deg %= TAU
         }
+    }
+
+    fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
+        struct EdgeIter<'a> {
+            is_consumed: bool,
+            circle_ref: &'a CircleShape,
+        }
+
+        impl<'a> Iterator for EdgeIter<'a> {
+            type Item = Edge<'a>;
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.is_consumed {
+                    None
+                } else {
+                    self.is_consumed = true;
+                    Some(Edge::Circle {
+                        center_point: self.circle_ref.center_point(),
+                        radius: self.circle_ref.radius(),
+                    })
+                }
+            }
+        }
+
+        Box::new(EdgeIter {
+            is_consumed: false,
+            circle_ref: self,
+        })
     }
 }
 
