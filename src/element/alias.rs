@@ -1,6 +1,6 @@
 use crate::{
     math::point::Point,
-    shape::polygon::{Rect, RegularTriangle, Square},
+    shape::polygon::{Rect, RegularPolygon, RegularTriangle, Square},
 };
 
 use super::ElementShape;
@@ -32,5 +32,14 @@ where
 {
     fn from((center_point, radius): (C, f32)) -> Self {
         RegularTriangle::new(center_point, radius).into()
+    }
+}
+
+impl<C> From<(usize, C, f32)> for Box<dyn ElementShape>
+where
+    C: Into<Point<f32>>,
+{
+    fn from((n, center, radius): (usize, C, f32)) -> Self {
+        RegularPolygon::new(center, n, radius).into()
     }
 }

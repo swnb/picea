@@ -4,7 +4,7 @@ use nannou::prelude::*;
 use picea::{
     element::{Element, ElementBuilder},
     math::edge::Edge,
-    meta::{force::Force, MetaBuilder},
+    meta::MetaBuilder,
     scene::Scene,
 };
 
@@ -21,6 +21,8 @@ fn model(_app: &App) -> Model {
         MetaBuilder::new(1.).is_fixed(true),
     );
 
+    scene.push_element(ground);
+
     let element = ElementBuilder::new(
         ((200., 200.), 100.),
         MetaBuilder::new(1.)
@@ -30,7 +32,17 @@ fn model(_app: &App) -> Model {
 
     let element: Element = element.into();
 
-    scene.push_element(ground);
+    scene.push_element(element);
+
+    let element = ElementBuilder::new(
+        (7, (50., 200.), 100.),
+        MetaBuilder::new(1.)
+            .angular(std::f32::consts::FRAC_PI_6)
+            .force("gravity", (0., -10.)), // .is_fixed(true),
+    );
+
+    let element: Element = element.into();
+
     scene.push_element(element);
 
     Model {
