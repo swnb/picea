@@ -1,6 +1,9 @@
 use crate::{
     math::point::Point,
-    shape::polygon::{Rect, RegularPolygon, RegularTriangle, Square},
+    shape::{
+        circle::CircleShape,
+        polygon::{Rect, RegularPolygon, RegularTriangle, Square},
+    },
 };
 
 use super::ElementShape;
@@ -25,13 +28,13 @@ impl From<(f32, f32, f32)> for Box<dyn ElementShape> {
     }
 }
 
-// create triangle
+// create circle
 impl<C> From<(C, f32)> for Box<dyn ElementShape>
 where
     C: Into<Point<f32>>,
 {
     fn from((center_point, radius): (C, f32)) -> Self {
-        RegularTriangle::new(center_point, radius).into()
+        CircleShape::new(center_point, radius).into()
     }
 }
 

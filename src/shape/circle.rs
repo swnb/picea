@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use super::{ComputeMomentOfInertia, Shape};
 use crate::{
     math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
@@ -52,14 +50,63 @@ impl Shape for CircleShape {
     }
 
     fn projection_on_vector(&self, vector: &Vector<f32>) -> (Point<f32>, Point<f32>) {
-        // TOD
-        unimplemented!()
+        let vector_normal = vector.normalize();
+        let center_point = self.center_point();
+        let radius = self.radius();
+        let vf = Vector::from;
+        if vector_normal.x().abs() <= 0.1 {
+            if vector.y() < 0. {
+                (
+                    center_point + vf((radius, 0.)),
+                    center_point + vf((-radius, 0.)),
+                )
+            } else {
+                (
+                    center_point + vf((-radius, 0.)),
+                    center_point + vf((radius, 0.)),
+                )
+            }
+        } else if vector_normal.y().abs() <= 0.1 {
+            if vector.x() < 0. {
+                (
+                    center_point + vf((0., radius)),
+                    center_point + vf((0., -radius)),
+                )
+            } else {
+                (
+                    center_point + vf((0., -radius)),
+                    center_point + vf((0., radius)),
+                )
+            }
+        } else {
+            let k = vector.y() / vector.x();
+            let dx = radius / (k.powf(2.) + 1.).sqrt();
+            let dy = radius / (k.recip().powf(2.) + 1.).sqrt();
+
+            let x = vector.x();
+            let y = vector.y();
+
+            let x = if vector.x() > 0. {
+                (x - dx, x + dx)
+            } else {
+                (x + dx, x - dx)
+            };
+
+            let y = if vector.y() > 0. {
+                (y - dy, y + dy)
+            } else {
+                (y + dy, y - dy)
+            };
+
+            (center_point + vf((x.0, y.0)), center_point + vf((x.1, x.1)))
+        }
     }
 
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
         let center_point = self.center_point();
         let (center_x, center_y): (f32, f32) = center_point.into();
         let radius = self.radius();
+        use AxisDirection::*;
         match axis {
             X => (center_x - radius, center_x + radius),
             Y => (center_y - radius, center_y + radius),

@@ -34,16 +34,16 @@ fn model(_app: &App) -> Model {
 
     scene.push_element(element);
 
-    let element = ElementBuilder::new(
-        (7, (50., 200.), 100.),
-        MetaBuilder::new(1.)
-            .angular(std::f32::consts::FRAC_PI_6)
-            .force("gravity", (0., -10.)), // .is_fixed(true),
-    );
+    // let element = ElementBuilder::new(
+    //     (7, (50., 200.), 100.),
+    //     MetaBuilder::new(1.)
+    //         .angular(std::f32::consts::FRAC_PI_6)
+    //         .force("gravity", (0., -10.)), // .is_fixed(true),
+    // );
 
-    let element: Element = element.into();
+    // let element: Element = element.into();
 
-    scene.push_element(element);
+    // scene.push_element(element);
 
     Model {
         scene,

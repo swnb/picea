@@ -228,6 +228,7 @@ fn gjk_collision_detective(
 
     let compute_support_point = |reference_vector: Vector<f32>| {
         let result = compute_support_point(reference_vector);
+        dbg!(&result, reference_vector);
         // FIXME this is wrong? <= 0
         if (result.vector * reference_vector) < 0. {
             None
@@ -273,8 +274,6 @@ fn gjk_collision_detective(
         let cb_normal = (cb ^ (cb ^ ca)).into();
 
         if inv_c * cb_normal > f32::EPSILON {
-            // refactor
-
             let tmp = compute_support_point(cb_normal)?;
 
             if tmp == c || tmp == b {
