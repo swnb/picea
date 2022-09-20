@@ -57,25 +57,25 @@ impl Shape for CircleShape {
         if vector_normal.x().abs() <= 0.1 {
             if vector.y() < 0. {
                 (
-                    center_point + vf((radius, 0.)),
-                    center_point + vf((-radius, 0.)),
+                    center_point + vf((0., radius)),
+                    center_point + vf((0., -radius)),
                 )
             } else {
                 (
-                    center_point + vf((-radius, 0.)),
-                    center_point + vf((radius, 0.)),
+                    center_point + vf((0., -radius)),
+                    center_point + vf((0., radius)),
                 )
             }
         } else if vector_normal.y().abs() <= 0.1 {
             if vector.x() < 0. {
                 (
-                    center_point + vf((0., radius)),
-                    center_point + vf((0., -radius)),
+                    center_point + vf((radius, 0.)),
+                    center_point + vf((-radius, 0.)),
                 )
             } else {
                 (
-                    center_point + vf((0., -radius)),
-                    center_point + vf((0., radius)),
+                    center_point + vf((-radius, 0.)),
+                    center_point + vf((radius, 0.)),
                 )
             }
         } else {
@@ -83,8 +83,9 @@ impl Shape for CircleShape {
             let dx = radius / (k.powf(2.) + 1.).sqrt();
             let dy = radius / (k.recip().powf(2.) + 1.).sqrt();
 
-            let x = vector.x();
-            let y = vector.y();
+            let center_point = self.center_point();
+
+            let (x, y) = center_point.into();
 
             let x = if vector.x() > 0. {
                 (x - dx, x + dx)
@@ -98,7 +99,7 @@ impl Shape for CircleShape {
                 (y + dy, y - dy)
             };
 
-            (center_point + vf((x.0, y.0)), center_point + vf((x.1, x.1)))
+            (center_point + vf((x.0, y.0)), center_point + vf((x.1, y.1)))
         }
     }
 
@@ -164,5 +165,32 @@ impl ComputeMomentOfInertia for CircleShape {
     // compute moment of inertia;
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
         m * self.radius().powf(2.) * 0.5
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        let circle_shape = CircleShape::new((0., 0.), 25.);
+
+        let p = circle_shape.projection_on_vector(&(1., 0.).into());
+        dbg!(p);
+        let p = circle_shape.projection_on_vector(&(1., 1.).into());
+        dbg!(p);
+        let p = circle_shape.projection_on_vector(&(0., 1.).into());
+        dbg!(p);
+        let p = circle_shape.projection_on_vector(&(-1., 1.).into());
+        dbg!(p);
+        let p = circle_shape.projection_on_vector(&(-1., 0.).into());
+        dbg!(p);
+        let p = circle_shape.projection_on_vector(&(-1., -1.).into());
+        dbg!(p);
+        let p = circle_shape.projection_on_vector(&(0., -1.).into());
+        dbg!(p);
+        let p = circle_shape.projection_on_vector(&(1., -1.).into());
+        dbg!(p);
     }
 }
