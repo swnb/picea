@@ -11,7 +11,7 @@ pub fn compute_polygon_center_point<'a>(
     let mut point_iter = point_iter.map(|p| p.to_vector());
     let first_point = point_iter.next().unwrap();
     let sum = point_iter.fold(first_point, |acc, p| acc + p);
-    (sum / edge_count).to_point()
+    (sum * edge_count.recip()).to_point()
 }
 
 pub fn projection_polygon_on_vector<'a>(

@@ -66,7 +66,7 @@ macro_rules! impl_vector {
 
                 pub fn normalize(&self) -> Vector<$T> {
                     let length = self.abs();
-                    (self.x() / length, self.y() / length).into()
+                    (self.x() * length.recip(), self.y() * length.recip()).into()
                 }
 
                 #[inline]

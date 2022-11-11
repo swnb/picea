@@ -101,7 +101,8 @@ pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
             let v = element.compute_point_velocity(contact_point);
 
             let velocity_reducer = move |pre_velocity: Vector<f32>| {
-                pre_velocity + normal * ((v * -normal + B * depth / delta_t) * lambda * inv_mass)
+                pre_velocity
+                    + normal * ((v * -normal + B * depth * delta_t.recip()) * lambda * inv_mass)
             };
 
             let angular_velocity_reducer = move |pre_angular_velocity| {

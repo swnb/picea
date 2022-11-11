@@ -261,7 +261,9 @@ impl<const N: usize> ComputeMomentOfInertia for ConstRegularPolygon<N> {
 
         let radius = self.radius;
 
-        0.5 * m * radius.powf(2.) * (1. - (2. / 3. * (PI / Self::EDGE_COUNT as f32).sin().powf(2.)))
+        0.5 * m
+            * radius.powf(2.)
+            * (1. - (2. / 3. * (PI * (Self::EDGE_COUNT as f32).recip()).sin().powf(2.)))
     }
 }
 
@@ -299,7 +301,7 @@ impl Rect {
 
 impl ComputeMomentOfInertia for Rect {
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
-        m * (self.width().powf(2.) + self.height().powf(2.)) / 12f32
+        m * (self.width().powf(2.) + self.height().powf(2.)) * 12f32.recip()
     }
 }
 
@@ -416,7 +418,7 @@ impl RegularPolygon {
 
         let mut vertexes: Vec<Point<f32>> = Vec::with_capacity(edge_count);
 
-        let edge_angle = TAU / edge_count as f32;
+        let edge_angle = TAU * (edge_count as f32).recip();
 
         let mut point: Vector<_> = (0., radius).into();
         vertexes.push(point.to_point());
@@ -474,6 +476,6 @@ impl ComputeMomentOfInertia for RegularPolygon {
 
         let edge_count = self.inner_polygon.edge_count() as f32;
 
-        0.5 * m * radius.powf(2.) * (1. - (2. / 3. * (PI / edge_count).sin().powf(2.)))
+        0.5 * m * radius.powf(2.) * (1. - (2. / 3. * (PI * edge_count.recip()).sin().powf(2.)))
     }
 }

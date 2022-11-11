@@ -79,9 +79,9 @@ impl Shape for CircleShape {
                 )
             }
         } else {
-            let k = vector.y() / vector.x();
-            let dx = radius / (k.powf(2.) + 1.).sqrt();
-            let dy = radius / (k.recip().powf(2.) + 1.).sqrt();
+            let k = vector.y() * vector.x().recip();
+            let dx = radius * (k.powf(2.) + 1.).sqrt().recip();
+            let dy = radius * (k.recip().powf(2.) + 1.).sqrt().recip();
 
             let center_point = self.center_point();
 
