@@ -53,7 +53,7 @@ impl ElementStore {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Element> {
         self.elements.iter_mut().map(|v| {
-            let element = &v.element as *const _ as *mut Element;
+            let element = &v.element as *const _ as *mut _;
             unsafe { &mut *element }
         })
     }
