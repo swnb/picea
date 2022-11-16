@@ -2,7 +2,7 @@ use crate::{
     math::point::Point,
     shape::{
         circle::CircleShape,
-        polygon::{Rect, RegularPolygon, RegularTriangle, Square},
+        polygon::{Rect, RegularPolygon, Square},
     },
 };
 

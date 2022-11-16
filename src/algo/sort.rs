@@ -17,9 +17,9 @@ where
         self.0.swap(i, j)
     }
 
-    fn quick_sort<F>(&mut self, start_index: usize, end_index: usize, compare: F)
+    fn quick_sort<F>(&mut self, start_index: usize, end_index: usize, compare: &F)
     where
-        F: Copy + Fn(&T::Item, &T::Item) -> Ordering,
+        F: Fn(&T::Item, &T::Item) -> Ordering,
     {
         if start_index >= end_index {
             return;
@@ -50,7 +50,7 @@ where
         self.quick_sort(k + 1, end_index, compare);
     }
 
-    fn insertion_sort<F>(&mut self, start_index: usize, end_index: usize, compare: F)
+    fn insertion_sort<F>(&mut self, start_index: usize, end_index: usize, compare: &F)
     where
         F: Fn(&T::Item, &T::Item) -> Ordering,
     {
@@ -81,14 +81,14 @@ pub(crate) trait SortableCollection {
 
     fn quick_sort<F>(&mut self, compare: F)
     where
-        F: Copy + Fn(&Self::Item, &Self::Item) -> Ordering,
+        F: Fn(&Self::Item, &Self::Item) -> Ordering,
     {
         let length = self.len();
-        SortableCollectionWrapper(self).quick_sort(0, length - 1, compare);
+        SortableCollectionWrapper(self).quick_sort(0, length - 1, &compare);
     }
 
     fn insertion_sort(&mut self, compare: impl Fn(&Self::Item, &Self::Item) -> Ordering) {
         let length = self.len();
-        SortableCollectionWrapper(self).insertion_sort(0, length - 1, compare)
+        SortableCollectionWrapper(self).insertion_sort(0, length - 1, &compare)
     }
 }

@@ -36,7 +36,7 @@ pub trait ElementCollection {
 
     fn get_mut(&mut self, index: usize) -> &mut Self::Element;
 
-    fn sort(&mut self, compare: impl Fn(&Self::Element, &Self::Element) -> Ordering + Copy);
+    fn sort(&mut self, compare: impl Fn(&Self::Element, &Self::Element) -> Ordering);
 }
 
 // new type for ElementCollection , aim to add method for it
@@ -73,7 +73,7 @@ where
 
     fn sort<F>(&mut self, compare: F)
     where
-        F: Fn(&T::Element, &T::Element) -> Ordering + Copy,
+        F: Fn(&T::Element, &T::Element) -> Ordering,
     {
         self.0.sort(compare);
     }

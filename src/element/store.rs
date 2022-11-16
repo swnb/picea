@@ -87,7 +87,7 @@ impl ElementStore {
 
     pub fn sort<F>(&mut self, compare: F)
     where
-        F: Copy + Fn(&Element, &Element) -> Ordering,
+        F: Fn(&Element, &Element) -> Ordering,
     {
         if self.is_sorted {
             self.insertion_sort(compare);
@@ -121,7 +121,7 @@ impl ElementCollection for &mut ElementStore {
         self.get_mut_element_by_id(id).unwrap()
     }
 
-    fn sort(&mut self, compare: impl Fn(&Element, &Element) -> Ordering + Copy) {
+    fn sort(&mut self, compare: impl Fn(&Element, &Element) -> Ordering) {
         ElementStore::sort(self, compare)
     }
 }
