@@ -1,10 +1,6 @@
-use std::{process, time::SystemTime};
+use std::time::SystemTime;
 
-use nannou::{
-    event::KeyboardInput,
-    prelude::*,
-    winit::event::{self, DeviceEvent},
-};
+use nannou::{prelude::*, winit::event};
 use picea::{
     element::{Element, ElementBuilder},
     math::edge::Edge,
