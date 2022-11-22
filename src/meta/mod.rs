@@ -37,8 +37,9 @@ impl Meta {
         self.velocity
     }
 
-    pub fn set_velocity(&mut self, mut reducer: impl FnMut(Speed) -> Speed) {
+    pub fn set_velocity(&mut self, mut reducer: impl FnMut(Speed) -> Speed) -> &mut Self {
         self.velocity = reducer(self.velocity);
+        self
     }
 
     pub fn force(&self) -> &ForceGroup {
@@ -57,35 +58,39 @@ impl Meta {
         self.inv_mass
     }
 
-    pub fn set_mass(&mut self, mut reducer: impl FnMut(Mass) -> Mass) {
+    pub fn set_mass(&mut self, mut reducer: impl FnMut(Mass) -> Mass) -> &mut Self {
         self.mass = reducer(self.mass);
         self.inv_mass = self.mass.recip();
+        self
     }
 
     pub fn angular_velocity(&self) -> f32 {
         self.angular_velocity
     }
 
-    pub fn set_angular_velocity(&mut self, mut reducer: impl FnMut(f32) -> f32) {
-        self.angular_velocity = reducer(self.angular_velocity)
+    pub fn set_angular_velocity(&mut self, mut reducer: impl FnMut(f32) -> f32) -> &mut Self {
+        self.angular_velocity = reducer(self.angular_velocity);
+        self
     }
 
     pub fn angular(&self) -> f32 {
         self.angular
     }
 
-    pub fn set_angular(&mut self, mut reducer: impl FnMut(f32) -> f32) {
-        self.angular = reducer(self.angular)
+    pub fn set_angular(&mut self, mut reducer: impl FnMut(f32) -> f32) -> &mut Self {
+        self.angular = reducer(self.angular);
+        self
     }
 
     pub fn collision_infos(&self) -> impl Iterator<Item = &CollisionInfo> {
         self.collision_infos.iter().map(|info| &**info)
     }
 
-    pub fn set_collision_infos(&mut self, info: Rc<CollisionInfo>) {
+    pub fn set_collision_infos(&mut self, info: Rc<CollisionInfo>) -> &mut Self {
         // TODO refactor
         self.collision_infos.clear();
         self.collision_infos.push(info);
+        self
     }
 
     pub fn moment_of_inertia(&self) -> Mass {
@@ -96,22 +101,25 @@ impl Meta {
         self.inv_moment_of_inertia
     }
 
-    pub fn set_moment_of_inertia(&mut self, mut reducer: impl FnMut(Mass) -> Mass) {
+    pub fn set_moment_of_inertia(&mut self, mut reducer: impl FnMut(Mass) -> Mass) -> &mut Self {
         self.moment_of_inertia = reducer(self.moment_of_inertia);
         self.inv_moment_of_inertia = self.moment_of_inertia.recip();
+        self
     }
 
     pub fn is_fixed(&self) -> bool {
         self.is_fixed
     }
 
-    pub fn set_is_fixed(&mut self, is_fixed: bool) {
+    pub fn set_is_fixed(&mut self, is_fixed: bool) -> &mut Self {
         self.is_fixed = is_fixed;
+        self
     }
 
     // TODO  refactor, remove
-    pub fn mark_collision(&mut self, is_collision: bool) {
+    pub fn mark_collision(&mut self, is_collision: bool) -> &mut Self {
         self.is_collision = is_collision;
+        self
     }
 
     pub fn is_collision(&self) -> bool {

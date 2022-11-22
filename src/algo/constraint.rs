@@ -112,9 +112,9 @@ pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
             (velocity_reducer, angular_velocity_reducer)
         })
     {
-        element.meta_mut().set_velocity(velocity_reducer);
         element
             .meta_mut()
-            .set_angular_velocity(angular_velocity_reducer)
+            .set_velocity(velocity_reducer)
+            .set_angular_velocity(angular_velocity_reducer);
     }
 }
