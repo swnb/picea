@@ -383,6 +383,16 @@ impl From<Vector<f32>> for Vector3<f32> {
     }
 }
 
+impl From<Vector<f64>> for Vector3<f64> {
+    fn from(value: Vector<f64>) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+            z: 0.,
+        }
+    }
+}
+
 impl<T: Clone + Copy> From<(T, T, T)> for Vector3<T> {
     fn from((x, y, z): (T, T, T)) -> Self {
         Self { x, y, z }
