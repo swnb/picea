@@ -2,7 +2,7 @@ use std::ops::Not;
 
 use super::vector::Vector;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AxisDirection {
     X,
     Y,
@@ -36,5 +36,18 @@ impl From<AxisDirection> for Vector {
             X => (1., 0.).into(),
             Y => (0., 1.).into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::mem::size_of;
+
+    use super::*;
+
+    #[test]
+    fn test_axis_direction_size() {
+        assert_eq!(size_of::<AxisDirection>(), size_of::<u8>());
     }
 }

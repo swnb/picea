@@ -374,6 +374,7 @@ impl NormalPolygon {
         }
     }
 }
+
 impl CommonPolygon for NormalPolygon {
     type PointIter<'a> = slice::Iter<'a, Point<f32>>;
 

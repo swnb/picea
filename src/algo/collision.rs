@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{
     cmp::Ordering,
-    ops::{ControlFlow, Index, IndexMut},
+    ops::{ControlFlow, Deref, DerefMut, IndexMut},
 };
 
 // define element trait
@@ -23,7 +23,7 @@ pub trait Element {
 }
 
 // define collection of elements
-pub trait ElementCollection {
+pub trait CollisionalCollection: IndexMut<usize, Output = Self::Element> {
     type Element: Element;
 
     fn len(&self) -> usize;
@@ -32,66 +32,63 @@ pub trait ElementCollection {
         self.len() == 0
     }
 
-    fn get(&self, index: usize) -> &Self::Element;
-
-    fn get_mut(&mut self, index: usize) -> &mut Self::Element;
-
     fn sort(&mut self, compare: impl Fn(&Self::Element, &Self::Element) -> Ordering);
 }
 
 // new type for ElementCollection , aim to add method for it
-struct ElementCollectionWrapper<T>(T)
+struct CollisionalCollectionWrapper<T>(T)
 where
-    T: ElementCollection;
+    T: CollisionalCollection;
 
-impl<T> Index<usize> for ElementCollectionWrapper<T>
+impl<T> Deref for CollisionalCollectionWrapper<T>
 where
-    T: ElementCollection,
+    T: CollisionalCollection,
 {
-    type Output = T::Element;
-    fn index(&self, index: usize) -> &Self::Output {
-        self.0.get(index)
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl<T> IndexMut<usize> for ElementCollectionWrapper<T>
-where
-    T: ElementCollection,
-{
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        self.0.get_mut(index)
+impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
-impl<T> ElementCollectionWrapper<T>
-where
-    T: ElementCollection,
-{
-    fn len(&self) -> usize {
-        self.0.len()
-    }
+// impl<T> Index<usize> for CollisionalCollectionWrapper<T>
+// where
+//     T: ElementCollection,
+// {
+//     type Output = T::Element;
+//     fn index(&self, index: usize) -> &Self::Output {
+//         &self[index]
+//     }
+// }
 
-    fn sort<F>(&mut self, compare: F)
-    where
-        F: Fn(&T::Element, &T::Element) -> Ordering,
-    {
-        self.0.sort(compare);
-    }
-}
+// impl<T> IndexMut<usize> for CollisionalCollectionWrapper<T>
+// where
+//     T: ElementCollection,
+// {
+//     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+//         self.get_mut(index)
+//     }
+// }
 
 // entry of collision check, if element is collision, handler will call
 pub fn detect_collision<T>(
     elements: T,
     mut handler: impl FnMut(&mut T::Element, &mut T::Element, CollisionInfo),
 ) where
-    T: ElementCollection,
+    T: CollisionalCollection,
 {
     // let time = std::time::Instant::now();
 
     // TODO
     let axis = AxisDirection::X;
 
-    let elements = ElementCollectionWrapper(elements);
+    let elements = CollisionalCollectionWrapper(elements);
 
     sweep_and_prune_collision_detection(elements, axis, |a, b| {
         // TODO special collision algo for circle and circle
@@ -151,11 +148,11 @@ pub fn special_collision_detection<E: Element>(a: &mut E, b: &mut E) -> Option<C
  * find the elements that maybe collision
  */
 fn sweep_and_prune_collision_detection<T, Z>(
-    mut elements: ElementCollectionWrapper<T>,
+    mut elements: CollisionalCollectionWrapper<T>,
     axis: AxisDirection,
     mut handler: Z,
 ) where
-    T: ElementCollection,
+    T: CollisionalCollection,
     Z: FnMut(&mut T::Element, &mut T::Element),
 {
     elements.sort(|a, b| {
@@ -179,7 +176,7 @@ fn sweep_and_prune_collision_detection<T, Z>(
                     let a: *mut _ = &mut elements[i];
                     let b: *mut _ = &mut elements[j];
                     unsafe {
-                        handler(&mut *b, &mut *a);
+                        handler(&mut *a, &mut *b);
                     };
                 }
             } else {
@@ -488,6 +485,6 @@ fn epa_compute_collision_edge(
 
 fn v_clip_collision_pointer_detective<T>(a: &T::Element, b: &T::Element, normal: Vector<f32>)
 where
-    T: ElementCollection,
+    T: CollisionalCollection,
 {
 }

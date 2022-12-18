@@ -1,7 +1,12 @@
-use crate::algo::{collision::ElementCollection, sort::SortableCollection};
+use crate::algo::{collision::CollisionalCollection, sort::SortableCollection};
 
 use super::{Element, ID};
-use std::{cmp::Ordering, collections::BTreeMap, rc::Rc};
+use std::{
+    cmp::Ordering,
+    collections::BTreeMap,
+    ops::{Index, IndexMut},
+    rc::Rc,
+};
 
 struct StoredElement<E = Element> {
     is_deleted: bool,
@@ -20,13 +25,16 @@ pub struct ElementStore {
     is_sorted: bool, // use quick sort algo , otherwise use select sort
 }
 
-impl SortableCollection for ElementStore {
-    type Item = Element;
-
-    fn get(&self, index: usize) -> &Self::Item {
+impl Index<usize> for ElementStore {
+    type Output = Element;
+    fn index(&self, index: usize) -> &Self::Output {
         let id = self.region_sort_result[index];
         self.get_element_by_id(id).unwrap()
     }
+}
+
+impl SortableCollection for ElementStore {
+    type Item = Element;
 
     fn len(&self) -> usize {
         self.elements.len()
@@ -39,7 +47,7 @@ impl SortableCollection for ElementStore {
 
 impl ElementStore {
     pub fn with_capacity(capacity: usize) -> Self {
-        ElementStore {
+        Self {
             elements: Vec::with_capacity(capacity),
             region_sort_result: Vec::with_capacity(capacity),
             map: BTreeMap::new(),
@@ -105,20 +113,27 @@ impl ElementStore {
     }
 }
 
-impl ElementCollection for &mut ElementStore {
-    type Element = Element;
-    fn len(&self) -> usize {
-        self.region_sort_result.len()
-    }
+impl Index<usize> for &mut ElementStore {
+    type Output = Element;
 
-    fn get(&self, index: usize) -> &Element {
+    fn index(&self, index: usize) -> &Self::Output {
         let id = self.region_sort_result[index];
         self.get_element_by_id(id).unwrap()
     }
+}
 
-    fn get_mut(&mut self, index: usize) -> &mut Element {
+// impl trait IndexMut for &mut ElementStore
+impl IndexMut<usize> for &mut ElementStore {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let id = self.region_sort_result[index];
         self.get_mut_element_by_id(id).unwrap()
+    }
+}
+
+impl CollisionalCollection for &mut ElementStore {
+    type Element = Element;
+    fn len(&self) -> usize {
+        self.region_sort_result.len()
     }
 
     fn sort(&mut self, compare: impl Fn(&Element, &Element) -> Ordering) {
