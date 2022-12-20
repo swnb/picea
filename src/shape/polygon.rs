@@ -435,7 +435,7 @@ impl RegularPolygon {
             radius,
             edge_count,
             edge_angle,
-            inner_polygon: NormalPolygon::new(center_point, vertexes),
+            inner_polygon: NormalPolygon::new((0., 0.), vertexes),
         };
 
         if edge_count & 1 == 0 {
