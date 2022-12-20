@@ -225,7 +225,7 @@ fn gjk_collision_detective(
 
     let compute_support_point = |reference_vector: Vector<f32>| {
         let result = compute_support_point(reference_vector);
-        dbg!(&result, reference_vector);
+        // dbg!(&result, reference_vector);
         // FIXME this is wrong? <= 0
         if (result.vector * reference_vector) < 0. {
             None

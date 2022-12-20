@@ -122,7 +122,6 @@ impl Index<usize> for &mut ElementStore {
     }
 }
 
-// impl trait IndexMut for &mut ElementStore
 impl IndexMut<usize> for &mut ElementStore {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let id = self.region_sort_result[index];

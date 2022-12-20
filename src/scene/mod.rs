@@ -66,7 +66,7 @@ impl Scene {
         &mut self,
         delta_time: f32,
         // TODO remove callback
-        mut callback: impl FnMut(Vec<Point<f32>>),
+        mut callback: impl FnMut(Vec<[Point<f32>; 2]>),
     ) {
         self.element_store
             .iter_mut()
@@ -86,26 +86,24 @@ impl Scene {
             let contact_a = info.contact_a();
 
             let contact_b = info.contact_b();
-            dbg!(contact_a);
-            dbg!(contact_b);
+            // dbg!(contact_a);
+            // dbg!(contact_b);
 
-            let mut l = match contact_a {
-                ContactType::Point(p) => vec![*p],
-                ContactType::Edge([p, p2]) => vec![*p, *p2],
+            let l = match contact_a {
+                ContactType::Point(p) => [*p, *p + (info.normal() * 10.)],
+                ContactType::Edge([p, p2]) => unimplemented!(""),
             };
 
             let l1 = match contact_b {
-                ContactType::Point(p) => vec![*p],
-                ContactType::Edge([p, p2]) => vec![*p, *p2],
+                ContactType::Point(p) => [*p, *p + (info.normal() * 10.)],
+                ContactType::Edge([p, p2]) => [*p, *p2],
             };
 
-            let normal = info.normal() * 10.;
-
-            l.extend(l1);
-
-            l.push((normal.x(), normal.y()).into());
-
-            callback(l);
+            callback(vec![
+                l,
+                l1,
+                [(0., 0.).into(), (info.normal() * 100f32).to_point()],
+            ]);
             // a.force_group_mut()
             //     .add_force(Force::new("pop", -normal * 10.));
             // b.force_group_mut()

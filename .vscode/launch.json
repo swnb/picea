@@ -1,0 +1,101 @@
+{
+  // 使用 IntelliSense 了解相关属性。 
+  // 悬停以查看现有属性的描述。
+  // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in library 'picea'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=picea"
+        ],
+        "filter": {
+          "name": "picea",
+          "kind": "lib"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug example 'd'",
+      "cargo": {
+        "args": [
+          "build",
+          "--example=d",
+          "--package=picea"
+        ],
+        "filter": {
+          "name": "d",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in example 'd'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--example=d",
+          "--package=picea"
+        ],
+        "filter": {
+          "name": "d",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug example 'ground_collision'",
+      "cargo": {
+        "args": [
+          "build",
+          "--example=ground_collision",
+          "--package=picea"
+        ],
+        "filter": {
+          "name": "ground_collision",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in example 'ground_collision'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--example=ground_collision",
+          "--package=picea"
+        ],
+        "filter": {
+          "name": "ground_collision",
+          "kind": "example"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
