@@ -20,7 +20,7 @@ fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
     let ground = ElementBuilder::new(
-        (-100., -200., 400., 200.),
+        (-500., -300., 1000., 100.),
         MetaBuilder::new(1.).is_fixed(true),
     );
 
