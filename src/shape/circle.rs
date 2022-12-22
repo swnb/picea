@@ -50,57 +50,13 @@ impl Shape for CircleShape {
     }
 
     fn projection_on_vector(&self, vector: &Vector<f32>) -> (Point<f32>, Point<f32>) {
-        let vector_normal = vector.normalize();
+        let vector = vector.normalize();
+
         let center_point = self.center_point();
-        let radius = self.radius();
-        let vf = Vector::from;
-        if vector_normal.x().abs() <= 0.1 {
-            if vector.y() < 0. {
-                (
-                    center_point + vf((0., radius)),
-                    center_point + vf((0., -radius)),
-                )
-            } else {
-                (
-                    center_point + vf((0., -radius)),
-                    center_point + vf((0., radius)),
-                )
-            }
-        } else if vector_normal.y().abs() <= 0.1 {
-            if vector.x() < 0. {
-                (
-                    center_point + vf((radius, 0.)),
-                    center_point + vf((-radius, 0.)),
-                )
-            } else {
-                (
-                    center_point + vf((-radius, 0.)),
-                    center_point + vf((radius, 0.)),
-                )
-            }
-        } else {
-            let k = vector.y() * vector.x().recip();
-            let dx = radius * (k.powf(2.) + 1.).sqrt().recip();
-            let dy = radius * (k.recip().powf(2.) + 1.).sqrt().recip();
-
-            let center_point = self.center_point();
-
-            let (x, y) = center_point.into();
-
-            let x = if vector.x() > 0. {
-                (x - dx, x + dx)
-            } else {
-                (x + dx, x - dx)
-            };
-
-            let y = if vector.y() > 0. {
-                (y - dy, y + dy)
-            } else {
-                (y + dy, y - dy)
-            };
-
-            (center_point + vf((x.0, y.0)), center_point + vf((x.1, y.1)))
-        }
+        (
+            center_point - vector * self.radius(),
+            center_point + vector * self.radius(),
+        )
     }
 
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
