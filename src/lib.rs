@@ -5,4 +5,5 @@ pub mod meta;
 pub mod renderer;
 pub mod scene;
 pub mod shape;
+pub mod tools;
 pub mod web;
