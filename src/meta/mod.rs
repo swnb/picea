@@ -1,7 +1,7 @@
 pub mod collision;
 pub mod force;
 
-use std::rc::Rc;
+use std::{ops::Deref, rc::Rc};
 
 use crate::math::vector::{Vector, Vector3};
 
@@ -20,17 +20,72 @@ pub type Speed = Vector<f32>;
 pub struct Meta {
     force_group: ForceGroup,
     velocity: Speed,
-    mass: Mass,
-    inv_mass: Mass,
-    moment_of_inertia: Mass,
-    inv_moment_of_inertia: Mass,
+    mass: ValueWithInv<Mass>,
+    // mass: Mass,
+    // inv_mass: Mass,
+    moment_of_inertia: ValueWithInv<Mass>,
+    // inv_moment_of_inertia: Mass,
     angular_velocity: f32,
     angular: f32,
     is_fixed: bool,
     collision_infos: Vec<Rc<CollisionInfo>>,
     // TODO 移除 collision
     is_collision: bool,
+    is_transparent: bool,
 }
+
+struct ValueWithInv<T> {
+    value: T,
+    inv_value: T,
+}
+
+impl<T> Deref for ValueWithInv<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<T: Clone> Clone for ValueWithInv<T> {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            inv_value: self.inv_value.clone(),
+        }
+    }
+}
+
+macro_rules! impl_value_with_inv {
+    ($($t:ty),*) => {
+        $(
+            impl From<$t> for ValueWithInv<$t> {
+                fn from(value: $t) -> Self {
+                    Self {
+                        value,
+                        inv_value: value.recip(),
+                    }
+                }
+            }
+
+            impl ValueWithInv<$t> {
+                fn value(&self) -> $t {
+                    self.value
+                }
+
+                fn inv(&self) -> $t {
+                    self.inv_value
+                }
+
+                fn set_value(&mut self, new_value: $t) {
+                    self.value = new_value;
+                    self.inv_value = new_value.recip();
+                }
+            }
+        )*
+    };
+}
+
+impl_value_with_inv!(f32, f64);
 
 impl Meta {
     pub fn velocity(&self) -> Speed {
@@ -42,7 +97,7 @@ impl Meta {
         self
     }
 
-    pub fn force(&self) -> &ForceGroup {
+    pub fn force_group(&self) -> &ForceGroup {
         &self.force_group
     }
 
@@ -51,16 +106,15 @@ impl Meta {
     }
 
     pub fn mass(&self) -> Mass {
-        self.mass
+        *self.mass
     }
 
     pub fn inv_mass(&self) -> Mass {
-        self.inv_mass
+        self.mass.inv()
     }
 
     pub fn set_mass(&mut self, mut reducer: impl FnMut(Mass) -> Mass) -> &mut Self {
-        self.mass = reducer(self.mass);
-        self.inv_mass = self.mass.recip();
+        self.mass.set_value(reducer(*self.mass));
         self
     }
 
@@ -94,16 +148,16 @@ impl Meta {
     }
 
     pub fn moment_of_inertia(&self) -> Mass {
-        self.moment_of_inertia
+        *self.moment_of_inertia
     }
 
     pub fn inv_moment_of_inertia(&self) -> Mass {
-        self.inv_moment_of_inertia
+        self.moment_of_inertia.inv()
     }
 
     pub fn set_moment_of_inertia(&mut self, mut reducer: impl FnMut(Mass) -> Mass) -> &mut Self {
-        self.moment_of_inertia = reducer(self.moment_of_inertia);
-        self.inv_moment_of_inertia = self.moment_of_inertia.recip();
+        self.moment_of_inertia
+            .set_value(reducer(*self.moment_of_inertia));
         self
     }
 
@@ -124,6 +178,15 @@ impl Meta {
 
     pub fn is_collision(&self) -> bool {
         self.is_collision
+    }
+
+    pub fn is_transparent(&self) -> bool {
+        self.is_transparent
+    }
+
+    pub fn mark_transparent(&mut self, is_transparent: bool) -> &mut Self {
+        self.is_transparent = is_transparent;
+        self
     }
 
     pub fn compute_mass_eff(&self, normal: Vector<f32>, r: Vector<f32>) -> f32 {
@@ -162,21 +225,18 @@ impl MetaBuilder {
             // TODO
         }
 
-        let inv_mass = mass.recip();
-
         Self {
             meta: Meta {
                 force_group: ForceGroup::new(),
                 velocity: (0., 0.).into(),
-                mass,
-                inv_mass,
+                mass: mass.into(),
                 angular: 0.,
                 angular_velocity: 0.,
-                moment_of_inertia: 0.,
-                inv_moment_of_inertia: 0.,
+                moment_of_inertia: (0.).into(),
                 is_fixed: false,
                 collision_infos: vec![],
                 is_collision: false,
+                is_transparent: false,
             },
         }
     }
@@ -194,7 +254,7 @@ impl MetaBuilder {
     }
 
     pub fn mass(mut self, mass: f32) -> Self {
-        self.meta.mass = mass;
+        self.meta.mass.set_value(mass);
         self
     }
 
@@ -210,6 +270,11 @@ impl MetaBuilder {
 
     pub fn is_fixed(mut self, is_fixed: bool) -> Self {
         self.meta.is_fixed = is_fixed;
+        self
+    }
+
+    pub fn is_transparent(mut self, is_transparent: bool) -> Self {
+        self.meta.is_transparent = is_transparent;
         self
     }
 }

@@ -69,6 +69,10 @@ impl ForceGroup {
         self.force_set.get(id)
     }
 
+    pub fn has_force(&self, id: &str) -> bool {
+        self.force_set.contains_key(id)
+    }
+
     pub fn get_force_mut(&mut self, id: &str) -> Option<&mut Force> {
         self.force_set.get_mut(id)
     }
