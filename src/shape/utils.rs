@@ -23,7 +23,7 @@ pub fn projection_polygon_on_vector<'a>(
     let mut max = f32::MIN;
     let mut max_point = (0., 0.).into();
     point_iter.for_each(|&cur| {
-        let size = cur >> vector;
+        let size = cur.to_vector() >> vector;
         if size < min {
             min = size;
             min_point = cur;
