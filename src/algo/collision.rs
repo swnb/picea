@@ -9,6 +9,7 @@ use crate::{
 use std::{
     cmp::Ordering,
     ops::{ControlFlow, Deref, DerefMut, IndexMut},
+    process,
 };
 
 // define element trait
@@ -187,12 +188,13 @@ fn sweep_and_prune_collision_detection<T, Z>(
     }
 }
 
+// TODO object is too large , we need shrink this struct in the future， rm start_point and end_point
 // gjk 两个多边形形成的差集, 衍生的点
 #[derive(Clone, Debug)]
-struct GJKDifferencePoint {
-    start_point: Point<f32>,
-    end_point: Point<f32>,
-    vector: Vector<f32>,
+pub(crate) struct GJKDifferencePoint {
+    pub(crate) start_point: Point<f32>,
+    pub(crate) end_point: Point<f32>,
+    pub(crate) vector: Vector<f32>,
 }
 
 impl PartialEq for GJKDifferencePoint {
@@ -215,7 +217,7 @@ type Triangle = [GJKDifferencePoint; 3];
 
 // for rectangle , avg compare is 1 to 2 time;
 // https://youtu.be/ajv46BSqcK4 gjk algo explain
-fn gjk_collision_detective(
+pub(crate) fn gjk_collision_detective(
     first_approximation_vector: Vector<f32>,
     compute_support_point: impl Fn(Vector<f32>) -> GJKDifferencePoint,
 ) -> Option<Triangle> {
@@ -315,15 +317,148 @@ fn gjk_collision_detective(
 }
 
 #[derive(Clone, Debug)]
-struct ClosestGJKDifferenceEdge {
-    a: GJKDifferencePoint,
-    b: GJKDifferencePoint,
-    normal: Vector<f32>,
-    depth: f32,
+pub(crate) struct ClosestGJKDifferenceEdge {
+    pub(crate) a: GJKDifferencePoint,
+    pub(crate) b: GJKDifferencePoint,
+    pub(crate) normal: Vector<f32>,
+    pub(crate) depth: f32,
+}
+
+// MaybeMinkowskiEdge means this edge maybe the Minkowski's edge
+// it depends where it can or not expand any more
+// if edge can't expand , and it's is closed edge to the origin, it is the edge we need
+// the edge must inside the minkowski
+#[derive(Clone, Debug)]
+pub(crate) struct MaybeMinkowskiEdge {
+    pub(crate) a: GJKDifferencePoint,
+    pub(crate) b: GJKDifferencePoint,
+    pub(crate) normal: Vector<f32>,
+    pub(crate) depth: f32,
+}
+
+impl From<(GJKDifferencePoint, GJKDifferencePoint)> for MaybeMinkowskiEdge {
+    fn from((a, b): (GJKDifferencePoint, GJKDifferencePoint)) -> Self {
+        let ab = (b.vector - a.vector).into();
+        let ao: Vector3<_> = (-a.vector).into();
+        let normal: Vector<_> = (ao ^ ab ^ ab).into();
+        let depth = a.vector >> normal;
+
+        Self {
+            a,
+            b,
+            normal: normal.normalize(),
+            depth,
+        }
+    }
+}
+
+impl MaybeMinkowskiEdge {
+    pub(crate) fn expand<F>(&self, compute_support_point: F) -> Option<[MaybeMinkowskiEdge; 2]>
+    where
+        F: Fn(Vector<f32>) -> GJKDifferencePoint,
+    {
+        let different_point = compute_support_point(self.normal);
+        let new_point = different_point.vector;
+
+        if (new_point * different_point.vector).is_sign_negative() {
+            return None;
+        }
+
+        if different_point == self.a || different_point == self.b {
+            return None;
+        }
+
+        if ((self.a.vector - different_point.vector) * self.normal).abs() <= 0.1
+            || ((self.a.vector - different_point.vector) * self.normal).abs() <= 0.1
+        {
+            return None;
+        }
+
+        Some([
+            (self.a.clone(), different_point.clone()).into(),
+            (different_point, self.b.clone()).into(),
+        ])
+    }
+}
+
+struct Simplex {
+    edges: Vec<MaybeMinkowskiEdge>,
+}
+
+impl Simplex {
+    pub(crate) fn new(triangle: Triangle) -> Self {
+        // expect two iter to find the close edge
+        let mut edges: Vec<MaybeMinkowskiEdge> = Vec::with_capacity(3 + 2);
+        for i in 0..3 {
+            let j = (i + 1) % 3;
+            let a = triangle[i].clone();
+            let b = triangle[j].clone();
+            let edge = (a, b).into();
+            edges.push(edge);
+        }
+
+        Self { edges }
+    }
+
+    // expand the simplex, find the min
+    pub(crate) fn expand<F>(&mut self, compute_support_point: F) -> Result<(), ()>
+    where
+        F: Fn(Vector<f32>) -> GJKDifferencePoint,
+    {
+        let min_index = self.find_min_edge_index();
+
+        self.edges[min_index]
+            .expand(&compute_support_point)
+            .map(|new_edges| {
+                self.edges.splice(min_index..min_index + 1, new_edges);
+            })
+            .ok_or(())
+    }
+
+    pub(crate) fn find_min_edge(&self) -> ClosestGJKDifferenceEdge {
+        let min_index = self.find_min_edge_index();
+
+        let edge = &self.edges[min_index];
+
+        // TODO replace with MaybeMinkowskiEdge
+        ClosestGJKDifferenceEdge {
+            a: edge.a.clone(),
+            b: edge.b.clone(),
+            normal: edge.normal,
+            depth: edge.depth,
+        }
+    }
+
+    fn find_min_edge_index(&self) -> usize {
+        let mut min_depth = f32::MAX;
+        let mut min_index = 0;
+        for (i, edge) in self.edges.iter().enumerate() {
+            if edge.depth < min_depth {
+                min_index = i;
+                min_depth = edge.depth;
+            }
+        }
+        min_index
+    }
 }
 
 // https://dyn4j.org/2010/05/epa-expanding-polytope-algorithm/ epa algo explain
-fn epa_compute_collision_edge(
+pub(crate) fn epa_compute_collision_edge<F>(
+    triangle: Triangle,
+    compute_support_point: F,
+) -> ClosestGJKDifferenceEdge
+where
+    F: Fn(Vector<f32>) -> GJKDifferencePoint,
+{
+    let mut simplex = Simplex::new(triangle);
+
+    while simplex.expand(&compute_support_point).is_ok() {}
+
+    simplex.find_min_edge()
+}
+
+// https://dyn4j.org/2010/05/epa-expanding-polytope-algorithm/ epa algo explain
+pub(crate) fn origin_epa_compute_collision_edge(
     triangle: Triangle,
     compute_support_point: impl Fn(Vector<f32>) -> GJKDifferencePoint,
 ) -> ClosestGJKDifferenceEdge {
@@ -333,10 +468,13 @@ fn epa_compute_collision_edge(
     ) -> (f32, Vector<f32>) {
         let ab = (b.vector - a.vector).into();
         let ao: Vector3<_> = (-a.vector).into();
-        let mut normal: Vector<_> = (ao ^ ab ^ ab).into();
-        normal = normal.normalize();
-        let depth = a.vector * normal;
-        (depth, normal)
+        let normal: Vector<_> = (ao ^ ab ^ ab).into();
+
+        // let depth1 = a.vector * normal.normalize();
+        let depth = a.vector >> normal;
+        // dbg!((depth1 - depth).abs());
+        // assert!((depth1 - depth).abs() < f32::EPSILON);
+        (depth, normal.normalize())
     }
 
     // init simplex
@@ -354,7 +492,15 @@ fn epa_compute_collision_edge(
         });
     }
 
+    let mut performance_count = 0;
+
     loop {
+        performance_count += 1;
+        if performance_count >= 100 {
+            dbg!("infinite");
+            process::exit(-1);
+        }
+
         let mut origin_closest_edge_anchor = (f32::MAX, 0);
         for (i, edge) in simplex.iter().enumerate() {
             if edge.depth < origin_closest_edge_anchor.0 {
@@ -370,9 +516,10 @@ fn epa_compute_collision_edge(
 
         let expand_point = compute_support_point(origin_closest_edge.normal);
 
-        if (expand_point.vector - origin_closest_edge.a.vector) * origin_closest_edge.normal
+        if ((expand_point.vector - origin_closest_edge.a.vector) * origin_closest_edge.normal).abs()
             < f32::EPSILON
         {
+            dbg!(performance_count);
             // can't expand
             return origin_closest_edge.clone();
         }
@@ -382,6 +529,8 @@ fn epa_compute_collision_edge(
         let (depth, normal) = compute_edge_info_away_from_edge(&a, &b);
 
         if (depth - origin_closest_edge.depth).abs() < f32::EPSILON {
+            dbg!(performance_count);
+
             return origin_closest_edge.clone();
         }
 
@@ -397,6 +546,8 @@ fn epa_compute_collision_edge(
         let (depth, normal) = compute_edge_info_away_from_edge(&a, &b);
 
         if (depth - origin_closest_edge.depth).abs() < f32::EPSILON {
+            dbg!(performance_count);
+
             return origin_closest_edge.clone();
         }
 
@@ -410,6 +561,9 @@ fn epa_compute_collision_edge(
         simplex.splice(i..(i + 1), [left, right]);
     }
 }
+
+//
+pub(crate) fn minkowski_sum() {}
 
 // fn sat_collision_detective<T>(a: &T::Element, b: &T::Element) -> Option<Vector<f32>>
 // where
