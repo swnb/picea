@@ -209,6 +209,7 @@ impl Meta {
     }
 }
 
+#[derive(Clone)]
 pub struct MetaBuilder {
     meta: Meta,
 }
