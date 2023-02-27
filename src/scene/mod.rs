@@ -91,7 +91,7 @@ impl Scene {
 
             let l = match contact_a {
                 ContactType::Point(p) => [*p, *p + (info.normal() * 10.)],
-                ContactType::Edge([p, p2]) => unimplemented!(""),
+                ContactType::Edge([p, p2]) => [*p, *p2],
             };
 
             let l1 = match contact_b {
@@ -119,5 +119,15 @@ impl Scene {
     #[inline]
     pub fn elements_iter_mut(&mut self) -> impl Iterator<Item = &mut Element> {
         self.element_store.iter_mut()
+    }
+
+    #[inline]
+    pub fn get_element(&self, id: ID) -> Option<&Element> {
+        self.element_store.get_element_by_id(id)
+    }
+
+    #[inline]
+    pub fn get_element_mut(&mut self, id: ID) -> Option<&mut Element> {
+        self.element_store.get_mut_element_by_id(id)
     }
 }
