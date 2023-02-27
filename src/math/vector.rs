@@ -65,8 +65,8 @@ macro_rules! impl_vector {
                 }
 
                 pub fn normalize(&self) -> Vector<$T> {
-                    let length = self.abs();
-                    (self.x() * length.recip(), self.y() * length.recip()).into()
+                    let shrink = self.abs().sqrt().recip();
+                    (self.x() * shrink, self.y() * shrink).into()
                 }
 
                 #[inline]
@@ -453,5 +453,12 @@ where
     type Output = T;
     fn mul(self, rhs: Self) -> Self::Output {
         (self.x() * rhs.x()) + (self.y() * rhs.y()) + (self.z() * rhs.z())
+    }
+}
+
+impl std::ops::Shr<Vector<f32>> for Vector<f32> {
+    type Output = f32;
+    fn shr(self, rhs: Vector<f32>) -> Self::Output {
+        self * rhs * rhs.abs().recip()
     }
 }

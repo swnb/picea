@@ -175,11 +175,3 @@ where
         self.set_y(|y| y - rhs.y);
     }
 }
-
-impl std::ops::Shr<Vector<f32>> for Point<f32> {
-    type Output = f32;
-    fn shr(self, rhs: Vector<f32>) -> Self::Output {
-        let vector = self.to_vector();
-        vector * rhs * rhs.abs().recip()
-    }
-}
