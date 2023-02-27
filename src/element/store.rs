@@ -87,10 +87,9 @@ impl ElementStore {
     }
 
     pub fn get_mut_element_by_id(&mut self, id: ID) -> Option<&mut Element> {
-        self.map.get_mut(&id).map(|v| {
-            let result = &v.element as *const _ as *mut Element;
-            unsafe { &mut *result }
-        })
+        let value = self.map.get_mut(&id)?;
+        let result = &value.element as *const _ as *mut Element;
+        unsafe { &mut *result }.into()
     }
 
     pub fn sort<F>(&mut self, compare: F)
