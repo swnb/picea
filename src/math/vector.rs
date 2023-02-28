@@ -65,7 +65,7 @@ macro_rules! impl_vector {
                 }
 
                 pub fn normalize(&self) -> Vector<$T> {
-                    let shrink = self.abs().sqrt().recip();
+                    let shrink = self.abs().recip();
                     (self.x() * shrink, self.y() * shrink).into()
                 }
 
