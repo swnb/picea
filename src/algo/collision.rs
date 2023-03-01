@@ -485,28 +485,9 @@ pub(crate) fn epa_compute_collision_edge<F>(
 where
     F: Fn(Vector<f32>) -> GJKDifferencePoint,
 {
-    let triangle_clone = triangle.clone();
     let mut simplex = Simplex::new(triangle);
 
-    let mut count = 0;
-
-    while simplex.expand(&compute_support_point).is_ok() {
-        count += 1;
-
-        if count >= 5 {
-            let edges = &simplex.edges;
-            println!("{}", triangle_clone[0]);
-            println!("{}", triangle_clone[1]);
-            println!("{}", triangle_clone[2]);
-            edges.iter().for_each(|edge| {
-                println!("{}", edge);
-            });
-            process::exit(-1);
-            break;
-        }
-    }
-
-    dbg!(count);
+    while simplex.expand(&compute_support_point).is_ok() {}
 
     simplex.find_min_edge()
 }
