@@ -202,25 +202,25 @@ fn sweep_and_prune_collision_detection<T, Z>(
 // TODO object is too large , we need shrink this struct in the future， rm start_point and end_point
 // gjk 两个多边形形成的差集, 衍生的点
 #[derive(Clone, Debug)]
-pub(crate) struct GJKDifferencePoint {
+pub(crate) struct MinkowskiDifferencePoint {
     pub(crate) start_point_from_a: Point<f32>,
     pub(crate) end_point_from_b: Point<f32>,
     pub(crate) vector: Vector<f32>,
 }
 
-impl Display for GJKDifferencePoint {
+impl Display for MinkowskiDifferencePoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!("{},", self.vector))
     }
 }
 
-impl PartialEq for GJKDifferencePoint {
+impl PartialEq for MinkowskiDifferencePoint {
     fn eq(&self, other: &Self) -> bool {
         self.vector == other.vector
     }
 }
 
-impl From<(Point<f32>, Point<f32>)> for GJKDifferencePoint {
+impl From<(Point<f32>, Point<f32>)> for MinkowskiDifferencePoint {
     fn from((s, e): (Point<f32>, Point<f32>)) -> Self {
         Self {
             start_point_from_a: s,
@@ -230,13 +230,13 @@ impl From<(Point<f32>, Point<f32>)> for GJKDifferencePoint {
     }
 }
 
-type Triangle = [GJKDifferencePoint; 3];
+type Triangle = [MinkowskiDifferencePoint; 3];
 
 // for rectangle , avg compare is 1 to 2 time;
 // https://youtu.be/ajv46BSqcK4 gjk algo explain
 pub(crate) fn gjk_collision_detective(
     first_approximation_vector: Vector<f32>,
-    compute_support_point: impl Fn(Vector<f32>) -> GJKDifferencePoint,
+    compute_support_point: impl Fn(Vector<f32>) -> MinkowskiDifferencePoint,
 ) -> Option<Triangle> {
     let approximation_vector = first_approximation_vector;
 
@@ -335,8 +335,8 @@ pub(crate) fn gjk_collision_detective(
 
 #[derive(Clone, Debug)]
 pub(crate) struct ClosestGJKDifferenceEdge {
-    pub(crate) a: GJKDifferencePoint,
-    pub(crate) b: GJKDifferencePoint,
+    pub(crate) a: MinkowskiDifferencePoint,
+    pub(crate) b: MinkowskiDifferencePoint,
     pub(crate) normal: Vector<f32>,
     pub(crate) depth: f32,
 }
@@ -347,8 +347,8 @@ pub(crate) struct ClosestGJKDifferenceEdge {
 // the edge must inside the minkowski
 #[derive(Clone, Debug)]
 pub(crate) struct MaybeMinkowskiEdge {
-    pub(crate) start_different_point: GJKDifferencePoint,
-    pub(crate) end_different_point: GJKDifferencePoint,
+    pub(crate) start_different_point: MinkowskiDifferencePoint,
+    pub(crate) end_different_point: MinkowskiDifferencePoint,
     pub(crate) normal: Vector<f32>,
     pub(crate) depth: f32,
 }
@@ -364,8 +364,10 @@ impl Display for MaybeMinkowskiEdge {
     }
 }
 
-impl From<(GJKDifferencePoint, GJKDifferencePoint)> for MaybeMinkowskiEdge {
-    fn from((start_point, end_point): (GJKDifferencePoint, GJKDifferencePoint)) -> Self {
+impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MaybeMinkowskiEdge {
+    fn from(
+        (start_point, end_point): (MinkowskiDifferencePoint, MinkowskiDifferencePoint),
+    ) -> Self {
         let a = start_point;
         let b = end_point;
         let ab = (b.vector - a.vector).into();
@@ -385,7 +387,7 @@ impl From<(GJKDifferencePoint, GJKDifferencePoint)> for MaybeMinkowskiEdge {
 impl MaybeMinkowskiEdge {
     pub(crate) fn expand<F>(&self, compute_support_point: F) -> Option<[MaybeMinkowskiEdge; 2]>
     where
-        F: Fn(Vector<f32>) -> GJKDifferencePoint,
+        F: Fn(Vector<f32>) -> MinkowskiDifferencePoint,
     {
         let different_point = compute_support_point(self.normal);
         let new_point = different_point.vector;
@@ -446,7 +448,7 @@ impl Simplex {
     // expand the simplex, find the min
     pub(crate) fn expand<F>(&mut self, compute_support_point: F) -> Result<(), ()>
     where
-        F: Fn(Vector<f32>) -> GJKDifferencePoint,
+        F: Fn(Vector<f32>) -> MinkowskiDifferencePoint,
     {
         let min_index = self.find_min_edge_index();
 
@@ -483,7 +485,7 @@ pub(crate) fn epa_compute_collision_edge<F>(
     compute_support_point: F,
 ) -> MinkowskiEdge
 where
-    F: Fn(Vector<f32>) -> GJKDifferencePoint,
+    F: Fn(Vector<f32>) -> MinkowskiDifferencePoint,
 {
     let mut simplex = Simplex::new(triangle);
 
