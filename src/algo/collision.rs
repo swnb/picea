@@ -1,6 +1,7 @@
 use crate::{
     math::{
         axis::AxisDirection,
+        edge,
         point::Point,
         vector::{Vector, Vector3},
     },
@@ -8,6 +9,7 @@ use crate::{
 };
 use std::{
     cmp::Ordering,
+    fmt::{Display, Write},
     ops::{ControlFlow, Deref, DerefMut, IndexMut},
     process,
 };
@@ -109,38 +111,47 @@ pub fn special_collision_detection<E: Element>(a: &mut E, b: &mut E) -> Option<C
     let compute_support_point = |reference_vector| {
         let (_, max_point_a) = a.projection_on_vector(&reference_vector);
         let (_, max_point_b) = b.projection_on_vector(&-reference_vector);
-        (max_point_b, max_point_a).into()
+        // (max_point_b, max_point_a).into()
+        (max_point_a, max_point_b).into()
     };
 
-    gjk_collision_detective(first_approximation_vector, compute_support_point).map(|simplex| {
-        let collision_edge = epa_compute_collision_edge(simplex, compute_support_point);
+    let simplex = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
+    let edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-        let g_a = &collision_edge.a;
-        let g_b = &collision_edge.b;
-        let b1 = g_a.start_point;
-        let a1 = g_a.end_point;
-        let b2 = g_b.start_point;
-        let a2 = g_b.end_point;
+    compute_collision_info(&edge);
 
-        fn compute_collision_contact_type(p1: Point<f32>, p2: Point<f32>) -> ContactType {
-            use ContactType::*;
-            if p1 == p2 {
-                Point(p1)
-            } else {
-                Edge([p1, p2])
-            }
+    let collision_edge = ClosestGJKDifferenceEdge {
+        a: edge.start_different_point.clone(),
+        b: edge.end_different_point.clone(),
+        normal: edge.normal,
+        depth: edge.depth,
+    };
+
+    let g_a = &collision_edge.a;
+    let g_b = &collision_edge.b;
+    let b1 = g_a.start_point_from_a;
+    let a1 = g_a.end_point_from_b;
+    let b2 = g_b.start_point_from_a;
+    let a2 = g_b.end_point_from_b;
+
+    fn compute_collision_contact_type(p1: Point<f32>, p2: Point<f32>) -> ContactType {
+        use ContactType::*;
+        if p1 == p2 {
+            Point(p1)
+        } else {
+            Edge([p1, p2])
         }
+    }
 
-        let contact_a = compute_collision_contact_type(a1, a2);
-        let contact_b = compute_collision_contact_type(b1, b2);
+    let contact_a = compute_collision_contact_type(a1, a2);
+    let contact_b = compute_collision_contact_type(b1, b2);
 
-        CollisionInfo {
-            collision_element_id_pair: (a.id(), b.id()),
-            contact_a,
-            contact_b,
-            normal: collision_edge.normal,
-            depth: collision_edge.depth,
-        }
+    Some(CollisionInfo {
+        collision_element_id_pair: (a.id(), b.id()),
+        contact_a,
+        contact_b,
+        normal: collision_edge.normal,
+        depth: collision_edge.depth,
     })
 }
 
@@ -192,9 +203,15 @@ fn sweep_and_prune_collision_detection<T, Z>(
 // gjk 两个多边形形成的差集, 衍生的点
 #[derive(Clone, Debug)]
 pub(crate) struct GJKDifferencePoint {
-    pub(crate) start_point: Point<f32>,
-    pub(crate) end_point: Point<f32>,
+    pub(crate) start_point_from_a: Point<f32>,
+    pub(crate) end_point_from_b: Point<f32>,
     pub(crate) vector: Vector<f32>,
+}
+
+impl Display for GJKDifferencePoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{},", self.vector))
+    }
 }
 
 impl PartialEq for GJKDifferencePoint {
@@ -206,9 +223,9 @@ impl PartialEq for GJKDifferencePoint {
 impl From<(Point<f32>, Point<f32>)> for GJKDifferencePoint {
     fn from((s, e): (Point<f32>, Point<f32>)) -> Self {
         Self {
-            start_point: s,
-            end_point: e,
-            vector: (s, e).into(),
+            start_point_from_a: s,
+            end_point_from_b: e,
+            vector: (e, s).into(),
         }
     }
 }
@@ -298,10 +315,10 @@ pub(crate) fn gjk_collision_detective(
             // update point
             b = c.clone();
             c = tmp;
-            return Some(ControlFlow::Continue(Failure));
+            return ControlFlow::Continue(Failure).into();
         }
 
-        Some(ControlFlow::Continue(Success))
+        ControlFlow::Continue(Success).into()
     };
 
     loop {
@@ -330,22 +347,35 @@ pub(crate) struct ClosestGJKDifferenceEdge {
 // the edge must inside the minkowski
 #[derive(Clone, Debug)]
 pub(crate) struct MaybeMinkowskiEdge {
-    pub(crate) a: GJKDifferencePoint,
-    pub(crate) b: GJKDifferencePoint,
+    pub(crate) start_different_point: GJKDifferencePoint,
+    pub(crate) end_different_point: GJKDifferencePoint,
     pub(crate) normal: Vector<f32>,
     pub(crate) depth: f32,
 }
 
+impl Display for MaybeMinkowskiEdge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_char('[')?;
+        let start_point = &self.start_different_point;
+        f.write_str(&format!("{},", start_point.vector))?;
+        let end_point = &self.end_different_point;
+        f.write_str(&format!("{}", end_point.vector))?;
+        f.write_char(']')
+    }
+}
+
 impl From<(GJKDifferencePoint, GJKDifferencePoint)> for MaybeMinkowskiEdge {
-    fn from((a, b): (GJKDifferencePoint, GJKDifferencePoint)) -> Self {
+    fn from((start_point, end_point): (GJKDifferencePoint, GJKDifferencePoint)) -> Self {
+        let a = start_point;
+        let b = end_point;
         let ab = (b.vector - a.vector).into();
         let ao: Vector3<_> = (-a.vector).into();
         let normal: Vector<_> = (ao ^ ab ^ ab).into();
         let depth = a.vector >> normal;
 
         Self {
-            a,
-            b,
+            start_different_point: a,
+            end_different_point: b,
             normal: normal.normalize(),
             depth,
         }
@@ -360,24 +390,37 @@ impl MaybeMinkowskiEdge {
         let different_point = compute_support_point(self.normal);
         let new_point = different_point.vector;
 
-        if (new_point * different_point.vector).is_sign_negative() {
+        if !(new_point * different_point.vector).is_sign_positive() {
             return None;
         }
 
-        if different_point == self.a || different_point == self.b {
-            return None;
-        }
-
-        if ((self.a.vector - different_point.vector) * self.normal).abs() <= 0.1
-            || ((self.a.vector - different_point.vector) * self.normal).abs() <= 0.1
+        if different_point == self.start_different_point
+            || different_point == self.end_different_point
         {
             return None;
         }
 
-        Some([
-            (self.a.clone(), different_point.clone()).into(),
-            (different_point, self.b.clone()).into(),
-        ])
+        // consider this const variable is same as zero
+        const MAX_TOLERABLE_ERROR: f32 = 1e-4;
+
+        if ((self.start_different_point.vector - different_point.vector) * self.normal).abs()
+            <= MAX_TOLERABLE_ERROR
+        {
+            return None;
+        }
+
+        if ((self.end_different_point.vector - different_point.vector) * self.normal).abs()
+            <= MAX_TOLERABLE_ERROR
+        {
+            return None;
+        }
+
+        let result = [
+            (self.start_different_point.clone(), different_point.clone()).into(),
+            (different_point, self.end_different_point.clone()).into(),
+        ];
+
+        result.into()
     }
 }
 
@@ -415,18 +458,10 @@ impl Simplex {
             .ok_or(())
     }
 
-    pub(crate) fn find_min_edge(&self) -> ClosestGJKDifferenceEdge {
+    pub(crate) fn find_min_edge(&self) -> MaybeMinkowskiEdge {
         let min_index = self.find_min_edge_index();
 
-        let edge = &self.edges[min_index];
-
-        // TODO replace with MaybeMinkowskiEdge
-        ClosestGJKDifferenceEdge {
-            a: edge.a.clone(),
-            b: edge.b.clone(),
-            normal: edge.normal,
-            depth: edge.depth,
-        }
+        self.edges[min_index].clone()
     }
 
     fn find_min_edge_index(&self) -> usize {
@@ -446,124 +481,47 @@ impl Simplex {
 pub(crate) fn epa_compute_collision_edge<F>(
     triangle: Triangle,
     compute_support_point: F,
-) -> ClosestGJKDifferenceEdge
+) -> MinkowskiEdge
 where
     F: Fn(Vector<f32>) -> GJKDifferencePoint,
 {
+    let triangle_clone = triangle.clone();
     let mut simplex = Simplex::new(triangle);
 
-    while simplex.expand(&compute_support_point).is_ok() {}
+    let mut count = 0;
+
+    while simplex.expand(&compute_support_point).is_ok() {
+        count += 1;
+
+        if count >= 5 {
+            let edges = &simplex.edges;
+            println!("{}", triangle_clone[0]);
+            println!("{}", triangle_clone[1]);
+            println!("{}", triangle_clone[2]);
+            edges.iter().for_each(|edge| {
+                println!("{}", edge);
+            });
+            process::exit(-1);
+            break;
+        }
+    }
+
+    dbg!(count);
 
     simplex.find_min_edge()
 }
 
-// https://dyn4j.org/2010/05/epa-expanding-polytope-algorithm/ epa algo explain
-pub(crate) fn origin_epa_compute_collision_edge(
-    triangle: Triangle,
-    compute_support_point: impl Fn(Vector<f32>) -> GJKDifferencePoint,
-) -> ClosestGJKDifferenceEdge {
-    fn compute_edge_info_away_from_edge(
-        a: &GJKDifferencePoint,
-        b: &GJKDifferencePoint,
-    ) -> (f32, Vector<f32>) {
-        let ab = (b.vector - a.vector).into();
-        let ao: Vector3<_> = (-a.vector).into();
-        let normal: Vector<_> = (ao ^ ab ^ ab).into();
+pub(crate) type MinkowskiEdge = MaybeMinkowskiEdge;
 
-        // let depth1 = a.vector * normal.normalize();
-        let depth = a.vector >> normal;
-        // dbg!((depth1 - depth).abs());
-        // assert!((depth1 - depth).abs() < f32::EPSILON);
-        (depth, normal.normalize())
-    }
+pub(crate) fn compute_collision_info(edge: &MinkowskiEdge) {
+    let a1 = edge.start_different_point.start_point_from_a;
+    let a2 = edge.end_different_point.start_point_from_a;
 
-    // init simplex
-    let mut simplex = Vec::with_capacity(3 * 3);
-    for i in 0..3 {
-        let j = (i + 1) % 3;
-        let a = &triangle[i];
-        let b = &triangle[j];
-        let (depth, normal) = compute_edge_info_away_from_edge(a, b);
-        simplex.push(ClosestGJKDifferenceEdge {
-            a: a.clone(),
-            b: b.clone(),
-            depth,
-            normal,
-        });
-    }
+    let b1 = edge.start_different_point.end_point_from_b;
+    let b2 = edge.end_different_point.end_point_from_b;
 
-    let mut performance_count = 0;
-
-    loop {
-        performance_count += 1;
-        if performance_count >= 100 {
-            dbg!("infinite");
-            process::exit(-1);
-        }
-
-        let mut origin_closest_edge_anchor = (f32::MAX, 0);
-        for (i, edge) in simplex.iter().enumerate() {
-            if edge.depth < origin_closest_edge_anchor.0 {
-                origin_closest_edge_anchor.0 = edge.depth;
-                origin_closest_edge_anchor.1 = i;
-            }
-        }
-
-        let origin_closest_edge_index = origin_closest_edge_anchor.1;
-        let i = origin_closest_edge_index;
-
-        let origin_closest_edge = &simplex[i];
-
-        let expand_point = compute_support_point(origin_closest_edge.normal);
-
-        if ((expand_point.vector - origin_closest_edge.a.vector) * origin_closest_edge.normal).abs()
-            < f32::EPSILON
-        {
-            dbg!(performance_count);
-            // can't expand
-            return origin_closest_edge.clone();
-        }
-
-        let a = origin_closest_edge.a.clone();
-        let b = expand_point.clone();
-        let (depth, normal) = compute_edge_info_away_from_edge(&a, &b);
-
-        if (depth - origin_closest_edge.depth).abs() < f32::EPSILON {
-            dbg!(performance_count);
-
-            return origin_closest_edge.clone();
-        }
-
-        let left = ClosestGJKDifferenceEdge {
-            a,
-            b,
-            depth,
-            normal,
-        };
-
-        let a = expand_point;
-        let b = origin_closest_edge.b.clone();
-        let (depth, normal) = compute_edge_info_away_from_edge(&a, &b);
-
-        if (depth - origin_closest_edge.depth).abs() < f32::EPSILON {
-            dbg!(performance_count);
-
-            return origin_closest_edge.clone();
-        }
-
-        let right = ClosestGJKDifferenceEdge {
-            a,
-            b,
-            depth,
-            normal,
-        };
-
-        simplex.splice(i..(i + 1), [left, right]);
-    }
+    assert!(!(a1 == a2 && b1 == b2));
 }
-
-//
-pub(crate) fn minkowski_sum() {}
 
 // fn sat_collision_detective<T>(a: &T::Element, b: &T::Element) -> Option<Vector<f32>>
 // where
@@ -637,8 +595,9 @@ pub(crate) fn minkowski_sum() {}
 //     collision_normal.1
 // }
 
-fn v_clip_collision_pointer_detective<T>(a: &T::Element, b: &T::Element, normal: Vector<f32>)
+fn v_clip_collision_detective<T>(a: &T::Element, b: &T::Element, normal: Vector<f32>)
 where
     T: CollisionalCollection,
 {
+    todo!()
 }
