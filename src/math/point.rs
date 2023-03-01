@@ -1,13 +1,25 @@
 use super::vector::Vector;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::{
+    fmt::Display,
+    ops::{Add, AddAssign, Sub, SubAssign},
+};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct Point<T = f64>
 where
     T: Clone + Copy,
 {
     pub(crate) x: T,
     pub(crate) y: T,
+}
+
+impl<T> Display for Point<T>
+where
+    T: Clone + Copy + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{{ x: {}, y: {} }}", self.x, self.y))
+    }
 }
 
 impl PartialEq for Point<f32> {

@@ -1,13 +1,25 @@
 use super::{point::Point, segment::Segment};
-use std::ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign};
+use std::{
+    fmt::Display,
+    ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign},
+};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct Vector<T = f64>
 where
     T: Clone + Copy,
 {
     pub(super) x: T,
     pub(super) y: T,
+}
+
+impl<T> Display for Vector<T>
+where
+    T: Display + Copy + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{{ x: {}, y: {} }}", self.x, self.y))
+    }
 }
 
 impl<T: Clone + Copy> Vector<T> {
