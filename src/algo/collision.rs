@@ -558,27 +558,27 @@ impl Simplex {
         self.difference_points.push(new_point.clone());
 
         let (normal, depth) =
-            compute_simplex_edge_info(&self[min_edge.end_different_point_index], &new_point);
+            compute_simplex_edge_info(&self[min_edge.start_different_point_index], &new_point);
 
         let new_edge_1 = SimplexEdge {
-            start_different_point_index: min_edge.end_different_point_index,
+            start_different_point_index: min_edge.start_different_point_index,
             end_different_point_index: new_point_index,
             normal,
             depth,
         };
 
         let (normal, depth) =
-            compute_simplex_edge_info(&new_point, &self[min_edge.start_different_point_index]);
+            compute_simplex_edge_info(&new_point, &self[min_edge.end_different_point_index]);
 
         let new_edge_2 = SimplexEdge {
             start_different_point_index: new_point_index,
-            end_different_point_index: min_edge.start_different_point_index,
+            end_different_point_index: min_edge.end_different_point_index,
             normal,
             depth,
         };
 
         self.edges
-            .splice(min_index..min_index + 1, [new_edge_1, new_edge_2]);
+            .splice(min_index..(min_index + 1), [new_edge_1, new_edge_2]);
 
         Ok(())
     }
