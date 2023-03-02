@@ -10,7 +10,7 @@ use crate::{
 use std::{
     cmp::Ordering,
     fmt::{Display, Write},
-    ops::{ControlFlow, Deref, DerefMut, IndexMut},
+    ops::{ControlFlow, Deref, DerefMut, Index, IndexMut},
     process,
 };
 
@@ -427,22 +427,119 @@ impl MaybeMinkowskiEdge {
 }
 
 struct Simplex {
-    edges: Vec<MaybeMinkowskiEdge>,
+    difference_points: Vec<MinkowskiDifferencePoint>,
+    edges: Vec<SimplexEdge>,
+}
+
+impl Index<usize> for Simplex {
+    type Output = MinkowskiDifferencePoint;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.difference_points[index]
+    }
+}
+
+impl IndexMut<usize> for Simplex {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.difference_points[index]
+    }
+}
+
+struct SimplexEdge {
+    // use index rather than copy difference point in order to shrink struct size;
+    start_different_point_index: usize,
+    end_different_point_index: usize,
+    normal: Vector<f32>,
+    depth: f32,
+}
+
+impl SimplexEdge {
+    pub(crate) fn expand<F>(
+        &self,
+        simplex: &Simplex,
+        compute_support_point: F,
+    ) -> Option<MinkowskiDifferencePoint>
+    where
+        F: Fn(Vector<f32>) -> MinkowskiDifferencePoint,
+    {
+        let different_point = compute_support_point(self.normal);
+        let new_point = different_point.vector;
+
+        if !(new_point * different_point.vector).is_sign_positive() {
+            return None;
+        }
+
+        let start_different_point = &simplex[self.start_different_point_index];
+        let end_different_point = &simplex[self.end_different_point_index];
+
+        if &different_point == start_different_point || &different_point == end_different_point {
+            return None;
+        }
+
+        // consider this const variable is same as zero
+        const MAX_TOLERABLE_ERROR: f32 = 1e-4;
+
+        if ((start_different_point.vector - different_point.vector) * self.normal).abs()
+            <= MAX_TOLERABLE_ERROR
+        {
+            return None;
+        } else {
+            dbg!(((start_different_point.vector - different_point.vector) * self.normal).abs());
+        }
+
+        if ((end_different_point.vector - different_point.vector) * self.normal).abs()
+            <= MAX_TOLERABLE_ERROR
+        {
+            return None;
+        } else {
+            dbg!(((start_different_point.vector - different_point.vector) * self.normal).abs());
+        }
+
+        different_point.into()
+    }
+}
+
+fn compute_simplex_edge_info(
+    start_difference_point: &MinkowskiDifferencePoint,
+    end_difference_point: &MinkowskiDifferencePoint,
+) -> (Vector<f32>, f32) {
+    let a = start_difference_point;
+    let b = end_difference_point;
+    let ab = (b.vector - a.vector).into();
+    let ao: Vector3<_> = (-a.vector).into();
+    let normal: Vector<_> = (ao ^ ab ^ ab).into();
+    let depth = a.vector >> normal;
+
+    (normal, depth)
 }
 
 impl Simplex {
     pub(crate) fn new(triangle: Triangle) -> Self {
-        // expect two iter to find the close edge
-        let mut edges: Vec<MaybeMinkowskiEdge> = Vec::with_capacity(3 + 2);
-        for i in 0..3 {
-            let j = (i + 1) % 3;
-            let a = triangle[i].clone();
-            let b = triangle[j].clone();
-            let edge = (a, b).into();
+        let mut difference_points: Vec<MinkowskiDifferencePoint> = Vec::with_capacity(3 + 2);
+        let mut edges = Vec::with_capacity(3 + 2);
+
+        difference_points.extend(triangle.into_iter());
+
+        let length = difference_points.len();
+        for i in 0..length {
+            let j = (i + 1) % length;
+
+            let (normal, depth) =
+                compute_simplex_edge_info(&difference_points[i], &difference_points[j]);
+
+            let edge = SimplexEdge {
+                start_different_point_index: i,
+                end_different_point_index: j,
+                depth,
+                normal,
+            };
+
             edges.push(edge);
         }
 
-        Self { edges }
+        Self {
+            difference_points,
+            edges,
+        }
     }
 
     // expand the simplex, find the min
@@ -452,18 +549,44 @@ impl Simplex {
     {
         let min_index = self.find_min_edge_index();
 
-        self.edges[min_index]
-            .expand(&compute_support_point)
-            .map(|new_edges| {
-                self.edges.splice(min_index..min_index + 1, new_edges);
-            })
-            .ok_or(())
+        let min_edge = &self.edges[min_index];
+
+        let new_point = min_edge.expand(self, &compute_support_point).ok_or(())?;
+
+        let new_point_index = self.difference_points.len();
+
+        self.difference_points.push(new_point.clone());
+
+        let (normal, depth) =
+            compute_simplex_edge_info(&self[min_edge.end_different_point_index], &new_point);
+
+        let new_edge_1 = SimplexEdge {
+            start_different_point_index: min_edge.end_different_point_index,
+            end_different_point_index: new_point_index,
+            normal,
+            depth,
+        };
+
+        let (normal, depth) =
+            compute_simplex_edge_info(&new_point, &self[min_edge.start_different_point_index]);
+
+        let new_edge_2 = SimplexEdge {
+            start_different_point_index: new_point_index,
+            end_different_point_index: min_edge.start_different_point_index,
+            normal,
+            depth,
+        };
+
+        self.edges
+            .splice(min_index..min_index + 1, [new_edge_1, new_edge_2]);
+
+        Ok(())
     }
 
-    pub(crate) fn find_min_edge(&self) -> MaybeMinkowskiEdge {
+    pub(crate) fn find_min_edge(&self) -> &SimplexEdge {
         let min_index = self.find_min_edge_index();
 
-        self.edges[min_index].clone()
+        &self.edges[min_index]
     }
 
     fn find_min_edge_index(&self) -> usize {
@@ -491,7 +614,14 @@ where
 
     while simplex.expand(&compute_support_point).is_ok() {}
 
-    simplex.find_min_edge()
+    let min_edge = simplex.find_min_edge();
+
+    MaybeMinkowskiEdge {
+        start_different_point: simplex[min_edge.start_different_point_index].clone(),
+        end_different_point: simplex[min_edge.end_different_point_index].clone(),
+        normal: min_edge.normal,
+        depth: min_edge.depth,
+    }
 }
 
 pub(crate) type MinkowskiEdge = MaybeMinkowskiEdge;
