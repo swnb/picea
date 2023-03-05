@@ -24,7 +24,7 @@ pub fn update_elements_by_duration<T: Element>(element: &mut T, delta_t: f32) {
 
     let inv_m = meta.inv_mass();
 
-    let force_group = meta.force();
+    let force_group = meta.force_group();
     let f = if force_group.is_empty() {
         None
     } else {
