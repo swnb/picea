@@ -24,6 +24,16 @@ impl CollisionInfo {
         self.collision_element_id_pair.1
     }
 
+    pub fn contact_type(&self, id: u32) -> &ContactType {
+        if self.element_id_a() == id {
+            self.contact_a()
+        } else if self.element_id_b() == id {
+            self.contact_b()
+        } else {
+            unreachable!()
+        }
+    }
+
     pub fn contact_a(&self) -> &ContactType {
         &self.contact_a
     }
