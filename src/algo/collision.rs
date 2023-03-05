@@ -509,7 +509,7 @@ fn compute_simplex_edge_info(
     let normal: Vector<_> = (ao ^ ab ^ ab).into();
     let depth = a.vector >> normal;
 
-    (normal, depth)
+    (normal.normalize(), depth)
 }
 
 impl Simplex {
