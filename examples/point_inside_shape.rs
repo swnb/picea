@@ -1,5 +1,9 @@
-use nannou::{prelude::*, winit::event};
+use nannou::{
+    prelude::*,
+    winit::event::{self},
+};
 use picea::{
+    algo::is_point_inside_shape,
     element::{Element, ElementBuilder},
     math::{edge::Edge, point::Point, vector::Vector},
     meta::MetaBuilder,
@@ -13,7 +17,9 @@ struct Model {
     collision_info: Option<Vec<[Point<f32>; 2]>>,
     addition_render_line: Vec<[Point<f32>; 2]>,
     addition_render_dot: Vec<Point<f32>>,
+    cursor_point: Option<Point<f32>>,
     is_paused: bool,
+    is_mouse_enter: bool,
 }
 
 fn create_model(_app: &App) -> Model {
@@ -29,9 +35,11 @@ fn create_model(_app: &App) -> Model {
 
     let ball: Element = ElementBuilder::new(
         ((-400., -100.), 60.),
-        MetaBuilder::new(1.).force("gravity", (0., -10.)),
+        MetaBuilder::new(1.).is_transparent(true), // .force("gravity", (0., -10.)),
     )
     .into();
+
+    dbg!(ball.id());
 
     scene.push_element(ball);
 
@@ -49,16 +57,10 @@ fn create_model(_app: &App) -> Model {
     let element = ElementBuilder::new(
         (7, (50., 200.), 100.),
         MetaBuilder::new(1.)
+            .is_transparent(true)
             .angular(-std::f32::consts::FRAC_PI_8)
             .force("gravity", (0., -10.)), // .is_fixed(true),
     );
-
-    // let element = ElementBuilder::new(
-    //     (7, (50., 200.), 100.),
-    //     MetaBuilder::new(1.)
-    //         .angular(-std::f32::consts::FRAC_PI_8)
-    //         .force("gravity", (0., -10.)), // .is_fixed(true),
-    // );
 
     let element: Element = element.into();
 
@@ -67,17 +69,15 @@ fn create_model(_app: &App) -> Model {
     // scene.push_element(element);
 
     let element = ElementBuilder::new(
-        (7, (50., 400.), 100.),
-        MetaBuilder::new(1.)
-            .angular(-std::f32::consts::FRAC_PI_8)
-            .force("gravity", (0., -10.)), // .is_fixed(true),
+        (7, (50., 200.), 100.),
+        MetaBuilder::new(1.).angular(-std::f32::consts::FRAC_PI_8),
     );
 
     let element: Element = element.into();
 
     let center_point = element.shape().center_point();
 
-    // scene.push_element(element);
+    scene.push_element(element);
 
     Model {
         scene,
@@ -86,6 +86,8 @@ fn create_model(_app: &App) -> Model {
         addition_render_line: vec![],
         addition_render_dot: vec![center_point],
         is_paused: false,
+        cursor_point: None,
+        is_mouse_enter: false,
     }
 }
 
@@ -104,6 +106,35 @@ fn event(app: &App, model: &mut Model, event: Event) {
             }
             _ => {}
         },
+        Event::WindowEvent {
+            id: _,
+            simple: Some(ev),
+        } => match ev {
+            WindowEvent::MousePressed(_) => {
+                // mouse down
+                model.is_mouse_enter = true;
+            }
+            WindowEvent::MouseReleased(_) => {
+                model.is_mouse_enter = false;
+                model.cursor_point = None;
+            }
+            WindowEvent::MouseMoved(p) if model.is_mouse_enter => {
+                let x = p.x;
+                let y = p.y;
+
+                model.cursor_point = Some((x, y).into());
+
+                for element in model.scene.elements_iter_mut() {
+                    if is_point_inside_shape((x, y), &mut element.shape().edge_iter()) {
+                        let center_point = element.shape().center_point();
+                        element.translate(&(center_point, model.cursor_point.unwrap()).into());
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        },
+
         Event::Update(_) => {
             let now = SystemTime::now();
 
@@ -211,13 +242,38 @@ fn view(app: &App, model: &Model, frame: Frame) {
     model.scene.elements_iter().for_each(|element| {
         let draw = app.draw();
 
+        let element_color = model
+            .cursor_point
+            .and_then(|p| {
+                if is_point_inside_shape(p, &mut element.shape().edge_iter()) {
+                    Some(RED)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(WHITE);
+
+        if let Some(edge) = element.shape().edge_iter().next() {
+            match edge {
+                Edge::Line { start_point, .. } => {
+                    let center_point = element.center_point();
+                    draw.line()
+                        .color(element_color)
+                        .start(vec2(center_point.x(), center_point.y()))
+                        .end(vec2(start_point.x(), start_point.y()));
+                }
+                Edge::Circle { .. } => {}
+                _ => unimplemented!(),
+            }
+        }
+
         element.shape().edge_iter().for_each(|edge| match edge {
             Edge::Line {
                 start_point,
                 end_point,
             } => {
                 draw.line()
-                    .color(WHITE)
+                    .color(element_color)
                     .start(vec2(start_point.x(), start_point.y()))
                     .end(vec2(end_point.x(), end_point.y()));
             }
@@ -226,7 +282,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
                 radius,
             } => {
                 draw.ellipse()
-                    .color(WHITE)
+                    .color(element_color)
                     .x_y(center_point.x(), center_point.y())
                     .width(radius * 2.)
                     .height(radius * 2.);
@@ -255,14 +311,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
     model.addition_render_line.iter().for_each(|point| {
         let draw = app.draw();
 
-        dbg!(point[0].x(), point[0].y());
-        dbg!(point[1].x(), point[1].y());
-
         draw.line()
             .weight(2.)
             .color(YELLOW)
             .start(vec2(point[0].x(), point[0].y()))
             .end(vec2(point[1].x(), point[1].y()));
+
         draw.to_frame(app, &frame).unwrap();
     });
 
@@ -275,6 +329,13 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .color(YELLOW);
         draw.to_frame(app, &frame).unwrap();
     });
+
+    if let Some(p) = model.cursor_point {
+        draw.ellipse().x_y(p.x(), p.y()).radius(2.).color(RED);
+        draw.to_frame(app, &frame).unwrap()
+    }
+
+    draw.to_frame(app, &frame).unwrap();
 }
 
 fn main() {
