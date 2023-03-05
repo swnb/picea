@@ -390,7 +390,7 @@ impl MaybeMinkowskiEdge {
         let different_point = compute_support_point(self.normal);
         let new_point = different_point.vector;
 
-        if !(new_point * different_point.vector).is_sign_positive() {
+        if !(new_point * self.normal).is_sign_positive() {
             return None;
         }
 
