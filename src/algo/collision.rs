@@ -392,7 +392,10 @@ impl MaybeMinkowskiEdge {
         let different_point = compute_support_point(self.normal);
         let new_point = different_point.vector;
 
-        if !(new_point * self.normal).is_sign_positive() {
+        // consider this const variable is same as zero
+        const MAX_TOLERABLE_ERROR: f32 = 1e-4;
+
+        if new_point * self.normal <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
@@ -401,9 +404,6 @@ impl MaybeMinkowskiEdge {
         {
             return None;
         }
-
-        // consider this const variable is same as zero
-        const MAX_TOLERABLE_ERROR: f32 = 1e-4;
 
         if ((self.start_different_point.vector - different_point.vector) * self.normal).abs()
             <= MAX_TOLERABLE_ERROR
