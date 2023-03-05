@@ -341,19 +341,19 @@ pub(crate) struct ClosestGJKDifferenceEdge {
     pub(crate) depth: f32,
 }
 
-// MaybeMinkowskiEdge means this edge maybe the Minkowski's edge
+// MinkowskiEdge means this edge maybe the Minkowski's edge
 // it depends where it can or not expand any more
-// if edge can't expand , and it's is closed edge to the origin, it is the edge we need
+// if edge can't expand , and it's is closest edge to the origin, it is the edge we need
 // the edge must inside the minkowski
 #[derive(Clone, Debug)]
-pub(crate) struct MaybeMinkowskiEdge {
+pub(crate) struct MinkowskiEdge {
     pub(crate) start_different_point: MinkowskiDifferencePoint,
     pub(crate) end_different_point: MinkowskiDifferencePoint,
     pub(crate) normal: Vector<f32>,
     pub(crate) depth: f32,
 }
 
-impl Display for MaybeMinkowskiEdge {
+impl Display for MinkowskiEdge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_char('[')?;
         let start_point = &self.start_different_point;
@@ -364,7 +364,7 @@ impl Display for MaybeMinkowskiEdge {
     }
 }
 
-impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MaybeMinkowskiEdge {
+impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdge {
     fn from(
         (start_point, end_point): (MinkowskiDifferencePoint, MinkowskiDifferencePoint),
     ) -> Self {
@@ -384,8 +384,8 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MaybeMinkows
     }
 }
 
-impl MaybeMinkowskiEdge {
-    pub(crate) fn expand<F>(&self, compute_support_point: F) -> Option<[MaybeMinkowskiEdge; 2]>
+impl MinkowskiEdge {
+    pub(crate) fn expand<F>(&self, compute_support_point: F) -> Option<[MinkowskiEdge; 2]>
     where
         F: Fn(Vector<f32>) -> MinkowskiDifferencePoint,
     {
@@ -395,7 +395,7 @@ impl MaybeMinkowskiEdge {
         // consider this const variable is same as zero
         const MAX_TOLERABLE_ERROR: f32 = 1e-4;
 
-        if new_point * self.normal <= MAX_TOLERABLE_ERROR {
+        if (new_point * self.normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
@@ -427,13 +427,13 @@ impl MaybeMinkowskiEdge {
 }
 
 struct Simplex {
-    edges: Vec<MaybeMinkowskiEdge>,
+    edges: Vec<MinkowskiEdge>,
 }
 
 impl Simplex {
     pub(crate) fn new(triangle: Triangle) -> Self {
         // expect two iter to find the close edge
-        let mut edges: Vec<MaybeMinkowskiEdge> = Vec::with_capacity(3 + 2);
+        let mut edges: Vec<MinkowskiEdge> = Vec::with_capacity(3 + 2);
         for i in 0..3 {
             let j = (i + 1) % 3;
             let a = triangle[i].clone();
@@ -460,7 +460,7 @@ impl Simplex {
             .ok_or(())
     }
 
-    pub(crate) fn find_min_edge(&self) -> MaybeMinkowskiEdge {
+    pub(crate) fn find_min_edge(&self) -> MinkowskiEdge {
         let min_index = self.find_min_edge_index();
 
         self.edges[min_index].clone()
@@ -493,8 +493,6 @@ where
 
     simplex.find_min_edge()
 }
-
-pub(crate) type MinkowskiEdge = MaybeMinkowskiEdge;
 
 pub(crate) fn compute_collision_info(edge: &MinkowskiEdge) {
     let a1 = edge.start_different_point.start_point_from_a;
