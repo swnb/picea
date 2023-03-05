@@ -44,7 +44,7 @@ fn create_model(_app: &App) -> Model {
     let result = ball.shape().projection_on_vector(&(0., 350.).into());
     dbg!(result);
 
-    // scene.push_element(ball);
+    scene.push_element(ball);
 
     let meta = MetaBuilder::new(1.)
         .is_transparent(true)

@@ -1,7 +1,6 @@
 use crate::{
     math::{
         axis::AxisDirection,
-        edge,
         point::Point,
         vector::{Vector, Vector3},
     },
@@ -11,7 +10,6 @@ use std::{
     cmp::Ordering,
     fmt::{Display, Write},
     ops::{ControlFlow, Deref, DerefMut, IndexMut},
-    process,
 };
 
 // define element trait
@@ -118,23 +116,14 @@ pub fn special_collision_detection<E: Element>(a: &mut E, b: &mut E) -> Option<C
     let simplex = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
     let edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-    compute_collision_info(&edge);
+    let a1 = edge.start_different_point.start_point_from_a;
+    let a2 = edge.end_different_point.start_point_from_a;
 
-    let collision_edge = ClosestGJKDifferenceEdge {
-        a: edge.start_different_point.clone(),
-        b: edge.end_different_point.clone(),
-        normal: edge.normal,
-        depth: edge.depth,
-    };
+    let b1 = edge.start_different_point.end_point_from_b;
+    let b2 = edge.end_different_point.end_point_from_b;
+    assert!(!(a1 == a2 && b1 == b2));
 
-    let g_a = &collision_edge.a;
-    let g_b = &collision_edge.b;
-    let b1 = g_a.start_point_from_a;
-    let a1 = g_a.end_point_from_b;
-    let b2 = g_b.start_point_from_a;
-    let a2 = g_b.end_point_from_b;
-
-    fn compute_collision_contact_type(p1: Point<f32>, p2: Point<f32>) -> ContactType {
+    fn get_collision_contact_type(p1: Point<f32>, p2: Point<f32>) -> ContactType {
         use ContactType::*;
         if p1 == p2 {
             Point(p1)
@@ -143,16 +132,17 @@ pub fn special_collision_detection<E: Element>(a: &mut E, b: &mut E) -> Option<C
         }
     }
 
-    let contact_a = compute_collision_contact_type(a1, a2);
-    let contact_b = compute_collision_contact_type(b1, b2);
+    let contact_a = get_collision_contact_type(a1, a2);
+    let contact_b = get_collision_contact_type(b1, b2);
 
-    Some(CollisionInfo {
+    CollisionInfo {
         collision_element_id_pair: (a.id(), b.id()),
         contact_a,
         contact_b,
-        normal: collision_edge.normal,
-        depth: collision_edge.depth,
-    })
+        normal: edge.normal,
+        depth: edge.depth,
+    }
+    .into()
 }
 
 /**
@@ -333,14 +323,6 @@ pub(crate) fn gjk_collision_detective(
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct ClosestGJKDifferenceEdge {
-    pub(crate) a: MinkowskiDifferencePoint,
-    pub(crate) b: MinkowskiDifferencePoint,
-    pub(crate) normal: Vector<f32>,
-    pub(crate) depth: f32,
-}
-
 // MinkowskiEdge means this edge maybe the Minkowski's edge
 // it depends where it can or not expand any more
 // if edge can't expand , and it's is closest edge to the origin, it is the edge we need
@@ -492,16 +474,6 @@ where
     while simplex.expand(&compute_support_point).is_ok() {}
 
     simplex.find_min_edge()
-}
-
-pub(crate) fn compute_collision_info(edge: &MinkowskiEdge) {
-    let a1 = edge.start_different_point.start_point_from_a;
-    let a2 = edge.end_different_point.start_point_from_a;
-
-    let b1 = edge.start_different_point.end_point_from_b;
-    let b2 = edge.end_different_point.end_point_from_b;
-
-    assert!(!(a1 == a2 && b1 == b2));
 }
 
 // fn sat_collision_detective<T>(a: &T::Element, b: &T::Element) -> Option<Vector<f32>>

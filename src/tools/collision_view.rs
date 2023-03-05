@@ -1,7 +1,5 @@
 use crate::{
-    algo::collision::{
-        compute_collision_info, epa_compute_collision_edge, gjk_collision_detective,
-    },
+    algo::collision::{epa_compute_collision_edge, gjk_collision_detective},
     element::Element,
     math::{point::Point, vector::Vector},
     scene::Scene,
@@ -52,8 +50,6 @@ impl CollisionStatusViewer {
         });
 
         let edge = epa_compute_collision_edge(simplex, compute_support_point);
-
-        compute_collision_info(&edge);
 
         let info = CollisionInfo {
             points: [
