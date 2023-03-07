@@ -158,6 +158,17 @@ where
     }
 }
 
+impl<T> From<(&Point<T>, &Point<T>)> for Vector<T>
+where
+    T: Clone + Copy + std::ops::Neg<Output = T> + std::ops::Sub<Output = T>,
+{
+    fn from((p1, p2): (&Point<T>, &Point<T>)) -> Self {
+        let x = p2.x() - p1.x();
+        let y = p2.y() - p1.y();
+        (x, y).into()
+    }
+}
+
 impl<T> Add<&Vector<T>> for Vector<T>
 where
     T: Clone + Copy + Add<Output = T>,
