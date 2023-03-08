@@ -235,7 +235,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             draw.ellipse()
                 .x_y(point.x(), point.y())
                 .radius(2.)
-                .color(BLUE);
+                .color(ORANGE);
         });
 
         draw.line()
