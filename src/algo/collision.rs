@@ -13,8 +13,8 @@ use std::{
     ops::{ControlFlow, Deref, DerefMut, IndexMut},
 };
 
-// define element trait
-pub trait Element {
+// define Collider trait
+pub trait Collider {
     fn id(&self) -> u32;
 
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32);
@@ -25,8 +25,8 @@ pub trait Element {
 }
 
 // define collection of elements
-pub trait CollisionalCollection: IndexMut<usize, Output = Self::Element> {
-    type Element: Element;
+pub trait CollisionalCollection: IndexMut<usize, Output = Self::Collider> {
+    type Collider: Collider;
 
     fn len(&self) -> usize;
 
@@ -34,10 +34,10 @@ pub trait CollisionalCollection: IndexMut<usize, Output = Self::Element> {
         self.len() == 0
     }
 
-    fn sort(&mut self, compare: impl Fn(&Self::Element, &Self::Element) -> Ordering);
+    fn sort(&mut self, compare: impl Fn(&Self::Collider, &Self::Collider) -> Ordering);
 }
 
-// new type for ElementCollection , aim to add method for it
+// new type for ColliderCollection , aim to add method for it
 struct CollisionalCollectionWrapper<T>(T)
 where
     T: CollisionalCollection;
@@ -81,7 +81,7 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
 // entry of collision check, if element is collision, handler will call
 pub fn detect_collision<T>(
     elements: T,
-    mut handler: impl FnMut(&mut T::Element, &mut T::Element, CollisionInfo),
+    mut handler: impl FnMut(&mut T::Collider, &mut T::Collider, CollisionInfo),
 ) where
     T: CollisionalCollection,
 {
@@ -102,7 +102,7 @@ pub fn detect_collision<T>(
     // dbg!(time.elapsed());
 }
 
-pub fn special_collision_detection<E: Element>(a: &mut E, b: &mut E) -> Option<CollisionInfo> {
+pub fn special_collision_detection<C: Collider>(a: &mut C, b: &mut C) -> Option<CollisionInfo> {
     let center_point_a = a.center_point();
     let center_point_b = b.center_point();
     let first_approximation_vector: Vector<f32> = (center_point_a, center_point_b).into();
@@ -160,7 +160,7 @@ fn sweep_and_prune_collision_detection<T, Z>(
     mut handler: Z,
 ) where
     T: CollisionalCollection,
-    Z: FnMut(&mut T::Element, &mut T::Element),
+    Z: FnMut(&mut T::Collider, &mut T::Collider),
 {
     elements.sort(|a, b| {
         let (ref min_a_x, _) = a.projection_on_axis(axis);
@@ -686,7 +686,7 @@ fn compute_cross_point_with_segment(
 //     collision_normal.1
 // }
 
-fn v_clip_collision_detective<T>(a: &T::Element, b: &T::Element, normal: Vector<f32>)
+fn v_clip_collision_detective<T>(a: &T::Collider, b: &T::Collider, normal: Vector<f32>)
 where
     T: CollisionalCollection,
 {

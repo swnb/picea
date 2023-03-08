@@ -129,7 +129,7 @@ impl IndexMut<usize> for &mut ElementStore {
 }
 
 impl CollisionalCollection for &mut ElementStore {
-    type Element = Element;
+    type Collider = Element;
     fn len(&self) -> usize {
         self.region_sort_result.len()
     }

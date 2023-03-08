@@ -3,7 +3,7 @@ pub(crate) mod store;
 
 use crate::{
     algo::{
-        collision::Element as CollisionElement,
+        collision::Collider,
         constraint::{update_elements_by_duration, Element as ConstraintElement},
     },
     math::{
@@ -132,7 +132,7 @@ impl From<ElementBuilder> for Element {
     }
 }
 
-impl CollisionElement for Element {
+impl Collider for Element {
     #[inline]
     fn center_point(&self) -> Point<f32> {
         self.shape.center_point()
