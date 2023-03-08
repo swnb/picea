@@ -178,7 +178,7 @@ impl ConstraintElement for Element {
         &mut self.meta
     }
 
-    fn compute_point_velocity(&self, concat_point: Point<f32>) -> Vector<f32> {
-        self.compute_point_velocity(concat_point)
+    fn compute_point_velocity(&self, contact_point: Point<f32>) -> Vector<f32> {
+        self.compute_point_velocity(contact_point)
     }
 }

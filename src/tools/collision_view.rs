@@ -1,5 +1,7 @@
 use crate::{
-    algo::collision::{epa_compute_collision_edge, gjk_collision_detective},
+    algo::collision::{
+        epa_compute_collision_edge, get_collision_contact_point, gjk_collision_detective,
+    },
     element::Element,
     math::{point::Point, vector::Vector},
     scene::Scene,
@@ -51,12 +53,23 @@ impl CollisionStatusViewer {
 
         let edge = epa_compute_collision_edge(simplex, compute_support_point);
 
+        let (contact_info_a, contact_info_b) =
+            get_collision_contact_point(&edge, a.shape().center_point(), b.shape().center_point());
+
+        let (_, point1) = a.shape().projection_on_vector(&edge.normal);
+
+        let (_, point2) = b.shape().projection_on_vector(&-edge.normal);
+
         let info = CollisionInfo {
             points: [
-                edge.start_different_point.start_point_from_a,
-                edge.end_different_point.start_point_from_a,
-                edge.end_different_point.end_point_from_b,
-                edge.start_different_point.end_point_from_b,
+                contact_info_a.contact_point,
+                (0., 0.).into(),
+                // edge.start_different_point.start_point_from_a,
+                // edge.end_different_point.start_point_from_a,
+                contact_info_b.contact_point,
+                (0., 0.).into(),
+                // edge.end_different_point.end_point_from_b,
+                // edge.start_different_point.end_point_from_b,
             ],
             vector: edge.normal,
         };

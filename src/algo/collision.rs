@@ -2,6 +2,7 @@ use crate::{
     math::{
         axis::AxisDirection,
         point::Point,
+        segment::Segment,
         vector::{Vector, Vector3},
     },
     meta::collision::{CollisionInfo, ContactType},
@@ -114,14 +115,16 @@ pub fn special_collision_detection<E: Element>(a: &mut E, b: &mut E) -> Option<C
     };
 
     let simplex = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
-    let edge = epa_compute_collision_edge(simplex, compute_support_point);
+    let minkowski_edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-    let a1 = edge.start_different_point.start_point_from_a;
-    let a2 = edge.end_different_point.start_point_from_a;
+    let a1 = minkowski_edge.start_different_point.start_point_from_a;
+    let a2 = minkowski_edge.end_different_point.start_point_from_a;
 
-    let b1 = edge.start_different_point.end_point_from_b;
-    let b2 = edge.end_different_point.end_point_from_b;
-    assert!(!(a1 == a2 && b1 == b2));
+    let b1 = minkowski_edge.start_different_point.end_point_from_b;
+    let b2 = minkowski_edge.end_different_point.end_point_from_b;
+
+    let (contact_info_a, contact_info_b) =
+        get_collision_contact_point(&minkowski_edge, center_point_a, center_point_b);
 
     fn get_collision_contact_type(p1: Point<f32>, p2: Point<f32>) -> ContactType {
         use ContactType::*;
@@ -132,6 +135,8 @@ pub fn special_collision_detection<E: Element>(a: &mut E, b: &mut E) -> Option<C
         }
     }
 
+    // TODO deal with edge with edge base on https://dyn4j.org/2011/11/contact-points-using-clipping/
+
     let contact_a = get_collision_contact_type(a1, a2);
     let contact_b = get_collision_contact_type(b1, b2);
 
@@ -139,8 +144,8 @@ pub fn special_collision_detection<E: Element>(a: &mut E, b: &mut E) -> Option<C
         collision_element_id_pair: (a.id(), b.id()),
         contact_a,
         contact_b,
-        normal: edge.normal,
-        depth: edge.depth,
+        normal: minkowski_edge.normal,
+        depth: minkowski_edge.depth,
     }
     .into()
 }
@@ -357,6 +362,8 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
         let normal: Vector<_> = (ao ^ ab ^ ab).into();
         let depth = a.vector >> normal;
 
+        debug_assert!(depth.is_sign_positive());
+
         Self {
             start_different_point: a,
             end_different_point: b,
@@ -474,6 +481,137 @@ where
     while simplex.expand(&compute_support_point).is_ok() {}
 
     simplex.find_min_edge()
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ContactInfo {
+    pub(crate) contact_point: Point<f32>,
+    pub(crate) normal: Vector<f32>,
+    pub(crate) depth: f32,
+}
+
+pub(crate) fn get_collision_contact_point(
+    minkowski_edge: &MinkowskiEdge,
+    center_point_a: Point<f32>,
+    center_point_b: Point<f32>,
+) -> (ContactInfo, ContactInfo) {
+    let normal = minkowski_edge.normal;
+    let depth = minkowski_edge.depth;
+
+    let a1 = minkowski_edge.start_different_point.start_point_from_a;
+    let a2 = minkowski_edge.end_different_point.start_point_from_a;
+
+    let b1 = minkowski_edge.start_different_point.end_point_from_b;
+    let b2 = minkowski_edge.end_different_point.end_point_from_b;
+
+    if a1 == a2 && b1 == b2 {
+        let contact_point_a = a1;
+
+        let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
+        // TODO 判断或许有误
+        let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
+            -normal
+        } else {
+            normal
+        };
+
+        let normal_toward_b = -normal_toward_a;
+
+        let contact_info_a = ContactInfo {
+            contact_point: a1,
+            normal: normal_toward_a,
+            depth,
+        };
+
+        let contact_info_b = ContactInfo {
+            contact_point: b1,
+            normal: normal_toward_b,
+            depth,
+        };
+
+        (contact_info_a, contact_info_b)
+    } else if a1 == a2 {
+        let contact_point_a = a1;
+
+        let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
+        // TODO 判断或许有误
+        let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
+            -normal
+        } else {
+            normal
+        };
+
+        let normal_toward_b = -normal_toward_a;
+
+        let contact_point_b = a1 + (normal_toward_a * depth);
+
+        let contact_info_a = ContactInfo {
+            contact_point: contact_point_a,
+            normal: normal_toward_a,
+            depth,
+        };
+
+        let contact_info_b = ContactInfo {
+            contact_point: contact_point_b,
+            normal: normal_toward_b,
+            depth,
+        };
+
+        (contact_info_a, contact_info_b)
+    } else if b1 == b2 {
+        let contact_point_b = b1;
+
+        let tmp_vector: Vector<_> = (contact_point_b, center_point_b).into();
+        // TODO 判断或许有误
+        let normal_toward_b = if (tmp_vector * normal).is_sign_negative() {
+            -normal
+        } else {
+            normal
+        };
+
+        let normal_toward_a = -normal_toward_b;
+
+        let contact_point_a = b1 + (normal_toward_b * depth);
+
+        let contact_info_a = ContactInfo {
+            contact_point: contact_point_a,
+            normal: normal_toward_a,
+            depth,
+        };
+
+        let contact_info_b = ContactInfo {
+            contact_point: contact_point_b,
+            normal: normal_toward_b,
+            depth,
+        };
+
+        (contact_info_a, contact_info_b)
+    } else {
+        let edge_a: Segment<_> = (a1, a2).into();
+        let edge_b: Segment<_> = (b1, b2).into();
+        v_clip(edge_a, edge_b);
+
+        todo!()
+    }
+}
+
+// want more detail about v_clip, visit
+// https://dyn4j.org/2011/11/contact-points-using-clipping/
+fn v_clip(edge_a: Segment<f32>, edge_b: Segment<f32>) {}
+
+fn compute_cross_point_with_segment(
+    segment: Segment<f32>,
+    start_point: &Point<f32>,
+    normal: Vector<f32>,
+) {
+    // take start_point as C , take start point in segment as A, take end point in segment as B
+    let c_a: Vector<f32> = (start_point, segment.get_start_point()).into();
+
+    let c_b: Vector<f32> = (start_point, segment.get_end_point()).into();
+
+    if (c_a * normal).is_sign_negative() || (c_b * normal).is_sign_negative() {
+        unreachable!();
+    }
 }
 
 // fn sat_collision_detective<T>(a: &T::Element, b: &T::Element) -> Option<Vector<f32>>
