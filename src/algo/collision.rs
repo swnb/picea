@@ -20,9 +20,9 @@ pub trait Collider {
 
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32);
 
-    fn projection_on_vector(&self, vector: &Vector<f32>) -> (Point<f32>, Point<f32>);
+    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point);
 
-    fn center_point(&self) -> Point<f32>;
+    fn center_point(&self) -> Point;
 }
 
 // define collection of elements
@@ -106,7 +106,7 @@ pub fn detect_collision<T>(
 pub fn special_collision_detection<C: Collider>(a: &mut C, b: &mut C) -> Option<CollisionInfo> {
     let center_point_a = a.center_point();
     let center_point_b = b.center_point();
-    let first_approximation_vector: Vector<f32> = (center_point_a, center_point_b).into();
+    let first_approximation_vector: Vector = (center_point_a, center_point_b).into();
 
     let compute_support_point = |reference_vector| {
         let (_, max_point_a) = a.projection_on_vector(&reference_vector);
@@ -127,7 +127,7 @@ pub fn special_collision_detection<C: Collider>(a: &mut C, b: &mut C) -> Option<
     // let (contact_info_a, contact_info_b) =
     //     get_collision_contact_point(&minkowski_edge, center_point_a, center_point_b);
 
-    fn get_collision_contact_type(p1: Point<f32>, p2: Point<f32>) -> ContactType {
+    fn get_collision_contact_type(p1: Point, p2: Point) -> ContactType {
         use ContactType::*;
         if p1 == p2 {
             Point(p1)
@@ -199,9 +199,9 @@ fn sweep_and_prune_collision_detection<T, Z>(
 // gjk 两个多边形形成的差集, 衍生的点
 #[derive(Clone, Debug)]
 pub(crate) struct MinkowskiDifferencePoint {
-    pub(crate) start_point_from_a: Point<f32>,
-    pub(crate) end_point_from_b: Point<f32>,
-    pub(crate) vector: Vector<f32>,
+    pub(crate) start_point_from_a: Point,
+    pub(crate) end_point_from_b: Point,
+    pub(crate) vector: Vector,
 }
 
 impl Display for MinkowskiDifferencePoint {
@@ -216,8 +216,8 @@ impl PartialEq for MinkowskiDifferencePoint {
     }
 }
 
-impl From<(Point<f32>, Point<f32>)> for MinkowskiDifferencePoint {
-    fn from((s, e): (Point<f32>, Point<f32>)) -> Self {
+impl From<(Point, Point)> for MinkowskiDifferencePoint {
+    fn from((s, e): (Point, Point)) -> Self {
         Self {
             start_point_from_a: s,
             end_point_from_b: e,
@@ -231,14 +231,14 @@ type Triangle = [MinkowskiDifferencePoint; 3];
 // for rectangle , avg compare is 1 to 2 time;
 // https://youtu.be/ajv46BSqcK4 gjk algo explain
 pub(crate) fn gjk_collision_detective(
-    first_approximation_vector: Vector<f32>,
-    compute_support_point: impl Fn(Vector<f32>) -> MinkowskiDifferencePoint,
+    first_approximation_vector: Vector,
+    compute_support_point: impl Fn(Vector) -> MinkowskiDifferencePoint,
 ) -> Option<Triangle> {
     let approximation_vector = first_approximation_vector;
 
     let mut a = compute_support_point(approximation_vector);
 
-    let compute_support_point = |reference_vector: Vector<f32>| {
+    let compute_support_point = |reference_vector: Vector| {
         let result = compute_support_point(reference_vector);
         // dbg!(&result, reference_vector);
         // FIXME this is wrong? <= 0
@@ -255,9 +255,9 @@ pub(crate) fn gjk_collision_detective(
         return None;
     }
 
-    fn compute_third_reference_vector(a: Vector<f32>, b: Vector<f32>) -> Vector<f32> {
+    fn compute_third_reference_vector(a: Vector, b: Vector) -> Vector {
         let inv_b = -b;
-        let base_vector: Vector<f32> = a + inv_b;
+        let base_vector: Vector = a + inv_b;
         let base_vector: Vector3<f32> = base_vector.into();
         (base_vector ^ inv_b.into() ^ base_vector).into()
     }
@@ -299,7 +299,7 @@ pub(crate) fn gjk_collision_detective(
             return Some(ControlFlow::Continue(Failure));
         }
 
-        let ca_normal: Vector<f32> = (cb ^ ca ^ ca).into();
+        let ca_normal: Vector = (cb ^ ca ^ ca).into();
 
         if inv_c * ca_normal > f32::EPSILON {
             let tmp = compute_support_point(ca_normal)?;
@@ -337,7 +337,7 @@ pub(crate) fn gjk_collision_detective(
 pub(crate) struct MinkowskiEdge {
     pub(crate) start_different_point: MinkowskiDifferencePoint,
     pub(crate) end_different_point: MinkowskiDifferencePoint,
-    pub(crate) normal: Vector<f32>,
+    pub(crate) normal: Vector,
     pub(crate) depth: f32,
 }
 
@@ -377,7 +377,7 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
 impl MinkowskiEdge {
     pub(crate) fn expand<F>(&self, compute_support_point: F) -> Option<[MinkowskiEdge; 2]>
     where
-        F: Fn(Vector<f32>) -> MinkowskiDifferencePoint,
+        F: Fn(Vector) -> MinkowskiDifferencePoint,
     {
         let different_point = compute_support_point(self.normal);
         let new_point = different_point.vector;
@@ -438,7 +438,7 @@ impl Simplex {
     // expand the simplex, find the min
     pub(crate) fn expand<F>(&mut self, compute_support_point: F) -> Result<(), ()>
     where
-        F: Fn(Vector<f32>) -> MinkowskiDifferencePoint,
+        F: Fn(Vector) -> MinkowskiDifferencePoint,
     {
         let min_index = self.find_min_edge_index();
 
@@ -475,7 +475,7 @@ pub(crate) fn epa_compute_collision_edge<F>(
     compute_support_point: F,
 ) -> MinkowskiEdge
 where
-    F: Fn(Vector<f32>) -> MinkowskiDifferencePoint,
+    F: Fn(Vector) -> MinkowskiDifferencePoint,
 {
     let mut simplex = Simplex::new(triangle);
 
@@ -486,16 +486,16 @@ where
 
 #[derive(Clone, Debug)]
 pub(crate) struct ContactInfo {
-    pub(crate) contact_point: Point<f32>,
-    pub(crate) normal: Vector<f32>,
+    pub(crate) contact_point: Point,
+    pub(crate) normal: Vector,
     pub(crate) depth: f32,
 }
 
 pub(crate) fn get_collision_contact_point(
     minkowski_edge: &MinkowskiEdge,
-    center_point_a: Point<f32>,
-    center_point_b: Point<f32>,
-) -> Vec<Point<f32>> {
+    center_point_a: Point,
+    center_point_b: Point,
+) -> Vec<Point> {
     let normal = minkowski_edge.normal;
     let depth = minkowski_edge.depth;
 
@@ -610,18 +610,18 @@ pub(crate) fn get_collision_contact_point(
 fn v_clip(
     edge_a: Segment<f32>,
     edge_b: Segment<f32>,
-    normal: Vector<f32>,
-    center_point_a: Point<f32>,
-    center_point_b: Point<f32>,
-) -> Vec<Point<f32>> {
+    normal: Vector,
+    center_point_a: Point,
+    center_point_b: Point,
+) -> Vec<Point> {
     // which collider is reference , A or B
     enum ReferenceCollider {
         A,
         B,
     }
 
-    let get_reference_normal = |edge: &Segment<f32>, center_point: Point<f32>| {
-        let tmp_vector: Vector<f32> = (edge.get_start_point(), &center_point).into();
+    let get_reference_normal = |edge: &Segment<f32>, center_point: Point| {
+        let tmp_vector: Vector = (edge.get_start_point(), &center_point).into();
         // normal direction must point to reference poly
         if (tmp_vector * normal).is_sign_negative() {
             -normal
@@ -670,23 +670,20 @@ fn v_clip(
 fn clip(
     reference_edge: &Segment<f32>,
     incident_edge: &Segment<f32>,
-    contact_points: &mut Vec<Point<f32>>,
+    contact_points: &mut Vec<Point>,
 ) {
     let reference_vector = reference_edge.to_vector().normalize();
     let incident_v1 = incident_edge.get_start_point();
     let incident_v2 = incident_edge.get_end_point();
 
     // vector must normalize
-    let compute_incident_point_project_size =
-        |reference_point: &Point<f32>, vector: Vector<f32>| {
-            let reference_project_size = reference_point.to_vector() * vector;
+    let compute_incident_point_project_size = |reference_point: &Point, vector: Vector| {
+        let reference_project_size = reference_point.to_vector() * vector;
 
-            let incident_v1_projection_size =
-                incident_v1.to_vector() * vector - reference_project_size;
-            let incident_v2_projection_size =
-                incident_v2.to_vector() * vector - reference_project_size;
-            (incident_v1_projection_size, incident_v2_projection_size)
-        };
+        let incident_v1_projection_size = incident_v1.to_vector() * vector - reference_project_size;
+        let incident_v2_projection_size = incident_v2.to_vector() * vector - reference_project_size;
+        (incident_v1_projection_size, incident_v2_projection_size)
+    };
 
     let reference_v1 = reference_edge.get_start_point();
     let (s1_by_reference_v1, s2_by_reference_v1) =
@@ -728,22 +725,18 @@ fn clip(
     }
 }
 
-fn compute_cross_point_with_segment(
-    segment: Segment<f32>,
-    start_point: &Point<f32>,
-    normal: Vector<f32>,
-) {
+fn compute_cross_point_with_segment(segment: Segment<f32>, start_point: &Point, normal: Vector) {
     // take start_point as C , take start point in segment as A, take end point in segment as B
-    let c_a: Vector<f32> = (start_point, segment.get_start_point()).into();
+    let c_a: Vector = (start_point, segment.get_start_point()).into();
 
-    let c_b: Vector<f32> = (start_point, segment.get_end_point()).into();
+    let c_b: Vector = (start_point, segment.get_end_point()).into();
 
     if (c_a * normal).is_sign_negative() || (c_b * normal).is_sign_negative() {
         unreachable!();
     }
 }
 
-// fn sat_collision_detective<T>(a: &T::Element, b: &T::Element) -> Option<Vector<f32>>
+// fn sat_collision_detective<T>(a: &T::Element, b: &T::Element) -> Option<Vector>
 // where
 //     T: ElementCollection,
 // {
@@ -763,9 +756,9 @@ fn compute_cross_point_with_segment(
 
 //     let edge_iter = shape_a.edge_iter().chain(shape_b.edge_iter());
 
-//     let mut collision_normal: (f32, Option<Vector<f32>>) = (f32::MAX, None);
+//     let mut collision_normal: (f32, Option<Vector>) = (f32::MAX, None);
 
-//     fn projection(shape: &ElementShape, axis: Vector<f32>) -> (f32, f32) {
+//     fn projection(shape: &ElementShape, axis: Vector) -> (f32, f32) {
 //         use ElementShape::*;
 //         match shape {
 //             Rect(shape) => shape
@@ -815,7 +808,7 @@ fn compute_cross_point_with_segment(
 //     collision_normal.1
 // }
 
-fn v_clip_collision_detective<T>(a: &T::Collider, b: &T::Collider, normal: Vector<f32>)
+fn v_clip_collision_detective<T>(a: &T::Collider, b: &T::Collider, normal: Vector)
 where
     T: CollisionalCollection,
 {

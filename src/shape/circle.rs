@@ -6,12 +6,12 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub struct CircleShape {
-    center: Point<f32>,
+    center: Point,
     r: f32,
     deg: f32,
 }
 
-impl<P: Into<Point<f32>>> From<(P, f32)> for CircleShape {
+impl<P: Into<Point>> From<(P, f32)> for CircleShape {
     fn from((p, radius): (P, f32)) -> Self {
         let center_point = p.into();
         Self::new(center_point, radius)
@@ -20,7 +20,7 @@ impl<P: Into<Point<f32>>> From<(P, f32)> for CircleShape {
 
 impl CircleShape {
     #[inline]
-    pub fn new(center_point: impl Into<Point<f32>>, radius: f32) -> Self {
+    pub fn new(center_point: impl Into<Point>, radius: f32) -> Self {
         Self {
             center: center_point.into(),
             r: radius,
@@ -34,22 +34,22 @@ impl CircleShape {
     }
 
     #[inline]
-    pub fn get_center_point(&self) -> Point<f32> {
+    pub fn get_center_point(&self) -> Point {
         self.center
     }
 
     #[inline]
-    pub fn translate(&mut self, vector: &Vector<f32>) {
+    pub fn translate(&mut self, vector: &Vector) {
         self.center += vector;
     }
 }
 
 impl Shape for CircleShape {
-    fn center_point(&self) -> Point<f32> {
+    fn center_point(&self) -> Point {
         self.center
     }
 
-    fn projection_on_vector(&self, vector: &Vector<f32>) -> (Point<f32>, Point<f32>) {
+    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
         let vector = vector.normalize();
 
         let center_point = self.center_point();
@@ -70,15 +70,15 @@ impl Shape for CircleShape {
         }
     }
 
-    fn translate(&mut self, vector: &Vector<f32>) {
+    fn translate(&mut self, vector: &Vector) {
         self.center += vector
     }
 
-    fn rotate(&mut self, &origin: &Point<f32>, deg: f32) {
+    fn rotate(&mut self, &origin: &Point, deg: f32) {
         use std::f32::consts::TAU;
 
         if origin != self.center {
-            let center_vector: Vector<f32> = (origin, self.center).into();
+            let center_vector: Vector = (origin, self.center).into();
             let new_center = origin + center_vector.affine_transformation_rotate(deg);
             self.center = new_center;
         }

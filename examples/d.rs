@@ -145,7 +145,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
     //     (2.598816 * 10., -2.6506805 * 10.),
     // );
 
-    fn p2pt2(p: impl Into<Point<f32>>) -> Point2 {
+    fn p2pt2(p: impl Into<Point>) -> Point2 {
         Some(p)
             .map(|v| v.into())
             .map(|v| v.into())

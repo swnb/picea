@@ -66,7 +66,7 @@ impl Scene {
         &mut self,
         delta_time: f32,
         // TODO remove callback
-        mut callback: impl FnMut(Vec<[Point<f32>; 2]>),
+        mut callback: impl FnMut(Vec<[Point; 2]>),
     ) {
         self.element_store
             .iter_mut()

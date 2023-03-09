@@ -8,9 +8,9 @@ pub mod polygon;
 mod utils;
 
 pub trait Shape {
-    fn center_point(&self) -> Point<f32>;
+    fn center_point(&self) -> Point;
 
-    fn projection_on_vector(&self, vector: &Vector<f32>) -> (Point<f32>, Point<f32>);
+    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point);
 
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
         use AxisDirection::*;
@@ -21,9 +21,9 @@ pub trait Shape {
         }
     }
 
-    fn translate(&mut self, vector: &Vector<f32>);
+    fn translate(&mut self, vector: &Vector);
 
-    fn rotate(&mut self, origin_point: &Point<f32>, deg: f32);
+    fn rotate(&mut self, origin_point: &Point, deg: f32);
 
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_>;
 }

@@ -1,11 +1,11 @@
-use super::vector::Vector;
+use super::{vector::Vector, CommonNum};
 use std::{
     fmt::Display,
     ops::{Add, AddAssign, Sub, SubAssign},
 };
 
 #[derive(Clone, Debug, Copy)]
-pub struct Point<T = f64>
+pub struct Point<T = CommonNum>
 where
     T: Clone + Copy,
 {
@@ -22,7 +22,7 @@ where
     }
 }
 
-impl PartialEq for Point<f32> {
+impl PartialEq for Point {
     fn eq(&self, other: &Self) -> bool {
         ((self.x() - other.x()).abs() < f32::EPSILON)
             && ((self.y() - other.y()).abs() < f32::EPSILON)

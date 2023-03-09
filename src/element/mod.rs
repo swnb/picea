@@ -77,7 +77,7 @@ impl Element {
     }
 
     #[inline]
-    pub fn center_point(&self) -> Point<f32> {
+    pub fn center_point(&self) -> Point {
         self.shape.center_point()
     }
 
@@ -92,7 +92,7 @@ impl Element {
     }
 
     #[inline]
-    pub fn translate(&mut self, vector: &Vector<f32>) {
+    pub fn translate(&mut self, vector: &Vector) {
         self.shape.translate(vector)
     }
 
@@ -111,7 +111,7 @@ impl Element {
     /**
      * assume point is inside element
      */
-    pub(crate) fn compute_point_velocity(&self, point: Point<f32>) -> Vector<f32> {
+    pub(crate) fn compute_point_velocity(&self, point: Point) -> Vector {
         let center_point = self.shape.center_point();
         let w = self.meta().angular_velocity();
         let w: Vector3<_> = (0., 0., w).into();
@@ -134,7 +134,7 @@ impl From<ElementBuilder> for Element {
 
 impl Collider for Element {
     #[inline]
-    fn center_point(&self) -> Point<f32> {
+    fn center_point(&self) -> Point {
         self.shape.center_point()
     }
 
@@ -149,14 +149,14 @@ impl Collider for Element {
     }
 
     #[inline]
-    fn projection_on_vector(&self, vector: &Vector<f32>) -> (Point<f32>, Point<f32>) {
+    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
         self.shape().projection_on_vector(vector)
     }
 }
 
 impl ConstraintElement for Element {
     #[inline]
-    fn translate(&mut self, vector: &Vector<f32>) {
+    fn translate(&mut self, vector: &Vector) {
         self.translate(vector);
     }
 
@@ -166,7 +166,7 @@ impl ConstraintElement for Element {
     }
 
     #[inline]
-    fn center_point(&self) -> Point<f32> {
+    fn center_point(&self) -> Point {
         self.shape.center_point()
     }
 
@@ -178,7 +178,7 @@ impl ConstraintElement for Element {
         &mut self.meta
     }
 
-    fn compute_point_velocity(&self, contact_point: Point<f32>) -> Vector<f32> {
+    fn compute_point_velocity(&self, contact_point: Point) -> Vector {
         self.compute_point_velocity(contact_point)
     }
 }

@@ -7,7 +7,7 @@ use crate::{
 #[derive(Default)]
 pub struct Draggable {
     is_mouse_down: bool,
-    mouse_move_point: Option<Point<f32>>,
+    mouse_move_point: Option<Point>,
     current_select_element_id: Option<u32>,
 }
 
@@ -34,7 +34,7 @@ impl Draggable {
             .current_select_element_id
             .and_then(|id| scene.get_element_mut(id))
         {
-            let vector_offset: Vector<f32> = (element.center_point(), (x, y).into()).into();
+            let vector_offset: Vector = (element.center_point(), (x, y).into()).into();
             element.translate(&vector_offset);
         }
     }
@@ -55,7 +55,7 @@ impl Draggable {
         self.current_select_element_id = None;
     }
 
-    pub fn mouse_point(&self) -> Option<Point<f32>> {
+    pub fn mouse_point(&self) -> Option<Point> {
         self.mouse_move_point
     }
 }

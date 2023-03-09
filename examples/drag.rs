@@ -38,7 +38,7 @@ fn create_model(_app: &App) -> Model {
 
     let ball: Element = ball.into();
 
-    let v: Vector<f32> = (0., 350.).into();
+    let v: Vector = (0., 350.).into();
     dbg!(v.abs());
 
     let result = ball.shape().projection_on_vector(&(0., 350.).into());

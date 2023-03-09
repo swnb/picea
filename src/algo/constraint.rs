@@ -4,17 +4,17 @@ use crate::{
 };
 
 pub trait Element {
-    fn translate(&mut self, vector: &Vector<f32>);
+    fn translate(&mut self, vector: &Vector);
 
     fn rotate(&mut self, deg: f32);
 
-    fn center_point(&self) -> Point<f32>;
+    fn center_point(&self) -> Point;
 
     fn meta(&self) -> &Meta;
 
     fn meta_mut(&mut self) -> &mut Meta;
 
-    fn compute_point_velocity(&self, contact_point: Point<f32>) -> Vector<f32>;
+    fn compute_point_velocity(&self, contact_point: Point) -> Vector;
 }
 
 pub fn update_elements_by_duration<T: Element>(element: &mut T, delta_t: f32) {
@@ -82,7 +82,7 @@ pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
         (Point(point_a), Point(point_b)) => *point_a,
     };
 
-    let r: Vector<f32> = (center_point, contact_point).into();
+    let r: Vector = (center_point, contact_point).into();
     let mut normal = collision_info.normal;
 
     if normal * r > 0. {
@@ -100,7 +100,7 @@ pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
 
     let v = element.compute_point_velocity(contact_point);
 
-    let velocity_reducer = move |pre_velocity: Vector<f32>| {
+    let velocity_reducer = move |pre_velocity: Vector| {
         pre_velocity + normal * ((v * -normal + B * depth * delta_t.recip()) * lambda * inv_mass)
     };
 

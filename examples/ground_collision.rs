@@ -10,9 +10,9 @@ use std::time::SystemTime;
 struct Model {
     scene: Scene,
     timer: SystemTime,
-    collision_info: Option<Vec<[Point<f32>; 2]>>,
-    addition_render_line: Vec<[Point<f32>; 2]>,
-    addition_render_dot: Vec<Point<f32>>,
+    collision_info: Option<Vec<[Point; 2]>>,
+    addition_render_line: Vec<[Point; 2]>,
+    addition_render_dot: Vec<Point>,
     is_paused: bool,
 }
 
@@ -125,9 +125,9 @@ fn event(app: &App, model: &mut Model, event: Event) {
             {
                 #[derive(Clone, Debug)]
                 struct MinkowskiDifferencePoint {
-                    start_point: Point<f32>,
-                    end_point: Point<f32>,
-                    vector: Vector<f32>,
+                    start_point: Point,
+                    end_point: Point,
+                    vector: Vector,
                 }
 
                 impl PartialEq for MinkowskiDifferencePoint {
@@ -136,8 +136,8 @@ fn event(app: &App, model: &mut Model, event: Event) {
                     }
                 }
 
-                impl From<(Point<f32>, Point<f32>)> for MinkowskiDifferencePoint {
-                    fn from((s, e): (Point<f32>, Point<f32>)) -> Self {
+                impl From<(Point, Point)> for MinkowskiDifferencePoint {
+                    fn from((s, e): (Point, Point)) -> Self {
                         Self {
                             start_point: s,
                             end_point: e,
@@ -146,18 +146,16 @@ fn event(app: &App, model: &mut Model, event: Event) {
                     }
                 }
 
-                let compute_support_point =
-                    |reference_vector: Vector<f32>| -> MinkowskiDifferencePoint {
-                        let (_, max_point_a) = a.shape().projection_on_vector(&reference_vector);
-                        let (_, max_point_b) = b.shape().projection_on_vector(&-reference_vector);
-                        (max_point_b, max_point_a).into()
-                    };
+                let compute_support_point = |reference_vector: Vector| -> MinkowskiDifferencePoint {
+                    let (_, max_point_a) = a.shape().projection_on_vector(&reference_vector);
+                    let (_, max_point_b) = b.shape().projection_on_vector(&-reference_vector);
+                    (max_point_b, max_point_a).into()
+                };
 
                 let center_point_a = a.center_point();
                 let center_point_b = b.center_point();
 
-                let first_approximation_vector: Vector<f32> =
-                    (center_point_a, center_point_b).into();
+                let first_approximation_vector: Vector = (center_point_a, center_point_b).into();
 
                 let gjk_point = compute_support_point(first_approximation_vector);
                 model.addition_render_line = vec![];

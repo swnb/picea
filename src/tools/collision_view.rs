@@ -8,13 +8,13 @@ use crate::{
 };
 
 pub struct CollisionInfo {
-    pub points: Vec<Point<f32>>,
-    pub vector: Vector<f32>,
+    pub points: Vec<Point>,
+    pub vector: Vector,
 }
 
 #[derive(Default)]
 pub struct CollisionStatusViewer {
-    minkowski_different_points: Vec<[Point<f32>; 3]>,
+    minkowski_different_points: Vec<[Point; 3]>,
     collision_infos: Vec<CollisionInfo>,
 }
 
@@ -33,13 +33,13 @@ impl CollisionStatusViewer {
     }
 
     fn detective_element_collision(&mut self, a: &Element, b: &Element) {
-        let compute_support_point = |reference_vector: Vector<f32>| {
+        let compute_support_point = |reference_vector: Vector| {
             let (_, max_point_a) = a.shape().projection_on_vector(&reference_vector);
             let (_, max_point_b) = b.shape().projection_on_vector(&-reference_vector);
             (max_point_a, max_point_b).into()
         };
 
-        let first_approximation_vector: Vector<f32> =
+        let first_approximation_vector: Vector =
             (a.shape().center_point(), b.shape().center_point()).into();
 
         let Some(simplex) = gjk_collision_detective(first_approximation_vector, compute_support_point) else {
@@ -69,7 +69,7 @@ impl CollisionStatusViewer {
         self.collision_infos.push(info);
     }
 
-    pub fn get_minkowski_different_points(&self) -> &[[Point<f32>; 3]] {
+    pub fn get_minkowski_different_points(&self) -> &[[Point; 3]] {
         &self.minkowski_different_points
     }
 

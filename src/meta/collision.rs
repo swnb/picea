@@ -2,8 +2,8 @@ use crate::math::{point::Point, vector::Vector};
 
 #[derive(Clone, Debug)]
 pub enum ContactType {
-    Point(Point<f32>),
-    Edge([Point<f32>; 2]),
+    Point(Point),
+    Edge([Point; 2]),
 }
 
 #[derive(Debug)]
@@ -12,7 +12,7 @@ pub struct CollisionInfo {
     pub(crate) contact_a: ContactType,
     pub(crate) contact_b: ContactType,
     pub(crate) depth: f32,
-    pub(crate) normal: Vector<f32>,
+    pub(crate) normal: Vector,
 }
 
 impl CollisionInfo {
@@ -50,7 +50,7 @@ impl CollisionInfo {
         self.depth
     }
 
-    pub fn normal(&self) -> Vector<f32> {
+    pub fn normal(&self) -> Vector {
         self.normal
     }
 }

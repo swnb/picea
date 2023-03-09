@@ -14,7 +14,7 @@ pub type Mass = f32;
 
 pub type Angular = f32;
 
-pub type Speed = Vector<f32>;
+pub type Speed = Vector;
 
 #[derive(Clone)]
 pub struct Meta {
@@ -189,7 +189,7 @@ impl Meta {
         self
     }
 
-    pub fn compute_mass_eff(&self, normal: Vector<f32>, r: Vector<f32>) -> f32 {
+    pub fn compute_mass_eff(&self, normal: Vector, r: Vector) -> f32 {
         const C: f32 = 0.9;
 
         let r: Vector3<f32> = r.into();
@@ -242,7 +242,7 @@ impl MetaBuilder {
         }
     }
 
-    pub fn force(mut self, force_id: &str, force: impl Into<Vector<f32>>) -> Self {
+    pub fn force(mut self, force_id: &str, force: impl Into<Vector>) -> Self {
         self.meta
             .force_group_mut()
             .add_force(Force::new(force_id, force.into()));

@@ -3,13 +3,13 @@ use crate::math::{edge::Edge, point::Point, vector::Vector};
 // use radial method to create vector from point to (infinite,point.y)
 // if the size of edges which cross vector is odd, the point is inside shape
 pub fn is_point_inside_shape(
-    point: impl Into<Point<f32>>,
+    point: impl Into<Point>,
     edge_iter: &'_ mut dyn Iterator<Item = Edge<'_>>,
 ) -> bool {
     let mut cross_count: usize = 0;
-    let offset_vector: Vector<f32> = (point.into(), (0., 0.).into()).into();
+    let offset_vector: Vector = (point.into(), (0., 0.).into()).into();
 
-    let is_point_cross_segment = |p1: Point<f32>, p2: Point<f32>| {
+    let is_point_cross_segment = |p1: Point, p2: Point| {
         if (p1.y() * p2.y()).is_sign_positive() {
             return false;
         }
@@ -49,7 +49,7 @@ pub fn is_point_inside_shape(
 }
 
 pub fn is_point_inside_shape_debug<'a>(
-    point: Point<f32>,
+    point: Point,
     edge_iter: &'a mut dyn Iterator<Item = Edge<'_>>,
 ) -> Vec<Edge<'a>> {
     vec![]
@@ -62,7 +62,7 @@ mod test {
 
     #[test]
     fn test_is_point_inside_shape() {
-        let is_point_cross_segment = |p1: Point<f32>, p2: Point<f32>| {
+        let is_point_cross_segment = |p1: Point, p2: Point| {
             if (p1.y() * p2.y()).is_sign_positive() {
                 return false;
             }
@@ -76,9 +76,9 @@ mod test {
                 cross_point_x.is_sign_positive()
             }
         };
-        let p1: Point<f32> = (-31.55, 142.13).into();
-        let p2: Point<f32> = (-46.091, 227.683).into();
-        let offset_vector: Vector<f32> = (82.6, -175.48).into();
+        let p1: Point = (-31.55, 142.13).into();
+        let p2: Point = (-46.091, 227.683).into();
+        let offset_vector: Vector = (82.6, -175.48).into();
         assert!(is_point_cross_segment(
             p1 + offset_vector,
             p2 + offset_vector

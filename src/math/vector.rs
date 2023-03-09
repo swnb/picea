@@ -1,11 +1,11 @@
-use super::{point::Point, segment::Segment};
+use super::{point::Point, segment::Segment, CommonNum};
 use std::{
     fmt::Display,
     ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign},
 };
 
 #[derive(Clone, Debug, Copy)]
-pub struct Vector<T = f64>
+pub struct Vector<T = CommonNum>
 where
     T: Clone + Copy,
 {
@@ -396,8 +396,8 @@ impl<T: Clone + Copy> Vector3<T> {
     }
 }
 
-impl From<Vector<f32>> for Vector3<f32> {
-    fn from(value: Vector<f32>) -> Self {
+impl From<Vector> for Vector3<f32> {
+    fn from(value: Vector) -> Self {
         Self {
             x: value.x,
             y: value.y,
@@ -479,9 +479,9 @@ where
     }
 }
 
-impl std::ops::Shr<Vector<f32>> for Vector<f32> {
+impl std::ops::Shr<Vector> for Vector {
     type Output = f32;
-    fn shr(self, rhs: Vector<f32>) -> Self::Output {
+    fn shr(self, rhs: Vector) -> Self::Output {
         self * rhs * rhs.abs().recip()
     }
 }

@@ -29,7 +29,7 @@ impl From<AxisDirection> for Vector<f32> {
     }
 }
 
-impl From<AxisDirection> for Vector {
+impl From<AxisDirection> for Vector<f64> {
     fn from(axis: AxisDirection) -> Self {
         use AxisDirection::*;
         match axis {

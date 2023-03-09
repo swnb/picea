@@ -5,7 +5,7 @@ use crate::math::vector::Vector;
 // TODO exclude mass
 pub struct Force {
     id: Rc<str>,
-    force: Vector<f32>,
+    force: Vector,
     is_temporary: bool,
 }
 
@@ -20,7 +20,7 @@ impl Clone for Force {
 }
 
 impl Force {
-    pub fn new<'a>(id: impl Into<&'a str>, vector: impl Into<Vector<f32>>) -> Self {
+    pub fn new<'a>(id: impl Into<&'a str>, vector: impl Into<Vector>) -> Self {
         let id = id.into();
         let id = Rc::from(id);
         Self {
@@ -30,11 +30,11 @@ impl Force {
         }
     }
 
-    pub fn get_vector(&self) -> Vector<f32> {
+    pub fn get_vector(&self) -> Vector {
         self.force
     }
 
-    pub fn set_vector(&mut self, mut reducer: impl FnMut(Vector<f32>) -> Vector<f32>) {
+    pub fn set_vector(&mut self, mut reducer: impl FnMut(Vector) -> Vector) {
         self.force = reducer(self.force)
     }
 
@@ -81,7 +81,7 @@ impl ForceGroup {
         self.force_set.remove(id)
     }
 
-    pub fn sum_force(&self) -> Vector<f32> {
+    pub fn sum_force(&self) -> Vector {
         self.force_set
             .values()
             .fold((0., 0.).into(), |mut acc, cur| {

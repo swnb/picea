@@ -31,7 +31,7 @@ impl From<(f32, f32, f32)> for Box<dyn ElementShape> {
 // create circle
 impl<C> From<(C, f32)> for Box<dyn ElementShape>
 where
-    C: Into<Point<f32>>,
+    C: Into<Point>,
 {
     fn from((center_point, radius): (C, f32)) -> Self {
         CircleShape::new(center_point, radius).into()
@@ -40,7 +40,7 @@ where
 
 impl<C> From<(usize, C, f32)> for Box<dyn ElementShape>
 where
-    C: Into<Point<f32>>,
+    C: Into<Point>,
 {
     fn from((n, center, radius): (usize, C, f32)) -> Self {
         RegularPolygon::new(center, n, radius).into()
