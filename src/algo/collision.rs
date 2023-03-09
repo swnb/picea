@@ -1,6 +1,7 @@
 use crate::{
     math::{
         axis::AxisDirection,
+        num::is_same_sign_f32,
         point::Point,
         segment::Segment,
         vector::{Vector, Vector3},
@@ -123,8 +124,8 @@ pub fn special_collision_detection<C: Collider>(a: &mut C, b: &mut C) -> Option<
     let b1 = minkowski_edge.start_different_point.end_point_from_b;
     let b2 = minkowski_edge.end_different_point.end_point_from_b;
 
-    let (contact_info_a, contact_info_b) =
-        get_collision_contact_point(&minkowski_edge, center_point_a, center_point_b);
+    // let (contact_info_a, contact_info_b) =
+    //     get_collision_contact_point(&minkowski_edge, center_point_a, center_point_b);
 
     fn get_collision_contact_type(p1: Point<f32>, p2: Point<f32>) -> ContactType {
         use ContactType::*;
@@ -494,7 +495,7 @@ pub(crate) fn get_collision_contact_point(
     minkowski_edge: &MinkowskiEdge,
     center_point_a: Point<f32>,
     center_point_b: Point<f32>,
-) -> (ContactInfo, ContactInfo) {
+) -> Vec<Point<f32>> {
     let normal = minkowski_edge.normal;
     let depth = minkowski_edge.depth;
 
@@ -529,7 +530,12 @@ pub(crate) fn get_collision_contact_point(
             depth,
         };
 
-        (contact_info_a, contact_info_b)
+        // (contact_info_a, contact_info_b);
+
+        return vec![
+            contact_info_a.contact_point.clone(),
+            contact_info_b.contact_point.clone(),
+        ];
     } else if a1 == a2 {
         let contact_point_a = a1;
 
@@ -557,7 +563,8 @@ pub(crate) fn get_collision_contact_point(
             depth,
         };
 
-        (contact_info_a, contact_info_b)
+        // (contact_info_a, contact_info_b);
+        return vec![contact_info_a.contact_point, contact_info_b.contact_point];
     } else if b1 == b2 {
         let contact_point_b = b1;
 
@@ -585,19 +592,141 @@ pub(crate) fn get_collision_contact_point(
             depth,
         };
 
-        (contact_info_a, contact_info_b)
+        // (contact_info_a, contact_info_b);
+
+        return vec![contact_info_a.contact_point, contact_info_b.contact_point];
     } else {
         let edge_a: Segment<_> = (a1, a2).into();
         let edge_b: Segment<_> = (b1, b2).into();
-        v_clip(edge_a, edge_b);
 
-        todo!()
+        v_clip(edge_a, edge_b, normal, center_point_a, center_point_b)
+
+        // todo!()
     }
 }
 
 // want more detail about v_clip, visit
 // https://dyn4j.org/2011/11/contact-points-using-clipping/
-fn v_clip(edge_a: Segment<f32>, edge_b: Segment<f32>) {}
+fn v_clip(
+    edge_a: Segment<f32>,
+    edge_b: Segment<f32>,
+    normal: Vector<f32>,
+    center_point_a: Point<f32>,
+    center_point_b: Point<f32>,
+) -> Vec<Point<f32>> {
+    // which collider is reference , A or B
+    enum ReferenceCollider {
+        A,
+        B,
+    }
+
+    let get_reference_normal = |edge: &Segment<f32>, center_point: Point<f32>| {
+        let tmp_vector: Vector<f32> = (edge.get_start_point(), &center_point).into();
+        // normal direction must point to reference poly
+        if (tmp_vector * normal).is_sign_negative() {
+            -normal
+        } else {
+            normal
+        }
+    };
+
+    let (reference_edge, incident_edge, reference_normal, reference_collider) = {
+        if (edge_a.to_vector() * normal).abs() < (edge_b.to_vector() * normal).abs() {
+            let reference_normal = get_reference_normal(&edge_a, center_point_a);
+            (edge_a, edge_b, reference_normal, ReferenceCollider::A)
+        } else {
+            let reference_normal = get_reference_normal(&edge_b, center_point_b);
+            (edge_b, edge_a, reference_normal, ReferenceCollider::B)
+        }
+    };
+
+    let mut contact_points = Vec::with_capacity(4);
+
+    // first and second clip
+    clip(&reference_edge, &incident_edge, &mut contact_points);
+
+    // last clip
+    let reference_point = reference_edge.get_start_point();
+
+    let reference_projection_size = reference_point.to_vector() * reference_normal;
+
+    let mut new_points_end_index = 0;
+    for i in 0..contact_points.len() {
+        if (contact_points[i].to_vector() * reference_normal - reference_projection_size)
+            .is_sign_positive()
+        {
+            contact_points.swap(new_points_end_index, i);
+            new_points_end_index += 1;
+        }
+    }
+
+    unsafe {
+        contact_points.set_len(new_points_end_index);
+    }
+
+    contact_points
+}
+
+fn clip(
+    reference_edge: &Segment<f32>,
+    incident_edge: &Segment<f32>,
+    contact_points: &mut Vec<Point<f32>>,
+) {
+    let reference_vector = reference_edge.to_vector().normalize();
+    let incident_v1 = incident_edge.get_start_point();
+    let incident_v2 = incident_edge.get_end_point();
+
+    // vector must normalize
+    let compute_incident_point_project_size =
+        |reference_point: &Point<f32>, vector: Vector<f32>| {
+            let reference_project_size = reference_point.to_vector() * vector;
+
+            let incident_v1_projection_size =
+                incident_v1.to_vector() * vector - reference_project_size;
+            let incident_v2_projection_size =
+                incident_v2.to_vector() * vector - reference_project_size;
+            (incident_v1_projection_size, incident_v2_projection_size)
+        };
+
+    let reference_v1 = reference_edge.get_start_point();
+    let (s1_by_reference_v1, s2_by_reference_v1) =
+        compute_incident_point_project_size(reference_v1, reference_vector);
+    let reference_v2 = reference_edge.get_end_point();
+    let (s1_by_reference_v2, s2_by_reference_v2) =
+        compute_incident_point_project_size(reference_v2, -reference_vector);
+
+    if s1_by_reference_v1.is_sign_positive() && s1_by_reference_v2.is_sign_positive() {
+        contact_points.push(*incident_v1);
+    }
+
+    if s2_by_reference_v1.is_sign_positive() && s2_by_reference_v2.is_sign_positive() {
+        contact_points.push(*incident_v2);
+    }
+
+    if !is_same_sign_f32(s1_by_reference_v1, s2_by_reference_v1) {
+        // 尝试切割
+        let s1_abs = s1_by_reference_v1.abs();
+        let s2_abs = s2_by_reference_v1.abs();
+
+        let incident_vector = incident_edge.to_vector();
+        let ratio = s1_abs * (s1_abs + s2_abs).recip();
+        let contact_point = *incident_v1 + incident_vector * ratio;
+
+        contact_points.push(contact_point);
+    }
+
+    if !is_same_sign_f32(s1_by_reference_v2, s2_by_reference_v2) {
+        // 尝试切割
+        let s1_abs = s1_by_reference_v2.abs();
+        let s2_abs = s2_by_reference_v2.abs();
+
+        let incident_vector = incident_edge.to_vector();
+        let ratio = s1_abs * (s1_abs + s2_abs).recip();
+        let contact_point = *incident_v1 + incident_vector * ratio;
+
+        contact_points.push(contact_point);
+    }
+}
 
 fn compute_cross_point_with_segment(
     segment: Segment<f32>,

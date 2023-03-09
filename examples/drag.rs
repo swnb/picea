@@ -224,19 +224,19 @@ fn view(app: &App, model: &Model, frame: Frame) {
         });
 
     for info in model.collision_viewer.get_collision_infos() {
-        info.points.iter().take(2).for_each(|point| {
+        info.points.iter().for_each(|point| {
             draw.ellipse()
                 .x_y(point.x(), point.y())
                 .radius(2.)
                 .color(RED);
         });
 
-        info.points.iter().skip(2).for_each(|point| {
-            draw.ellipse()
-                .x_y(point.x(), point.y())
-                .radius(2.)
-                .color(ORANGE);
-        });
+        // info.points.iter().skip(2).for_each(|point| {
+        //     draw.ellipse()
+        //         .x_y(point.x(), point.y())
+        //         .radius(2.)
+        //         .color(ORANGE);
+        // });
 
         draw.line()
             .weight(2.)
