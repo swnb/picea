@@ -495,7 +495,7 @@ pub(crate) fn get_collision_contact_point(
     minkowski_edge: &MinkowskiEdge,
     center_point_a: Point,
     center_point_b: Point,
-) -> Vec<Point> {
+) -> Vec<(ContactInfo, ContactInfo)> {
     let normal = minkowski_edge.normal;
     let depth = minkowski_edge.depth;
 
@@ -530,12 +530,7 @@ pub(crate) fn get_collision_contact_point(
             depth,
         };
 
-        // (contact_info_a, contact_info_b);
-
-        return vec![
-            contact_info_a.contact_point.clone(),
-            contact_info_b.contact_point.clone(),
-        ];
+        vec![(contact_info_a, contact_info_b)]
     } else if a1 == a2 {
         let contact_point_a = a1;
 
@@ -563,8 +558,7 @@ pub(crate) fn get_collision_contact_point(
             depth,
         };
 
-        // (contact_info_a, contact_info_b);
-        return vec![contact_info_a.contact_point, contact_info_b.contact_point];
+        vec![(contact_info_a, contact_info_b)]
     } else if b1 == b2 {
         let contact_point_b = b1;
 
@@ -592,16 +586,12 @@ pub(crate) fn get_collision_contact_point(
             depth,
         };
 
-        // (contact_info_a, contact_info_b);
-
-        return vec![contact_info_a.contact_point, contact_info_b.contact_point];
+        vec![(contact_info_a, contact_info_b)]
     } else {
         let edge_a: Segment<_> = (a1, a2).into();
         let edge_b: Segment<_> = (b1, b2).into();
 
         v_clip(edge_a, edge_b, normal, center_point_a, center_point_b)
-
-        // todo!()
     }
 }
 
@@ -613,9 +603,9 @@ fn v_clip(
     normal: Vector,
     center_point_a: Point,
     center_point_b: Point,
-) -> Vec<Point> {
+) -> Vec<(ContactInfo, ContactInfo)> {
     // which collider is reference , A or B
-    enum ReferenceCollider {
+    enum Collider {
         A,
         B,
     }
@@ -633,45 +623,63 @@ fn v_clip(
     let (reference_edge, incident_edge, reference_normal, reference_collider) = {
         if (edge_a.to_vector() * normal).abs() < (edge_b.to_vector() * normal).abs() {
             let reference_normal = get_reference_normal(&edge_a, center_point_a);
-            (edge_a, edge_b, reference_normal, ReferenceCollider::A)
+            (edge_a, edge_b, reference_normal, Collider::A)
         } else {
             let reference_normal = get_reference_normal(&edge_b, center_point_b);
-            (edge_b, edge_a, reference_normal, ReferenceCollider::B)
+            (edge_b, edge_a, reference_normal, Collider::B)
         }
     };
 
-    let mut contact_points = Vec::with_capacity(4);
-
     // first and second clip
-    clip(&reference_edge, &incident_edge, &mut contact_points);
+    let mut contact_points = clip(&reference_edge, &incident_edge);
 
     // last clip
     let reference_point = reference_edge.get_start_point();
 
     let reference_projection_size = reference_point.to_vector() * reference_normal;
 
-    let mut new_points_end_index = 0;
+    let mut contact_infos = vec![];
     for i in 0..contact_points.len() {
-        if (contact_points[i].to_vector() * reference_normal - reference_projection_size)
-            .is_sign_positive()
-        {
-            contact_points.swap(new_points_end_index, i);
-            new_points_end_index += 1;
+        let contact_point = contact_points[i];
+        let depth = contact_points[i].to_vector() * reference_normal - reference_projection_size;
+        if depth.is_sign_positive() {
+            // TODO refactor
+            let contact_pair = match reference_collider {
+                Collider::A => (
+                    ContactInfo {
+                        contact_point: contact_point + (-reference_normal * depth),
+                        normal: reference_normal,
+                        depth,
+                    },
+                    ContactInfo {
+                        contact_point,
+                        normal: -reference_normal,
+                        depth,
+                    },
+                ),
+                Collider::B => (
+                    ContactInfo {
+                        contact_point,
+                        normal: -reference_normal,
+                        depth,
+                    },
+                    ContactInfo {
+                        contact_point: contact_point + (-reference_normal * depth),
+                        normal: reference_normal,
+                        depth,
+                    },
+                ),
+            };
+            contact_infos.push(contact_pair);
         }
     }
 
-    unsafe {
-        contact_points.set_len(new_points_end_index);
-    }
-
-    contact_points
+    contact_infos
 }
 
-fn clip(
-    reference_edge: &Segment<f32>,
-    incident_edge: &Segment<f32>,
-    contact_points: &mut Vec<Point>,
-) {
+fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Point> {
+    let mut contact_points = Vec::with_capacity(4);
+
     let reference_vector = reference_edge.to_vector().normalize();
     let incident_v1 = incident_edge.get_start_point();
     let incident_v2 = incident_edge.get_end_point();
@@ -723,6 +731,8 @@ fn clip(
 
         contact_points.push(contact_point);
     }
+
+    contact_points
 }
 
 fn compute_cross_point_with_segment(segment: Segment<f32>, start_point: &Point, normal: Vector) {

@@ -8,7 +8,8 @@ use crate::{
 };
 
 pub struct CollisionInfo {
-    pub points: Vec<Point>,
+    pub points_a: Vec<Point>,
+    pub points_b: Vec<Point>,
     pub vector: Vector,
 }
 
@@ -62,7 +63,8 @@ impl CollisionStatusViewer {
         let (_, point2) = b.shape().projection_on_vector(&-edge.normal);
 
         let info = CollisionInfo {
-            points: contact_points,
+            points_a: contact_points.iter().map(|v| v.0.contact_point).collect(),
+            points_b: contact_points.iter().map(|v| v.1.contact_point).collect(),
             vector: edge.normal,
         };
 
