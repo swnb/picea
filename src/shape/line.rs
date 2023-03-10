@@ -1,5 +1,5 @@
 use crate::{
-    math::{axis::AxisDirection, edge::Edge, point::Point, segment::Segment, vector::Vector},
+    math::{edge::Edge, point::Point, segment::Segment, vector::Vector},
     meta::Mass,
 };
 
@@ -58,15 +58,6 @@ impl Shape for Line {
         }
     }
 
-    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
-        use AxisDirection::*;
-        let (p1, p2) = self.projection_on_vector(&axis.into());
-        match axis {
-            X => (p1.x(), p2.x()),
-            Y => (p1.y(), p2.y()),
-        }
-    }
-
     fn translate(&mut self, vector: &Vector) {
         *self.start_point_mut() += vector;
         *self.end_point_mut() += vector;
@@ -89,8 +80,8 @@ impl Shape for Line {
                 end_point: self.end_point(),
             },
             Edge::Line {
-                start_point: self.end_point(),
                 end_point: self.start_point(),
+                start_point: self.end_point(),
             },
         ];
 
