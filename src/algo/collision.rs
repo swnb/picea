@@ -631,50 +631,42 @@ fn v_clip(
     };
 
     // first and second clip
-    let mut contact_points = clip(&reference_edge, &incident_edge);
+    let contact_points = clip(&reference_edge, &incident_edge);
 
     // last clip
     let reference_point = reference_edge.get_start_point();
 
     let reference_projection_size = reference_point.to_vector() * reference_normal;
 
-    let mut contact_infos = vec![];
-    for i in 0..contact_points.len() {
-        let contact_point = contact_points[i];
-        let depth = contact_points[i].to_vector() * reference_normal - reference_projection_size;
-        if depth.is_sign_positive() {
-            // TODO refactor
-            let contact_pair = match reference_collider {
-                Collider::A => (
-                    ContactInfo {
-                        contact_point: contact_point + (-reference_normal * depth),
-                        normal: reference_normal,
-                        depth,
-                    },
-                    ContactInfo {
-                        contact_point,
-                        normal: -reference_normal,
-                        depth,
-                    },
-                ),
-                Collider::B => (
-                    ContactInfo {
-                        contact_point,
-                        normal: -reference_normal,
-                        depth,
-                    },
-                    ContactInfo {
-                        contact_point: contact_point + (-reference_normal * depth),
-                        normal: reference_normal,
-                        depth,
-                    },
-                ),
-            };
-            contact_infos.push(contact_pair);
+    let compute_contact_pair = |contact_point: Point| {
+        let depth = contact_point.to_vector() * reference_normal - reference_projection_size;
+        if depth.is_sign_negative() {
+            return None;
         }
-    }
 
-    contact_infos
+        let contact_info_1 = ContactInfo {
+            contact_point: contact_point + (-reference_normal * depth),
+            normal: reference_normal,
+            depth,
+        };
+
+        let contact_info_2 = ContactInfo {
+            contact_point,
+            normal: -reference_normal,
+            depth,
+        };
+
+        let contact_pair = match reference_collider {
+            Collider::A => (contact_info_1, contact_info_2),
+            Collider::B => (contact_info_2, contact_info_1),
+        };
+        contact_pair.into()
+    };
+
+    contact_points
+        .into_iter()
+        .filter_map(compute_contact_pair)
+        .collect()
 }
 
 fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Point> {
