@@ -164,7 +164,8 @@ fn sweep_and_prune_collision_detection<T, Z>(
                 }
             } else {
                 // no element is collision
-                break;
+                // FIXME
+                // break;
             }
         }
     }
