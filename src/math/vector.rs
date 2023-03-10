@@ -143,7 +143,7 @@ where
     T: std::ops::Neg<Output = T> + std::ops::Sub<Output = T>,
 {
     fn from(segment: Segment<T>) -> Self {
-        (*segment.get_start_point(), *segment.get_end_point()).into()
+        (*segment.start_point(), *segment.end_point()).into()
     }
 }
 
