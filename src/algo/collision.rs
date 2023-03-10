@@ -502,6 +502,7 @@ fn get_collision_contact_point(
 
         let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
         // TODO 判断或许有误
+        // FIXME 这里的处理必须要对 Line 做特殊处理
         let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
             -normal
         } else {
@@ -602,8 +603,9 @@ fn v_clip(
         B,
     }
 
-    let get_reference_normal = |edge: &Segment<f32>, center_point: Point| {
-        let tmp_vector: Vector = (edge.start_point(), &center_point).into();
+    let get_reference_normal = |reference_center_point: Point, incident_center_point: Point| {
+        let tmp_vector: Vector = (incident_center_point, reference_center_point).into();
+
         // normal direction must point to reference poly
         if (tmp_vector * normal).is_sign_negative() {
             -normal
@@ -614,10 +616,10 @@ fn v_clip(
 
     let (reference_edge, incident_edge, reference_normal, reference_collider) = {
         if (edge_a.to_vector() * normal).abs() < (edge_b.to_vector() * normal).abs() {
-            let reference_normal = get_reference_normal(&edge_a, center_point_a);
+            let reference_normal = get_reference_normal(center_point_a, center_point_b);
             (edge_a, edge_b, reference_normal, Collider::A)
         } else {
-            let reference_normal = get_reference_normal(&edge_b, center_point_b);
+            let reference_normal = get_reference_normal(center_point_b, center_point_a);
             (edge_b, edge_a, reference_normal, Collider::B)
         }
     };
