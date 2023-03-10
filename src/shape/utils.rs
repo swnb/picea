@@ -18,12 +18,13 @@ pub fn projection_polygon_on_vector<'a>(
     point_iter: impl Iterator<Item = &'a Point>,
     vector: Vector,
 ) -> (Point, Point) {
+    let vector = vector.normalize();
     let mut min = f32::MAX;
     let mut min_point = (0., 0.).into();
     let mut max = f32::MIN;
     let mut max_point = (0., 0.).into();
     point_iter.for_each(|&cur| {
-        let size = cur.to_vector() >> vector;
+        let size = cur.to_vector() * vector;
         if size < min {
             min = size;
             min_point = cur;
