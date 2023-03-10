@@ -414,6 +414,14 @@ impl MinkowskiEdge {
 
         result.into()
     }
+
+    pub(crate) fn get_contact_info(
+        &self,
+        center_point_a: Point,
+        center_point_b: Point,
+    ) -> Vec<(ContactInfo, ContactInfo)> {
+        get_collision_contact_point(self, center_point_a, center_point_b)
+    }
 }
 
 struct Simplex {
@@ -491,7 +499,7 @@ pub(crate) struct ContactInfo {
     pub(crate) depth: f32,
 }
 
-pub(crate) fn get_collision_contact_point(
+fn get_collision_contact_point(
     minkowski_edge: &MinkowskiEdge,
     center_point_a: Point,
     center_point_b: Point,

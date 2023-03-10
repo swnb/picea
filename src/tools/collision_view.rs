@@ -1,7 +1,5 @@
 use crate::{
-    algo::collision::{
-        epa_compute_collision_edge, get_collision_contact_point, gjk_collision_detective,
-    },
+    algo::collision::{epa_compute_collision_edge, gjk_collision_detective},
     element::Element,
     math::{point::Point, vector::Vector},
     scene::Scene,
@@ -40,8 +38,10 @@ impl CollisionStatusViewer {
             (max_point_a, max_point_b).into()
         };
 
-        let first_approximation_vector: Vector =
-            (a.shape().center_point(), b.shape().center_point()).into();
+        let center_point_a = a.shape().center_point();
+        let center_point_b = b.shape().center_point();
+
+        let first_approximation_vector: Vector = (center_point_a, center_point_b).into();
 
         let Some(simplex) = gjk_collision_detective(first_approximation_vector, compute_support_point) else {
             return;
@@ -54,8 +54,7 @@ impl CollisionStatusViewer {
 
         let edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-        let contact_points =
-            get_collision_contact_point(&edge, a.shape().center_point(), b.shape().center_point());
+        let contact_points = edge.get_contact_info(center_point_a, center_point_b);
 
         let info = CollisionInfo {
             points_a: contact_points.iter().map(|v| v.0.contact_point).collect(),
