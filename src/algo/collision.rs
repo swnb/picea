@@ -82,7 +82,7 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
 // entry of collision check, if element is collision, handler will call
 pub fn detect_collision<T>(
     elements: T,
-    mut handler: impl FnMut(&mut T::Collider, &mut T::Collider, CollisionInfo),
+    mut handler: impl FnMut(&mut T::Collider, &mut T::Collider, Vec<ContactInfoPair>),
 ) where
     T: CollisionalCollection,
 {
@@ -103,7 +103,10 @@ pub fn detect_collision<T>(
     // dbg!(time.elapsed());
 }
 
-pub fn special_collision_detection<C: Collider>(a: &mut C, b: &mut C) -> Option<CollisionInfo> {
+pub fn special_collision_detection<C: Collider>(
+    a: &mut C,
+    b: &mut C,
+) -> Option<Vec<(ContactInfo, ContactInfo)>> {
     let center_point_a = a.center_point();
     let center_point_b = b.center_point();
     let first_approximation_vector: Vector = (center_point_a, center_point_b).into();
@@ -118,37 +121,9 @@ pub fn special_collision_detection<C: Collider>(a: &mut C, b: &mut C) -> Option<
     let simplex = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
     let minkowski_edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-    let a1 = minkowski_edge.start_different_point.start_point_from_a;
-    let a2 = minkowski_edge.end_different_point.start_point_from_a;
+    let contact_infos = minkowski_edge.get_contact_info(center_point_a, center_point_b);
 
-    let b1 = minkowski_edge.start_different_point.end_point_from_b;
-    let b2 = minkowski_edge.end_different_point.end_point_from_b;
-
-    // let (contact_info_a, contact_info_b) =
-    //     get_collision_contact_point(&minkowski_edge, center_point_a, center_point_b);
-
-    fn get_collision_contact_type(p1: Point, p2: Point) -> ContactType {
-        use ContactType::*;
-        if p1 == p2 {
-            Point(p1)
-        } else {
-            Edge([p1, p2])
-        }
-    }
-
-    // TODO deal with edge with edge base on https://dyn4j.org/2011/11/contact-points-using-clipping/
-
-    let contact_a = get_collision_contact_type(a1, a2);
-    let contact_b = get_collision_contact_type(b1, b2);
-
-    CollisionInfo {
-        collision_element_id_pair: (a.id(), b.id()),
-        contact_a,
-        contact_b,
-        normal: minkowski_edge.normal,
-        depth: minkowski_edge.depth,
-    }
-    .into()
+    contact_infos.into()
 }
 
 /**
@@ -499,11 +474,13 @@ where
  * normal toward the shape of collider
  * depth is how deep the collision happen
  */
-pub(crate) struct ContactInfo {
+pub struct ContactInfo {
     pub(crate) contact_point: Point,
     pub(crate) normal: Vector,
     pub(crate) depth: f32,
 }
+
+pub type ContactInfoPair = (ContactInfo, ContactInfo);
 
 fn get_collision_contact_point(
     minkowski_edge: &MinkowskiEdge,

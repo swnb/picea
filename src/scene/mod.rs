@@ -62,52 +62,22 @@ impl Scene {
         element_id
     }
 
-    pub fn update_elements_by_duration(
-        &mut self,
-        delta_time: f32,
-        // TODO remove callback
-        mut callback: impl FnMut(Vec<[Point; 2]>),
-    ) {
+    pub fn update_elements_by_duration(&mut self, delta_time: f32) {
         self.element_store
             .iter_mut()
             .for_each(|element| element.tick(delta_time));
 
-        detect_collision(&mut self.element_store, |a, b, info| {
+        detect_collision(&mut self.element_store, |a, b, infos| {
             a.meta_mut().mark_collision(true);
+
             b.meta_mut().mark_collision(true);
 
-            // TODO
+            // TODO maybe just combine two contact info
+            a.meta_mut()
+                .set_collision_infos(infos.iter().map(|info| info.0.clone()));
 
-            let info = Rc::new(info);
-
-            a.meta_mut().set_collision_infos(info.clone());
-            b.meta_mut().set_collision_infos(info.clone());
-
-            let contact_a = info.contact_a();
-
-            let contact_b = info.contact_b();
-            // dbg!(contact_a);
-            // dbg!(contact_b);
-
-            let l = match contact_a {
-                ContactType::Point(p) => [*p, *p + (info.normal() * 10.)],
-                ContactType::Edge([p, p2]) => [*p, *p2],
-            };
-
-            let l1 = match contact_b {
-                ContactType::Point(p) => [*p, *p + (info.normal() * 10.)],
-                ContactType::Edge([p, p2]) => [*p, *p2],
-            };
-
-            callback(vec![
-                l,
-                l1,
-                [(0., 0.).into(), (info.normal() * 100f32).to_point()],
-            ]);
-            // a.force_group_mut()
-            //     .add_force(Force::new("pop", -normal * 10.));
-            // b.force_group_mut()
-            //     .add_force(Force::new("pop", normal * 10.));
+            b.meta_mut()
+                .set_collision_infos(infos.into_iter().map(|info| info.1));
         });
     }
 

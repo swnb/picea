@@ -50,7 +50,8 @@ pub fn update_elements_by_duration<T: Element>(element: &mut T, delta_t: f32) {
 
     let deg = (current_w + (current_w - origin_w) * 0.5) * delta_t;
     element.meta_mut().set_angular(|pre| (pre + deg) % TAU);
-    let delta_s = (current_v + (origin_v - current_v) * 0.5) * delta_t;
+
+    let delta_s = (origin_v * 0.5 + current_v * 0.5) * delta_t;
 
     element.translate(&delta_s);
     element.rotate(deg);
@@ -71,16 +72,7 @@ pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
         return
     };
 
-    use ContactType::*;
-    let contact_point = match collision_info.contact_points() {
-        (Edge(edge_a), Edge(edge_b)) => {
-            // TODO 物体堆叠
-            unimplemented!();
-        }
-        (Edge(edge_a), Point(point_b)) => *point_b,
-        (Point(point_a), Edge(edge_b)) => *point_a,
-        (Point(point_a), Point(point_b)) => *point_a,
-    };
+    let contact_point = collision_info.contact_point;
 
     let r: Vector = (center_point, contact_point).into();
     let mut normal = collision_info.normal;
@@ -96,7 +88,7 @@ pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
     let lambda = mass_eff;
 
     // let B 0..1 ;let h = t; let b = B/h * depth
-    const B: f32 = 0.9;
+    const B: f32 = 0.1;
 
     let v = element.compute_point_velocity(contact_point);
 

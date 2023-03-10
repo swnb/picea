@@ -27,13 +27,13 @@ fn create_model(_app: &App) -> Model {
 
     scene.push_element(ground);
 
-    let ball: Element = ElementBuilder::new(
-        ((-400., -100.), 60.),
-        MetaBuilder::new(1.).force("gravity", (0., -10.)),
-    )
-    .into();
+    // let ball: Element = ElementBuilder::new(
+    //     ((-400., -100.), 60.),
+    //     MetaBuilder::new(1.).force("gravity", (0., -10.)),
+    // )
+    // .into();
 
-    scene.push_element(ball);
+    // scene.push_element(ball);
 
     // let element = ElementBuilder::new(
     //     ((200., 200.), 100.),
@@ -46,12 +46,12 @@ fn create_model(_app: &App) -> Model {
 
     // scene.push_element(element);
 
-    let element = ElementBuilder::new(
-        (7, (50., 200.), 100.),
-        MetaBuilder::new(1.)
-            .angular(-std::f32::consts::FRAC_PI_8)
-            .force("gravity", (0., -10.)), // .is_fixed(true),
-    );
+    // let element = ElementBuilder::new(
+    //     (7, (50., 200.), 100.),
+    //     MetaBuilder::new(1.)
+    //         .angular(-std::f32::consts::FRAC_PI_8)
+    //         .force("gravity", (0., -10.)), // .is_fixed(true),
+    // );
 
     // let element = ElementBuilder::new(
     //     (7, (50., 200.), 100.),
@@ -60,14 +60,10 @@ fn create_model(_app: &App) -> Model {
     //         .force("gravity", (0., -10.)), // .is_fixed(true),
     // );
 
-    let element: Element = element.into();
-
-    let center_point = element.shape().center_point();
-
-    // scene.push_element(element);
+    // let element: Element = element.into();
 
     let element = ElementBuilder::new(
-        (7, (50., 400.), 100.),
+        (7, (50., 40.), 100.),
         MetaBuilder::new(1.)
             .angular(-std::f32::consts::FRAC_PI_8)
             .force("gravity", (0., -10.)), // .is_fixed(true),
@@ -75,16 +71,14 @@ fn create_model(_app: &App) -> Model {
 
     let element: Element = element.into();
 
-    let center_point = element.shape().center_point();
-
-    // scene.push_element(element);
+    scene.push_element(element);
 
     Model {
         scene,
         timer: SystemTime::now(),
         collision_info: None,
         addition_render_line: vec![],
-        addition_render_dot: vec![center_point],
+        addition_render_dot: vec![],
         is_paused: false,
     }
 }
@@ -111,80 +105,13 @@ fn event(app: &App, model: &mut Model, event: Event) {
 
             model.timer = now;
 
-            if model.collision_info.is_none() {
-                // return;
-            }
-
-            let ground = model.scene.get_element(1).unwrap();
-
-            let ball = model.scene.get_element(2).unwrap();
-
-            let a = ground;
-            let b = ball;
-
-            {
-                #[derive(Clone, Debug)]
-                struct MinkowskiDifferencePoint {
-                    start_point: Point,
-                    end_point: Point,
-                    vector: Vector,
-                }
-
-                impl PartialEq for MinkowskiDifferencePoint {
-                    fn eq(&self, other: &Self) -> bool {
-                        self.vector == other.vector
-                    }
-                }
-
-                impl From<(Point, Point)> for MinkowskiDifferencePoint {
-                    fn from((s, e): (Point, Point)) -> Self {
-                        Self {
-                            start_point: s,
-                            end_point: e,
-                            vector: (s, e).into(),
-                        }
-                    }
-                }
-
-                let compute_support_point = |reference_vector: Vector| -> MinkowskiDifferencePoint {
-                    let (_, max_point_a) = a.shape().projection_on_vector(&reference_vector);
-                    let (_, max_point_b) = b.shape().projection_on_vector(&-reference_vector);
-                    (max_point_b, max_point_a).into()
-                };
-
-                let center_point_a = a.center_point();
-                let center_point_b = b.center_point();
-
-                let first_approximation_vector: Vector = (center_point_a, center_point_b).into();
-
-                let gjk_point = compute_support_point(first_approximation_vector);
-                model.addition_render_line = vec![];
-
-                model
-                    .addition_render_line
-                    .push([gjk_point.start_point, gjk_point.end_point]);
-
-                model
-                    .addition_render_line
-                    .push([a.center_point(), b.center_point()]);
-            }
-
             if model.is_paused {
                 return;
             }
 
-            model.addition_render_dot = vec![];
-            model.scene.elements_iter().for_each(|element| {
-                model
-                    .addition_render_dot
-                    .push(element.shape().center_point())
-            });
-
             model
                 .scene
-                .update_elements_by_duration(duration.as_secs_f32(), |collision_info| {
-                    model.collision_info = Some(collision_info);
-                })
+                .update_elements_by_duration(duration.as_secs_f32())
         }
         _ => {}
     }
@@ -252,9 +179,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     model.addition_render_line.iter().for_each(|point| {
         let draw = app.draw();
-
-        dbg!(point[0].x(), point[0].y());
-        dbg!(point[1].x(), point[1].y());
 
         draw.line()
             .weight(2.)

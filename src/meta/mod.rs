@@ -3,7 +3,10 @@ pub mod force;
 
 use std::{ops::Deref, rc::Rc};
 
-use crate::math::vector::{Vector, Vector3};
+use crate::{
+    algo::collision::ContactInfo,
+    math::vector::{Vector, Vector3},
+};
 
 use self::{
     collision::CollisionInfo,
@@ -28,7 +31,7 @@ pub struct Meta {
     angular_velocity: f32,
     angular: f32,
     is_fixed: bool,
-    collision_infos: Vec<Rc<CollisionInfo>>,
+    collision_infos: Vec<ContactInfo>,
     // TODO 移除 collision
     is_collision: bool,
     is_transparent: bool,
@@ -136,14 +139,19 @@ impl Meta {
         self
     }
 
-    pub fn collision_infos(&self) -> impl Iterator<Item = &CollisionInfo> {
-        self.collision_infos.iter().map(|info| &**info)
+    pub fn collision_infos(&self) -> impl Iterator<Item = &ContactInfo> {
+        self.collision_infos.iter()
     }
 
-    pub fn set_collision_infos(&mut self, info: Rc<CollisionInfo>) -> &mut Self {
+    pub fn set_collision_infos(
+        &mut self,
+        contact_infos: impl IntoIterator<Item = ContactInfo>,
+    ) -> &mut Self {
         // TODO refactor
         self.collision_infos.clear();
-        self.collision_infos.push(info);
+        for contact_info in contact_infos {
+            self.collision_infos.push(contact_info);
+        }
         self
     }
 
