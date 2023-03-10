@@ -603,7 +603,7 @@ fn v_clip(
     }
 
     let get_reference_normal = |edge: &Segment<f32>, center_point: Point| {
-        let tmp_vector: Vector = (edge.get_start_point(), &center_point).into();
+        let tmp_vector: Vector = (edge.start_point(), &center_point).into();
         // normal direction must point to reference poly
         if (tmp_vector * normal).is_sign_negative() {
             -normal
@@ -626,7 +626,7 @@ fn v_clip(
     let contact_points = clip(&reference_edge, &incident_edge);
 
     // last clip
-    let reference_point = reference_edge.get_start_point();
+    let reference_point = reference_edge.start_point();
 
     let reference_projection_size = reference_point.to_vector() * reference_normal;
 
@@ -665,8 +665,8 @@ fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Poin
     let mut contact_points = Vec::with_capacity(4);
 
     let reference_vector = reference_edge.to_vector().normalize();
-    let incident_v1 = incident_edge.get_start_point();
-    let incident_v2 = incident_edge.get_end_point();
+    let incident_v1 = incident_edge.start_point();
+    let incident_v2 = incident_edge.end_point();
 
     // vector must normalize
     let compute_incident_point_project_size = |reference_point: &Point, vector: Vector| {
@@ -677,10 +677,10 @@ fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Poin
         (incident_v1_projection_size, incident_v2_projection_size)
     };
 
-    let reference_v1 = reference_edge.get_start_point();
+    let reference_v1 = reference_edge.start_point();
     let (s1_by_reference_v1, s2_by_reference_v1) =
         compute_incident_point_project_size(reference_v1, reference_vector);
-    let reference_v2 = reference_edge.get_end_point();
+    let reference_v2 = reference_edge.end_point();
     let (s1_by_reference_v2, s2_by_reference_v2) =
         compute_incident_point_project_size(reference_v2, -reference_vector);
 
@@ -721,9 +721,9 @@ fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Poin
 
 fn compute_cross_point_with_segment(segment: Segment<f32>, start_point: &Point, normal: Vector) {
     // take start_point as C , take start point in segment as A, take end point in segment as B
-    let c_a: Vector = (start_point, segment.get_start_point()).into();
+    let c_a: Vector = (start_point, segment.start_point()).into();
 
-    let c_b: Vector = (start_point, segment.get_end_point()).into();
+    let c_b: Vector = (start_point, segment.end_point()).into();
 
     if (c_a * normal).is_sign_negative() || (c_b * normal).is_sign_negative() {
         unreachable!();

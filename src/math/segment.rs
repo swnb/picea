@@ -3,12 +3,12 @@ use std::{
     ops::{Neg, Sub},
 };
 
-use super::{point::Point, vector::Vector};
+use super::{point::Point, vector::Vector, CommonNum};
 
 pub type Axis<T> = Segment<T>;
 
 #[derive(Clone)]
-pub struct Segment<T: Clone + Copy> {
+pub struct Segment<T: Clone + Copy = CommonNum> {
     start_point: Point<T>,
     end_point: Point<T>,
 }
@@ -21,12 +21,20 @@ impl<T: Clone + Copy> Segment<T> {
         }
     }
 
-    pub fn get_start_point(&self) -> &Point<T> {
+    pub fn start_point(&self) -> &Point<T> {
         &self.start_point
     }
 
-    pub fn get_end_point(&self) -> &Point<T> {
+    pub fn start_point_mut(&mut self) -> &mut Point<T> {
+        &mut self.start_point
+    }
+
+    pub fn end_point(&self) -> &Point<T> {
         &self.end_point
+    }
+
+    pub fn end_point_mut(&mut self) -> &mut Point<T> {
+        &mut self.end_point
     }
 
     pub fn flip(&self) -> Segment<T> {
