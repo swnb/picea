@@ -493,6 +493,12 @@ where
 }
 
 #[derive(Clone, Debug)]
+/**
+ * ContactInfo contain the collider collision info
+ * contact_point is where the collision happen
+ * normal toward the shape of collider
+ * depth is how deep the collision happen
+ */
 pub(crate) struct ContactInfo {
     pub(crate) contact_point: Point,
     pub(crate) normal: Vector,
