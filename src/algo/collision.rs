@@ -809,10 +809,3 @@ fn compute_cross_point_with_segment(segment: Segment<f32>, start_point: &Point, 
 //     }
 //     collision_normal.1
 // }
-
-fn v_clip_collision_detective<T>(a: &T::Collider, b: &T::Collider, normal: Vector)
-where
-    T: CollisionalCollection,
-{
-    todo!()
-}
