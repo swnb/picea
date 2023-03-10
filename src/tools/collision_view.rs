@@ -54,13 +54,8 @@ impl CollisionStatusViewer {
 
         let edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-        // let (contact_info_a, contact_info_b) =
         let contact_points =
             get_collision_contact_point(&edge, a.shape().center_point(), b.shape().center_point());
-
-        let (_, point1) = a.shape().projection_on_vector(&edge.normal);
-
-        let (_, point2) = b.shape().projection_on_vector(&-edge.normal);
 
         let info = CollisionInfo {
             points_a: contact_points.iter().map(|v| v.0.contact_point).collect(),
