@@ -4,6 +4,7 @@ use picea::{
     math::{edge::Edge, point::Point, vector::Vector},
     meta::MetaBuilder,
     scene::Scene,
+    shape::line::Line,
 };
 use std::time::SystemTime;
 
@@ -19,32 +20,29 @@ struct Model {
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
-    let ground: Element = ElementBuilder::new(
-        (-500., -300., 1000., 100.),
+    let ground = ElementBuilder::new(
+        Line::new((-500., -300.), (500., -300.)),
         MetaBuilder::new(1.).is_fixed(true),
-    )
-    .into();
+    );
 
     scene.push_element(ground);
 
-    // let ball: Element = ElementBuilder::new(
-    //     ((-400., -100.), 60.),
-    //     MetaBuilder::new(1.).force("gravity", (0., -10.)),
-    // )
-    // .into();
+    let ball: Element = ElementBuilder::new(
+        ((-400., -100.), 60.),
+        MetaBuilder::new(1.).force("gravity", (0., -10.)),
+    )
+    .into();
 
-    // scene.push_element(ball);
+    scene.push_element(ball);
 
-    // let element = ElementBuilder::new(
-    //     ((200., 200.), 100.),
-    //     MetaBuilder::new(1.)
-    //         .angular(std::f32::consts::FRAC_PI_6)
-    //         .force("gravity", (0., -10.)), // .is_fixed(true),
-    // );
+    let element = ElementBuilder::new(
+        ((200., 200.), 100.),
+        MetaBuilder::new(1.)
+            .angular(std::f32::consts::FRAC_PI_6)
+            .force("gravity", (0., -10.)), // .is_fixed(true),
+    );
 
-    // let element: Element = element.into();
-
-    // scene.push_element(element);
+    scene.push_element(element);
 
     // let element = ElementBuilder::new(
     //     (7, (50., 200.), 100.),
@@ -53,14 +51,14 @@ fn create_model(_app: &App) -> Model {
     //         .force("gravity", (0., -10.)), // .is_fixed(true),
     // );
 
-    // let element = ElementBuilder::new(
-    //     (7, (50., 200.), 100.),
-    //     MetaBuilder::new(1.)
-    //         .angular(-std::f32::consts::FRAC_PI_8)
-    //         .force("gravity", (0., -10.)), // .is_fixed(true),
-    // );
+    let element = ElementBuilder::new(
+        (7, (50., 200.), 100.),
+        MetaBuilder::new(1.)
+            .angular(-std::f32::consts::FRAC_PI_8)
+            .force("gravity", (0., -10.)), // .is_fixed(true),
+    );
 
-    // let element: Element = element.into();
+    scene.push_element(element);
 
     let element = ElementBuilder::new(
         (7, (50., 40.), 100.),
