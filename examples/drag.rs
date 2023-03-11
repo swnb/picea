@@ -8,6 +8,7 @@ use picea::{
     math::{edge::Edge, vector::Vector},
     meta::MetaBuilder,
     scene::Scene,
+    shape::line::Line,
     tools::{collision_view::CollisionStatusViewer, drag::Draggable},
 };
 use std::time::SystemTime;
@@ -23,13 +24,12 @@ struct Model {
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
-    // let ground: Element = ElementBuilder::new(
-    //     (-500., -300., 1000., 100.),
-    //     MetaBuilder::new(1.).is_fixed(true),
-    // )
-    // .into();
+    let line = ElementBuilder::new(
+        Line::new((-500., -300.), (-300., 200.)),
+        MetaBuilder::new(1.).is_transparent(true),
+    );
 
-    // scene.push_element(ground);
+    scene.push_element(line);
 
     let ball = ElementBuilder::new(
         ((-400., -100.), 60.),
@@ -39,10 +39,8 @@ fn create_model(_app: &App) -> Model {
     let ball: Element = ball.into();
 
     let v: Vector = (0., 350.).into();
-    dbg!(v.abs());
 
     let result = ball.shape().projection_on_vector(&(0., 350.).into());
-    dbg!(result);
 
     scene.push_element(ball);
 
