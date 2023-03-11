@@ -105,3 +105,27 @@ pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
         .set_velocity(velocity_reducer)
         .set_angular_velocity(angular_velocity_reducer);
 }
+
+/**
+ * Sequential Impulse
+ * two object collide，object A and object B
+ * n is the collision direction normal vector that could separate two object
+ * depth define how depth two object collide,
+ * the constraint define blow:
+ * ( velocity_A + (angular_velocity_A X radius_A) - velocity_B - (angular_velocity_B X radius_B) ) * n == 0
+ * which mean ，the **relatively** velocity in the collide direction must be zero，that is what constraint means.
+ * and previous velocity plus delta_velocity equal current velocity, what change object's velocity is F * t , also know as **Impulse** (I)
+ * velocity = previous_velocity + delta_velocity
+ * delta_velocity = I / mass
+ * **Impulse** is same for both object
+ * after we fix the velocity , two object is still collide, wo need to separate two element in the next tick
+ * we need to add prefix
+ * prefix = B * (depth / delta_time)
+ * B from 0 to 1
+ * prefix need to add into the constraint, so the equation become
+ * (.........) * n - prefix = 0
+ *
+ */
+fn sequential_impulse() {
+    todo!()
+}
