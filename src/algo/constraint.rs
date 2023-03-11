@@ -118,6 +118,8 @@ pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
  * velocity = previous_velocity + delta_velocity
  * delta_velocity = I / mass
  * **Impulse** is same for both object
+ * I = n * L
+ * some the purpose of constraint is find the L, and by L find Impulse , and finlay get the **delta_velocity** .
  * after we fix the velocity , two object is still collide, wo need to separate two element in the next tick
  * we need to add prefix
  * prefix = B * (depth / delta_time)
