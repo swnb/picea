@@ -145,6 +145,7 @@ pub(crate) struct ContactInfo {
     contact_point_b: Point,
 }
 
+// TODO shrink this trait
 pub trait ConstraintObject {
     fn translate(&mut self, vector: &Vector);
 
