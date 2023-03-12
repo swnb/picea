@@ -376,7 +376,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Vector3<T: Clone + Copy> {
+pub struct Vector3<T: Clone + Copy = CommonNum> {
     x: T,
     y: T,
     z: T,

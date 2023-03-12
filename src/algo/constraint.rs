@@ -1,6 +1,11 @@
 use crate::{
-    math::{point::Point, vector::Vector},
-    meta::{collision::ContactType, Meta},
+    algo::constraint,
+    math::{
+        point::Point,
+        vector::{Vector, Vector3},
+        CommonNum,
+    },
+    meta::Meta,
 };
 
 pub trait Element {
@@ -127,7 +132,98 @@ pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
  * prefix need to add into the constraint, so the equation become
  * (.........) * n - prefix = 0
  *
+ * more details , visit https://zhuanlan.zhihu.com/p/411876276
  */
 fn sequential_impulse() {
     todo!()
+}
+
+pub(crate) struct ContactInfo {
+    normal: Vector,
+    depth: f32,
+    contact_point_a: Point,
+    contact_point_b: Point,
+}
+
+pub trait ConstraintObject {
+    fn translate(&mut self, vector: &Vector);
+
+    fn rotate(&mut self, deg: f32);
+
+    fn center_point(&self) -> Point;
+
+    fn meta(&self) -> &Meta;
+
+    fn meta_mut(&mut self) -> &mut Meta;
+
+    fn compute_point_velocity(&self, contact_point: Point) -> Vector;
+}
+
+fn compute_mass_effective<Obj: ConstraintObject>(
+    object_a: &mut Obj,
+    object_b: &mut Obj,
+    contact_infos: &ContactInfo,
+) -> CommonNum {
+    const Cr: CommonNum = 0.9; // loss energy when collide happen
+
+    let center_point_a = object_a.center_point();
+    let center_point_b = object_b.center_point();
+
+    let r_a: Vector = (center_point_a, contact_infos.contact_point_a).into();
+    let r_b: Vector = (center_point_b, contact_infos.contact_point_b).into();
+
+    let inv_moment_of_inertia_a = object_a.meta().inv_moment_of_inertia();
+    let inv_moment_of_inertia_b = object_b.meta().inv_moment_of_inertia();
+
+    let inv_mass_a = object_a.meta().inv_mass();
+    let inv_mass_b = object_b.meta().inv_mass();
+
+    let normal = contact_infos.normal;
+
+    // compute and mass_eff and lambda_n
+    let equation_part1 = inv_mass_a;
+    let equation_part2 = inv_mass_b;
+    let equation_part3 = ((normal * (r_a ^ normal)) ^ r_a) * inv_moment_of_inertia_a;
+    let equation_part4 = ((normal * (r_b ^ normal)) ^ r_b) * inv_moment_of_inertia_b;
+
+    (equation_part1 + equation_part2 + equation_part3 + equation_part4).recip()
+}
+
+fn compute_impulse<Obj: ConstraintObject>(
+    object_a: &mut Obj,
+    object_b: &mut Obj,
+    contact_infos: &ContactInfo,
+    mass_effective: CommonNum,
+) -> Vector {
+    let normal = contact_infos.normal;
+
+    let velocity_a = object_a.meta().velocity();
+    let velocity_b = object_b.meta().velocity();
+
+    let w_a = object_a.meta().angular_velocity();
+    let w_b = object_b.meta().angular_velocity();
+
+    let center_point_a = object_a.center_point();
+    let center_point_b = object_b.center_point();
+
+    let r_a: Vector = (center_point_a, contact_infos.contact_point_a).into();
+    let r_b: Vector = (center_point_b, contact_infos.contact_point_b).into();
+
+    let w_a = Vector3::from((0., 0., w_a));
+    let r_a = Vector3::from(r_a);
+    let w_velocity_a: Vector = (w_a ^ r_a).into();
+
+    let w_b = Vector3::from((0., 0., w_b));
+    let r_b = Vector3::from(r_b);
+    let w_velocity_b: Vector = (w_b ^ r_b).into();
+
+    let sum_velocity_a = velocity_a + w_velocity_a;
+
+    let sum_velocity_b = velocity_b + w_velocity_b;
+
+    let coefficient = (sum_velocity_a - sum_velocity_b) * normal;
+
+    let lambda_n = -coefficient * mass_effective;
+
+    normal * lambda_n
 }
