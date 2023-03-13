@@ -20,17 +20,20 @@ struct Model {
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
-    let wall_start_point = (-500., -300.);
+    const height: f32 = 300.;
 
     let wall_bottom = Line::new((-500., -300.), (500., -300.));
     let meta = MetaBuilder::new(1.).is_fixed(true);
     scene.push_element(ElementBuilder::new(wall_bottom, meta.clone()));
 
-    let wall_right = Line::new((500., -300.), (500., 600.));
+    let wall_right = Line::new((500., -300.), (500., height));
     scene.push_element(ElementBuilder::new(wall_right, meta.clone()));
 
-    let wall_left = Line::new((-500., -300.), (-500., 600.));
-    scene.push_element(ElementBuilder::new(wall_left, meta));
+    let wall_left = Line::new((-500., -300.), (-500., height));
+    scene.push_element(ElementBuilder::new(wall_left, meta.clone()));
+
+    let wall_top = Line::new((-500., height), (500., height));
+    scene.push_element(ElementBuilder::new(wall_top, meta));
 
     let ball: Element = ElementBuilder::new(
         ((-400., -100.), 60.),
