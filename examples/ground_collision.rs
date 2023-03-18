@@ -268,30 +268,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
         //     .end(vec2(v.x() * 100., v.y() * 100.));
     }
 
-    // make_ellipse(GREEN, (57.501812, -25.667896).into(), 3.);
-
-    // make_ellipse(GREEN, (50.0, -30.0).into(), 3.);
-
-    make_ellipse(GREEN, (50.0, -9.469273).into(), 3.);
-    make_ellipse(GREEN, (41.312607, 8.54542).into(), 3.);
-
-    // make_ellipse(GREEN, (-28.784435, -32.161827).into(), 3.);
-
-    // make_ellipse(GREEN, (-28.784435, -26.0).into(), 3.);
-
-    // make_ellipse(GREEN, (59.232204, -24.669693).into(), 3.);
-    // make_ellipse(GREEN, (50.0, -30.).into(), 3.);
-
-    //  contact_point_a: Point {
-
-    //     x: -28.784435,
-    //     y: -32.161827,
-    // },
-    // contact_point_b: Point {
-    //     x: -28.784435,
-    //     y: -26.0,
-    // },
-
     draw.to_frame(app, &frame).unwrap();
 }
 
