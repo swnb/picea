@@ -1,14 +1,14 @@
 pub mod collision;
 pub mod force;
 
-use std::{ops::Deref, rc::Rc};
+use std::ops::Deref;
 
-use crate::math::vector::{Vector, Vector3};
-
-use self::{
-    collision::CollisionInfo,
-    force::{Force, ForceGroup},
+use crate::{
+    math::{vector::Vector, CommonNum},
+    shape::Shape,
 };
+
+use self::force::{Force, ForceGroup};
 
 pub type Mass = f32;
 
@@ -19,16 +19,14 @@ pub type Speed = Vector;
 #[derive(Clone)]
 pub struct Meta {
     force_group: ForceGroup,
-    velocity: Speed,
+    pre_velocity: Speed,
+    stashed_velocity: Speed,
     mass: ValueWithInv<Mass>,
-    // mass: Mass,
-    // inv_mass: Mass,
     moment_of_inertia: ValueWithInv<Mass>,
-    // inv_moment_of_inertia: Mass,
-    angular_velocity: f32,
-    angular: f32,
+    pre_angular_velocity: CommonNum,
+    stashed_angular_velocity: CommonNum,
+    angular: CommonNum,
     is_fixed: bool,
-    collision_infos: Vec<Rc<CollisionInfo>>,
     // TODO 移除 collision
     is_collision: bool,
     is_transparent: bool,
@@ -89,11 +87,11 @@ impl_value_with_inv!(f32, f64);
 
 impl Meta {
     pub fn velocity(&self) -> Speed {
-        self.velocity
+        self.stashed_velocity
     }
 
     pub fn set_velocity(&mut self, mut reducer: impl FnMut(Speed) -> Speed) -> &mut Self {
-        self.velocity = reducer(self.velocity);
+        self.stashed_velocity = reducer(self.stashed_velocity);
         self
     }
 
@@ -105,6 +103,7 @@ impl Meta {
         &mut self.force_group
     }
 
+    // TODO remove this because of fixed
     pub fn mass(&self) -> Mass {
         *self.mass
     }
@@ -119,11 +118,11 @@ impl Meta {
     }
 
     pub fn angular_velocity(&self) -> f32 {
-        self.angular_velocity
+        self.stashed_angular_velocity
     }
 
     pub fn set_angular_velocity(&mut self, mut reducer: impl FnMut(f32) -> f32) -> &mut Self {
-        self.angular_velocity = reducer(self.angular_velocity);
+        self.stashed_angular_velocity = reducer(self.stashed_angular_velocity);
         self
     }
 
@@ -136,17 +135,7 @@ impl Meta {
         self
     }
 
-    pub fn collision_infos(&self) -> impl Iterator<Item = &CollisionInfo> {
-        self.collision_infos.iter().map(|info| &**info)
-    }
-
-    pub fn set_collision_infos(&mut self, info: Rc<CollisionInfo>) -> &mut Self {
-        // TODO refactor
-        self.collision_infos.clear();
-        self.collision_infos.push(info);
-        self
-    }
-
+    // TODO remove this because of fixed
     pub fn moment_of_inertia(&self) -> Mass {
         *self.moment_of_inertia
     }
@@ -189,13 +178,41 @@ impl Meta {
         self
     }
 
-    pub fn compute_mass_eff(&self, normal: Vector, r: Vector) -> f32 {
-        const C: f32 = 0.9;
+    pub fn apply_impulse(&mut self, lambda: CommonNum, normal: Vector, r: Vector) {
+        // can't apply impulse to element when element fixed
+        if self.is_fixed() {
+            return;
+        }
 
-        let r: Vector3<f32> = r.into();
+        let inv_mass = self.inv_mass();
 
-        C * (self.inv_mass() + (r ^ normal.into()).z().powf(2.) * self.inv_moment_of_inertia())
-            .recip()
+        self.set_velocity(|pre_velocity| pre_velocity + normal * lambda * inv_mass);
+
+        let inv_moment_of_inertia = self.inv_moment_of_inertia();
+
+        self.set_angular_velocity(|pre_angular_velocity| {
+            pre_angular_velocity + (r ^ normal) * lambda * inv_moment_of_inertia
+        });
+    }
+
+    // TODO remove this code
+    // pub fn compute_mass_eff(&self, normal: Vector, r: Vector) -> f32 {
+    //     const C: f32 = 0.9;
+
+    //     let r: Vector3<f32> = r.into();
+
+    //     C * (self.inv_mass() + (r ^ normal.into()).z().powf(2.) * self.inv_moment_of_inertia())
+    //         .recip()
+    // }
+
+    // update element position by velocity and angular_velocity
+    pub fn sync_position_by_meta_update(&mut self, delta_time: CommonNum) -> (Vector, CommonNum) {
+        let s = (self.pre_velocity * 0.5 + self.stashed_velocity * 0.5) * delta_time;
+        let angular =
+            (self.stashed_angular_velocity * 0.5 + self.pre_angular_velocity * 0.5) * delta_time;
+        self.pre_velocity = self.stashed_velocity;
+        self.pre_angular_velocity = self.stashed_angular_velocity;
+        (s, angular)
     }
 
     pub fn compute_kinetic_energy(&self) -> f32 {
@@ -215,7 +232,9 @@ pub struct MetaBuilder {
 }
 
 impl From<MetaBuilder> for Meta {
-    fn from(builder: MetaBuilder) -> Self {
+    fn from(mut builder: MetaBuilder) -> Self {
+        builder.meta.pre_velocity = builder.meta.stashed_velocity;
+        builder.meta.pre_angular_velocity = builder.meta.stashed_angular_velocity;
         builder.meta
     }
 }
@@ -229,13 +248,14 @@ impl MetaBuilder {
         Self {
             meta: Meta {
                 force_group: ForceGroup::new(),
-                velocity: (0., 0.).into(),
+                pre_velocity: (0., 0.).into(),
+                stashed_velocity: (0., 0.).into(),
                 mass: mass.into(),
                 angular: 0.,
-                angular_velocity: 0.,
+                pre_angular_velocity: 0.,
+                stashed_angular_velocity: 0.,
                 moment_of_inertia: (0.).into(),
                 is_fixed: false,
-                collision_infos: vec![],
                 is_collision: false,
                 is_transparent: false,
             },
@@ -250,7 +270,7 @@ impl MetaBuilder {
     }
 
     pub fn velocity(mut self, velocity: impl Into<Speed>) -> Self {
-        self.meta.velocity = velocity.into();
+        self.meta.stashed_velocity = velocity.into();
         self
     }
 
@@ -260,7 +280,7 @@ impl MetaBuilder {
     }
 
     pub fn angular_velocity(mut self, av: f32) -> Self {
-        self.meta.angular_velocity = av;
+        self.meta.stashed_angular_velocity = av;
         self
     }
 

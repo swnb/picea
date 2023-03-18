@@ -4,6 +4,8 @@ use crate::{
 };
 
 pub mod circle;
+pub mod convex;
+pub mod line;
 pub mod polygon;
 mod utils;
 

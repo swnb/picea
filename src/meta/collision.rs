@@ -1,18 +1,14 @@
-use crate::math::{point::Point, vector::Vector};
-
-#[derive(Clone, Debug)]
-pub enum ContactType {
-    Point(Point),
-    Edge([Point; 2]),
-}
+use crate::{
+    algo::collision::ContactPointPair,
+    math::{point::Point, vector::Vector, CommonNum},
+};
 
 #[derive(Debug)]
 pub struct CollisionInfo {
     pub(crate) collision_element_id_pair: (u32, u32),
-    pub(crate) contact_a: ContactType,
-    pub(crate) contact_b: ContactType,
-    pub(crate) depth: f32,
-    pub(crate) normal: Vector,
+    // TODO contact_point_pair should be vector, avoid compute multi times
+    pub(crate) contact_point_pair: ContactPointPair,
+    pub(crate) mass_effective: Option<CommonNum>,
 }
 
 impl CollisionInfo {
@@ -24,33 +20,31 @@ impl CollisionInfo {
         self.collision_element_id_pair.1
     }
 
-    pub fn contact_type(&self, id: u32) -> &ContactType {
-        if self.element_id_a() == id {
-            self.contact_a()
-        } else if self.element_id_b() == id {
-            self.contact_b()
-        } else {
-            unreachable!()
-        }
+    pub fn contact_point_a(&self) -> &Point {
+        &self.contact_point_pair.contact_point_a
     }
 
-    pub fn contact_a(&self) -> &ContactType {
-        &self.contact_a
+    pub fn contact_point_b(&self) -> &Point {
+        &self.contact_point_pair.contact_point_b
     }
 
-    pub fn contact_b(&self) -> &ContactType {
-        &self.contact_b
-    }
-
-    pub fn contact_points(&self) -> (&ContactType, &ContactType) {
-        (&self.contact_a, &self.contact_b)
+    pub fn contact_points(&self) -> (&Point, &Point) {
+        (self.contact_point_a(), self.contact_point_b())
     }
 
     pub fn depth(&self) -> f32 {
-        self.depth
+        self.contact_point_pair.depth
     }
 
     pub fn normal(&self) -> Vector {
-        self.normal
+        self.contact_point_pair.normal_toward_a
+    }
+
+    pub fn mass_effective(&self) -> Option<CommonNum> {
+        self.mass_effective
+    }
+
+    pub fn set_mass_effective(&mut self, mass_effective: CommonNum) {
+        self.mass_effective = Some(mass_effective)
     }
 }

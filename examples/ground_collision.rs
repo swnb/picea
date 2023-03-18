@@ -1,9 +1,11 @@
 use nannou::{prelude::*, winit::event};
 use picea::{
     element::{Element, ElementBuilder},
-    math::{edge::Edge, point::Point, vector::Vector},
+    math::{edge::Edge, point::Point},
     meta::MetaBuilder,
     scene::Scene,
+    shape::{convex::ConvexPolygon, line::Line},
+    tools::collision_view::CollisionStatusViewer,
 };
 use std::time::SystemTime;
 
@@ -11,29 +13,37 @@ struct Model {
     scene: Scene,
     timer: SystemTime,
     collision_info: Option<Vec<[Point; 2]>>,
-    addition_render_line: Vec<[Point; 2]>,
-    addition_render_dot: Vec<Point>,
+    collision_viewer: CollisionStatusViewer,
     is_paused: bool,
 }
 
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
-    let ground: Element = ElementBuilder::new(
-        (-500., -300., 1000., 100.),
-        MetaBuilder::new(1.).is_fixed(true),
-    )
-    .into();
+    const height: f32 = 30.;
 
-    scene.push_element(ground);
+    let wall_bottom = Line::new((-50., -30.), (50., -30.));
+    let wall_bottom = (-50., -30., 100., 4.);
+    let meta = MetaBuilder::new(100.).is_fixed(true);
+    let id = scene.push_element(ElementBuilder::new(wall_bottom, meta.clone()));
+    println!("{id} wall_bottom");
 
-    let ball: Element = ElementBuilder::new(
-        ((-400., -100.), 60.),
-        MetaBuilder::new(1.).force("gravity", (0., -10.)),
-    )
-    .into();
+    let wall_right = Line::new((50., -30.), (50., height));
+    let wall_right = (50., -30., 4., 100.);
+    let id = scene.push_element(ElementBuilder::new(wall_right, meta.clone()));
+    println!("{id} wall_right");
 
-    scene.push_element(ball);
+    // let wall_left = Line::new((-50., -30.), (-50., height));
+    // let id = scene.push_element(ElementBuilder::new(wall_left, meta.clone()));
+    // println!("{id} wall_left ");
+
+    // let ball: Element = ElementBuilder::new(
+    //     ((-40., -10.), 6.),
+    //     MetaBuilder::new(10.).force("gravity", (0., -10.)),
+    // )
+    // .into();
+
+    // scene.push_element(ball);
 
     // let element = ElementBuilder::new(
     //     ((200., 200.), 100.),
@@ -42,50 +52,68 @@ fn create_model(_app: &App) -> Model {
     //         .force("gravity", (0., -10.)), // .is_fixed(true),
     // );
 
-    // let element: Element = element.into();
-
     // scene.push_element(element);
 
     let element = ElementBuilder::new(
-        (7, (50., 200.), 100.),
-        MetaBuilder::new(1.)
-            .angular(-std::f32::consts::FRAC_PI_8)
-            .force("gravity", (0., -10.)), // .is_fixed(true),
+        (7, (-30., 20.), 20.),
+        MetaBuilder::new(10.)
+            .angular(-f32::FRAC_PI_8())
+            // .angular_velocity(-std::f32::consts::FRAC_PI_8)
+            .force("gravity", (10., -10. * 10.)), // .is_fixed(true),
     );
 
-    // let element = ElementBuilder::new(
-    //     (7, (50., 200.), 100.),
-    //     MetaBuilder::new(1.)
-    //         .angular(-std::f32::consts::FRAC_PI_8)
-    //         .force("gravity", (0., -10.)), // .is_fixed(true),
-    // );
-
-    let element: Element = element.into();
-
-    let center_point = element.shape().center_point();
-
-    // scene.push_element(element);
+    let id = scene.push_element(element);
+    println!("{id} element left");
 
     let element = ElementBuilder::new(
-        (7, (50., 400.), 100.),
-        MetaBuilder::new(1.)
-            .angular(-std::f32::consts::FRAC_PI_8)
-            .force("gravity", (0., -10.)), // .is_fixed(true),
+        (6, (10., 20.), 20.),
+        MetaBuilder::new(10.)
+            .angular(-f32::FRAC_PI_8())
+            // .angular_velocity(-std::f32::consts::FRAC_PI_8)
+            .force("gravity", (10., -10. * 10.)), // .is_fixed(true),
     );
 
-    let element: Element = element.into();
-
-    let center_point = element.shape().center_point();
-
-    // scene.push_element(element);
+    let id = scene.push_element(element);
+    println!("{id} element right");
 
     Model {
         scene,
         timer: SystemTime::now(),
         collision_info: None,
-        addition_render_line: vec![],
-        addition_render_dot: vec![center_point],
         is_paused: false,
+        collision_viewer: Default::default(),
+    }
+}
+
+fn create_model2(_app: &App) -> Model {
+    let mut scene = Scene::new();
+
+    let a = ConvexPolygon::new(vec![
+        (21.367706, 10.029329).into(),
+        (41.312607, 8.545427).into(),
+        (50.0, -9.469273).into(),
+        (38.74245, -26.000067).into(),
+        (18.797558, -24.516144).into(),
+        (10.110172, -6.5015135).into(),
+    ]);
+
+    let b = ConvexPolygon::new(vec![
+        (50.0, -30.0).into(),
+        (54.0, -30.0).into(),
+        (54.0, 70.0).into(),
+        (50.0, 70.0).into(),
+    ]);
+
+    scene.push_element(ElementBuilder::new(a, MetaBuilder::new(10.).is_fixed(true)));
+
+    scene.push_element(ElementBuilder::new(b, MetaBuilder::new(10.).is_fixed(true)));
+
+    Model {
+        scene,
+        timer: SystemTime::now(),
+        collision_info: None,
+        is_paused: false,
+        collision_viewer: Default::default(),
     }
 }
 
@@ -105,86 +133,21 @@ fn event(app: &App, model: &mut Model, event: Event) {
             _ => {}
         },
         Event::Update(_) => {
+            model.collision_viewer.on_update(&mut model.scene);
+
             let now = SystemTime::now();
 
             let duration = now.duration_since(model.timer).unwrap();
 
             model.timer = now;
 
-            if model.collision_info.is_none() {
-                // return;
-            }
-
-            let ground = model.scene.get_element(1).unwrap();
-
-            let ball = model.scene.get_element(2).unwrap();
-
-            let a = ground;
-            let b = ball;
-
-            {
-                #[derive(Clone, Debug)]
-                struct MinkowskiDifferencePoint {
-                    start_point: Point,
-                    end_point: Point,
-                    vector: Vector,
-                }
-
-                impl PartialEq for MinkowskiDifferencePoint {
-                    fn eq(&self, other: &Self) -> bool {
-                        self.vector == other.vector
-                    }
-                }
-
-                impl From<(Point, Point)> for MinkowskiDifferencePoint {
-                    fn from((s, e): (Point, Point)) -> Self {
-                        Self {
-                            start_point: s,
-                            end_point: e,
-                            vector: (s, e).into(),
-                        }
-                    }
-                }
-
-                let compute_support_point = |reference_vector: Vector| -> MinkowskiDifferencePoint {
-                    let (_, max_point_a) = a.shape().projection_on_vector(&reference_vector);
-                    let (_, max_point_b) = b.shape().projection_on_vector(&-reference_vector);
-                    (max_point_b, max_point_a).into()
-                };
-
-                let center_point_a = a.center_point();
-                let center_point_b = b.center_point();
-
-                let first_approximation_vector: Vector = (center_point_a, center_point_b).into();
-
-                let gjk_point = compute_support_point(first_approximation_vector);
-                model.addition_render_line = vec![];
-
-                model
-                    .addition_render_line
-                    .push([gjk_point.start_point, gjk_point.end_point]);
-
-                model
-                    .addition_render_line
-                    .push([a.center_point(), b.center_point()]);
-            }
-
             if model.is_paused {
                 return;
             }
 
-            model.addition_render_dot = vec![];
-            model.scene.elements_iter().for_each(|element| {
-                model
-                    .addition_render_dot
-                    .push(element.shape().center_point())
-            });
-
             model
                 .scene
-                .update_elements_by_duration(duration.as_secs_f32(), |collision_info| {
-                    model.collision_info = Some(collision_info);
-                })
+                .update_elements_by_duration(duration.as_secs_f32())
         }
         _ => {}
     }
@@ -195,84 +158,141 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     let draw = app.draw();
 
-    draw.line()
-        .color(WHITE)
-        .start(vec2(-1000., 0.))
-        .end(vec2(1000., 0.));
+    let scale = 5.;
 
-    draw.line()
-        .color(WHITE)
-        .start(vec2(0., -1000.))
-        .end(vec2(0., 1000.));
-    draw.to_frame(app, &frame).unwrap();
+    let make_line = |color: rgb::Srgb<u8>, start_point: Point, end_point: Point| {
+        draw.line()
+            .color(color)
+            .start(vec2(start_point.x() * scale, start_point.y() * scale))
+            .end(vec2(end_point.x() * scale, end_point.y() * scale));
+    };
+
+    let make_ellipse = |color: rgb::Srgb<u8>, center_point: Point, radius: f32| {
+        draw.ellipse()
+            .color(color)
+            .x_y(center_point.x() * scale, center_point.y() * scale)
+            .width(radius * 2. * scale)
+            .height(radius * 2. * scale);
+    };
+
+    make_line(WHITE, (-1000., 0.).into(), (1000., 0.).into());
+    make_line(WHITE, (0., -1000.).into(), (0., 1000.).into());
 
     model.scene.elements_iter().for_each(|element| {
-        let draw = app.draw();
+        element
+            .shape()
+            .edge_iter()
+            .take(1)
+            .for_each(|edge| match edge {
+                Edge::Line {
+                    start_point,
+                    end_point,
+                } => {
+                    make_line(WHITE, element.center_point(), *start_point);
+                }
+                Edge::Circle {
+                    center_point,
+                    radius,
+                } => {
+                    // draw.ellipse()
+                    //     .color(WHITE)
+                    //     .x_y(center_point.x(), center_point.y())
+                    //     .width(radius * 2.)
+                    //     .height(radius * 2.);
+                }
+                _ => unimplemented!(),
+            });
 
         element.shape().edge_iter().for_each(|edge| match edge {
             Edge::Line {
                 start_point,
                 end_point,
-            } => {
-                draw.line()
-                    .color(WHITE)
-                    .start(vec2(start_point.x(), start_point.y()))
-                    .end(vec2(end_point.x(), end_point.y()));
-            }
+            } => make_line(WHITE, *start_point, *end_point),
             Edge::Circle {
                 center_point,
                 radius,
             } => {
-                draw.ellipse()
-                    .color(WHITE)
-                    .x_y(center_point.x(), center_point.y())
-                    .width(radius * 2.)
-                    .height(radius * 2.);
+                make_ellipse(WHITE, center_point, radius);
             }
             _ => unimplemented!(),
         });
-
-        draw.to_frame(app, &frame).unwrap();
     });
 
     if let Some(collision_info) = &model.collision_info {
-        // frame.clear(BLACK);
         collision_info.iter().for_each(|point| {
-            let draw = app.draw();
-
-            // dbg!(point[0].x(), point[0].y());
-            draw.line()
-                .weight(2.)
-                .color(YELLOW)
-                .start(vec2(point[0].x(), point[0].y()))
-                .end(vec2(point[1].x(), point[1].y()));
-            draw.to_frame(app, &frame).unwrap();
+            make_line(YELLOW, point[0], point[1]);
         });
     }
 
-    model.addition_render_line.iter().for_each(|point| {
-        let draw = app.draw();
+    model
+        .collision_viewer
+        .get_minkowski_different_points()
+        .iter()
+        .for_each(|points| {
+            for i in 0..points.len() {
+                let p1 = points[i];
+                let p2 = if i + 1 >= points.len() {
+                    points[0]
+                } else {
+                    points[i + 1]
+                };
 
-        dbg!(point[0].x(), point[0].y());
-        dbg!(point[1].x(), point[1].y());
+                make_line(YELLOW, p1, p2);
+            }
+        });
 
-        draw.line()
-            .weight(2.)
-            .color(YELLOW)
-            .start(vec2(point[0].x(), point[0].y()))
-            .end(vec2(point[1].x(), point[1].y()));
-        draw.to_frame(app, &frame).unwrap();
-    });
+    let points = model.collision_viewer.get_all_minkowski_different_points();
 
-    model.addition_render_dot.iter().for_each(|point| {
-        let draw = app.draw();
+    for i in 0..points.len() {
+        let p1 = points[i];
+        let p2 = points[(i + 1) % points.len()];
+        make_line(BLUE, p1, p2);
+    }
 
-        draw.ellipse()
-            .x_y(point.x(), point.y())
-            .radius(2.)
-            .color(YELLOW);
-        draw.to_frame(app, &frame).unwrap();
-    });
+    for info in model.collision_viewer.get_collision_infos() {
+        let point = info.point_a();
+
+        make_ellipse(RED, point, 6. / scale);
+
+        let point = info.point_b();
+
+        make_ellipse(ORANGE, point, 6. / scale);
+
+        let v = info.normal_toward_a();
+
+        make_line(RED, (0., 0.).into(), (v * 10f32).to_point());
+        // draw.line()
+        //     .weight(2.)
+        //     .color(RED)
+        //     .start(vec2(0., 0.))
+        //     .end(vec2(v.x() * 100., v.y() * 100.));
+    }
+
+    // make_ellipse(GREEN, (57.501812, -25.667896).into(), 3.);
+
+    // make_ellipse(GREEN, (50.0, -30.0).into(), 3.);
+
+    make_ellipse(GREEN, (50.0, -9.469273).into(), 3.);
+    make_ellipse(GREEN, (41.312607, 8.54542).into(), 3.);
+
+    // make_ellipse(GREEN, (-28.784435, -32.161827).into(), 3.);
+
+    // make_ellipse(GREEN, (-28.784435, -26.0).into(), 3.);
+
+    // make_ellipse(GREEN, (59.232204, -24.669693).into(), 3.);
+    // make_ellipse(GREEN, (50.0, -30.).into(), 3.);
+
+    //  contact_point_a: Point {
+
+    //     x: -28.784435,
+    //     y: -32.161827,
+    // },
+    // contact_point_b: Point {
+    //     x: -28.784435,
+    //     y: -26.0,
+    // },
+
+    draw.to_frame(app, &frame).unwrap();
 }
 
 fn main() {

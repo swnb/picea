@@ -14,16 +14,28 @@ pub fn compute_polygon_center_point<'a>(
     (sum * edge_count.recip()).to_point()
 }
 
+pub fn compute_convex_center_point<'a>(
+    point_iter: impl Iterator<Item = &'a Point>,
+    edge_count: f32,
+) -> Point {
+    let mut result = (0., 0.).into();
+    for &point in point_iter {
+        result += point.to_vector() * edge_count.recip();
+    }
+    result
+}
+
 pub fn projection_polygon_on_vector<'a>(
     point_iter: impl Iterator<Item = &'a Point>,
     vector: Vector,
 ) -> (Point, Point) {
+    let vector = vector.normalize();
     let mut min = f32::MAX;
     let mut min_point = (0., 0.).into();
     let mut max = f32::MIN;
     let mut max_point = (0., 0.).into();
     point_iter.for_each(|&cur| {
-        let size = cur.to_vector() >> vector;
+        let size = cur.to_vector() * vector;
         if size < min {
             min = size;
             min_point = cur;

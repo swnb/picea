@@ -120,7 +120,7 @@ impl WebScene {
     }
 
     pub fn tick(&mut self, delta_t: f32) {
-        self.scene.update_elements_by_duration(delta_t, |_| {});
+        self.scene.update_elements_by_duration(delta_t);
     }
 
     pub fn for_each_element(&self, callback: Function) {
