@@ -14,7 +14,7 @@ impl<T: ElementShape + 'static> From<T> for Box<dyn ElementShape> {
     }
 }
 
-// create react
+// create rect
 impl From<(f32, f32, f32, f32)> for Box<dyn ElementShape> {
     fn from((x, y, width, height): (f32, f32, f32, f32)) -> Self {
         Rect::new(x, y, width, height).into()

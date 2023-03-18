@@ -31,16 +31,19 @@ fn create_model(_app: &App) -> Model {
 
     scene.push_element(line);
 
+    let line2 = ElementBuilder::new(
+        Line::new((-500., -300.), (500., -300.)),
+        MetaBuilder::new(1.).is_transparent(true),
+    );
+
+    scene.push_element(line2);
+
     let ball = ElementBuilder::new(
         ((-400., -100.), 60.),
         MetaBuilder::new(1.).is_transparent(true),
     );
 
     let ball: Element = ball.into();
-
-    let v: Vector = (0., 350.).into();
-
-    let result = ball.shape().projection_on_vector(&(0., 350.).into());
 
     scene.push_element(ball);
 
@@ -53,16 +56,26 @@ fn create_model(_app: &App) -> Model {
     //     meta.clone().angular(f32::PI() / 6.),
     // ));
 
-    for edge_size in 3..=6 {
-        scene.push_element(ElementBuilder::new(
-            (edge_size, (-1000. + edge_size as f32 * 200., 250.), 100.),
-            meta.clone(), // .angular(f32::PI() / 6.),
-        ));
-        scene.push_element(ElementBuilder::new(
-            (edge_size, (-1000. + edge_size as f32 * 200., -250.), 100.),
-            meta.clone(),
-        ));
-    }
+    // for edge_size in 3..=6 {
+    //     scene.push_element(ElementBuilder::new(
+    //         (edge_size, (-1000. + edge_size as f32 * 200., 250.), 100.),
+    //         meta.clone(), // .angular(f32::PI() / 6.),
+    //     ));
+    //     scene.push_element(ElementBuilder::new(
+    //         (edge_size, (-1000. + edge_size as f32 * 200., -250.), 100.),
+    //         meta.clone(),
+    //     ));
+    // }
+
+    scene.push_element(ElementBuilder::new(
+        (6, (10., 20.), 200.),
+        MetaBuilder::new(1.).angular(f32::FRAC_PI_8() / 22.), // .angular(f32::PI() / 6.),
+    ));
+
+    scene.push_element(ElementBuilder::new(
+        (250., 250., 50., 500.),
+        MetaBuilder::new(1.), // .angular(f32::PI() / 6.),
+    ));
 
     Model {
         scene,
@@ -222,25 +235,26 @@ fn view(app: &App, model: &Model, frame: Frame) {
         });
 
     for info in model.collision_viewer.get_collision_infos() {
-        info.points_a.iter().for_each(|point| {
-            draw.ellipse()
-                .x_y(point.x(), point.y())
-                .radius(6.)
-                .color(RED);
-        });
+        let point = info.point_a();
+        draw.ellipse()
+            .x_y(point.x(), point.y())
+            .radius(6.)
+            .color(RED);
 
-        info.points_b.iter().for_each(|point| {
-            draw.ellipse()
-                .x_y(point.x(), point.y())
-                .radius(6.)
-                .color(ORANGE);
-        });
+        let point = info.point_b();
+
+        draw.ellipse()
+            .x_y(point.x(), point.y())
+            .radius(6.)
+            .color(ORANGE);
+
+        let v = info.normal_toward_a();
 
         draw.line()
             .weight(2.)
             .color(RED)
             .start(vec2(0., 0.))
-            .end(vec2(info.vector.x() * 100., info.vector.y() * 100.));
+            .end(vec2(v.x() * 100., v.y() * 100.));
     }
 
     if let Some(p) = model.draggable.mouse_point() {

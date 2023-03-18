@@ -6,4 +6,5 @@ pub mod point;
 pub mod segment;
 pub mod vector;
 
+// TODO rename
 pub(crate) type CommonNum = f32;

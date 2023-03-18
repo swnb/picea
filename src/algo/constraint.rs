@@ -1,114 +1,178 @@
 use crate::{
-    algo::constraint,
+    element::Element,
     math::{
         point::Point,
         vector::{Vector, Vector3},
         CommonNum,
     },
-    meta::Meta,
+    meta::{collision::CollisionInfo, Meta},
 };
 
-pub trait Element {
-    fn translate(&mut self, vector: &Vector);
+// pub trait Element {
+//     fn translate(&mut self, vector: &Vector);
 
-    fn rotate(&mut self, deg: f32);
+//     fn rotate(&mut self, deg: f32);
 
-    fn center_point(&self) -> Point;
+//     fn center_point(&self) -> Point;
 
-    fn meta(&self) -> &Meta;
+//     fn meta(&self) -> &Meta;
 
-    fn meta_mut(&mut self) -> &mut Meta;
+//     fn meta_mut(&mut self) -> &mut Meta;
 
-    fn compute_point_velocity(&self, contact_point: Point) -> Vector;
-}
+//     fn compute_point_velocity(&self, contact_point: Point) -> Vector;
+// }
 
-pub fn update_elements_by_duration<T: Element>(element: &mut T, delta_t: f32) {
-    use std::f32::consts::TAU;
+// pub fn update_elements_by_duration<T: Element>(element: &mut T, delta_t: f32) {
+//     use std::f32::consts::TAU;
 
-    let meta = element.meta();
+//     let meta = element.meta();
 
-    let inv_m = meta.inv_mass();
+//     let inv_m = meta.inv_mass();
 
-    let force_group = meta.force_group();
-    let f = if force_group.is_empty() {
-        None
-    } else {
-        Some(force_group.sum_force())
-    };
+//     let force_group = meta.force_group();
+//     let f = if force_group.is_empty() {
+//         None
+//     } else {
+//         Some(force_group.sum_force())
+//     };
 
-    let origin_v = meta.velocity();
-    let origin_w = meta.angular_velocity();
+//     let origin_v = meta.velocity();
+//     let origin_w = meta.angular_velocity();
 
-    let a = f.map(|f| f * inv_m);
+//     let a = f.map(|f| f * inv_m);
 
-    if let Some(a) = a {
-        let inc_v = a * delta_t;
-        element.meta_mut().set_velocity(|pre_v| pre_v + inc_v);
-    }
+//     if let Some(a) = a {
+//         let inc_v = a * delta_t;
+//         element.meta_mut().set_velocity(|pre_v| pre_v + inc_v);
+//     }
 
-    compute_constraint(element, delta_t);
+//     // compute_constraint(element, delta_t);
 
-    let meta = element.meta();
+//     let meta = element.meta();
 
-    let current_v = meta.velocity();
-    let current_w = meta.angular_velocity();
+//     let current_v = meta.velocity();
+//     let current_w = meta.angular_velocity();
 
-    let deg = (current_w + (current_w - origin_w) * 0.5) * delta_t;
-    element.meta_mut().set_angular(|pre| (pre + deg) % TAU);
+//     let deg = (current_w + (current_w - origin_w) * 0.5) * delta_t;
+//     element.meta_mut().set_angular(|pre| (pre + deg) % TAU);
 
-    let delta_s = (origin_v * 0.5 + current_v * 0.5) * delta_t;
+//     let delta_s = (origin_v * 0.5 + current_v * 0.5) * delta_t;
 
-    element.translate(&delta_s);
-    element.rotate(deg);
-}
+//     element.translate(&delta_s);
+//     element.rotate(deg);
+// }
 
-pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
-    if !element.meta().is_collision() {
-        return;
-    } else {
-        element.meta_mut().mark_collision(false);
-    }
+// pub fn compute_constraint<T: Element>(element: &mut T, delta_t: f32) {
+//     if !element.meta().is_collision() {
+//         return;
+//     } else {
+//         element.meta_mut().mark_collision(false);
+//     }
 
-    let center_point = element.center_point();
+//     let center_point = element.center_point();
 
-    let inv_mass = element.meta().inv_mass();
+//     let inv_mass = element.meta().inv_mass();
 
-    let Some(collision_info) = element.meta().collision_infos().next() else {
-        return
-    };
+//     let Some(collision_info) = element.meta().collision_infos().next() else {
+//         return
+//     };
 
-    let contact_point = collision_info.contact_point;
+//     let contact_point = collision_info.contact_point;
 
-    let r: Vector = (center_point, contact_point).into();
-    let mut normal = collision_info.normal;
+//     let r: Vector = (center_point, contact_point).into();
+//     let mut normal = collision_info.normal;
 
-    if normal * r > 0. {
-        normal = -normal
-    }
+//     if normal * r > 0. {
+//         normal = -normal
+//     }
 
-    let mass_eff = element.meta().compute_mass_eff(normal, r);
-    let inv_moment_of_inertia = element.meta().inv_moment_of_inertia();
-    let depth = collision_info.depth;
+//     let mass_eff = element.meta().compute_mass_eff(normal, r);
+//     let inv_moment_of_inertia = element.meta().inv_moment_of_inertia();
+//     let depth = collision_info.depth;
 
-    let lambda = mass_eff;
+//     let lambda = mass_eff;
 
-    // let B 0..1 ;let h = t; let b = B/h * depth
-    const B: f32 = 0.1;
+//     // let B 0..1 ;let h = t; let b = B/h * depth
+//     const B: f32 = 0.1;
 
-    let v = element.compute_point_velocity(contact_point);
+//     let v = element.compute_point_velocity(contact_point);
 
-    let velocity_reducer = move |pre_velocity: Vector| {
-        pre_velocity + normal * ((v * -normal + B * depth * delta_t.recip()) * lambda * inv_mass)
-    };
+//     // let velocity_reducer = move |pre_velocity: Vector| {
+//     //     pre_velocity + normal * ((v * -normal + B * depth * delta_t.recip()) * lambda * inv_mass)
+//     // };
 
-    let angular_velocity_reducer = move |pre_angular_velocity| {
-        pre_angular_velocity - (r ^ normal) * lambda * inv_moment_of_inertia
-    };
+//     // let angular_velocity_reducer = move |pre_angular_velocity| {
+//     //     pre_angular_velocity - (r ^ normal) * lambda * inv_moment_of_inertia
+//     // };
 
-    element
-        .meta_mut()
-        .set_velocity(velocity_reducer)
-        .set_angular_velocity(angular_velocity_reducer);
+//     // element
+//     //     .meta_mut()
+//     //     .set_velocity(velocity_reducer)
+//     //     .set_angular_velocity(angular_velocity_reducer);
+// }
+
+pub(crate) fn constraint<'a, 'b, M, F>(
+    contact_manifold: M,
+    mut query_elements: F,
+    delta_time: CommonNum,
+    should_use_bias: bool,
+) where
+    M: Iterator<Item = &'b mut CollisionInfo>,
+    F: FnMut((u32, u32)) -> Option<(&'a mut Element, &'a mut Element)>,
+{
+    contact_manifold
+        .filter_map(|collision_info| {
+            query_elements(collision_info.collision_element_id_pair)
+                .map(|elements| (elements, collision_info))
+        })
+        .filter(|((e_a, e_b), _)| !(e_a.meta().is_fixed() && e_b.meta().is_fixed()))
+        .for_each(|((element_a, element_b), collision_info)| {
+            let contact_info = ContactInfo {
+                contact_point_a: *collision_info.contact_point_a(),
+                contact_point_b: *collision_info.contact_point_b(),
+                normal: collision_info.normal(),
+                depth: collision_info.depth(),
+            };
+
+            let mass_effective = match collision_info.mass_effective() {
+                Some(v) => v,
+                None => {
+                    let mass_effective =
+                        compute_mass_effective(element_a, element_b, &contact_info);
+                    collision_info.set_mass_effective(mass_effective);
+                    mass_effective
+                }
+            };
+
+            let lambda = compute_impulse(
+                element_a,
+                element_b,
+                &contact_info,
+                mass_effective,
+                delta_time,
+                should_use_bias,
+            );
+
+            // let impulse_to_a = contact_info.normal * lambda;
+
+            // let impulse_to_b = -impulse_to_a;
+
+            let center_point_a = element_a.center_point();
+
+            element_a.meta_mut().apply_impulse(
+                lambda,
+                contact_info.normal,
+                (center_point_a, *collision_info.contact_point_a()).into(),
+            );
+
+            let center_point_b = element_b.center_point();
+
+            element_b.meta_mut().apply_impulse(
+                lambda,
+                -contact_info.normal,
+                (center_point_b, *collision_info.contact_point_b()).into(),
+            );
+        });
 }
 
 /**
@@ -138,11 +202,12 @@ fn sequential_impulse() {
     todo!()
 }
 
+#[derive(Debug)]
 pub(crate) struct ContactInfo {
-    normal: Vector,
-    depth: f32,
     contact_point_a: Point,
     contact_point_b: Point,
+    normal: Vector,
+    depth: f32,
 }
 
 // TODO shrink this trait
@@ -163,29 +228,29 @@ pub trait ConstraintObject {
 fn compute_mass_effective<Obj: ConstraintObject>(
     object_a: &mut Obj,
     object_b: &mut Obj,
-    contact_infos: &ContactInfo,
+    contact_info: &ContactInfo,
 ) -> CommonNum {
-    const Cr: CommonNum = 0.9; // loss energy when collide happen
-
     let center_point_a = object_a.center_point();
     let center_point_b = object_b.center_point();
 
-    let r_a: Vector = (center_point_a, contact_infos.contact_point_a).into();
-    let r_b: Vector = (center_point_b, contact_infos.contact_point_b).into();
+    let r_a: Vector = (center_point_a, contact_info.contact_point_a).into();
+    let r_b: Vector = (center_point_b, contact_info.contact_point_b).into();
 
     let inv_moment_of_inertia_a = object_a.meta().inv_moment_of_inertia();
     let inv_moment_of_inertia_b = object_b.meta().inv_moment_of_inertia();
 
     let inv_mass_a = object_a.meta().inv_mass();
+
     let inv_mass_b = object_b.meta().inv_mass();
 
-    let normal = contact_infos.normal;
+    let normal = contact_info.normal;
 
     // compute and mass_eff and lambda_n
     let equation_part1 = inv_mass_a;
     let equation_part2 = inv_mass_b;
-    let equation_part3 = ((normal * (r_a ^ normal)) ^ r_a) * inv_moment_of_inertia_a;
-    let equation_part4 = ((normal * (r_b ^ normal)) ^ r_b) * inv_moment_of_inertia_b;
+    // let equation_part3 = ((normal * (r_a ^ normal)) ^ r_a) * inv_moment_of_inertia_a;
+    let equation_part3 = (r_a ^ normal) * (r_a ^ normal) * inv_moment_of_inertia_a;
+    let equation_part4 = (r_b ^ normal) * (r_b ^ normal) * inv_moment_of_inertia_b;
 
     (equation_part1 + equation_part2 + equation_part3 + equation_part4).recip()
 }
@@ -193,10 +258,13 @@ fn compute_mass_effective<Obj: ConstraintObject>(
 fn compute_impulse<Obj: ConstraintObject>(
     object_a: &mut Obj,
     object_b: &mut Obj,
-    contact_infos: &ContactInfo,
+    contact_info: &ContactInfo,
     mass_effective: CommonNum,
-) -> Vector {
-    let normal = contact_infos.normal;
+    delta_time: CommonNum,
+    should_use_bias: bool,
+) -> CommonNum {
+    let normal = contact_info.normal;
+    let depth = contact_info.depth;
 
     let velocity_a = object_a.meta().velocity();
     let velocity_b = object_b.meta().velocity();
@@ -207,8 +275,8 @@ fn compute_impulse<Obj: ConstraintObject>(
     let center_point_a = object_a.center_point();
     let center_point_b = object_b.center_point();
 
-    let r_a: Vector = (center_point_a, contact_infos.contact_point_a).into();
-    let r_b: Vector = (center_point_b, contact_infos.contact_point_b).into();
+    let r_a: Vector = (center_point_a, contact_info.contact_point_a).into();
+    let r_b: Vector = (center_point_b, contact_info.contact_point_b).into();
 
     let w_a = Vector3::from((0., 0., w_a));
     let r_a = Vector3::from(r_a);
@@ -222,9 +290,26 @@ fn compute_impulse<Obj: ConstraintObject>(
 
     let sum_velocity_b = velocity_b + w_velocity_b;
 
-    let coefficient = (sum_velocity_a - sum_velocity_b) * normal;
+    // TODO set B into context
+    const B: CommonNum = 0.9;
 
-    let lambda_n = -coefficient * mass_effective;
+    const Cr: CommonNum = 1.0;
 
-    normal * lambda_n
+    let bias = if should_use_bias {
+        B * depth * delta_time.recip()
+    } else {
+        0.
+    };
+
+    let coefficient = (sum_velocity_a - sum_velocity_b) * -normal * (1. + Cr) + bias;
+
+    debug_assert!(depth.is_sign_positive());
+
+    let lambda_n = coefficient * mass_effective;
+
+    lambda_n
+}
+
+pub struct Solver {
+    bias: CommonNum,
 }

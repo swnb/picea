@@ -1,15 +1,18 @@
 use crate::{
-    algo::collision::detect_collision,
+    algo::{
+        collision::detect_collision,
+        constraint::{constraint, ConstraintObject},
+    },
     element::{store::ElementStore, Element},
-    math::point::Point,
-    meta::collision::ContactType,
+    math::CommonNum,
+    meta::collision::CollisionInfo,
 };
-use std::rc::Rc;
 
 #[derive(Default)]
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
+    contact_manifolds: Vec<CollisionInfo>,
 }
 
 type ID = u32;
@@ -63,22 +66,49 @@ impl Scene {
     }
 
     pub fn update_elements_by_duration(&mut self, delta_time: f32) {
-        self.element_store
-            .iter_mut()
-            .for_each(|element| element.tick(delta_time));
+        // self.element_store
+        //     .iter_mut()
+        //     .for_each(|element| element.tick(delta_time));
 
-        detect_collision(&mut self.element_store, |a, b, infos| {
-            a.meta_mut().mark_collision(true);
-
-            b.meta_mut().mark_collision(true);
-
-            // TODO maybe just combine two contact info
-            a.meta_mut()
-                .set_collision_infos(infos.iter().map(|info| info.0.clone()));
-
-            b.meta_mut()
-                .set_collision_infos(infos.into_iter().map(|info| info.1));
+        self.element_store.iter_mut().for_each(|element| {
+            let force = element.meta().force_group().sum_force();
+            let a = force * element.meta().inv_mass();
+            element.meta_mut().set_velocity(|pre| pre + a * delta_time);
         });
+
+        self.contact_manifolds.clear();
+
+        detect_collision(&mut self.element_store, |a, b, contact_point_pairs| {
+            // TODO remove mark_collision
+            // a.meta_mut().mark_collision(true);
+            // b.meta_mut().mark_collision(true);
+
+            let collision_infos =
+                contact_point_pairs
+                    .into_iter()
+                    .map(|contact_point_pair| CollisionInfo {
+                        collision_element_id_pair: (a.id(), b.id()),
+                        contact_point_pair,
+                        mass_effective: None,
+                    });
+
+            self.contact_manifolds.extend(collision_infos);
+        });
+
+        // dbg!(self.contact_manifolds.len());
+
+        for i in 0..10 {
+            self.constraint(delta_time, false);
+        }
+
+        self.constraint(delta_time, true);
+
+        self.element_store.iter_mut().for_each(|element| {
+            let (s, angular) = element.meta_mut().sync_position_by_meta_update(delta_time);
+            element.translate(&s);
+            // NOTE this is important, all rotate is reverse
+            element.rotate(-angular);
+        })
     }
 
     #[inline]
@@ -99,5 +129,29 @@ impl Scene {
     #[inline]
     pub fn get_element_mut(&mut self, id: ID) -> Option<&mut Element> {
         self.element_store.get_mut_element_by_id(id)
+    }
+
+    fn constraint(&mut self, delta_time: CommonNum, should_use_bias: bool) {
+        let query_element_pair =
+            |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
+                let element_a = self
+                    .element_store
+                    .get_mut_element_by_id(element_id_pair.0)?
+                    as *mut Element;
+
+                let element_b = self
+                    .element_store
+                    .get_mut_element_by_id(element_id_pair.1)?
+                    as *mut Element;
+
+                unsafe { (&mut *element_a, &mut *element_b) }.into()
+            };
+
+        constraint(
+            self.contact_manifolds.iter_mut(),
+            query_element_pair,
+            delta_time,
+            should_use_bias,
+        );
     }
 }

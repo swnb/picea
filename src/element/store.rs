@@ -80,6 +80,7 @@ impl ElementStore {
 
     pub fn remove(&mut self, id: ID) {
         // TODO
+        todo!()
     }
 
     pub fn get_element_by_id(&self, id: ID) -> Option<&Element> {

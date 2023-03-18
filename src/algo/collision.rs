@@ -1,12 +1,10 @@
-use crate::{
-    math::{
-        axis::AxisDirection,
-        num::is_same_sign_f32,
-        point::Point,
-        segment::Segment,
-        vector::{Vector, Vector3},
-    },
-    meta::collision::{CollisionInfo, ContactType},
+use crate::math::{
+    axis::AxisDirection,
+    num::is_same_sign_f32,
+    point::Point,
+    segment::Segment,
+    vector::{Vector, Vector3},
+    CommonNum,
 };
 use std::{
     cmp::Ordering,
@@ -63,7 +61,7 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
 // entry of collision check, if element is collision, handler will call
 pub fn detect_collision<T>(
     elements: T,
-    mut handler: impl FnMut(&mut T::Collider, &mut T::Collider, Vec<ContactInfoPair>),
+    mut handler: impl FnMut(&mut T::Collider, &mut T::Collider, Vec<ContactPointPair>),
 ) where
     T: CollisionalCollection,
 {
@@ -87,7 +85,7 @@ pub fn detect_collision<T>(
 pub fn special_collision_detection<C: Collider>(
     a: &mut C,
     b: &mut C,
-) -> Option<Vec<(ContactInfo, ContactInfo)>> {
+) -> Option<Vec<ContactPointPair>> {
     let center_point_a = a.center_point();
     let center_point_b = b.center_point();
     let first_approximation_vector: Vector = (center_point_a, center_point_b).into();
@@ -410,7 +408,7 @@ impl MinkowskiEdge {
         &self,
         center_point_a: Point,
         center_point_b: Point,
-    ) -> Vec<(ContactInfo, ContactInfo)> {
+    ) -> Vec<ContactPointPair> {
         get_collision_contact_point(self, center_point_a, center_point_b)
     }
 }
@@ -490,19 +488,36 @@ where
  * normal toward the shape of collider
  * depth is how deep the collision happen
  */
-pub struct ContactInfo {
-    pub(crate) contact_point: Point,
-    pub(crate) normal: Vector,
+pub struct ContactPointPair {
+    pub(crate) contact_point_a: Point,
+    pub(crate) contact_point_b: Point,
+    pub(crate) normal_toward_a: Vector,
     pub(crate) depth: f32,
 }
 
-pub type ContactInfoPair = (ContactInfo, ContactInfo);
+impl ContactPointPair {
+    pub fn point_a(&self) -> Point {
+        self.contact_point_a
+    }
+
+    pub fn point_b(&self) -> Point {
+        self.contact_point_b
+    }
+
+    pub fn normal_toward_a(&self) -> Vector {
+        self.normal_toward_a
+    }
+
+    pub fn depth(&self) -> CommonNum {
+        self.depth
+    }
+}
 
 fn get_collision_contact_point(
     minkowski_edge: &MinkowskiEdge,
     center_point_a: Point,
     center_point_b: Point,
-) -> Vec<(ContactInfo, ContactInfo)> {
+) -> Vec<ContactPointPair> {
     let normal = minkowski_edge.normal;
     let depth = minkowski_edge.depth;
 
@@ -527,19 +542,14 @@ fn get_collision_contact_point(
 
         let normal_toward_b = -normal_toward_a;
 
-        let contact_info_a = ContactInfo {
-            contact_point: a1,
-            normal: normal_toward_a,
+        let contact_point_pair = ContactPointPair {
+            contact_point_a: a1,
+            contact_point_b: b1,
+            normal_toward_a,
             depth,
         };
 
-        let contact_info_b = ContactInfo {
-            contact_point: b1,
-            normal: normal_toward_b,
-            depth,
-        };
-
-        vec![(contact_info_a, contact_info_b)]
+        vec![contact_point_pair]
     } else if a1 == a2 {
         let contact_point_a = a1;
 
@@ -555,19 +565,14 @@ fn get_collision_contact_point(
 
         let contact_point_b = a1 + (normal_toward_a * depth);
 
-        let contact_info_a = ContactInfo {
-            contact_point: contact_point_a,
-            normal: normal_toward_a,
+        let contact_point_pair = ContactPointPair {
+            contact_point_a,
+            contact_point_b,
+            normal_toward_a,
             depth,
         };
 
-        let contact_info_b = ContactInfo {
-            contact_point: contact_point_b,
-            normal: normal_toward_b,
-            depth,
-        };
-
-        vec![(contact_info_a, contact_info_b)]
+        vec![contact_point_pair]
     } else if b1 == b2 {
         let contact_point_b = b1;
 
@@ -583,19 +588,14 @@ fn get_collision_contact_point(
 
         let contact_point_a = b1 + (normal_toward_b * depth);
 
-        let contact_info_a = ContactInfo {
-            contact_point: contact_point_a,
-            normal: normal_toward_a,
+        let contact_point_pair = ContactPointPair {
+            contact_point_a,
+            contact_point_b,
+            normal_toward_a,
             depth,
         };
 
-        let contact_info_b = ContactInfo {
-            contact_point: contact_point_b,
-            normal: normal_toward_b,
-            depth,
-        };
-
-        vec![(contact_info_a, contact_info_b)]
+        vec![contact_point_pair]
     } else {
         let edge_a: Segment<_> = (a1, a2).into();
         let edge_b: Segment<_> = (b1, b2).into();
@@ -612,7 +612,7 @@ fn v_clip(
     normal: Vector,
     center_point_a: Point,
     center_point_b: Point,
-) -> Vec<(ContactInfo, ContactInfo)> {
+) -> Vec<ContactPointPair> {
     // which collider is reference , A or B
     enum Collider {
         A,
@@ -654,21 +654,25 @@ fn v_clip(
             return None;
         }
 
-        let contact_info_1 = ContactInfo {
-            contact_point: contact_point + (-reference_normal * depth),
-            normal: reference_normal,
-            depth,
-        };
+        let contact_point_1 = contact_point + (-reference_normal * depth);
+        let contact_point_2 = contact_point;
 
-        let contact_info_2 = ContactInfo {
-            contact_point,
-            normal: -reference_normal,
-            depth,
-        };
+        let normal_1 = reference_normal;
+        let normal_2 = -normal_1;
 
         let contact_pair = match reference_collider {
-            Collider::A => (contact_info_1, contact_info_2),
-            Collider::B => (contact_info_2, contact_info_1),
+            Collider::A => ContactPointPair {
+                contact_point_a: contact_point_1,
+                contact_point_b: contact_point_2,
+                normal_toward_a: normal_1,
+                depth,
+            },
+            Collider::B => ContactPointPair {
+                contact_point_a: contact_point_2,
+                contact_point_b: contact_point_1,
+                normal_toward_a: normal_2,
+                depth,
+            },
         };
         contact_pair.into()
     };

@@ -2,12 +2,10 @@ pub mod alias;
 pub(crate) mod store;
 
 use crate::{
-    algo::{
-        collision::Collider,
-        constraint::{update_elements_by_duration, Element as ConstraintElement},
-    },
+    algo::{collision::Collider, constraint::ConstraintObject},
     math::{
         axis::AxisDirection,
+        edge::Edge,
         point::Point,
         vector::{Vector, Vector3},
     },
@@ -44,7 +42,6 @@ impl ElementBuilder {
     }
 }
 
-// #[derive(Clone)]
 pub struct Element {
     id: ID,
     meta: Meta,
@@ -67,6 +64,7 @@ impl Element {
 
         shape.rotate(&shape.center_point(), meta.angular());
 
+        // FIXME update moment_of_inertia when meta update
         let moment_of_inertia = shape.compute_moment_of_inertia(meta.mass());
 
         meta.set_moment_of_inertia(|_| moment_of_inertia);
@@ -104,7 +102,7 @@ impl Element {
     #[inline]
     pub fn tick(&mut self, secs: f32) {
         if !self.meta.is_fixed() {
-            update_elements_by_duration(self, secs)
+            todo!();
         }
     }
 
@@ -123,6 +121,12 @@ impl Element {
 
     pub fn shape(&self) -> &dyn ElementShape {
         &*self.shape
+    }
+
+    // TODO remove
+    pub fn debug_shape(&self) {
+        let edges: Vec<Edge> = self.shape().edge_iter().collect();
+        dbg!(edges);
     }
 }
 
@@ -154,7 +158,7 @@ impl Collider for Element {
     }
 }
 
-impl ConstraintElement for Element {
+impl ConstraintObject for Element {
     #[inline]
     fn translate(&mut self, vector: &Vector) {
         self.translate(vector);

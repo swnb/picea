@@ -1,5 +1,7 @@
 use crate::{
-    algo::collision::{epa_compute_collision_edge, gjk_collision_detective},
+    algo::collision::{
+        compute_minkowski, epa_compute_collision_edge, gjk_collision_detective, ContactPointPair,
+    },
     element::Element,
     math::{point::Point, vector::Vector},
     scene::Scene,
@@ -13,8 +15,9 @@ pub struct CollisionInfo {
 
 #[derive(Default)]
 pub struct CollisionStatusViewer {
+    minkowski_different: Vec<Point>,
     minkowski_different_points: Vec<[Point; 3]>,
-    collision_infos: Vec<CollisionInfo>,
+    collision_infos: Vec<ContactPointPair>,
 }
 
 impl CollisionStatusViewer {
@@ -52,24 +55,41 @@ impl CollisionStatusViewer {
             simplex.map(|ref p| p.vector.to_point())
         });
 
+        self.minkowski_different = compute_minkowski(compute_support_point)
+            .into_iter()
+            .map(|different_point| different_point.vector.to_point())
+            .collect();
+
         let edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-        let contact_points = edge.get_contact_info(center_point_a, center_point_b);
+        let contact_point_pairs = edge.get_contact_info(center_point_a, center_point_b);
 
-        let info = CollisionInfo {
-            points_a: contact_points.iter().map(|v| v.0.contact_point).collect(),
-            points_b: contact_points.iter().map(|v| v.1.contact_point).collect(),
-            vector: edge.normal,
-        };
+        // let info = CollisionInfo {
+        //     points_a: contact_point_pairs
+        //         .iter()
+        //         .map(|pair| pair.contact_point_a)
+        //         .collect(),
+        //     points_b: contact_point_pairs
+        //         .iter()
+        //         .map(|pair| pair.contact_point_b)
+        //         .collect(),
+        //     vector: edge.normal,
+        // };
 
-        self.collision_infos.push(info);
+        self.collision_infos.extend(contact_point_pairs);
     }
 
+    // TODO chore rename
     pub fn get_minkowski_different_points(&self) -> &[[Point; 3]] {
         &self.minkowski_different_points
     }
 
-    pub fn get_collision_infos(&self) -> &[CollisionInfo] {
+    pub fn get_collision_infos(&self) -> &[ContactPointPair] {
         &self.collision_infos
+    }
+
+    // TODO chore rename
+    pub fn get_all_minkowski_different_points(&self) -> &[Point] {
+        &self.minkowski_different
     }
 }
