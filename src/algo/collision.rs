@@ -60,25 +60,6 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
     }
 }
 
-// impl<T> Index<usize> for CollisionalCollectionWrapper<T>
-// where
-//     T: ElementCollection,
-// {
-//     type Output = T::Element;
-//     fn index(&self, index: usize) -> &Self::Output {
-//         &self[index]
-//     }
-// }
-
-// impl<T> IndexMut<usize> for CollisionalCollectionWrapper<T>
-// where
-//     T: ElementCollection,
-// {
-//     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-//         self.get_mut(index)
-//     }
-// }
-
 // entry of collision check, if element is collision, handler will call
 pub fn detect_collision<T>(
     elements: T,
@@ -305,6 +286,23 @@ pub(crate) fn gjk_collision_detective(
     }
 }
 
+pub(crate) fn compute_minkowski<F>(compute_support_point: F) -> Vec<MinkowskiDifferencePoint>
+where
+    F: Fn(Vector) -> MinkowskiDifferencePoint,
+{
+    const SAMPLE_SIZE: usize = 100;
+
+    let mut vector: Vector = (0., 1.).into();
+    let mut result = Vec::with_capacity(SAMPLE_SIZE);
+    let deg = std::f32::consts::PI * 2. * (SAMPLE_SIZE as CommonNum).recip();
+    for _ in 0..SAMPLE_SIZE {
+        vector.affine_transformation_rotate_self(deg);
+        let p = compute_support_point(vector);
+        result.push(p);
+    }
+    result
+}
+
 // MinkowskiEdge means this edge maybe the Minkowski's edge
 // it depends where it can or not expand any more
 // if edge can't expand , and it's is closest edge to the origin, it is the edge we need
@@ -336,16 +334,33 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
         let b = end_point;
         let ab = (b.vector - a.vector).into();
         let ao: Vector3<_> = (-a.vector).into();
-        let normal: Vector<_> = (ao ^ ab ^ ab).into();
-        let depth = a.vector >> normal;
 
-        debug_assert!(depth.is_sign_positive());
+        let ao_x_ab = ao ^ ab;
 
-        Self {
-            start_different_point: a,
-            end_different_point: b,
-            normal: normal.normalize(),
-            depth,
+        //  NOTE maybe z < EPSILON
+        // ao_x_ab.z() == 0 means ab pass origin, follow compute will get NaN
+        if (ao_x_ab).z() == 0. {
+            let ab: Vector = ab.into();
+            let normal = !ab;
+
+            Self {
+                start_different_point: a,
+                end_different_point: b,
+                normal: normal.normalize(),
+                depth: 0.,
+            }
+        } else {
+            let normal: Vector<_> = (ao_x_ab ^ ab).into();
+            let depth = a.vector >> normal;
+
+            debug_assert!(depth.is_sign_positive());
+
+            Self {
+                start_different_point: a,
+                end_different_point: b,
+                normal: normal.normalize(),
+                depth,
+            }
         }
     }
 }
@@ -501,6 +516,7 @@ fn get_collision_contact_point(
         let contact_point_a = a1;
 
         let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
+
         // TODO 判断或许有误
         // FIXME 这里的处理必须要对 Line 做特殊处理
         let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
@@ -803,3 +819,37 @@ fn compute_cross_point_with_segment(segment: Segment<f32>, start_point: &Point, 
 //     }
 //     collision_normal.1
 // }
+
+mod tests {
+
+    use crate::math::{
+        point::Point,
+        vector::{Vector, Vector3},
+    };
+
+    use super::{MinkowskiDifferencePoint, MinkowskiEdge};
+
+    #[test]
+    fn test_minkowski_point() {
+        let start_different_point = MinkowskiDifferencePoint {
+            start_point_from_a: Point { x: 50.0, y: 70.0 },
+            end_point_from_b: Point {
+                x: 50.0,
+                y: -9.469273,
+            },
+            vector: (0.0, 79.46927).into(),
+        };
+        let end_different_point = MinkowskiDifferencePoint {
+            start_point_from_a: Point { x: 50.0, y: -30.0 },
+            end_point_from_b: Point {
+                x: 50.0,
+                y: -9.469273,
+            },
+            vector: (0.0, -20.530727).into(),
+        };
+
+        let edge: MinkowskiEdge = (start_different_point, end_different_point).into();
+
+        assert!(edge.depth == 0.);
+    }
+}
