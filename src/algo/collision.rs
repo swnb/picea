@@ -93,7 +93,6 @@ pub fn special_collision_detection<C: Collider>(
     let compute_support_point = |reference_vector| {
         let (_, max_point_a) = a.projection_on_vector(&reference_vector);
         let (_, max_point_b) = b.projection_on_vector(&-reference_vector);
-        // (max_point_b, max_point_a).into()
         (max_point_a, max_point_b).into()
     };
 
@@ -339,6 +338,7 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
         // ao_x_ab.z() == 0 means ab pass origin, follow compute will get NaN
         if (ao_x_ab).z() == 0. {
             let ab: Vector = ab.into();
+            //  NOTE current normal direction need to be corrected when we need to know the orientation
             let normal = !ab;
 
             Self {
@@ -438,6 +438,11 @@ impl Simplex {
         F: Fn(Vector) -> MinkowskiDifferencePoint,
     {
         let min_index = self.find_min_edge_index();
+
+        if self.edges[min_index].depth == 0. {
+            // no need to expand
+            return Err(());
+        }
 
         self.edges[min_index]
             .expand(&compute_support_point)
