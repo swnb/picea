@@ -33,7 +33,7 @@ fn create_model(_app: &App) -> Model {
         for col in 0..max_col {
             let element = ElementBuilder::new(
                 (4, (-30. + (col as f32 * 21.), 60. - level as f32 * 10.), 5.),
-                MetaBuilder::new(10.).force("gravity", (10., -10. * 10.)),
+                MetaBuilder::new(10.).force("gravity", (0., -10. * 10.)),
             );
             scene.push_element(element);
         }
@@ -155,30 +155,30 @@ fn view(app: &App, model: &Model, frame: Frame) {
         });
     }
 
-    model
-        .collision_viewer
-        .get_minkowski_different_points()
-        .iter()
-        .for_each(|points| {
-            for i in 0..points.len() {
-                let p1 = points[i];
-                let p2 = if i + 1 >= points.len() {
-                    points[0]
-                } else {
-                    points[i + 1]
-                };
+    // model
+    //     .collision_viewer
+    //     .get_minkowski_different_points()
+    //     .iter()
+    //     .for_each(|points| {
+    //         for i in 0..points.len() {
+    //             let p1 = points[i];
+    //             let p2 = if i + 1 >= points.len() {
+    //                 points[0]
+    //             } else {
+    //                 points[i + 1]
+    //             };
 
-                make_line(YELLOW, p1, p2);
-            }
-        });
+    //             make_line(YELLOW, p1, p2);
+    //         }
+    //     });
 
-    let points = model.collision_viewer.get_all_minkowski_different_points();
+    // let points = model.collision_viewer.get_all_minkowski_different_points();
 
-    for i in 0..points.len() {
-        let p1 = points[i];
-        let p2 = points[(i + 1) % points.len()];
-        make_line(BLUE, p1, p2);
-    }
+    // for i in 0..points.len() {
+    //     let p1 = points[i];
+    //     let p2 = points[(i + 1) % points.len()];
+    //     make_line(BLUE, p1, p2);
+    // }
 
     for info in model.collision_viewer.get_collision_infos() {
         let point = info.point_a();
