@@ -532,6 +532,7 @@ fn get_collision_contact_point(
     let b1 = minkowski_edge.start_different_point.end_point_from_b;
     let b2 = minkowski_edge.end_different_point.end_point_from_b;
 
+    // TODO use v_clip for all situation
     if a1 == a2 && b1 == b2 {
         let contact_point_a = a1;
 

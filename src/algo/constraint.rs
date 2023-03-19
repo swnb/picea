@@ -144,7 +144,7 @@ pub(crate) fn constraint<'a, 'b, M, F>(
                 }
             };
 
-            let lambda = compute_impulse(
+            let (lambda, friction_lambda) = compute_impulse(
                 element_a,
                 element_b,
                 &contact_info,
@@ -153,9 +153,7 @@ pub(crate) fn constraint<'a, 'b, M, F>(
                 should_use_bias,
             );
 
-            // let impulse_to_a = contact_info.normal * lambda;
-
-            // let impulse_to_b = -impulse_to_a;
+            let friction_lambda = friction_lambda * 0.05;
 
             let center_point_a = element_a.center_point();
 
@@ -165,11 +163,23 @@ pub(crate) fn constraint<'a, 'b, M, F>(
                 (center_point_a, *collision_info.contact_point_a()).into(),
             );
 
+            element_a.meta_mut().apply_impulse(
+                friction_lambda,
+                !contact_info.normal,
+                (center_point_a, *collision_info.contact_point_a()).into(),
+            );
+
             let center_point_b = element_b.center_point();
 
             element_b.meta_mut().apply_impulse(
                 lambda,
                 -contact_info.normal,
+                (center_point_b, *collision_info.contact_point_b()).into(),
+            );
+
+            element_b.meta_mut().apply_impulse(
+                friction_lambda,
+                -!contact_info.normal,
                 (center_point_b, *collision_info.contact_point_b()).into(),
             );
         });
@@ -262,7 +272,7 @@ fn compute_impulse<Obj: ConstraintObject>(
     mass_effective: CommonNum,
     delta_time: CommonNum,
     should_use_bias: bool,
-) -> CommonNum {
+) -> (CommonNum, CommonNum) {
     let normal = contact_info.normal;
     let depth = contact_info.depth;
 
@@ -291,9 +301,9 @@ fn compute_impulse<Obj: ConstraintObject>(
     let sum_velocity_b = velocity_b + w_velocity_b;
 
     // TODO set B into context
-    const B: CommonNum = 0.9;
+    const B: CommonNum = 0.5;
 
-    const Cr: CommonNum = 1.0;
+    const Cr: CommonNum = 0.1;
 
     let bias = if should_use_bias {
         B * depth * delta_time.recip()
@@ -307,7 +317,9 @@ fn compute_impulse<Obj: ConstraintObject>(
 
     let lambda_n = coefficient * mass_effective;
 
-    lambda_n
+    let friction_lambda_n = -(sum_velocity_a - sum_velocity_b) * !normal * mass_effective;
+
+    (lambda_n, friction_lambda_n)
 }
 
 pub struct Solver {
