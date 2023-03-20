@@ -153,7 +153,14 @@ pub(crate) fn constraint<'a, 'b, M, F>(
                 should_use_bias,
             );
 
-            let friction_lambda = friction_lambda * 0.05;
+            if lambda.abs() > 1000. || friction_lambda.abs() > 1000. {
+                (element_a as &mut Element).debug_shape();
+                (element_b as &mut Element).debug_shape();
+                dbg!(lambda, friction_lambda);
+                dbg!(contact_info.clone());
+            }
+
+            let friction_lambda = friction_lambda * 0.09;
 
             let center_point_a = element_a.center_point();
 
@@ -212,7 +219,7 @@ fn sequential_impulse() {
     todo!()
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ContactInfo {
     contact_point_a: Point,
     contact_point_b: Point,
