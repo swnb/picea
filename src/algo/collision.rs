@@ -59,11 +59,11 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
 }
 
 // entry of collision check, if element is collision, handler will call
-pub fn detect_collision<T>(
-    elements: T,
-    mut handler: impl FnMut(&mut T::Collider, &mut T::Collider, Vec<ContactPointPair>),
-) where
+pub fn detect_collision<T, H>(elements: T, mut handler: H)
+where
     T: CollisionalCollection,
+    // TODO use Iterator instead Vec
+    H: FnMut(&mut T::Collider, &mut T::Collider, Vec<ContactPointPair>),
 {
     // let time = std::time::Instant::now();
 

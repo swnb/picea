@@ -1,15 +1,20 @@
+use std::slice::IterMut;
+
 use crate::{
-    algo::{collision::detect_collision, constraint::constraint},
+    algo::{
+        collision::{detect_collision, ContactPointPair},
+        constraint::{ContactPointPairInfo, ManifoldsIterMut, Solver},
+    },
     element::{store::ElementStore, Element},
     math::CommonNum,
-    meta::collision::CollisionInfo,
+    meta::collision::Manifold,
 };
 
 #[derive(Default)]
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
-    contact_manifolds: Vec<CollisionInfo>,
+    contact_manifolds: Vec<Manifold>,
 }
 
 type ID = u32;
@@ -80,23 +85,20 @@ impl Scene {
             // a.meta_mut().mark_collision(true);
             // b.meta_mut().mark_collision(true);
 
-            let collision_infos =
-                contact_point_pairs
-                    .into_iter()
-                    .map(|contact_point_pair| CollisionInfo {
-                        collision_element_id_pair: (a.id(), b.id()),
-                        contact_point_pair,
-                        mass_effective: None,
-                    });
+            let contact_point_pairs = contact_point_pairs
+                .into_iter()
+                .map(|contact_point_pair| contact_point_pair.into())
+                .collect();
 
-            self.contact_manifolds.extend(collision_infos);
+            let contact_manifold = Manifold {
+                collision_element_id_pair: (a.id(), b.id()),
+                contact_point_pairs,
+            };
+
+            self.contact_manifolds.push(contact_manifold);
         });
 
-        for _ in 0..10 {
-            self.constraint(delta_time, false);
-        }
-
-        self.constraint(delta_time, true);
+        self.constraint(delta_time);
 
         self.element_store
             .iter_mut()
@@ -138,7 +140,7 @@ impl Scene {
         unsafe { (&mut *element_a, &mut *element_b) }.into()
     }
 
-    fn constraint(&mut self, delta_time: CommonNum, should_use_bias: bool) {
+    fn constraint(&mut self, delta_time: CommonNum) {
         let query_element_pair =
             |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
                 let element_a = self
@@ -154,11 +156,16 @@ impl Scene {
                 unsafe { (&mut *element_a, &mut *element_b) }.into()
             };
 
-        constraint(
-            self.contact_manifolds.iter_mut(),
-            query_element_pair,
-            delta_time,
-            should_use_bias,
-        );
+        impl ManifoldsIterMut for Vec<Manifold> {
+            type Item<'a> = IterMut<'a, Manifold>;
+
+            fn iter_mut(&mut self) -> Self::Item<'_> {
+                <[Manifold]>::iter_mut(self)
+            }
+        }
+
+        let mut solver = Solver::<'_, Element, Vec<Manifold>>::new(&mut self.contact_manifolds);
+
+        solver.constraint(query_element_pair, delta_time);
     }
 }
