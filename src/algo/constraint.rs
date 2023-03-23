@@ -154,8 +154,6 @@ pub(crate) fn constraint<'a, 'b, M, F>(
                 should_use_bias,
             );
 
-            let friction_lambda = friction_lambda * 0.05;
-
             let center_point_a = element_a.center_point();
 
             element_a.meta_mut().apply_impulse(
