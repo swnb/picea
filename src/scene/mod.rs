@@ -1,8 +1,5 @@
 use crate::{
-    algo::{
-        collision::detect_collision,
-        constraint::{constraint, ConstraintObject},
-    },
+    algo::{collision::detect_collision, constraint::constraint},
     element::{store::ElementStore, Element},
     math::CommonNum,
     meta::collision::CollisionInfo,
