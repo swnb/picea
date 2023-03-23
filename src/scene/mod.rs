@@ -92,20 +92,15 @@ impl Scene {
             self.contact_manifolds.extend(collision_infos);
         });
 
-        // dbg!(self.contact_manifolds.len());
-
         for _ in 0..10 {
             self.constraint(delta_time, false);
         }
 
         self.constraint(delta_time, true);
 
-        self.element_store.iter_mut().for_each(|element| {
-            let (s, angular) = element.meta_mut().sync_position_by_meta_update(delta_time);
-            element.translate(&s);
-            // NOTE this is important, all rotate is reverse
-            element.rotate(-angular);
-        })
+        self.element_store
+            .iter_mut()
+            .for_each(|element| element.integrate_velocity(delta_time))
     }
 
     #[inline]
@@ -126,6 +121,21 @@ impl Scene {
     #[inline]
     pub fn get_element_mut(&mut self, id: ID) -> Option<&mut Element> {
         self.element_store.get_mut_element_by_id(id)
+    }
+
+    pub(crate) fn query_element_pair(
+        &mut self,
+        element_id_pair: (u32, u32),
+    ) -> Option<(&mut Element, &mut Element)> {
+        let element_a = self
+            .element_store
+            .get_mut_element_by_id(element_id_pair.0)? as *mut Element;
+
+        let element_b = self
+            .element_store
+            .get_mut_element_by_id(element_id_pair.1)? as *mut Element;
+
+        unsafe { (&mut *element_a, &mut *element_b) }.into()
     }
 
     fn constraint(&mut self, delta_time: CommonNum, should_use_bias: bool) {
