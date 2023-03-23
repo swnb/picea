@@ -8,6 +8,7 @@ use crate::{
         edge::Edge,
         point::Point,
         vector::{Vector, Vector3},
+        CommonNum,
     },
     meta::Meta,
     shape::{ComputeMomentOfInertia, Shape},
@@ -106,21 +107,16 @@ impl Element {
         }
     }
 
-    /**
-     * assume point is inside element
-     */
-    pub(crate) fn compute_point_velocity(&self, point: Point) -> Vector {
-        let center_point = self.shape.center_point();
-        let w = self.meta().angular_velocity();
-        let w: Vector3<_> = (0., 0., w).into();
-        let r: Vector<_> = (center_point, point).into();
-        let angular_velocity = w ^ r.into();
-        let velocity = self.meta().velocity();
-        velocity + Vector::from(angular_velocity)
-    }
-
     pub fn shape(&self) -> &dyn ElementShape {
         &*self.shape
+    }
+
+    pub fn integrate_velocity(&mut self, delta_time: CommonNum) {
+        let path = self.meta().velocity() * delta_time;
+        let angular = self.meta().angular() * delta_time;
+        self.translate(&path);
+        // NOTE this is important, all rotate is reverse
+        self.rotate(-angular);
     }
 
     // TODO remove
@@ -159,17 +155,6 @@ impl Collider for Element {
 }
 
 impl ConstraintObject for Element {
-    #[inline]
-    fn translate(&mut self, vector: &Vector) {
-        self.translate(vector);
-    }
-
-    #[inline]
-    fn rotate(&mut self, deg: f32) {
-        self.rotate(deg)
-    }
-
-    #[inline]
     fn center_point(&self) -> Point {
         self.shape.center_point()
     }
@@ -182,7 +167,17 @@ impl ConstraintObject for Element {
         &mut self.meta
     }
 
-    fn compute_point_velocity(&self, contact_point: Point) -> Vector {
-        self.compute_point_velocity(contact_point)
+    /// assume point is inside shape
+    fn compute_point_velocity(&self, point: &Point) -> Vector {
+        let meta = self.meta();
+
+        let center_point = self.center_point();
+        let r: Vector = (center_point, *point).into();
+        let angular_velocity = meta.angular_velocity();
+        let w: Vector3 = (0., 0., angular_velocity).into();
+        let mut v: Vector = (w ^ r.into()).into();
+        v += meta.velocity();
+
+        v
     }
 }

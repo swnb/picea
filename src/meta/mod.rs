@@ -193,26 +193,6 @@ impl Meta {
         });
     }
 
-    // TODO remove this code
-    // pub fn compute_mass_eff(&self, normal: Vector, r: Vector) -> f32 {
-    //     const C: f32 = 0.9;
-
-    //     let r: Vector3<f32> = r.into();
-
-    //     C * (self.inv_mass() + (r ^ normal.into()).z().powf(2.) * self.inv_moment_of_inertia())
-    //         .recip()
-    // }
-
-    // update element position by velocity and angular_velocity
-    pub fn sync_position_by_meta_update(&mut self, delta_time: CommonNum) -> (Vector, CommonNum) {
-        let s = (self.pre_velocity * 0.5 + self.stashed_velocity * 0.5) * delta_time;
-        let angular =
-            (self.stashed_angular_velocity * 0.5 + self.pre_angular_velocity * 0.5) * delta_time;
-        self.pre_velocity = self.stashed_velocity;
-        self.pre_angular_velocity = self.stashed_angular_velocity;
-        (s, angular)
-    }
-
     pub fn compute_kinetic_energy(&self) -> f32 {
         let velocity = self.velocity();
         let velocity_square = velocity * velocity;
