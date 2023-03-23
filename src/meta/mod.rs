@@ -3,10 +3,7 @@ pub mod force;
 
 use std::ops::Deref;
 
-use crate::{
-    math::{vector::Vector, CommonNum},
-    shape::Shape,
-};
+use crate::math::{vector::Vector, CommonNum};
 
 use self::force::{Force, ForceGroup};
 
