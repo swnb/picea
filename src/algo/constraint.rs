@@ -1,6 +1,7 @@
 use crate::{
     element::Element,
     math::{
+        num::limit_at_range,
         point::Point,
         vector::{Vector, Vector3},
         CommonNum,
@@ -153,7 +154,15 @@ pub(crate) fn constraint<'a, 'b, M, F>(
                 should_use_bias,
             );
 
-            let friction_lambda = friction_lambda * 0.05;
+            // TODO remove
+            if lambda.abs() > 1000. || friction_lambda.abs() > 1000. {
+                (element_a as &mut Element).debug_shape();
+                (element_b as &mut Element).debug_shape();
+                dbg!(lambda, friction_lambda);
+                dbg!(contact_info.clone());
+            }
+
+            let friction_lambda = friction_lambda;
 
             let center_point_a = element_a.center_point();
 
@@ -212,7 +221,7 @@ fn sequential_impulse() {
     todo!()
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ContactInfo {
     contact_point_a: Point,
     contact_point_b: Point,
@@ -306,18 +315,30 @@ fn compute_impulse<Obj: ConstraintObject>(
     const Cr: CommonNum = 0.1;
 
     let bias = if should_use_bias {
+        // B * (depth - 0.02) * delta_time.recip()
         B * depth * delta_time.recip()
     } else {
         0.
     };
 
-    let coefficient = (sum_velocity_a - sum_velocity_b) * -normal * (1. + Cr) + bias;
+    let coefficient = (sum_velocity_a - sum_velocity_b) * -normal * (1. + Cr);
 
     debug_assert!(depth.is_sign_positive());
 
-    let lambda_n = coefficient * mass_effective;
+    let max_friction_lambada_n = (coefficient * mass_effective * 1.2).abs();
+
+    let lambda_n = (coefficient + bias * 0.8) * mass_effective;
 
     let friction_lambda_n = -(sum_velocity_a - sum_velocity_b) * !normal * mass_effective;
+
+    // dbg!(max_friction_lambada_n, friction_lambda_n);
+
+    // let friction_lambda_n = limit_at_range(
+    //     friction_lambda_n,
+    //     (-max_friction_lambada_n)..=(max_friction_lambada_n),
+    // );
+
+    let friction_lambda_n = friction_lambda_n * 0.1;
 
     (lambda_n, friction_lambda_n)
 }
