@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use crate::{
     element::Element,
     math::{
@@ -112,11 +114,19 @@ use crate::{
 //     //     .set_angular_velocity(angular_velocity_reducer);
 // }
 
+pub(crate) trait ManifoldIterMut {
+    type Item<'a>: Iterator<Item = &'a mut CollisionInfo>
+    where
+        Self: 'a;
+
+    fn iter_mut(&self) -> Self::Item<'_>;
+}
+
 pub(crate) fn constraint<'a, 'b, M, F>(
     contact_manifold: M,
     mut query_elements: F,
     delta_time: CommonNum,
-    should_use_bias: bool,
+    constraint_position: bool,
 ) where
     M: Iterator<Item = &'b mut CollisionInfo>,
     F: FnMut((u32, u32)) -> Option<(&'a mut Element, &'a mut Element)>,
@@ -128,12 +138,22 @@ pub(crate) fn constraint<'a, 'b, M, F>(
         })
         .filter(|((e_a, e_b), _)| !(e_a.meta().is_fixed() && e_b.meta().is_fixed()))
         .for_each(|((element_a, element_b), collision_info)| {
-            let contact_info = ContactInfo {
+            let mut contact_info = ContactInfo {
                 contact_point_a: *collision_info.contact_point_a(),
                 contact_point_b: *collision_info.contact_point_b(),
                 normal: collision_info.normal(),
                 depth: collision_info.depth(),
+                total_friction_lambda: 0.,
+                total_lambda: 0.,
             };
+
+            let mut solver = ContactSolver::new(element_a, element_b, &mut contact_info);
+            if constraint_position {
+                solver.solve_position_constraint(delta_time);
+            } else {
+                solver.solve_velocity_constraint(delta_time);
+            }
+            return;
 
             let mass_effective = match collision_info.mass_effective() {
                 Some(v) => v,
@@ -151,7 +171,7 @@ pub(crate) fn constraint<'a, 'b, M, F>(
                 &contact_info,
                 mass_effective,
                 delta_time,
-                should_use_bias,
+                constraint_position,
             );
 
             let center_point_a = element_a.center_point();
@@ -217,21 +237,19 @@ pub(crate) struct ContactInfo {
     contact_point_b: Point,
     normal: Vector,
     depth: f32,
+    total_friction_lambda: CommonNum,
+    total_lambda: CommonNum,
 }
 
 // TODO shrink this trait
 pub trait ConstraintObject {
-    fn translate(&mut self, vector: &Vector);
-
-    fn rotate(&mut self, deg: f32);
-
     fn center_point(&self) -> Point;
 
     fn meta(&self) -> &Meta;
 
     fn meta_mut(&mut self) -> &mut Meta;
 
-    fn compute_point_velocity(&self, contact_point: Point) -> Vector;
+    fn compute_point_velocity(&self, contact_point: &Point) -> Vector;
 }
 
 fn compute_mass_effective<Obj: ConstraintObject>(
@@ -321,18 +339,179 @@ fn compute_impulse<Obj: ConstraintObject>(
 
     let friction_lambda_n = -(sum_velocity_a - sum_velocity_b) * !normal * mass_effective;
 
-    // dbg!(max_friction_lambada_n, friction_lambda_n);
+    dbg!(max_friction_lambada_n, friction_lambda_n);
 
-    // let friction_lambda_n = limit_at_range(
-    //     friction_lambda_n,
-    //     (-max_friction_lambada_n)..=(max_friction_lambada_n),
-    // );
+    let friction_lambda_n = limit_at_range(
+        friction_lambda_n,
+        (-max_friction_lambada_n)..=(max_friction_lambada_n),
+    );
 
     let friction_lambda_n = friction_lambda_n * 0.1;
 
     (lambda_n, friction_lambda_n)
 }
 
-pub struct Solver {
-    bias: CommonNum,
+pub(crate) struct ContactSolver<'a: 'b, 'b, Object: ConstraintObject> {
+    coefficient_bias: CommonNum,
+    coefficient_elastic: CommonNum,
+    max_allow_permeate: CommonNum,
+    coefficient_friction: CommonNum,
+    object_a: &'a mut Object,
+    object_b: &'a mut Object,
+    contact_info: &'b mut ContactInfo,
+}
+
+impl<'a: 'b, 'b, Object> ContactSolver<'a, 'b, Object>
+where
+    Object: ConstraintObject,
+{
+    pub(crate) fn new(
+        object_a: &'a mut Object,
+        object_b: &'a mut Object,
+        contact_info: &'b mut ContactInfo,
+    ) -> Self {
+        Self {
+            coefficient_bias: 0.8,
+            coefficient_elastic: 0.01,
+            max_allow_permeate: 0.2,
+            coefficient_friction: 0.2,
+            object_a,
+            object_b,
+            contact_info,
+        }
+    }
+
+    fn solve_velocity_constraint(&mut self, bias: CommonNum) {
+        // TODO cache this
+        let mass_effective = self.compute_mass_effective();
+
+        let Self {
+            object_a,
+            object_b,
+            contact_info,
+            ..
+        } = self;
+
+        let normal = contact_info.normal;
+        let depth = contact_info.depth;
+
+        let sum_velocity_a = object_a.compute_point_velocity(&contact_info.contact_point_a);
+
+        let sum_velocity_b = object_b.compute_point_velocity(&contact_info.contact_point_b);
+
+        let coefficient =
+            (sum_velocity_a - sum_velocity_b) * -normal * (1. + self.coefficient_elastic);
+
+        debug_assert!(depth.is_sign_positive());
+
+        let max_friction_lambada_n =
+            (coefficient * mass_effective * self.coefficient_friction).abs();
+
+        let lambda = (coefficient + bias) * mass_effective;
+
+        let previous_total_lambda = contact_info.total_lambda;
+        contact_info.total_lambda += lambda;
+        contact_info.total_lambda = contact_info.total_lambda.max(0.);
+        let lambda = contact_info.total_lambda - previous_total_lambda;
+
+        let friction_lambda = -(sum_velocity_a - sum_velocity_b) * !normal * mass_effective;
+
+        let previous_total_friction_lambda = contact_info.total_friction_lambda;
+        contact_info.total_friction_lambda += friction_lambda;
+        contact_info.total_friction_lambda = limit_at_range(
+            contact_info.total_friction_lambda,
+            -max_friction_lambada_n..=max_friction_lambada_n,
+        );
+        let friction_lambda = contact_info.total_friction_lambda - previous_total_friction_lambda;
+
+        // let friction_lambda = friction_lambda * 0.1;
+
+        let center_point_a = object_a.center_point();
+
+        object_a.meta_mut().apply_impulse(
+            lambda,
+            contact_info.normal,
+            (center_point_a, contact_info.contact_point_a).into(),
+        );
+
+        object_a.meta_mut().apply_impulse(
+            friction_lambda,
+            !contact_info.normal,
+            (center_point_a, contact_info.contact_point_a).into(),
+        );
+
+        let center_point_b = object_b.center_point();
+
+        object_b.meta_mut().apply_impulse(
+            lambda,
+            -contact_info.normal,
+            (center_point_b, contact_info.contact_point_b).into(),
+        );
+
+        object_b.meta_mut().apply_impulse(
+            friction_lambda,
+            -!contact_info.normal,
+            (center_point_b, contact_info.contact_point_b).into(),
+        );
+    }
+
+    fn solve_position_constraint(&mut self, delta_time: CommonNum) {
+        let Self { contact_info, .. } = &*self;
+
+        // let mut permeate = (contact_info.depth - self.max_allow_permeate).max(0.);
+
+        let permeate = contact_info.depth;
+
+        let bias = self.coefficient_bias * permeate * delta_time.recip();
+
+        self.solve_velocity_constraint(bias);
+    }
+
+    fn compute_mass_effective(&self) -> CommonNum {
+        let Self {
+            object_a,
+            object_b,
+            contact_info,
+            ..
+        } = self;
+
+        let center_point_a = object_a.center_point();
+        let center_point_b = object_b.center_point();
+
+        let r_a: Vector = (center_point_a, contact_info.contact_point_a).into();
+        let r_b: Vector = (center_point_b, contact_info.contact_point_b).into();
+
+        let inv_moment_of_inertia_a = object_a.meta().inv_moment_of_inertia();
+        let inv_moment_of_inertia_b = object_b.meta().inv_moment_of_inertia();
+
+        let inv_mass_a = object_a.meta().inv_mass();
+
+        let inv_mass_b = object_b.meta().inv_mass();
+
+        let normal = contact_info.normal;
+
+        // compute and mass_eff and lambda_n
+        let equation_part1 = inv_mass_a;
+        let equation_part2 = inv_mass_b;
+        // let equation_part3 = ((normal * (r_a ^ normal)) ^ r_a) * inv_moment_of_inertia_a;
+        let equation_part3 = (r_a ^ normal) * (r_a ^ normal) * inv_moment_of_inertia_a;
+        let equation_part4 = (r_b ^ normal) * (r_b ^ normal) * inv_moment_of_inertia_b;
+
+        (equation_part1 + equation_part2 + equation_part3 + equation_part4).recip()
+    }
+}
+
+pub(crate) struct Solver<T: ConstraintObject> {
+    _marker: PhantomData<T>,
+}
+
+const MAX_ITERATOR_TIMES: usize = 10;
+
+impl<T: ConstraintObject> Solver<T> {
+    pub(crate) fn constraint<'a: 'b, 'b, F>(&'a self, query_element_pair: F)
+    where
+        F: FnMut((u32, u32)) -> (&'b mut T, &'b mut T),
+    {
+        for _ in 0..MAX_ITERATOR_TIMES {}
+    }
 }
