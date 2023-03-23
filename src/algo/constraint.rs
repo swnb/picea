@@ -154,15 +154,7 @@ pub(crate) fn constraint<'a, 'b, M, F>(
                 should_use_bias,
             );
 
-            // TODO remove
-            if lambda.abs() > 1000. || friction_lambda.abs() > 1000. {
-                (element_a as &mut Element).debug_shape();
-                (element_b as &mut Element).debug_shape();
-                dbg!(lambda, friction_lambda);
-                dbg!(contact_info.clone());
-            }
-
-            let friction_lambda = friction_lambda;
+            let friction_lambda = friction_lambda * 0.05;
 
             let center_point_a = element_a.center_point();
 
