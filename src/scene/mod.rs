@@ -97,7 +97,7 @@ impl Scene {
 
         // dbg!(self.contact_manifolds.len());
 
-        for i in 0..10 {
+        for _ in 0..10 {
             self.constraint(delta_time, false);
         }
 

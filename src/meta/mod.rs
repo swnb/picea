@@ -191,6 +191,7 @@ impl Meta {
         let inv_moment_of_inertia = self.inv_moment_of_inertia();
 
         self.set_angular_velocity(|pre_angular_velocity| {
+            // TODO (r ^ (normal * lambda))
             pre_angular_velocity + (r ^ normal) * lambda * inv_moment_of_inertia
         });
     }

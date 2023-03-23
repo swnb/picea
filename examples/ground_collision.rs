@@ -1,6 +1,6 @@
 use nannou::{prelude::*, winit::event};
 use picea::{
-    element::{Element, ElementBuilder},
+    element::ElementBuilder,
     math::{edge::Edge, point::Point},
     meta::MetaBuilder,
     scene::Scene,
@@ -23,19 +23,19 @@ fn create_model(_app: &App) -> Model {
     const height: f32 = 30.;
 
     let wall_bottom = Line::new((-50., -30.), (50., -30.));
-    let wall_bottom = (-50., -30., 100., 4.);
+    // let wall_bottom = (-50., -30., 100., 4.);
     let meta = MetaBuilder::new(100.).is_fixed(true);
     let id = scene.push_element(ElementBuilder::new(wall_bottom, meta.clone()));
     println!("{id} wall_bottom");
 
     let wall_right = Line::new((50., -30.), (50., height));
-    let wall_right = (50., -30., 4., 100.);
+    // let wall_right = (50., -30., 4., 100.);
     let id = scene.push_element(ElementBuilder::new(wall_right, meta.clone()));
     println!("{id} wall_right");
 
-    // let wall_left = Line::new((-50., -30.), (-50., height));
-    // let id = scene.push_element(ElementBuilder::new(wall_left, meta.clone()));
-    // println!("{id} wall_left ");
+    let wall_left = Line::new((-50., -30.), (-50., height));
+    let id = scene.push_element(ElementBuilder::new(wall_left, meta.clone()));
+    println!("{id} wall_left ");
 
     // let ball: Element = ElementBuilder::new(
     //     ((-40., -10.), 6.),
@@ -75,38 +75,6 @@ fn create_model(_app: &App) -> Model {
 
     let id = scene.push_element(element);
     println!("{id} element right");
-
-    Model {
-        scene,
-        timer: SystemTime::now(),
-        collision_info: None,
-        is_paused: false,
-        collision_viewer: Default::default(),
-    }
-}
-
-fn create_model2(_app: &App) -> Model {
-    let mut scene = Scene::new();
-
-    let a = ConvexPolygon::new(vec![
-        (21.367706, 10.029329).into(),
-        (41.312607, 8.545427).into(),
-        (50.0, -9.469273).into(),
-        (38.74245, -26.000067).into(),
-        (18.797558, -24.516144).into(),
-        (10.110172, -6.5015135).into(),
-    ]);
-
-    let b = ConvexPolygon::new(vec![
-        (50.0, -30.0).into(),
-        (54.0, -30.0).into(),
-        (54.0, 70.0).into(),
-        (50.0, 70.0).into(),
-    ]);
-
-    scene.push_element(ElementBuilder::new(a, MetaBuilder::new(10.).is_fixed(true)));
-
-    scene.push_element(ElementBuilder::new(b, MetaBuilder::new(10.).is_fixed(true)));
 
     Model {
         scene,
@@ -224,30 +192,30 @@ fn view(app: &App, model: &Model, frame: Frame) {
         });
     }
 
-    model
-        .collision_viewer
-        .get_minkowski_different_points()
-        .iter()
-        .for_each(|points| {
-            for i in 0..points.len() {
-                let p1 = points[i];
-                let p2 = if i + 1 >= points.len() {
-                    points[0]
-                } else {
-                    points[i + 1]
-                };
+    // model
+    //     .collision_viewer
+    //     .get_minkowski_different_points()
+    //     .iter()
+    //     .for_each(|points| {
+    //         for i in 0..points.len() {
+    //             let p1 = points[i];
+    //             let p2 = if i + 1 >= points.len() {
+    //                 points[0]
+    //             } else {
+    //                 points[i + 1]
+    //             };
 
-                make_line(YELLOW, p1, p2);
-            }
-        });
+    //             make_line(YELLOW, p1, p2);
+    //         }
+    //     });
 
-    let points = model.collision_viewer.get_all_minkowski_different_points();
+    // let points = model.collision_viewer.get_all_minkowski_different_points();
 
-    for i in 0..points.len() {
-        let p1 = points[i];
-        let p2 = points[(i + 1) % points.len()];
-        make_line(BLUE, p1, p2);
-    }
+    // for i in 0..points.len() {
+    //     let p1 = points[i];
+    //     let p2 = points[(i + 1) % points.len()];
+    //     make_line(BLUE, p1, p2);
+    // }
 
     for info in model.collision_viewer.get_collision_infos() {
         let point = info.point_a();
