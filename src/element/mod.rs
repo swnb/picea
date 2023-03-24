@@ -113,7 +113,7 @@ impl Element {
 
     pub fn integrate_velocity(&mut self, delta_time: CommonNum) {
         let path = self.meta().velocity() * delta_time;
-        let angular = self.meta().angular() * delta_time;
+        let angular = self.meta().angular_velocity() * delta_time;
         self.translate(&path);
         // NOTE this is important, all rotate is reverse
         self.rotate(-angular);
