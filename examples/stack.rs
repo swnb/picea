@@ -7,7 +7,11 @@ use picea::{
     shape::{convex::ConvexPolygon, line::Line},
     tools::collision_view::CollisionStatusViewer,
 };
-use std::time::SystemTime;
+use std::{
+    fs::{self, File},
+    io::Write,
+    time::SystemTime,
+};
 
 struct Model {
     scene: Scene,
@@ -15,6 +19,7 @@ struct Model {
     collision_info: Option<Vec<[Point; 2]>>,
     collision_viewer: CollisionStatusViewer,
     is_paused: bool,
+    log_file: File,
 }
 
 fn create_model(_app: &App) -> Model {
@@ -26,6 +31,8 @@ fn create_model(_app: &App) -> Model {
         ground_bottom,
         MetaBuilder::new(1.).is_fixed(true),
     ));
+
+    let example = File::create("./logs/example").unwrap();
 
     const MAX_LEVEL: usize = 11;
     for level in 0..MAX_LEVEL {
@@ -45,6 +52,7 @@ fn create_model(_app: &App) -> Model {
         collision_info: None,
         is_paused: false,
         collision_viewer: Default::default(),
+        log_file: example,
     }
 }
 
