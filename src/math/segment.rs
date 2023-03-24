@@ -3,12 +3,12 @@ use std::{
     ops::{Neg, Sub},
 };
 
-use super::{point::Point, vector::Vector, CommonNum};
+use super::{point::Point, vector::Vector, FloatNum};
 
 pub type Axis<T> = Segment<T>;
 
 #[derive(Clone)]
-pub struct Segment<T: Clone + Copy = CommonNum> {
+pub struct Segment<T: Clone + Copy = FloatNum> {
     start_point: Point<T>,
     end_point: Point<T>,
 }

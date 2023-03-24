@@ -4,7 +4,7 @@ use crate::math::{
     point::Point,
     segment::Segment,
     vector::{Vector, Vector3},
-    CommonNum,
+    FloatNum,
 };
 use std::{
     cmp::Ordering,
@@ -291,7 +291,7 @@ where
 
     let mut vector: Vector = (0., 1.).into();
     let mut result = Vec::with_capacity(SAMPLE_SIZE);
-    let deg = std::f32::consts::PI * 2. * (SAMPLE_SIZE as CommonNum).recip();
+    let deg = std::f32::consts::PI * 2. * (SAMPLE_SIZE as FloatNum).recip();
     for _ in 0..SAMPLE_SIZE {
         vector.affine_transformation_rotate_self(deg);
         let p = compute_support_point(vector);
@@ -513,7 +513,7 @@ impl ContactPointPair {
         self.normal_toward_a
     }
 
-    pub fn depth(&self) -> CommonNum {
+    pub fn depth(&self) -> FloatNum {
         self.depth
     }
 }

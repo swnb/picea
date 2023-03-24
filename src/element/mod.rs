@@ -8,7 +8,7 @@ use crate::{
         edge::Edge,
         point::Point,
         vector::{Vector, Vector3},
-        CommonNum,
+        FloatNum,
     },
     meta::Meta,
     shape::{ComputeMomentOfInertia, Shape},
@@ -111,7 +111,7 @@ impl Element {
         &*self.shape
     }
 
-    pub fn integrate_velocity(&mut self, delta_time: CommonNum) {
+    pub fn integrate_velocity(&mut self, delta_time: FloatNum) {
         let path = self.meta().velocity() * delta_time;
         let angular = self.meta().angular_velocity() * delta_time;
         self.translate(&path);

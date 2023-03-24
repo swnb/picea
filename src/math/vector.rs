@@ -1,11 +1,11 @@
-use super::{point::Point, segment::Segment, CommonNum};
+use super::{point::Point, segment::Segment, FloatNum};
 use std::{
     fmt::Display,
     ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign},
 };
 
 #[derive(Clone, Debug, Copy)]
-pub struct Vector<T = CommonNum>
+pub struct Vector<T = FloatNum>
 where
     T: Clone + Copy,
 {
@@ -376,7 +376,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Vector3<T: Clone + Copy = CommonNum> {
+pub struct Vector3<T: Clone + Copy = FloatNum> {
     x: T,
     y: T,
     z: T,

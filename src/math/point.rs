@@ -1,11 +1,11 @@
-use super::{vector::Vector, CommonNum};
+use super::{vector::Vector, FloatNum};
 use std::{
     fmt::Display,
     ops::{Add, AddAssign, Sub, SubAssign},
 };
 
 #[derive(Clone, Debug, Copy)]
-pub struct Point<T = CommonNum>
+pub struct Point<T = FloatNum>
 where
     T: Clone + Copy,
 {

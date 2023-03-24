@@ -3,7 +3,7 @@ use crate::{
         num::limit_at_range,
         point::Point,
         vector::{Vector, Vector3},
-        CommonNum,
+        FloatNum,
     },
     meta::{collision::Manifold, Meta},
 };
@@ -22,7 +22,7 @@ pub(crate) trait ManifoldsIterMut {
 // pub(crate) fn constraint<'a, 'b, M, F>(
 //     contact_manifolds: M,
 //     mut query_elements: F,
-//     delta_time: CommonNum,
+//     delta_time: FloatNum,
 //     constraint_position: bool,
 // ) where
 //     M: ManifoldsIterMut,
@@ -84,9 +84,9 @@ fn sequential_impulse() {
 #[derive(Debug, Clone)]
 pub struct ContactPointPairInfo {
     contact_point_pair: ContactPointPair,
-    total_friction_lambda: CommonNum,
-    total_lambda: CommonNum,
-    mass_effective: Option<CommonNum>,
+    total_friction_lambda: FloatNum,
+    total_lambda: FloatNum,
+    mass_effective: Option<FloatNum>,
 }
 
 impl From<ContactPointPair> for ContactPointPairInfo {
@@ -121,7 +121,7 @@ fn compute_mass_effective<Obj: ConstraintObject>(
     object_a: &mut Obj,
     object_b: &mut Obj,
     contact_info: &ContactPointPairInfo,
-) -> CommonNum {
+) -> FloatNum {
     let center_point_a = object_a.center_point();
     let center_point_b = object_b.center_point();
 
@@ -151,10 +151,10 @@ fn compute_impulse<Obj: ConstraintObject>(
     object_a: &mut Obj,
     object_b: &mut Obj,
     contact_info: &ContactPointPairInfo,
-    mass_effective: CommonNum,
-    delta_time: CommonNum,
+    mass_effective: FloatNum,
+    delta_time: FloatNum,
     should_use_bias: bool,
-) -> (CommonNum, CommonNum) {
+) -> (FloatNum, FloatNum) {
     let normal = contact_info.normal_toward_a;
     let depth = contact_info.depth;
 
@@ -183,9 +183,9 @@ fn compute_impulse<Obj: ConstraintObject>(
     let sum_velocity_b = velocity_b + w_velocity_b;
 
     // TODO set B into context
-    const B: CommonNum = 0.5;
+    const B: FloatNum = 0.5;
 
-    const Cr: CommonNum = 0.1;
+    const Cr: FloatNum = 0.1;
 
     let bias = if should_use_bias {
         // B * (depth - 0.02) * delta_time.recip()
@@ -217,11 +217,11 @@ fn compute_impulse<Obj: ConstraintObject>(
 }
 
 pub(crate) struct ContactSolver<'a: 'b, 'b, Object: ConstraintObject> {
-    coefficient_bias: CommonNum,
-    coefficient_elastic: CommonNum,
+    coefficient_bias: FloatNum,
+    coefficient_elastic: FloatNum,
     // TODO
-    max_allow_permeate: CommonNum,
-    coefficient_friction: CommonNum,
+    max_allow_permeate: FloatNum,
+    coefficient_friction: FloatNum,
     object_a: &'a mut Object,
     object_b: &'a mut Object,
 
@@ -248,7 +248,7 @@ where
         }
     }
 
-    fn solve_velocity_constraint(&mut self, bias: CommonNum) {
+    fn solve_velocity_constraint(&mut self, bias: FloatNum) {
         let mass_effective = match self.contact_info.mass_effective {
             Some(v) => v,
             None => {
@@ -330,7 +330,7 @@ where
         );
     }
 
-    fn solve_position_constraint(&mut self, delta_time: CommonNum) {
+    fn solve_position_constraint(&mut self, delta_time: FloatNum) {
         let Self { contact_info, .. } = &*self;
 
         // let mut permeate = (contact_info.depth - self.max_allow_permeate).max(0.);
@@ -342,7 +342,7 @@ where
         self.solve_velocity_constraint(bias);
     }
 
-    fn compute_mass_effective(&self) -> CommonNum {
+    fn compute_mass_effective(&self) -> FloatNum {
         let Self {
             object_a,
             object_b,
@@ -396,7 +396,7 @@ where
     pub(crate) fn constraint<'a, 'b: 'a, F, T: 'b>(
         &'a mut self,
         mut query_element_pair: F,
-        delta_time: CommonNum,
+        delta_time: FloatNum,
     ) where
         T: ConstraintObject,
         F: FnMut((u32, u32)) -> Option<(&'b mut T, &'b mut T)>,

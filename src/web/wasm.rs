@@ -2,7 +2,7 @@ extern crate console_error_panic_hook;
 extern crate wasm_bindgen;
 use crate::{
     element::ElementBuilder,
-    math::{edge::Edge, point::Point, CommonNum},
+    math::{edge::Edge, point::Point, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
     shape::{line::Line, polygon::Rect},
@@ -77,10 +77,10 @@ interface WebScene {
 impl WebScene {
     pub fn create_rect(
         &mut self,
-        x: CommonNum,
-        y: CommonNum,
-        width: CommonNum,
-        height: CommonNum,
+        x: FloatNum,
+        y: FloatNum,
+        width: FloatNum,
+        height: FloatNum,
     ) -> u32 {
         let rect = Rect::new(x, y, width, height);
         let meta = MetaBuilder::new(1.).force("gravity", (0., 10.));

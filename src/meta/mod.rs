@@ -3,7 +3,7 @@ pub mod force;
 
 use std::ops::Deref;
 
-use crate::math::{vector::Vector, CommonNum};
+use crate::math::{vector::Vector, FloatNum};
 
 use self::force::{Force, ForceGroup};
 
@@ -20,9 +20,9 @@ pub struct Meta {
     stashed_velocity: Speed,
     mass: ValueWithInv<Mass>,
     moment_of_inertia: ValueWithInv<Mass>,
-    pre_angular_velocity: CommonNum,
-    stashed_angular_velocity: CommonNum,
-    angular: CommonNum,
+    pre_angular_velocity: FloatNum,
+    stashed_angular_velocity: FloatNum,
+    angular: FloatNum,
     is_fixed: bool,
     // TODO 移除 collision
     is_collision: bool,
@@ -175,7 +175,7 @@ impl Meta {
         self
     }
 
-    pub fn apply_impulse(&mut self, lambda: CommonNum, normal: Vector, r: Vector) {
+    pub fn apply_impulse(&mut self, lambda: FloatNum, normal: Vector, r: Vector) {
         // can't apply impulse to element when element fixed
         if self.is_fixed() {
             return;
