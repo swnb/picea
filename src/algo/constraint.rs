@@ -107,7 +107,6 @@ impl Deref for ContactPointPairInfo {
     }
 }
 
-// TODO shrink this trait
 pub trait ConstraintObject {
     fn center_point(&self) -> Point;
 
