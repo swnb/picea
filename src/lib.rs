@@ -6,4 +6,5 @@ pub mod renderer;
 pub mod scene;
 pub mod shape;
 pub mod tools;
+#[cfg(feature = "wasm-web")]
 pub mod web;

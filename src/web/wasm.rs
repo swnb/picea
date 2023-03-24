@@ -1,13 +1,26 @@
 extern crate console_error_panic_hook;
 extern crate wasm_bindgen;
-use crate::{element::Element, meta::MetaBuilder, scene::Scene};
+use crate::{
+    element::ElementBuilder,
+    math::{edge::Edge, point::Point, CommonNum},
+    meta::MetaBuilder,
+    scene::Scene,
+    shape::{line::Line, polygon::Rect},
+};
 use js_sys::Function;
+use serde::{Deserialize, Serialize};
 use std::panic;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn set_panic_console_hook() {
     panic::set_hook(Box::new(console_error_panic_hook::hook));
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
 }
 
 #[wasm_bindgen]
@@ -19,7 +32,7 @@ pub struct WebScene {
 pub struct WebPicea;
 
 #[wasm_bindgen]
-#[derive(Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct Tuple2 {
     pub x: f32,
     pub y: f32,
@@ -32,125 +45,103 @@ impl Tuple2 {
     }
 }
 
-#[wasm_bindgen]
-#[derive(Clone)]
-pub struct RectElementBuilder {
-    top_left_point: Tuple2,
-    width: f32,
-    height: f32,
-    weight: f32,
-    angular: f32,
-    angular_velocity: f32,
-    velocity: Tuple2,
-    fixed: bool,
-    force: Tuple2,
-}
-
-#[wasm_bindgen]
-impl RectElementBuilder {
-    pub fn new(top_left_point: Tuple2, width: f32, height: f32) -> Self {
-        Self {
-            top_left_point,
-            width,
-            height,
-            weight: 1.,
-            angular: 0.,
-            angular_velocity: 0.,
-            fixed: false,
-            velocity: Tuple2::new(0., 0.),
-            force: Tuple2::new(0., 0.),
+impl From<Point> for Tuple2 {
+    fn from(value: Point) -> Self {
+        Tuple2 {
+            x: value.x,
+            y: value.y,
         }
     }
+}
 
-    pub fn weight(&mut self, weight: f32) -> Self {
-        self.weight = weight;
-        self.clone()
-    }
-
-    pub fn angular(&mut self, angular: f32) -> Self {
-        self.angular = angular;
-        self.clone()
-    }
-
-    pub fn angular_velocity(&mut self, angular_velocity: f32) -> Self {
-        self.angular_velocity = angular_velocity;
-        self.clone()
-    }
-
-    pub fn velocity(&mut self, velocity: Tuple2) -> Self {
-        self.velocity = velocity;
-        self.clone()
-    }
-
-    pub fn fixed(&mut self, fixed: bool) -> Self {
-        self.fixed = fixed;
-        self.clone()
-    }
-
-    pub fn force(&mut self, force: Tuple2) -> Self {
-        self.force = force;
-        self.clone()
+impl Into<Point> for Tuple2 {
+    fn into(self) -> Point {
+        Point {
+            x: self.x,
+            y: self.y,
+        }
     }
 }
+
+// TODO should keep copy of element for web
+// each time engine update element, get update vector and angular should be more fast
+
+#[wasm_bindgen(typescript_custom_section)]
+const FOREACH_ELEMENT_CALLBACK: &'static str = r#"
+interface WebScene {
+    for_each_element(callback: (points:{x:number,y:number}[],id :number) => void): void;
+}
+"#;
 
 #[wasm_bindgen]
 impl WebScene {
-    pub fn push_rect_element(&mut self, params: &RectElementBuilder) {
-        let &RectElementBuilder {
-            top_left_point: Tuple2 { x, y },
-            width,
-            height,
-            weight,
-            angular,
-            angular_velocity,
-            velocity: Tuple2 { x: vx, y: vy },
-            fixed: is_fixed,
-            force: Tuple2 { x: fx, y: fy },
-        } = params;
+    pub fn create_rect(
+        &mut self,
+        x: CommonNum,
+        y: CommonNum,
+        width: CommonNum,
+        height: CommonNum,
+    ) -> u32 {
+        let rect = Rect::new(x, y, width, height);
+        let meta = MetaBuilder::new(1.).force("gravity", (0., 10.));
+        let element = ElementBuilder::new(rect, meta);
+        self.scene.push_element(element)
+    }
 
-        // self.scene.push_element(Element::new(
-        //     ElementShape::Rect(((x, y), (width, height)).into()),
-        //     MetaBuilder::new(weight)
-        //         .angular(angular)
-        //         .angular_velocity(angular_velocity)
-        //         .velocity((vx, vy))
-        //         .is_fixed(is_fixed)
-        //         .force("f", (fx, fy)),
-        // ))
+    pub fn create_line(&mut self, start_point: Tuple2, end_point: Tuple2) -> u32 {
+        let line = Line::new(start_point, end_point);
+        let meta = MetaBuilder::new(1.)
+            .force("gravity", (0., 10.))
+            .is_fixed(true);
+        let element = ElementBuilder::new(line, meta);
+        self.scene.push_element(element)
     }
 
     pub fn tick(&mut self, delta_t: f32) {
         self.scene.update_elements_by_duration(delta_t);
     }
 
+    #[wasm_bindgen(skip_typescript, typescript_type = "FOREACH_ELEMENT_CALLBACK")]
     pub fn for_each_element(&self, callback: Function) {
-        // self.scene.elements_iter().for_each(|element| {
-        //     // TODO opt
-        //     if let ShapeUnion::Rect(shape) = element.shape() {
-        //         let this = JsValue::null();
-        //         let result = js_sys::Array::new_with_length(8);
-        //         shape
-        //             .corner_iter()
-        //             .map(|&v| Tuple2 { x: v.x(), y: v.y() })
-        //             .enumerate()
-        //             .for_each(|(i, p)| {
-        //                 let f = JsValue::from;
+        let this = JsValue::null();
 
-        //                 result.set(2 * i as u32, f(p.x));
-        //                 result.set(2 * i as u32 + 1, f(p.y));
-        //             });
+        self.scene.elements_iter().for_each(|element| {
+            let id = element.id();
+            let result = js_sys::Array::new();
+            element.shape().edge_iter().for_each(|edge| match edge {
+                Edge::Arc {
+                    start_point,
+                    support_point,
+                    end_point,
+                } => {
+                    todo!()
+                }
+                Edge::Circle {
+                    center_point,
+                    radius,
+                } => {
+                    todo!()
+                }
+                Edge::Line {
+                    start_point,
+                    end_point,
+                } => {
+                    let point: Tuple2 = (*start_point).into();
+                    let value = serde_wasm_bindgen::to_value(&point).unwrap();
+                    result.push(&value);
+                }
+            });
 
-        //         callback.call1(&this, result.as_ref()).unwrap();
-        //     }
-        // });
+            callback
+                .call2(&this, &JsValue::from(result), &JsValue::from(id))
+                .unwrap();
+        });
     }
 }
 
 #[wasm_bindgen]
-impl WebPicea {
-    pub fn create_scene() -> WebScene {
-        WebScene {
-            scene: Scene::new(),
-        }
+pub fn create_scene() -> WebScene {
+    WebScene {
+        scene: Scene::new(),
     }
 }

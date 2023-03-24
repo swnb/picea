@@ -68,6 +68,10 @@ impl Scene {
         element_id
     }
 
+    pub fn element_size(&self) -> usize {
+        self.element_store.size()
+    }
+
     pub fn update_elements_by_duration(&mut self, delta_time: f32) {
         // TODO 120 fps
         // max frame rate is 60
@@ -90,11 +94,14 @@ impl Scene {
         //     .iter_mut()
         //     .for_each(|element| element.tick(delta_time));
 
-        self.element_store.iter_mut().for_each(|element| {
-            let force = element.meta().force_group().sum_force();
-            let a = force * element.meta().inv_mass();
-            element.meta_mut().set_velocity(|pre| pre + a * delta_time);
-        });
+        self.element_store
+            .iter_mut()
+            .filter(|element| !element.meta().is_fixed())
+            .for_each(|element| {
+                let force = element.meta().force_group().sum_force();
+                let a = force * element.meta().inv_mass();
+                element.meta_mut().set_velocity(|pre| pre + a * delta_time);
+            });
 
         self.contact_manifolds.clear();
 

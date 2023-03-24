@@ -55,6 +55,11 @@ impl ElementStore {
         }
     }
 
+    pub fn size(&self) -> usize {
+        // TODO remove delete element when count
+        self.elements.len()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Element> {
         self.elements.iter().map(|v| &v.element)
     }
