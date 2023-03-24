@@ -242,7 +242,7 @@ where
             coefficient_bias: 0.8,
             coefficient_elastic: 0.01,
             max_allow_permeate: 0.2,
-            coefficient_friction: 0.2,
+            coefficient_friction: 10.,
             object_a,
             object_b,
             contact_info,
@@ -278,17 +278,21 @@ where
 
         debug_assert!(depth.is_sign_positive());
 
-        let max_friction_lambada_n =
-            (coefficient * mass_effective * self.coefficient_friction).abs();
+        // (coefficient * mass_effective * self.coefficient_friction).abs();
 
         let lambda = (coefficient + bias) * mass_effective;
+
+        let max_friction_lambada_n = (lambda * self.coefficient_friction).abs();
 
         let previous_total_lambda = contact_info.total_lambda;
         contact_info.total_lambda += lambda;
         contact_info.total_lambda = contact_info.total_lambda.max(0.);
         let lambda = contact_info.total_lambda - previous_total_lambda;
 
-        let friction_lambda = -(sum_velocity_a - sum_velocity_b) * !normal * mass_effective;
+        // TODO better friction algo
+        let friction_lambda = -(sum_velocity_a - sum_velocity_b) * !normal * mass_effective * 0.5;
+
+        // let current_friction_lambda = friction_lambda;
 
         let previous_total_friction_lambda = contact_info.total_friction_lambda;
         contact_info.total_friction_lambda += friction_lambda;
@@ -297,8 +301,6 @@ where
             -max_friction_lambada_n..=max_friction_lambada_n,
         );
         let friction_lambda = contact_info.total_friction_lambda - previous_total_friction_lambda;
-
-        // let friction_lambda = friction_lambda * 0.1;
 
         let center_point_a = object_a.center_point();
 
@@ -375,36 +377,44 @@ where
     }
 }
 
-pub(crate) struct Solver<'z, T, M>
+pub(crate) struct Solver<'z, M>
 where
-    T: ConstraintObject,
     M: ManifoldsIterMut,
 {
     contact_manifolds: &'z mut M,
-    _marker: PhantomData<T>,
 }
 
 const MAX_ITERATOR_TIMES: usize = 10;
 
-impl<'z, T, M> Solver<'z, T, M>
+impl<'z, M> Solver<'z, M>
 where
-    T: ConstraintObject,
     M: ManifoldsIterMut,
 {
     pub(crate) fn new(contact_manifolds: &'z mut M) -> Self {
-        Self {
-            contact_manifolds,
-            _marker: PhantomData,
-        }
+        Self { contact_manifolds }
     }
 
-    pub(crate) fn constraint<'a: 'b, 'b, F>(
+    pub(crate) fn constraint<'a, 'b: 'a, F, T: 'b>(
         &'a mut self,
         mut query_element_pair: F,
         delta_time: CommonNum,
     ) where
+        T: ConstraintObject,
         F: FnMut((u32, u32)) -> Option<(&'b mut T, &'b mut T)>,
     {
+        let solve = |(object_a, object_b, manifold): (&'_ mut T, &'_ mut T, &'_ mut Manifold),
+                     fix_position: bool| {
+            for contact_info in manifold.contact_point_pairs_mut() {
+                let mut solver = ContactSolver::new(object_a, object_b, contact_info);
+
+                if fix_position {
+                    solver.solve_position_constraint(delta_time);
+                } else {
+                    solver.solve_velocity_constraint(delta_time);
+                }
+            }
+        };
+
         let mut constraint = |fix_position: bool| {
             self.contact_manifolds
                 .iter_mut()
@@ -415,7 +425,7 @@ where
                 .filter(|(object_a, object_b, _)| {
                     !(object_a.meta().is_fixed() && object_b.meta().is_fixed())
                 })
-                .for_each(|v| Self::solve(v, delta_time, fix_position));
+                .for_each(|v| solve(v, fix_position));
         };
 
         for _ in 0..MAX_ITERATOR_TIMES {
@@ -423,21 +433,5 @@ where
         }
 
         constraint(true);
-    }
-
-    fn solve(
-        (object_a, object_b, manifold): (&mut T, &mut T, &mut Manifold),
-        delta_time: CommonNum,
-        fix_position: bool,
-    ) {
-        for contact_info in manifold.contact_point_pairs_mut() {
-            let mut solver = ContactSolver::new(object_a, object_b, contact_info);
-
-            if fix_position {
-                solver.solve_position_constraint(delta_time);
-            } else {
-                solver.solve_velocity_constraint(delta_time);
-            }
-        }
     }
 }

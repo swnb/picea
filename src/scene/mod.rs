@@ -15,6 +15,7 @@ pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
     contact_manifolds: Vec<Manifold>,
+    total_skip_durations: CommonNum,
 }
 
 type ID = u32;
@@ -68,6 +69,23 @@ impl Scene {
     }
 
     pub fn update_elements_by_duration(&mut self, delta_time: f32) {
+        // TODO 120 fps
+        // max frame rate is 60
+        const MIN_DELTA_TIME: CommonNum = 1. / 61.;
+        // if self.total_skip_durations + delta_time < MIN_DELTA_TIME {
+        //     // skip this frame
+        //     self.total_skip_durations += delta_time;
+        //     return;
+        // }
+
+        // let delta_time = self.total_skip_durations + delta_time;
+
+        // self.total_skip_durations = 0.;
+
+        // TODO use dynamic delta_time
+
+        let delta_time: CommonNum = 1. / 61.;
+
         // self.element_store
         //     .iter_mut()
         //     .for_each(|element| element.tick(delta_time));
@@ -125,21 +143,6 @@ impl Scene {
         self.element_store.get_mut_element_by_id(id)
     }
 
-    pub(crate) fn query_element_pair(
-        &mut self,
-        element_id_pair: (u32, u32),
-    ) -> Option<(&mut Element, &mut Element)> {
-        let element_a = self
-            .element_store
-            .get_mut_element_by_id(element_id_pair.0)? as *mut Element;
-
-        let element_b = self
-            .element_store
-            .get_mut_element_by_id(element_id_pair.1)? as *mut Element;
-
-        unsafe { (&mut *element_a, &mut *element_b) }.into()
-    }
-
     fn constraint(&mut self, delta_time: CommonNum) {
         let query_element_pair =
             |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
@@ -164,7 +167,7 @@ impl Scene {
             }
         }
 
-        let mut solver = Solver::<'_, Element, Vec<Manifold>>::new(&mut self.contact_manifolds);
+        let mut solver = Solver::<'_, Vec<Manifold>>::new(&mut self.contact_manifolds);
 
         solver.constraint(query_element_pair, delta_time);
     }
