@@ -7,7 +7,7 @@ use crate::{
     },
     meta::{collision::Manifold, Meta},
 };
-use std::{marker::PhantomData, ops::Deref};
+use std::ops::Deref;
 
 use super::collision::ContactPointPair;
 

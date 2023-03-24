@@ -1,7 +1,4 @@
-use std::{
-    cmp::Ordering,
-    ops::{Range, RangeInclusive},
-};
+use std::ops::RangeInclusive;
 
 use super::FloatNum;
 

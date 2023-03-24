@@ -832,15 +832,10 @@ fn compute_cross_point_with_segment(segment: Segment<f32>, start_point: &Point, 
 
 mod tests {
 
-    use crate::math::{
-        point::Point,
-        vector::{Vector, Vector3},
-    };
-
-    use super::{MinkowskiDifferencePoint, MinkowskiEdge};
-
     #[test]
     fn test_minkowski_point() {
+        use super::{MinkowskiDifferencePoint, MinkowskiEdge};
+        use crate::math::point::Point;
         let start_different_point = MinkowskiDifferencePoint {
             start_point_from_a: Point { x: 50.0, y: 70.0 },
             end_point_from_b: Point {

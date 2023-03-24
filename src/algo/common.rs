@@ -56,12 +56,11 @@ pub fn is_point_inside_shape_debug<'a>(
 }
 
 mod test {
-    use crate::math::{point::Point, vector::Vector};
-
-    use super::is_point_inside_shape;
 
     #[test]
     fn test_is_point_inside_shape() {
+        use crate::math::{point::Point, vector::Vector};
+
         let is_point_cross_segment = |p1: Point, p2: Point| {
             if (p1.y() * p2.y()).is_sign_positive() {
                 return false;

@@ -2,8 +2,8 @@ use std::slice::IterMut;
 
 use crate::{
     algo::{
-        collision::{detect_collision, ContactPointPair},
-        constraint::{ContactPointPairInfo, ManifoldsIterMut, Solver},
+        collision::detect_collision,
+        constraint::{ManifoldsIterMut, Solver},
     },
     element::{store::ElementStore, Element},
     math::FloatNum,
