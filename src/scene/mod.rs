@@ -1,3 +1,5 @@
+pub(crate) mod context;
+
 use std::slice::IterMut;
 
 use crate::{
@@ -10,12 +12,15 @@ use crate::{
     meta::collision::Manifold,
 };
 
+use self::context::Context;
+
 #[derive(Default)]
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
     contact_manifolds: Vec<Manifold>,
     total_skip_durations: FloatNum,
+    context: Context,
 }
 
 type ID = u32;
@@ -94,8 +99,7 @@ impl Scene {
         //     .iter_mut()
         //     .for_each(|element| element.tick(delta_time));
 
-        self.element_store
-            .iter_mut()
+        self.elements_iter_mut()
             .filter(|element| !element.meta().is_fixed())
             .for_each(|element| {
                 let force = element.meta().force_group().sum_force();
@@ -125,8 +129,16 @@ impl Scene {
 
         self.constraint(delta_time);
 
-        self.element_store
-            .iter_mut()
+        self.elements_iter().for_each(|element| {
+            let v = element.meta().velocity();
+
+            let a_v = element.meta().angular_velocity();
+
+            // if v.abs() < 0.07 || a_v < 0.08 {}
+            // dbg!(v.abs(), a_v);
+        });
+
+        self.elements_iter_mut()
             .for_each(|element| element.integrate_velocity(delta_time))
     }
 
@@ -174,7 +186,8 @@ impl Scene {
             }
         }
 
-        let mut solver = Solver::<'_, Vec<Manifold>>::new(&mut self.contact_manifolds);
+        let mut solver =
+            Solver::<'_, '_, Vec<Manifold>>::new(&self.context, &mut self.contact_manifolds);
 
         solver.constraint(query_element_pair, delta_time);
     }

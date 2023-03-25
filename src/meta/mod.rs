@@ -27,6 +27,8 @@ pub struct Meta {
     // TODO 移除 collision
     is_collision: bool,
     is_transparent: bool,
+    // if element is is_sleeping , skip constraint or collision
+    is_sleeping: bool,
 }
 
 struct ValueWithInv<T> {
@@ -151,7 +153,7 @@ impl Meta {
         self.is_fixed
     }
 
-    pub fn set_is_fixed(&mut self, is_fixed: bool) -> &mut Self {
+    pub fn mark_is_fixed(&mut self, is_fixed: bool) -> &mut Self {
         self.is_fixed = is_fixed;
         self
     }
@@ -236,6 +238,7 @@ impl MetaBuilder {
                 is_fixed: false,
                 is_collision: false,
                 is_transparent: false,
+                is_sleeping: false,
             },
         }
     }
