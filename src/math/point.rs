@@ -1,8 +1,11 @@
-use super::vector::Vector;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use super::{vector::Vector, FloatNum};
+use std::{
+    fmt::Display,
+    ops::{Add, AddAssign, Sub, SubAssign},
+};
 
-#[derive(Clone, Copy, Debug)]
-pub struct Point<T = f64>
+#[derive(Clone, Debug, Copy)]
+pub struct Point<T = FloatNum>
 where
     T: Clone + Copy,
 {
@@ -10,7 +13,16 @@ where
     pub(crate) y: T,
 }
 
-impl PartialEq for Point<f32> {
+impl<T> Display for Point<T>
+where
+    T: Clone + Copy + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{{ x: {}, y: {} }}", self.x, self.y))
+    }
+}
+
+impl PartialEq for Point {
     fn eq(&self, other: &Self) -> bool {
         ((self.x() - other.x()).abs() < f32::EPSILON)
             && ((self.y() - other.y()).abs() < f32::EPSILON)
@@ -173,13 +185,5 @@ where
     fn sub_assign(&mut self, rhs: Vector<T>) {
         self.set_x(|x| x - rhs.x);
         self.set_y(|y| y - rhs.y);
-    }
-}
-
-impl std::ops::Shr<Vector<f32>> for Point<f32> {
-    type Output = f32;
-    fn shr(self, rhs: Vector<f32>) -> Self::Output {
-        let vector = self.to_vector();
-        vector * rhs * rhs.abs().recip()
     }
 }

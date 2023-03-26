@@ -1,21 +1,12 @@
-use crate::math::{point::Point, vector::Vector};
-
-#[derive(Clone, Debug)]
-pub enum ContactType {
-    Point(Point<f32>),
-    Edge([Point<f32>; 2]),
-}
+use crate::algo::constraint::ContactPointPairInfo;
 
 #[derive(Debug)]
-pub struct CollisionInfo {
+pub struct Manifold {
     pub(crate) collision_element_id_pair: (u32, u32),
-    pub(crate) contact_a: ContactType,
-    pub(crate) contact_b: ContactType,
-    pub(crate) depth: f32,
-    pub(crate) normal: Vector<f32>,
+    pub(crate) contact_point_pairs: Vec<ContactPointPairInfo>,
 }
 
-impl CollisionInfo {
+impl Manifold {
     pub fn element_id_a(&self) -> u32 {
         self.collision_element_id_pair.0
     }
@@ -24,23 +15,13 @@ impl CollisionInfo {
         self.collision_element_id_pair.1
     }
 
-    pub fn contact_a(&self) -> &ContactType {
-        &self.contact_a
+    pub fn contact_point_pairs(&self) -> impl Iterator<Item = &'_ ContactPointPairInfo> {
+        self.contact_point_pairs.iter()
     }
 
-    pub fn contact_b(&self) -> &ContactType {
-        &self.contact_b
-    }
-
-    pub fn contact_points(&self) -> (&ContactType, &ContactType) {
-        (&self.contact_a, &self.contact_b)
-    }
-
-    pub fn depth(&self) -> f32 {
-        self.depth
-    }
-
-    pub fn normal(&self) -> Vector<f32> {
-        self.normal
+    pub fn contact_point_pairs_mut(
+        &mut self,
+    ) -> impl Iterator<Item = &'_ mut ContactPointPairInfo> {
+        self.contact_point_pairs.iter_mut()
     }
 }

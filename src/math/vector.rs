@@ -1,13 +1,25 @@
-use super::{point::Point, segment::Segment};
-use std::ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign};
+use super::{point::Point, segment::Segment, FloatNum};
+use std::{
+    fmt::Display,
+    ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign},
+};
 
-#[derive(Clone, Copy, Debug)]
-pub struct Vector<T = f64>
+#[derive(Clone, Debug, Copy)]
+pub struct Vector<T = FloatNum>
 where
     T: Clone + Copy,
 {
     pub(super) x: T,
     pub(super) y: T,
+}
+
+impl<T> Display for Vector<T>
+where
+    T: Display + Copy + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{{ x: {}, y: {} }}", self.x, self.y))
+    }
 }
 
 impl<T: Clone + Copy> Vector<T> {
@@ -41,6 +53,11 @@ impl<T: Clone + Copy> Vector<T> {
     pub fn set_y(&mut self, mut reducer: impl FnMut(T) -> T) {
         self.y = reducer(self.y);
     }
+
+    #[inline]
+    pub fn to_point(&self) -> Point<T> {
+        (self.x, self.y).into()
+    }
 }
 
 macro_rules! impl_vector {
@@ -60,8 +77,8 @@ macro_rules! impl_vector {
                 }
 
                 pub fn normalize(&self) -> Vector<$T> {
-                    let length = self.abs();
-                    (self.x() / length, self.y() / length).into()
+                    let shrink = self.abs().recip();
+                    (self.x() * shrink, self.y() * shrink).into()
                 }
 
                 #[inline]
@@ -126,7 +143,7 @@ where
     T: std::ops::Neg<Output = T> + std::ops::Sub<Output = T>,
 {
     fn from(segment: Segment<T>) -> Self {
-        (*segment.get_start_point(), *segment.get_end_point()).into()
+        (*segment.start_point(), *segment.end_point()).into()
     }
 }
 
@@ -135,6 +152,17 @@ where
     T: Clone + Copy + std::ops::Neg<Output = T> + std::ops::Sub<Output = T>,
 {
     fn from((p1, p2): (Point<T>, Point<T>)) -> Self {
+        let x = p2.x() - p1.x();
+        let y = p2.y() - p1.y();
+        (x, y).into()
+    }
+}
+
+impl<T> From<(&Point<T>, &Point<T>)> for Vector<T>
+where
+    T: Clone + Copy + std::ops::Neg<Output = T> + std::ops::Sub<Output = T>,
+{
+    fn from((p1, p2): (&Point<T>, &Point<T>)) -> Self {
         let x = p2.x() - p1.x();
         let y = p2.y() - p1.y();
         (x, y).into()
@@ -348,7 +376,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Vector3<T: Clone + Copy> {
+pub struct Vector3<T: Clone + Copy = FloatNum> {
     x: T,
     y: T,
     z: T,
@@ -368,8 +396,18 @@ impl<T: Clone + Copy> Vector3<T> {
     }
 }
 
-impl From<Vector<f32>> for Vector3<f32> {
-    fn from(value: Vector<f32>) -> Self {
+impl From<Vector> for Vector3<f32> {
+    fn from(value: Vector) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+            z: 0.,
+        }
+    }
+}
+
+impl From<Vector<f64>> for Vector3<f64> {
+    fn from(value: Vector<f64>) -> Self {
         Self {
             x: value.x,
             y: value.y,
@@ -438,5 +476,12 @@ where
     type Output = T;
     fn mul(self, rhs: Self) -> Self::Output {
         (self.x() * rhs.x()) + (self.y() * rhs.y()) + (self.z() * rhs.z())
+    }
+}
+
+impl std::ops::Shr<Vector> for Vector {
+    type Output = f32;
+    fn shr(self, rhs: Vector) -> Self::Output {
+        self * rhs * rhs.abs().recip()
     }
 }
