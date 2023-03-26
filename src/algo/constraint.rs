@@ -239,7 +239,7 @@ where
 
 pub(crate) struct Solver<'z, 'e, M>
 where
-    M: ManifoldsIterMut,
+    M: ManifoldsIterMut + ?Sized,
 {
     context: &'e Context,
     contact_manifolds: &'z mut M,
@@ -249,7 +249,7 @@ const MAX_ITERATOR_TIMES: usize = 10;
 
 impl<'z, 'e, M> Solver<'z, 'e, M>
 where
-    M: ManifoldsIterMut,
+    M: ManifoldsIterMut + ?Sized,
 {
     pub(crate) fn new(context: &'e Context, contact_manifolds: &'z mut M) -> Self {
         Self {

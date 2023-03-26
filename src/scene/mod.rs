@@ -1,6 +1,9 @@
 pub(crate) mod context;
 
-use std::slice::IterMut;
+use std::{
+    mem::{replace, swap},
+    slice::IterMut,
+};
 
 use crate::{
     algo::{
@@ -19,6 +22,7 @@ pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
     contact_manifolds: Vec<Manifold>,
+    pre_contact_manifold: Vec<Manifold>,
     total_skip_durations: FloatNum,
     context: Context,
 }
@@ -88,7 +92,7 @@ impl Scene {
 
                 const MIN_ANGULAR_VELOCITY: FloatNum = 0.08;
                 let motion = v.abs().powf(2.) + a_v.powf(2.);
-                dbg!(motion);
+
                 if motion < MIN_ANGULAR_VELOCITY {
                     element.meta_mut().mark_motionless();
                     if element.meta().motionless_frame_counter() > max_enter_sleep_frame {
@@ -131,8 +135,6 @@ impl Scene {
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
 
-        self.contact_manifolds.clear();
-
         detect_collision(
             &mut self.element_store,
             |a, b, contact_point_pairs| {
@@ -155,10 +157,20 @@ impl Scene {
             |element_a, element_b| element_a.meta().is_sleeping() && element_b.meta().is_sleeping(),
         );
 
-        self.constraint(delta_time);
+        let manifolds =
+            unsafe { &mut *(&mut self.pre_contact_manifold as &mut [Manifold] as *mut [Manifold]) };
+
+        self.constraint(manifolds, delta_time);
+
+        let manifolds =
+            unsafe { &mut *(&mut self.contact_manifolds as &mut [Manifold] as *mut [Manifold]) };
+
+        self.constraint(manifolds, delta_time);
 
         self.elements_iter_mut()
-            .for_each(|element| element.integrate_velocity(delta_time))
+            .for_each(|element| element.integrate_velocity(delta_time));
+
+        self.pre_contact_manifold = std::mem::take(&mut self.contact_manifolds);
     }
 
     #[inline]
@@ -181,7 +193,7 @@ impl Scene {
         self.element_store.get_mut_element_by_id(id)
     }
 
-    fn constraint(&mut self, delta_time: FloatNum) {
+    fn constraint(&mut self, manifolds: &mut [Manifold], delta_time: FloatNum) {
         let query_element_pair =
             |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
                 let element_a = self
@@ -197,16 +209,15 @@ impl Scene {
                 unsafe { (&mut *element_a, &mut *element_b) }.into()
             };
 
-        impl ManifoldsIterMut for Vec<Manifold> {
-            type Item<'a> = IterMut<'a, Manifold>;
+        impl ManifoldsIterMut for [Manifold] {
+            type Item<'z> = IterMut<'z, Manifold> where Self:'z;
 
             fn iter_mut(&mut self) -> Self::Item<'_> {
                 <[Manifold]>::iter_mut(self)
             }
         }
 
-        let mut solver =
-            Solver::<'_, '_, Vec<Manifold>>::new(&self.context, &mut self.contact_manifolds);
+        let mut solver = Solver::<'_, '_, [Manifold]>::new(&self.context, manifolds);
 
         solver.constraint(query_element_pair, delta_time);
     }
