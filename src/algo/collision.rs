@@ -1,6 +1,6 @@
 use crate::math::{
     axis::AxisDirection,
-    num::is_same_sign_f32,
+    num::is_same_sign,
     point::Point,
     segment::Segment,
     vector::{Vector, Vector3},
@@ -731,7 +731,7 @@ fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Poin
         contact_points.push(*incident_v2);
     }
 
-    if !is_same_sign_f32(s1_by_reference_v1, s2_by_reference_v1) {
+    if !is_same_sign(s1_by_reference_v1, s2_by_reference_v1) {
         // 尝试切割
         let s1_abs = s1_by_reference_v1.abs();
         let s2_abs = s2_by_reference_v1.abs();
@@ -743,7 +743,7 @@ fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Poin
         contact_points.push(contact_point);
     }
 
-    if !is_same_sign_f32(s1_by_reference_v2, s2_by_reference_v2) {
+    if !is_same_sign(s1_by_reference_v2, s2_by_reference_v2) {
         // 尝试切割
         let s1_abs = s1_by_reference_v2.abs();
         let s2_abs = s2_by_reference_v2.abs();
