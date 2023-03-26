@@ -59,11 +59,12 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
 }
 
 // entry of collision check, if element is collision, handler will call
-pub fn detect_collision<T, H>(elements: T, mut handler: H)
+pub fn detect_collision<T, H, F>(elements: T, mut handler: H, skip: F)
 where
     T: CollisionalCollection,
     // TODO use Iterator instead Vec
     H: FnMut(&mut T::Collider, &mut T::Collider, Vec<ContactPointPair>),
+    F: Fn(&T::Collider, &T::Collider) -> bool,
 {
     // let time = std::time::Instant::now();
 
@@ -72,12 +73,17 @@ where
 
     let elements = CollisionalCollectionWrapper(elements);
 
-    sweep_and_prune_collision_detection(elements, axis, |a, b| {
-        // TODO special collision algo for circle and circle
-        if let Some(collision_info) = special_collision_detection(a, b) {
-            handler(a, b, collision_info);
-        }
-    });
+    sweep_and_prune_collision_detection(
+        elements,
+        axis,
+        |a, b| {
+            // TODO special collision algo for circle and circle
+            if let Some(collision_info) = special_collision_detection(a, b) {
+                handler(a, b, collision_info);
+            }
+        },
+        skip,
+    );
 
     // dbg!(time.elapsed());
 }
@@ -108,13 +114,15 @@ pub fn special_collision_detection<C: Collider>(
  * 粗检测
  * find the elements that maybe collision
  */
-fn sweep_and_prune_collision_detection<T, Z>(
+fn sweep_and_prune_collision_detection<T, Z, F>(
     mut elements: CollisionalCollectionWrapper<T>,
     axis: AxisDirection,
     mut handler: Z,
+    skip: F,
 ) where
     T: CollisionalCollection,
     Z: FnMut(&mut T::Collider, &mut T::Collider),
+    F: Fn(&T::Collider, &T::Collider) -> bool,
 {
     elements.sort(|a, b| {
         let (ref min_a_x, _) = a.projection_on_axis(axis);
@@ -133,6 +141,9 @@ fn sweep_and_prune_collision_detection<T, Z>(
                 let (b_min_y, b_max_y) = elements[j].projection_on_axis(!axis);
 
                 if !(a_max_y < b_min_y || b_max_y < a_min_y) {
+                    if skip(&elements[i], &elements[j]) {
+                        continue;
+                    }
                     // detective precise collision
                     let a: *mut _ = &mut elements[i];
                     let b: *mut _ = &mut elements[j];

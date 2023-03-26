@@ -112,6 +112,9 @@ impl Element {
     }
 
     pub fn integrate_velocity(&mut self, delta_time: FloatNum) {
+        if self.meta().is_fixed() {
+            return;
+        }
         let path = self.meta().velocity() * delta_time;
         let angular = self.meta().angular_velocity() * delta_time;
         self.translate(&path);

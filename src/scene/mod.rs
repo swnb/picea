@@ -78,6 +78,29 @@ impl Scene {
     }
 
     pub fn update_elements_by_duration(&mut self, delta_time: f32) {
+        let max_enter_sleep_frame = self.context.max_enter_sleep_frame;
+
+        if self.context.enable_sleep_mode {
+            self.elements_iter_mut().for_each(|element| {
+                let v = element.meta().velocity();
+
+                let a_v = element.meta().angular_velocity();
+
+                const MIN_ANGULAR_VELOCITY: FloatNum = 0.08;
+                let motion = v.abs().powf(2.) + a_v.powf(2.);
+                dbg!(motion);
+                if motion < MIN_ANGULAR_VELOCITY {
+                    element.meta_mut().mark_motionless();
+                    if element.meta().motionless_frame_counter() > max_enter_sleep_frame {
+                        element.meta_mut().reset_motionless_frame_counter();
+                        element.meta_mut().mark_is_sleeping(true);
+                    }
+                } else {
+                    element.meta_mut().mark_is_sleeping(false);
+                }
+            });
+        }
+
         // TODO 120 fps
         // max frame rate is 60
         const MIN_DELTA_TIME: FloatNum = 1. / 61.;
@@ -101,6 +124,7 @@ impl Scene {
 
         self.elements_iter_mut()
             .filter(|element| !element.meta().is_fixed())
+            .filter(|element| !element.meta().is_sleeping())
             .for_each(|element| {
                 let force = element.meta().force_group().sum_force();
                 let a = force * element.meta().inv_mass();
@@ -109,34 +133,29 @@ impl Scene {
 
         self.contact_manifolds.clear();
 
-        detect_collision(&mut self.element_store, |a, b, contact_point_pairs| {
-            // TODO remove mark_collision
-            // a.meta_mut().mark_collision(true);
-            // b.meta_mut().mark_collision(true);
+        detect_collision(
+            &mut self.element_store,
+            |a, b, contact_point_pairs| {
+                // TODO remove mark_collision
+                // a.meta_mut().mark_collision(true);
+                // b.meta_mut().mark_collision(true);
 
-            let contact_point_pairs = contact_point_pairs
-                .into_iter()
-                .map(|contact_point_pair| contact_point_pair.into())
-                .collect();
+                let contact_point_pairs = contact_point_pairs
+                    .into_iter()
+                    .map(|contact_point_pair| contact_point_pair.into())
+                    .collect();
 
-            let contact_manifold = Manifold {
-                collision_element_id_pair: (a.id(), b.id()),
-                contact_point_pairs,
-            };
+                let contact_manifold = Manifold {
+                    collision_element_id_pair: (a.id(), b.id()),
+                    contact_point_pairs,
+                };
 
-            self.contact_manifolds.push(contact_manifold);
-        });
+                self.contact_manifolds.push(contact_manifold);
+            },
+            |element_a, element_b| element_a.meta().is_sleeping() && element_b.meta().is_sleeping(),
+        );
 
         self.constraint(delta_time);
-
-        self.elements_iter().for_each(|element| {
-            let v = element.meta().velocity();
-
-            let a_v = element.meta().angular_velocity();
-
-            // if v.abs() < 0.07 || a_v < 0.08 {}
-            // dbg!(v.abs(), a_v);
-        });
 
         self.elements_iter_mut()
             .for_each(|element| element.integrate_velocity(delta_time))

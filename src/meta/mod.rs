@@ -29,6 +29,7 @@ pub struct Meta {
     is_transparent: bool,
     // if element is is_sleeping , skip constraint or collision
     is_sleeping: bool,
+    motionless_frame_counter: u8,
 }
 
 struct ValueWithInv<T> {
@@ -177,6 +178,30 @@ impl Meta {
         self
     }
 
+    pub fn mark_motionless(&mut self) {
+        self.motionless_frame_counter += 1;
+    }
+
+    pub fn motionless_frame_counter(&self) -> u8 {
+        self.motionless_frame_counter
+    }
+
+    pub fn reset_motionless_frame_counter(&mut self) {
+        self.motionless_frame_counter = 0;
+    }
+
+    pub fn mark_is_sleeping(&mut self, is_sleeping: bool) {
+        if is_sleeping {
+            self.set_velocity(|_| (0., 0.).into());
+            self.set_angular_velocity(|_| 0.);
+        }
+        self.is_sleeping = is_sleeping;
+    }
+
+    pub fn is_sleeping(&self) -> bool {
+        self.is_sleeping
+    }
+
     pub fn apply_impulse(&mut self, lambda: FloatNum, normal: Vector, r: Vector) {
         // can't apply impulse to element when element fixed
         if self.is_fixed() {
@@ -239,6 +264,7 @@ impl MetaBuilder {
                 is_collision: false,
                 is_transparent: false,
                 is_sleeping: false,
+                motionless_frame_counter: 0,
             },
         }
     }
