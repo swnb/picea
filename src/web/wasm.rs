@@ -83,7 +83,7 @@ impl WebScene {
         height: FloatNum,
     ) -> u32 {
         let rect = Rect::new(x, y, width, height);
-        let meta = MetaBuilder::new(1.).force("gravity", (0., 10.));
+        let meta = MetaBuilder::new(1.).force("gravity", (0., 20.));
         let element = ElementBuilder::new(rect, meta);
         self.scene.push_element(element)
     }
