@@ -4,14 +4,10 @@ use picea::{
     math::{edge::Edge, point::Point},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{convex::ConvexPolygon, line::Line},
+    shape::line::Line,
     tools::collision_view::CollisionStatusViewer,
 };
-use std::{
-    fs::{self, File},
-    io::Write,
-    time::SystemTime,
-};
+use std::{fs::File, time::SystemTime};
 
 struct Model {
     scene: Scene,
@@ -24,7 +20,7 @@ struct Model {
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
-    let ground_bottom = Line::new((-1000., -400.), (1000., -400.));
+    let ground_bottom = Line::new((-100., -40.), (100., -40.));
 
     scene.push_element(ElementBuilder::new(
         ground_bottom,
@@ -38,11 +34,7 @@ fn create_model(_app: &App) -> Model {
         let max_col = level;
         for col in 0..max_col {
             let element = ElementBuilder::new(
-                (
-                    4,
-                    (-300. + (col as f32 * 210.), 700. - level as f32 * 100.),
-                    50.,
-                ),
+                (4, (-30. + (col as f32 * 21.), 70. - level as f32 * 10.), 5.),
                 MetaBuilder::new(10.).force("gravity", (0., -10. * 10.)),
             );
             scene.push_element(element);
@@ -97,7 +89,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     let draw = app.draw();
 
-    let scale = 0.5;
+    let scale = 5.;
 
     let make_line = |color: rgb::Srgb<u8>, start_point: Point, end_point: Point| {
         draw.line()
@@ -157,20 +149,23 @@ fn view(app: &App, model: &Model, frame: Frame) {
         });
     });
 
-    if false {
-        for info in model.collision_viewer.get_collision_infos() {
-            let point = info.point_a();
+    for info in model.collision_viewer.get_collision_infos() {
+        let point = info.point_a();
 
-            make_ellipse(RED, point, 6. / scale);
+        make_ellipse(RED, point, 6. / scale);
 
-            let point = info.point_b();
+        let point = info.point_b();
 
-            make_ellipse(ORANGE, point, 6. / scale);
+        make_ellipse(ORANGE, point, 6. / scale);
 
-            let v = info.normal_toward_a();
+        let v = info.normal_toward_a();
 
-            make_line(RED, (0., 0.).into(), (v * 10f32).to_point());
-        }
+        make_line(RED, (0., 0.).into(), (v * 10f32).to_point());
+        // draw.line()
+        //     .weight(2.)
+        //     .color(RED)
+        //     .start(vec2(0., 0.))
+        //     .end(vec2(v.x() * 100., v.y() * 100.));
     }
 
     draw.to_frame(app, &frame).unwrap();
