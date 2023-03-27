@@ -1,9 +1,6 @@
 pub(crate) mod context;
 
-use std::{
-    mem::{replace, swap},
-    slice::IterMut,
-};
+use std::slice::IterMut;
 
 use crate::{
     algo::{
