@@ -82,7 +82,11 @@ impl Scene {
     }
 
     pub fn update_elements_by_duration(&mut self, delta_time: f32) {
-        let max_enter_sleep_frame = self.context.max_enter_sleep_frame;
+        let Context {
+            max_enter_sleep_frame,
+            max_enter_sleep_motion,
+            ..
+        } = self.context;
 
         if self.context.enable_sleep_mode {
             self.elements_iter_mut().for_each(|element| {
@@ -90,10 +94,9 @@ impl Scene {
 
                 let a_v = element.meta().angular_velocity();
 
-                const MIN_ANGULAR_VELOCITY: FloatNum = 0.08;
                 let motion = v.abs().powf(2.) + a_v.powf(2.);
 
-                if motion < MIN_ANGULAR_VELOCITY {
+                if motion < max_enter_sleep_motion {
                     element.meta_mut().mark_motionless();
                     if element.meta().motionless_frame_counter() > max_enter_sleep_frame {
                         element.meta_mut().reset_motionless_frame_counter();
