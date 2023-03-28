@@ -158,12 +158,11 @@ impl Scene {
         );
 
         let manifolds =
-            unsafe { &mut *(&mut self.pre_contact_manifold as &mut [Manifold] as *mut [Manifold]) };
+            unsafe { &mut *(&mut self.pre_contact_manifold as &mut [Manifold] as *mut _) };
 
         self.constraint(manifolds, delta_time);
 
-        let manifolds =
-            unsafe { &mut *(&mut self.contact_manifolds as &mut [Manifold] as *mut [Manifold]) };
+        let manifolds = unsafe { &mut *(&mut self.contact_manifolds as &mut [Manifold] as *mut _) };
 
         self.constraint(manifolds, delta_time);
 
