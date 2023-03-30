@@ -4,10 +4,11 @@ use crate::{
 };
 
 pub mod circle;
+pub mod concave;
 pub mod convex;
 pub mod line;
 pub mod polygon;
-mod utils;
+pub mod utils;
 
 pub trait Shape {
     fn center_point(&self) -> Point;
