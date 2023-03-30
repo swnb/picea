@@ -5,7 +5,7 @@ use nannou::{
 use picea::{
     algo::is_point_inside_shape,
     element::{Element, ElementBuilder},
-    math::{edge::Edge, vector::Vector},
+    math::edge::Edge,
     meta::MetaBuilder,
     scene::Scene,
     shape::line::Line,
