@@ -138,11 +138,11 @@ impl<T: Clone + Copy> From<[T; 2]> for Vector<T> {
     }
 }
 
-impl<T: Clone + Copy> From<Segment<T>> for Vector<T>
+impl<T: Clone + Copy> From<&Segment<T>> for Vector<T>
 where
     T: Neg<Output = T> + Sub<Output = T>,
 {
-    fn from(segment: Segment<T>) -> Self {
+    fn from(segment: &Segment<T>) -> Self {
         (*segment.start_point(), *segment.end_point()).into()
     }
 }
