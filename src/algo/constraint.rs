@@ -279,7 +279,7 @@ where
                 if fix_position {
                     solver.solve_position_constraint(delta_time);
                 } else {
-                    solver.solve_velocity_constraint(delta_time);
+                    solver.solve_velocity_constraint(0.);
                 }
             }
         };
