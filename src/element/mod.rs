@@ -22,6 +22,7 @@ pub struct ElementBuilder {
     meta: Meta,
 }
 
+// TODO rename
 pub trait ElementShape: Shape + ComputeMomentOfInertia {}
 impl<T> ElementShape for T where T: Shape + ComputeMomentOfInertia {}
 
