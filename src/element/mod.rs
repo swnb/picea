@@ -173,6 +173,9 @@ impl ConstraintObject for Element {
     /// assume point is inside shape
     fn compute_point_velocity(&self, point: &Point) -> Vector {
         let meta = self.meta();
+        if meta.is_fixed() {
+            return (0., 0.).into();
+        }
 
         let center_point = self.center_point();
         let r: Vector = (center_point, *point).into();
