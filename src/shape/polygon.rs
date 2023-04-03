@@ -1,12 +1,13 @@
 use super::{
     utils::{
+        compute_area_of_triangle, compute_moment_of_inertia_of_triangle,
         compute_polygon_center_point, projection_polygon_on_vector, rotate_polygon,
         translate_polygon,
     },
     ComputeMomentOfInertia, Shape,
 };
 use crate::{
-    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::Mass,
 };
 use std::{mem::MaybeUninit, slice};
@@ -77,6 +78,7 @@ macro_rules! impl_shape_for_common_polygon {
 
         #[inline]
         fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
+            // TODO move to normal loop, performance issue
             let iter = self.point_iter()
                     .zip(self.point_iter().skip(1).chain(self.point_iter().take(1)))
                     .map(|v| v.into());
@@ -96,7 +98,7 @@ macro_rules! impl_shape_for_common_polygon {
 }
 
 #[derive(Clone, Debug)]
-pub struct ConstPolygon<const N: usize> {
+pub(crate) struct ConstPolygon<const N: usize> {
     vertexes: [Point; N],
     center_point: Point,
 }
@@ -306,6 +308,29 @@ impl ComputeMomentOfInertia for Rect {
 }
 
 impl_common_polygon!(Rect, inner);
+
+// common shape triangle
+pub struct Triangle {
+    inner: ConstPolygon<3>,
+}
+
+impl Triangle {
+    pub fn new(points: [Point; 3]) -> Self {
+        let inner = ConstPolygon::new(points);
+        Self { inner }
+    }
+
+    pub fn compute_area(&self) -> FloatNum {
+        compute_area_of_triangle(&self.inner.vertexes)
+    }
+}
+
+impl ComputeMomentOfInertia for Triangle {
+    // the inertia of triangle is (1/36) * m * (a^2 + b^2 + c^2)
+    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
+        compute_moment_of_inertia_of_triangle(&self.inner.vertexes, m)
+    }
+}
 
 pub struct RegularTriangle {
     inner: ConstRegularPolygon<3>,

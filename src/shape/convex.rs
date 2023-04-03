@@ -5,7 +5,11 @@ use crate::{
 };
 
 use super::{
-    utils::{compute_convex_center_point, projection_polygon_on_vector},
+    utils::{
+        compute_area_of_triangle, compute_convex_center_point,
+        compute_moment_of_inertia_of_triangle, projection_polygon_on_vector,
+        split_convex_polygon_to_triangles,
+    },
     ComputeMomentOfInertia, Shape,
 };
 
@@ -75,8 +79,17 @@ impl Shape for ConvexPolygon {
 }
 
 impl ComputeMomentOfInertia for ConvexPolygon {
+    // split into multi triangles ,compute each triangle's moment_of_inertia , sum them all
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
-        // TODO
-        m
+        let triangles = split_convex_polygon_to_triangles(&self.points);
+
+        let total_area = triangles
+            .iter()
+            .fold(0., |acc, triangle| acc + compute_area_of_triangle(triangle));
+
+        triangles.into_iter().fold(0., |acc, triangle| {
+            let mass = m * compute_area_of_triangle(&triangle) / total_area;
+            compute_moment_of_inertia_of_triangle(&triangle, mass) + acc
+        })
     }
 }

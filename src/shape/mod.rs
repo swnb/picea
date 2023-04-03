@@ -32,5 +32,6 @@ pub trait Shape {
 }
 
 pub trait ComputeMomentOfInertia {
+    // TODO cache compute result
     fn compute_moment_of_inertia(&self, m: Mass) -> f32;
 }

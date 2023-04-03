@@ -96,6 +96,7 @@ impl Scene {
 
                 let a_v = element.meta().angular_velocity();
 
+                // TODO better performance for abs
                 let motion = v.abs().powf(2.) + a_v.powf(2.);
 
                 if motion < max_enter_sleep_motion {

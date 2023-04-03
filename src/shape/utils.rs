@@ -1,6 +1,9 @@
 use std::{borrow::Cow, ops::Deref};
 
-use crate::math::{num::is_same_sign, point::Point, segment::Segment, vector::Vector, FloatNum};
+use crate::{
+    math::{num::is_same_sign, point::Point, segment::Segment, vector::Vector, FloatNum},
+    meta::Mass,
+};
 
 /**
  * useful tool for polygon to transform
@@ -24,6 +27,49 @@ pub fn compute_convex_center_point<'a>(
     for &point in point_iter {
         result += point.to_vector() * edge_count.recip();
     }
+    result
+}
+
+pub fn compute_moment_of_inertia_of_triangle(vertexes: &[Point; 3], m: Mass) -> FloatNum {
+    let mut sum = 0.;
+    for i in 0..3usize {
+        let edge: Vector = (vertexes[i], vertexes[(i + 1) % 3]).into();
+        sum += edge * edge;
+    }
+    (1. / 36.) * sum * m
+}
+
+/**
+ * a,b,c is three vertex of triangle
+ * s = 1/2 * (ab X ac);
+ */
+pub fn compute_area_of_triangle(vertexes: &[Point; 3]) -> FloatNum {
+    let [a, b, c] = *vertexes;
+    let ab: Vector = (a, b).into();
+    let ac = (a, c).into();
+    (ab ^ ac).abs() * 0.5
+}
+
+// split convex polygon into many triangles
+pub fn split_convex_polygon_to_triangles(points: &[Point]) -> Vec<[Point; 3]> {
+    let points_len = points.len();
+
+    if points_len < 3 {
+        return vec![];
+    }
+
+    let mut result = Vec::with_capacity(points_len - 2);
+
+    // a , b, c is the three point of triangles
+    let a = points[0];
+
+    for i in 1..(points_len - 1) {
+        let b = points[i];
+        let c = points[i + 1];
+
+        result.push([a, b, c]);
+    }
+
     result
 }
 
