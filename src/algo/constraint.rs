@@ -211,9 +211,10 @@ where
                 tangent_normal
             };
 
+        // FIXME mass_effective
         // TODO better friction algo
         let friction_lambda =
-            (sum_velocity_a - sum_velocity_b) * friction_normal_toward_a * mass_effective * 0.5;
+            (sum_velocity_a - sum_velocity_b) * friction_normal_toward_a * mass_effective;
 
         let previous_total_friction_lambda = contact_info.total_friction_lambda;
         contact_info.total_friction_lambda += friction_lambda;
