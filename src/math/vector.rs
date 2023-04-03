@@ -4,7 +4,7 @@ use std::{
     ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Shr, Sub, SubAssign},
 };
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Default)]
 pub struct Vector<T = FloatNum>
 where
     T: Clone + Copy,
