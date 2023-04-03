@@ -396,7 +396,9 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
 }
 
 pub fn split_concave_polygon_to_convex_polygons(vertexes: &[Point]) -> Vec<Vec<Point>> {
-    if !check_is_concave(vertexes) {}
+    if !check_is_concave(vertexes) {
+        return vec![vertexes.into()];
+    }
 
     let vertexes_cow = if check_is_polygon_clockwise(vertexes) {
         Cow::Borrowed(vertexes)
