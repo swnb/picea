@@ -312,7 +312,9 @@ pub fn check_is_concave(vertexes: &[Point]) -> bool {
  * try use check_is_polygon_clockwise to check is polygon clockwise
  * reference https://zhuanlan.zhihu.com/p/350994427
  */
-pub fn split_clockwise_concave_polygon_once(vertexes: &[Point]) -> Option<[Vec<Point>; 2]> {
+pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
+    vertexes: &[Point],
+) -> Option<[Vec<Point>; 2]> {
     let helper = VertexesHelper(vertexes);
 
     let vertexes_len = helper.len();
@@ -393,7 +395,7 @@ pub fn split_clockwise_concave_polygon_once(vertexes: &[Point]) -> Option<[Vec<P
     None
 }
 
-pub fn split_concave_polygon(vertexes: &[Point]) -> Vec<Vec<Point>> {
+pub fn split_concave_polygon_to_convex_polygons(vertexes: &[Point]) -> Vec<Vec<Point>> {
     if !check_is_concave(vertexes) {}
 
     let vertexes_cow = if check_is_polygon_clockwise(vertexes) {
@@ -410,7 +412,7 @@ pub fn split_concave_polygon(vertexes: &[Point]) -> Vec<Vec<Point>> {
 
     let mut stack = vec![];
 
-    if let Some(two_polygon) = split_clockwise_concave_polygon_once(vertexes) {
+    if let Some(two_polygon) = split_clockwise_concave_polygon_to_two_convex_polygon(vertexes) {
         stack.extend(two_polygon);
     } else {
         let vertexes = match vertexes_cow {
@@ -421,7 +423,7 @@ pub fn split_concave_polygon(vertexes: &[Point]) -> Vec<Vec<Point>> {
     }
 
     while let Some(polygon) = stack.pop() {
-        if let Some(two_polygon) = split_clockwise_concave_polygon_once(&polygon) {
+        if let Some(two_polygon) = split_clockwise_concave_polygon_to_two_convex_polygon(&polygon) {
             stack.extend(two_polygon);
         } else {
             result.push(polygon);
@@ -435,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_split_concave_polygon() {
-        use super::split_clockwise_concave_polygon_once;
+        use super::split_clockwise_concave_polygon_to_two_convex_polygon;
         use crate::math::point::Point;
         use crate::math::FloatNum;
         use crate::shape::utils::check_is_polygon_clockwise;
@@ -454,7 +456,7 @@ mod tests {
 
         assert!(check_is_polygon_clockwise(vertexes));
 
-        let result = split_clockwise_concave_polygon_once(vertexes).unwrap();
+        let result = split_clockwise_concave_polygon_to_two_convex_polygon(vertexes).unwrap();
 
         // dbg!(result);
 
@@ -470,7 +472,7 @@ mod tests {
         .map(|v| v.into())
         .collect::<Vec<Point>>();
 
-        let result = split_clockwise_concave_polygon_once(vertexes).unwrap();
+        let result = split_clockwise_concave_polygon_to_two_convex_polygon(vertexes).unwrap();
 
         dbg!(result);
     }
