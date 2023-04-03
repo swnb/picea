@@ -4,8 +4,10 @@ use picea::{
     math::{edge::Edge, point::Point, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{convex::ConvexPolygon, line::Line, utils::split_concave_polygon},
-    tools::collision_view::CollisionStatusViewer,
+    shape::{convex::ConvexPolygon, line::Line, utils::split_concave_polygon_to_convex_polygons},
+    tools::{
+        collision_view::CollisionStatusViewer, snapshot::create_element_construct_code_snapshot,
+    },
 };
 use std::{collections::VecDeque, time::SystemTime};
 
@@ -19,12 +21,12 @@ struct Model {
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
-    let ground_bottom = Line::new((-100., -40.), (100., -40.));
+    let ground_bottom = Line::new((-200., -14.), (200., -14.));
 
-    // scene.push_element(ElementBuilder::new(
-    //     ground_bottom,
-    //     MetaBuilder::new(1.).is_fixed(true),
-    // ));
+    scene.push_element(ElementBuilder::new(
+        ground_bottom,
+        MetaBuilder::new(1.).is_fixed(true),
+    ));
 
     let vertexes = vec![
         (-1, 5),
@@ -43,19 +45,15 @@ fn create_model(_app: &App) -> Model {
         .map(|&(x, y)| (x as FloatNum, y as FloatNum))
         .map(|v| v.into())
         .collect::<VecDeque<Point>>();
-    let polygons = split_concave_polygon(&Vec::from(vertexes)[..]);
+
+    let polygons = split_concave_polygon_to_convex_polygons(&Vec::from(vertexes)[..]);
+
     let elements: Vec<Element> = polygons
         .into_iter()
-        .skip(1)
-        .take(2)
-        .map(|v| {
-            for p in v.clone() {
-                dbg!(p);
-            }
-            v
-        })
         .map(ConvexPolygon::new)
-        .map(|shape| ElementBuilder::new(shape, MetaBuilder::new(10.)).into())
+        .map(|shape| {
+            ElementBuilder::new(shape, MetaBuilder::new(10.).force("gravity", (0., -100.))).into()
+        })
         .collect();
 
     elements.into_iter().for_each(|e| {
@@ -65,7 +63,7 @@ fn create_model(_app: &App) -> Model {
     Model {
         scene,
         timer: SystemTime::now(),
-        is_paused: false,
+        is_paused: true,
         collision_viewer: Default::default(),
     }
 }
@@ -77,14 +75,18 @@ fn event(app: &App, model: &mut Model, event: Event) {
             simple: Some(WindowEvent::KeyPressed(t)),
         } => match t {
             event::VirtualKeyCode::R => *model = create_model(app),
-            event::VirtualKeyCode::C => {}
+            event::VirtualKeyCode::D => model.scene.elements_iter().for_each(|element| {
+                dbg!(element.id());
+                let code = create_element_construct_code_snapshot(element);
+                dbg!(code);
+            }),
             event::VirtualKeyCode::Space => {
                 model.is_paused = !model.is_paused;
             }
             _ => {}
         },
         Event::Update(_) => {
-            model.collision_viewer.on_update(&mut model.scene);
+            // model.collision_viewer.on_update(&mut model.scene);
 
             let now = SystemTime::now();
 
@@ -96,9 +98,10 @@ fn event(app: &App, model: &mut Model, event: Event) {
                 return;
             }
 
-            // model
-            //     .scene
-            //     .update_elements_by_duration(duration.as_secs_f32())
+            model
+                .scene
+                .update_elements_by_duration(duration.as_secs_f32());
+            // model.is_paused = true;
         }
         _ => {}
     }
@@ -126,9 +129,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .height(radius * 2. * scale);
     };
 
-    // make_line(WHITE, (-1000., 0.).into(), (1000., 0.).into());
-    // make_line(WHITE, (0., -1000.).into(), (0., 1000.).into());
-
     model.scene.elements_iter().for_each(|element| {
         element
             .shape()
@@ -144,26 +144,17 @@ fn view(app: &App, model: &Model, frame: Frame) {
                 Edge::Circle {
                     center_point,
                     radius,
-                } => {
-                    // draw.ellipse()
-                    //     .color(WHITE)
-                    //     .x_y(center_point.x(), center_point.y())
-                    //     .width(radius * 2.)
-                    //     .height(radius * 2.);
-                }
+                } => {}
                 _ => unimplemented!(),
             });
+
+        make_ellipse(BLUE, element.center_point(), 0.5);
 
         element.shape().edge_iter().for_each(|edge| match edge {
             Edge::Line {
                 start_point,
                 end_point,
-            } => {
-                // dbg!(start_point);
-                // dbg!(end_point);
-
-                make_line(WHITE, *start_point, *end_point)
-            }
+            } => make_line(WHITE, *start_point, *end_point),
             Edge::Circle {
                 center_point,
                 radius,
@@ -182,8 +173,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
         let point = info.point_b();
 
         make_ellipse(ORANGE, point, 6. / scale);
-
-        dbg!(info.depth());
 
         let v = info.normal_toward_a();
 
