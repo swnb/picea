@@ -149,7 +149,7 @@ impl Scene {
 
                 let contact_point_pairs = contact_point_pairs
                     .into_iter()
-                    .map(|contact_point_pair| contact_point_pair.into())
+                    .map(|contact_point_pair| (contact_point_pair, &*a, &*b).into())
                     .collect();
 
                 let contact_manifold = Manifold {
