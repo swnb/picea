@@ -143,11 +143,6 @@ impl Collider for Element {
     }
 
     #[inline]
-    fn id(&self) -> u32 {
-        self.id()
-    }
-
-    #[inline]
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
         self.shape().projection_on_axis(axis)
     }
