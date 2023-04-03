@@ -9,7 +9,7 @@ use crate::{
  * useful tool for polygon to transform
  */
 
-pub fn compute_polygon_center_point<'a>(
+pub fn compute_polygon_approximate_center_point<'a>(
     point_iter: impl Iterator<Item = &'a Point>,
     edge_count: f32,
 ) -> Point {
