@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use picea::{
     math::{point::Point, vector::Vector, FloatNum},
-    shape::utils::{split_clockwise_concave_polygon_once, split_concave_polygon},
+    shape::utils::split_concave_polygon_to_convex_polygons,
 };
 
 use nannou::{prelude::*, winit::event};
@@ -138,7 +138,7 @@ fn view2(app: &App, model: &Model, frame: Frame) {
         // draw.ellipse().x_y(p.x(), p.y()).color(WHITE).radius(3.);
     }
 
-    let polygons = split_concave_polygon(&Vec::from(vertexes)[..]);
+    let polygons = split_concave_polygon_to_convex_polygons(&Vec::from(vertexes)[..]);
     let polygons_len = polygons.len();
 
     // dbg!(polygons);
