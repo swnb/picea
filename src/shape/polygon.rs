@@ -359,7 +359,7 @@ impl ComputeMomentOfInertia for Square {
     }
 }
 
-pub struct NormalPolygon {
+pub(crate) struct NormalPolygon {
     vertexes: Vec<Point>,
     center_point: Point,
 }
