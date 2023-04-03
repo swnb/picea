@@ -368,7 +368,7 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
         }
 
         if min_cut_edge_index == vertexes_len {
-            panic!("cant' found the cut edge , something is wrong");
+            unreachable!("cant' found the cut edge , something is wrong");
         }
 
         let z = min_cut_edge_index.max(i);
