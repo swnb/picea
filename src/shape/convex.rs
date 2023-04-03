@@ -1,12 +1,12 @@
 use crate::{
-    math::{edge::Edge, point::Point, vector::Vector},
+    math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::Mass,
     shape::utils::rotate_polygon,
 };
 
 use super::{
     utils::{
-        compute_area_of_triangle, compute_convex_center_point,
+        compute_area_of_convex, compute_area_of_triangle, compute_convex_center_point,
         compute_moment_of_inertia_of_triangle, projection_polygon_on_vector,
         split_convex_polygon_to_triangles,
     },
@@ -17,16 +17,24 @@ use super::{
 pub struct ConvexPolygon {
     vertexes: Vec<Point>,
     center_point: Point,
+    area: FloatNum,
 }
 
 impl ConvexPolygon {
     pub fn new(points: impl Into<Vec<Point>>) -> Self {
         let vertexes: Vec<_> = points.into();
         let center_point = compute_convex_center_point(&vertexes);
+        let area = compute_area_of_convex(&vertexes);
+
         Self {
             vertexes,
             center_point,
+            area,
         }
+    }
+
+    pub fn area(&self) -> FloatNum {
+        self.area
     }
 }
 

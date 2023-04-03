@@ -40,6 +40,16 @@ pub fn compute_convex_center_point(points: &[Point]) -> Point {
     center_point.to_point()
 }
 
+/**
+ * split convex polygon into triangles , compute the sum of all triangle area
+ */
+pub fn compute_area_of_convex(vertexes: &[Point]) -> FloatNum {
+    let triangles = split_convex_polygon_to_triangles(vertexes);
+    triangles.into_iter().fold(0., |acc, triangle| {
+        acc + compute_area_of_triangle(&triangle)
+    })
+}
+
 pub fn compute_moment_of_inertia_of_triangle(vertexes: &[Point; 3], m: Mass) -> FloatNum {
     let mut sum = 0.;
     for i in 0..3usize {
