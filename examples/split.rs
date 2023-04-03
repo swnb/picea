@@ -2,7 +2,10 @@ use std::collections::VecDeque;
 
 use picea::{
     math::{point::Point, vector::Vector, FloatNum},
-    shape::utils::split_concave_polygon_to_convex_polygons,
+    shape::utils::{
+        split_clockwise_concave_polygon_to_two_convex_polygon,
+        split_concave_polygon_to_convex_polygons,
+    },
 };
 
 use nannou::{prelude::*, winit::event};
@@ -72,7 +75,8 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .radius(10.);
     }
 
-    let [a, b] = split_clockwise_concave_polygon_once(&Vec::from(vertexes)[..]).unwrap();
+    let [a, b] =
+        split_clockwise_concave_polygon_to_two_convex_polygon(&Vec::from(vertexes)[..]).unwrap();
 
     for mut p in a {
         p = (p.to_vector() * 10.).to_point();
