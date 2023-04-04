@@ -189,6 +189,7 @@ where
         self.solve_friction_constraint(max_friction_lambda);
     }
 
+    // TODO add static friction , make object static
     fn solve_friction_constraint(&mut self, max_friction_lambda: FloatNum) {
         let Self {
             object_a,
@@ -225,7 +226,7 @@ where
         let friction_lambda = contact_info.total_friction_lambda - previous_total_friction_lambda;
 
         object_a.meta_mut().apply_impulse(
-            friction_lambda,
+            friction_lambda.abs(),
             friction_normal_toward_a,
             contact_info.r_a,
         );
