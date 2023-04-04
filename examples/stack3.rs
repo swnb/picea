@@ -4,7 +4,7 @@ use picea::{
     math::{edge::Edge, point::Point, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{convex::ConvexPolygon, line::Line, utils::split_concave_polygon_to_convex_polygons},
+    shape::{concave::ConcavePolygon, line::Line},
     tools::{
         collision_view::CollisionStatusViewer, snapshot::create_element_construct_code_snapshot,
     },
@@ -46,19 +46,36 @@ fn create_model(_app: &App) -> Model {
         .map(|v| v.into())
         .collect::<VecDeque<Point>>();
 
-    let polygons = split_concave_polygon_to_convex_polygons(&Vec::from(vertexes)[..]);
+    let concave_polygon = ConcavePolygon::new(&Vec::from(vertexes)[..]);
 
-    let elements: Vec<Element> = polygons
-        .into_iter()
-        .map(ConvexPolygon::new)
-        .map(|shape| {
-            ElementBuilder::new(shape, MetaBuilder::new(10.).force("gravity", (0., -100.))).into()
-        })
-        .collect();
+    // let polygons = split_concave_polygon_to_convex_polygons(&Vec::from(vertexes)[..]);
 
-    elements.into_iter().for_each(|e| {
-        scene.push_element(e);
-    });
+    // let elements: Vec<Element> = polygons
+    //     .into_iter()
+    //     .map(ConvexPolygon::new)
+    //     .map(|shape| {
+    //         ElementBuilder::new(shape, MetaBuilder::new(10.).force("gravity", (0., -100.))).into()
+    //     })
+    //     .collect();
+
+    // elements.into_iter().for_each(|e| {
+    //     scene.push_element(e);
+    // });
+
+    // let convex_polygons = concave_polygon.clone().to_convex_polygons();
+
+    // for convex_polygon in convex_polygons {
+    //     let element = ElementBuilder::new(
+    //         convex_polygon,
+    //         MetaBuilder::new(10.).force("gravity", (0., -100.)),
+    //     );
+    //     scene.push_element(element);
+    // }
+    let element = ElementBuilder::new(
+        concave_polygon,
+        MetaBuilder::new(10.).force("gravity", (0., -100.)),
+    );
+    scene.push_element(element);
 
     Model {
         scene,
@@ -130,23 +147,23 @@ fn view(app: &App, model: &Model, frame: Frame) {
     };
 
     model.scene.elements_iter().for_each(|element| {
-        element
-            .shape()
-            .edge_iter()
-            .take(1)
-            .for_each(|edge| match edge {
-                Edge::Line {
-                    start_point,
-                    end_point,
-                } => {
-                    make_line(WHITE, element.center_point(), *start_point);
-                }
-                Edge::Circle {
-                    center_point,
-                    radius,
-                } => {}
-                _ => unimplemented!(),
-            });
+        // element
+        //     .shape()
+        //     .edge_iter()
+        //     .take(1)
+        //     .for_each(|edge| match edge {
+        //         Edge::Line {
+        //             start_point,
+        //             end_point,
+        //         } => {
+        //             make_line(WHITE, element.center_point(), *start_point);
+        //         }
+        //         Edge::Circle {
+        //             center_point,
+        //             radius,
+        //         } => {}
+        //         _ => unimplemented!(),
+        //     });
 
         make_ellipse(BLUE, element.center_point(), 0.5);
 
