@@ -1,7 +1,9 @@
 use std::{borrow::Cow, ops::Deref};
 
 use crate::{
-    math::{num::is_same_sign, point::Point, segment::Segment, vector::Vector, FloatNum},
+    math::{
+        edge::Edge, num::is_same_sign, point::Point, segment::Segment, vector::Vector, FloatNum,
+    },
     meta::Mass,
 };
 
@@ -32,9 +34,12 @@ pub fn compute_convex_center_point(points: &[Point]) -> Point {
         .iter()
         .fold(0., |acc, triangle| acc + compute_area_of_triangle(triangle));
 
+    let total_area_inv = total_area.recip();
+
     let center_point: Vector = triangles.iter().fold(Default::default(), |acc, triangle| {
         let center_point = compute_polygon_approximate_center_point(triangle.iter(), 3.);
-        acc + (center_point.to_vector() * (compute_area_of_triangle(triangle) / total_area))
+        let rate = compute_area_of_triangle(triangle) * total_area_inv;
+        acc + (center_point.to_vector() * rate)
     });
 
     center_point.to_point()
@@ -212,6 +217,37 @@ impl VertexesHelper<'_> {
         let a = self[index % len];
         let b = self[(index + 1) % len];
         (a, b).into()
+    }
+}
+
+pub(crate) struct VertexesToEdgeIter<'a> {
+    index: usize,
+    vertexes: &'a [Point],
+}
+
+impl<'a> VertexesToEdgeIter<'a> {
+    pub fn new(vertexes: &'a [Point]) -> Self {
+        Self { index: 0, vertexes }
+    }
+}
+
+impl<'a> Iterator for VertexesToEdgeIter<'a> {
+    type Item = Edge<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let len = self.vertexes.len();
+        if self.index >= len {
+            return None;
+        }
+
+        let edge = Edge::Line {
+            start_point: &self.vertexes[self.index],
+            end_point: &self.vertexes[(self.index + 1) % len],
+        };
+
+        self.index += 1;
+
+        edge.into()
     }
 }
 

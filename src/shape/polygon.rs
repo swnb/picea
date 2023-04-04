@@ -4,9 +4,11 @@ use super::{
         compute_polygon_approximate_center_point, projection_polygon_on_vector, rotate_polygon,
         translate_polygon,
     },
-    ComputeMomentOfInertia, Shape,
+    CenterPoint, EdgeIterable, GeometryTransform,
 };
 use crate::{
+    algo::collision::{Collider, Projector},
+    element::ComputeMomentOfInertia,
     math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::Mass,
 };
@@ -34,12 +36,35 @@ trait CommonPolygon {
 }
 
 macro_rules! impl_shape_for_common_polygon {
-    (@inner_impl) => {
+    (@center_point,@inner_impl) => {
         #[inline]
         fn center_point(&self) -> Point {
             self.get_center_point()
         }
+    };
+    (@transform,@inner_impl) => {
+        #[inline]
+        fn translate(&mut self, vector: &Vector) {
+            translate_polygon(self.point_iter_mut(), vector);
+            *self.center_point_mut() += vector;
+        }
 
+        #[inline]
+        fn rotate(&mut self, &origin_point: &Point, deg: f32) {
+            rotate_polygon(origin_point, self.point_iter_mut(), deg);
+        }
+    };
+    (@edge_iter,@inner_impl) => {
+        #[inline]
+        fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
+            // TODO move to normal loop, performance issue
+            let iter = self.point_iter()
+                    .zip(self.point_iter().skip(1).chain(self.point_iter().take(1)))
+                    .map(|v| v.into());
+            Box::new(iter)
+        }
+    };
+    (@projector,@inner_impl) => {
         #[inline]
         fn projection_on_vector(&self, &vector: &Vector) -> (Point, Point) {
             projection_polygon_on_vector(self.point_iter(), vector)
@@ -64,36 +89,36 @@ macro_rules! impl_shape_for_common_polygon {
             };
             point_iter.fold((f32::MAX, f32::MIN), reducer)
         }
-
-        #[inline]
-        fn translate(&mut self, vector: &Vector) {
-            translate_polygon(self.point_iter_mut(), vector);
-            *self.center_point_mut() += vector;
-        }
-
-        #[inline]
-        fn rotate(&mut self, &origin_point: &Point, deg: f32) {
-            rotate_polygon(origin_point, self.point_iter_mut(), deg);
-        }
-
-        #[inline]
-        fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
-            // TODO move to normal loop, performance issue
-            let iter = self.point_iter()
-                    .zip(self.point_iter().skip(1).chain(self.point_iter().take(1)))
-                    .map(|v| v.into());
-            Box::new(iter)
-        }
     };
     ($struct_name:ident) => {
-        impl Shape for $struct_name where Self:CommonPolygon {
-            impl_shape_for_common_polygon!(@inner_impl);
+        impl GeometryTransform for $struct_name {
+            impl_shape_for_common_polygon!(@transform, @inner_impl);
         }
+        impl CenterPoint for $struct_name {
+            impl_shape_for_common_polygon!(@center_point,@inner_impl);
+        }
+        impl EdgeIterable for $struct_name {
+            impl_shape_for_common_polygon!(@edge_iter,@inner_impl);
+        }
+        impl Projector for $struct_name {
+            impl_shape_for_common_polygon!(@projector,@inner_impl);
+        }
+        impl Collider for $struct_name {}
     };
     (@const,$struct_name:ident) => {
-        impl<const N:usize> Shape for $struct_name<N> where Self:CommonPolygon {
-            impl_shape_for_common_polygon!(@inner_impl);
+        impl<const N:usize> GeometryTransform for $struct_name<N> {
+            impl_shape_for_common_polygon!(@transform,@inner_impl);
         }
+        impl<const N:usize> CenterPoint for $struct_name<N> {
+            impl_shape_for_common_polygon!(@center_point,@inner_impl);
+        }
+        impl<const N:usize> EdgeIterable for $struct_name<N> {
+            impl_shape_for_common_polygon!(@edge_iter,@inner_impl);
+        }
+        impl<const N:usize> Projector for $struct_name<N> {
+            impl_shape_for_common_polygon!(@projector,@inner_impl);
+        }
+        impl<const N:usize> Collider for $struct_name<N> {}
     };
 }
 

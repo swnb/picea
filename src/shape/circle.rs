@@ -1,24 +1,26 @@
-use super::{ComputeMomentOfInertia, Shape};
+use super::{CenterPoint, EdgeIterable, GeometryTransform};
 use crate::{
+    algo::collision::{Collider, Projector},
+    element::ComputeMomentOfInertia,
     math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
     meta::Mass,
 };
 
 #[derive(Clone, Debug)]
-pub struct CircleShape {
+pub struct Circle {
     center: Point,
     r: f32,
     deg: f32,
 }
 
-impl<P: Into<Point>> From<(P, f32)> for CircleShape {
+impl<P: Into<Point>> From<(P, f32)> for Circle {
     fn from((p, radius): (P, f32)) -> Self {
         let center_point = p.into();
         Self::new(center_point, radius)
     }
 }
 
-impl CircleShape {
+impl Circle {
     #[inline]
     pub fn new(center_point: impl Into<Point>, radius: f32) -> Self {
         Self {
@@ -44,11 +46,7 @@ impl CircleShape {
     }
 }
 
-impl Shape for CircleShape {
-    fn center_point(&self) -> Point {
-        self.center
-    }
-
+impl Projector for Circle {
     fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
         let vector = vector.normalize();
 
@@ -69,7 +67,15 @@ impl Shape for CircleShape {
             Y => (center_y - radius, center_y + radius),
         }
     }
+}
 
+impl CenterPoint for Circle {
+    fn center_point(&self) -> Point {
+        self.center
+    }
+}
+
+impl GeometryTransform for Circle {
     fn translate(&mut self, vector: &Vector) {
         self.center += vector
     }
@@ -88,11 +94,13 @@ impl Shape for CircleShape {
             self.deg %= TAU
         }
     }
+}
 
+impl EdgeIterable for Circle {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
         struct EdgeIter<'a> {
             is_consumed: bool,
-            circle_ref: &'a CircleShape,
+            circle_ref: &'a Circle,
         }
 
         impl<'a> Iterator for EdgeIter<'a> {
@@ -117,12 +125,14 @@ impl Shape for CircleShape {
     }
 }
 
-impl ComputeMomentOfInertia for CircleShape {
+impl ComputeMomentOfInertia for Circle {
     // compute moment of inertia;
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
         m * self.radius().powf(2.) * 0.5
     }
 }
+
+impl Collider for Circle {}
 
 #[cfg(test)]
 mod tests {
@@ -130,7 +140,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let circle_shape = CircleShape::new((0., 0.), 25.);
+        let circle_shape = Circle::new((0., 0.), 25.);
 
         let p = circle_shape.projection_on_vector(&(1., 0.).into());
         dbg!(p);
