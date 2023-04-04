@@ -10,6 +10,7 @@ pub mod line;
 pub mod polygon;
 pub mod utils;
 
+// TODO extract trait Projector
 pub trait Shape {
     fn center_point(&self) -> Point;
 

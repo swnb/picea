@@ -9,7 +9,10 @@ use crate::{
  * useful tool for polygon to transform
  */
 
-pub fn compute_polygon_center_point<'a>(
+/**
+ * this function simply return the avg point of vertexes, it doesn't suit for all convex polygon
+ */
+pub fn compute_polygon_approximate_center_point<'a>(
     point_iter: impl Iterator<Item = &'a Point>,
     edge_count: f32,
 ) -> Point {
@@ -19,15 +22,32 @@ pub fn compute_polygon_center_point<'a>(
     (sum * edge_count.recip()).to_point()
 }
 
-pub fn compute_convex_center_point<'a>(
-    point_iter: impl Iterator<Item = &'a Point>,
-    edge_count: f32,
-) -> Point {
-    let mut result = (0., 0.).into();
-    for &point in point_iter {
-        result += point.to_vector() * edge_count.recip();
-    }
-    result
+/**
+ * split convex polygon into triangles , use the rate of area sum all the center point of triangle
+ */
+pub fn compute_convex_center_point(points: &[Point]) -> Point {
+    let triangles = split_convex_polygon_to_triangles(points);
+
+    let total_area = triangles
+        .iter()
+        .fold(0., |acc, triangle| acc + compute_area_of_triangle(triangle));
+
+    let center_point: Vector = triangles.iter().fold(Default::default(), |acc, triangle| {
+        let center_point = compute_polygon_approximate_center_point(triangle.iter(), 3.);
+        acc + (center_point.to_vector() * (compute_area_of_triangle(triangle) / total_area))
+    });
+
+    center_point.to_point()
+}
+
+/**
+ * split convex polygon into triangles , compute the sum of all triangle area
+ */
+pub fn compute_area_of_convex(vertexes: &[Point]) -> FloatNum {
+    let triangles = split_convex_polygon_to_triangles(vertexes);
+    triangles.into_iter().fold(0., |acc, triangle| {
+        acc + compute_area_of_triangle(&triangle)
+    })
 }
 
 pub fn compute_moment_of_inertia_of_triangle(vertexes: &[Point; 3], m: Mass) -> FloatNum {

@@ -14,11 +14,29 @@ use std::{
 
 // define Collider trait
 pub trait Collider {
-    fn id(&self) -> u32;
-
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32);
 
     fn projection_on_vector(&self, vector: &Vector) -> (Point, Point);
+
+    fn center_point(&self) -> Point;
+}
+
+// TODO use new trait
+
+pub trait Projector {
+    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32);
+
+    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point);
+}
+
+pub trait NewCollider: Projector {
+    type Children<'a>: Iterator<Item = &'a dyn Projector>
+    where
+        Self: 'a;
+
+    fn projectors(&self) -> Option<Self::Children<'_>> {
+        None
+    }
 
     fn center_point(&self) -> Point;
 }

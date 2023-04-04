@@ -1,7 +1,7 @@
 use super::{
     utils::{
         compute_area_of_triangle, compute_moment_of_inertia_of_triangle,
-        compute_polygon_center_point, projection_polygon_on_vector, rotate_polygon,
+        compute_polygon_approximate_center_point, projection_polygon_on_vector, rotate_polygon,
         translate_polygon,
     },
     ComputeMomentOfInertia, Shape,
@@ -108,7 +108,8 @@ impl<const N: usize> ConstPolygon<N> {
 
     #[inline]
     pub fn new(vertexes: [Point; N]) -> Self {
-        let center_point = compute_polygon_center_point(vertexes.iter(), vertexes.len() as f32);
+        let center_point =
+            compute_polygon_approximate_center_point(vertexes.iter(), vertexes.len() as f32);
 
         Self {
             vertexes,
