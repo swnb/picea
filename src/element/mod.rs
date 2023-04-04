@@ -2,7 +2,10 @@ pub mod alias;
 pub(crate) mod store;
 
 use crate::{
-    algo::{collision::Collider, constraint::ConstraintObject},
+    algo::{
+        collision::{Collider, Projector, SubCollider},
+        constraint::ConstraintObject,
+    },
     math::{
         axis::AxisDirection,
         edge::Edge,
@@ -10,30 +13,45 @@ use crate::{
         vector::{Vector, Vector3},
         FloatNum,
     },
-    meta::Meta,
-    shape::{ComputeMomentOfInertia, Shape},
+    meta::{Mass, Meta},
+    shape::{CenterPoint, EdgeIterable, GeometryTransform},
 };
 
 type ID = u32;
 
 // TODO refactor element builder
 pub struct ElementBuilder {
-    shape: Box<dyn ElementShape>,
+    shape: Box<dyn ShapeTraitUnion>,
     meta: Meta,
 }
 
+pub trait ComputeMomentOfInertia {
+    fn compute_moment_of_inertia(&self, m: Mass) -> f32;
+}
+
 // TODO rename
-pub trait ElementShape: Shape + ComputeMomentOfInertia {}
-impl<T> ElementShape for T where T: Shape + ComputeMomentOfInertia {}
+pub trait ShapeTraitUnion:
+    GeometryTransform + CenterPoint + EdgeIterable + ComputeMomentOfInertia + Projector + Collider
+{
+}
+impl<T> ShapeTraitUnion for T where
+    T: GeometryTransform
+        + CenterPoint
+        + EdgeIterable
+        + ComputeMomentOfInertia
+        + Projector
+        + Collider
+{
+}
 
 impl ElementBuilder {
-    pub fn new(shape: impl Into<Box<dyn ElementShape>>, meta: impl Into<Meta>) -> Self {
+    pub fn new(shape: impl Into<Box<dyn ShapeTraitUnion>>, meta: impl Into<Meta>) -> Self {
         let shape = shape.into();
         let meta = meta.into();
         Self { shape, meta }
     }
 
-    pub fn shape(mut self, shape: impl Into<Box<dyn ElementShape>>) -> Self {
+    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeTraitUnion>>) -> Self {
         self.shape = shape.into();
         self
     }
@@ -47,7 +65,7 @@ impl ElementBuilder {
 pub struct Element {
     id: ID,
     meta: Meta,
-    shape: Box<dyn ElementShape>,
+    shape: Box<dyn ShapeTraitUnion>,
 }
 
 impl Element {
@@ -61,7 +79,7 @@ impl Element {
     }
 
     #[inline]
-    pub fn new(mut shape: Box<dyn ElementShape>, meta: impl Into<Meta>) -> Self {
+    pub fn new(mut shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>) -> Self {
         let mut meta = meta.into();
 
         shape.rotate(&shape.center_point(), meta.angular());
@@ -108,7 +126,7 @@ impl Element {
         }
     }
 
-    pub fn shape(&self) -> &dyn ElementShape {
+    pub fn shape(&self) -> &dyn ShapeTraitUnion {
         &*self.shape
     }
 
@@ -133,23 +151,6 @@ impl Element {
 impl From<ElementBuilder> for Element {
     fn from(builder: ElementBuilder) -> Self {
         Self::new(builder.shape, builder.meta)
-    }
-}
-
-impl Collider for Element {
-    #[inline]
-    fn center_point(&self) -> Point {
-        self.shape.center_point()
-    }
-
-    #[inline]
-    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
-        self.shape().projection_on_axis(axis)
-    }
-
-    #[inline]
-    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
-        self.shape().projection_on_vector(vector)
     }
 }
 
@@ -181,5 +182,27 @@ impl ConstraintObject for Element {
         v += meta.velocity();
 
         v
+    }
+}
+
+impl CenterPoint for Element {
+    fn center_point(&self) -> Point {
+        self.shape().center_point()
+    }
+}
+
+impl Projector for Element {
+    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
+        self.shape().projection_on_axis(axis)
+    }
+
+    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
+        self.shape().projection_on_vector(vector)
+    }
+}
+
+impl Collider for Element {
+    fn sub_colliders(&self) -> Option<Box<dyn Iterator<Item = &dyn SubCollider> + '_>> {
+        self.shape().sub_colliders()
     }
 }
