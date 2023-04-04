@@ -1,31 +1,116 @@
-use crate::math::point::Point;
+use crate::{
+    algo::collision::{Collider, Projector, SubCollider},
+    element::ComputeMomentOfInertia,
+    math::{edge::Edge, point::Point, vector::Vector, FloatNum},
+};
 
-use super::{convex::ConvexPolygon, utils::split_concave_polygon_to_convex_polygons};
+use super::{
+    convex::ConvexPolygon,
+    utils::{
+        projection_polygon_on_vector, rotate_polygon, split_concave_polygon_to_convex_polygons,
+        translate_polygon, VertexesToEdgeIter,
+    },
+    CenterPoint, EdgeIterable, GeometryTransform,
+};
 
-#[derive(Default)]
+#[derive(Clone)]
 pub struct ConcavePolygon {
+    origin_vertexes: Vec<Point>,
     sub_convex_polygons: Vec<ConvexPolygon>,
+    center_point: Point,
+    area: FloatNum,
 }
 
 impl ConcavePolygon {
     pub fn new(vertexes: &[Point]) -> Self {
-        let sub_convex_polygons = split_concave_polygon_to_convex_polygons(vertexes)
-            .into_iter()
-            .map(ConvexPolygon::new)
-            .collect();
+        let origin_vertexes = vertexes.to_owned();
+        let sub_convex_polygons: Vec<_> =
+            split_concave_polygon_to_convex_polygons(&origin_vertexes)
+                .into_iter()
+                .map(ConvexPolygon::new)
+                .collect();
+
+        let total_area = sub_convex_polygons
+            .iter()
+            .fold(0., |acc, convex_polygon| acc + convex_polygon.area());
+        let total_area_inv = total_area.recip();
+
+        let center_point = sub_convex_polygons
+            .iter()
+            .fold(Default::default(), |acc: Vector, convex_polygon| {
+                let rate = convex_polygon.area() * total_area_inv;
+                acc + convex_polygon.center_point().to_vector() * rate
+            })
+            .to_point();
+
         Self {
+            origin_vertexes,
             sub_convex_polygons,
+            center_point,
+            area: total_area,
         }
+    }
+
+    pub fn to_convex_polygons(self) -> impl Iterator<Item = ConvexPolygon> {
+        self.sub_convex_polygons.into_iter()
     }
 }
 
-/**
- * 凹多边形的转动惯量可以通过以下公式计算：
- * I = Σ(Ig + A * d^2)
- * 其中，Ig是每个三角形相对于重心的转动惯量，A是三角形的面积，d是三角形重心到凹多边形重心的距离。Σ表示对所有三角形求和。
- * 具体而言，对于每个三角形，可以通过以下公式计算其相对于重心的转动惯量：
- * Ig = (1/36) * m * (a^2 + b^2 + c^2)
- * 其中，m是三角形的质量（可以看作是面积），a、b、c是三角形的三条边的长度。该公式可以通过将三角形看作是一个平面薄片并绕过重心的轴旋转来推导出来。
- * 需要注意的是，凹多边形的重心需要使用刚才提到的方法来计算。同时，该公式仅适用于二维几何形状，对于三维几何形状的转动惯量计算，公式会有所不同。
- */
-fn compute_moment_of_inertia() {}
+impl GeometryTransform for ConcavePolygon {
+    fn translate(&mut self, vector: &Vector) {
+        self.sub_convex_polygons
+            .iter_mut()
+            .for_each(|convex_polygon| convex_polygon.translate(vector));
+        translate_polygon(self.origin_vertexes.iter_mut(), vector);
+        self.center_point += vector;
+    }
+
+    fn rotate(&mut self, origin_point: &Point, deg: f32) {
+        // TODO update center point ?
+        self.sub_convex_polygons
+            .iter_mut()
+            .for_each(|convex_polygon| convex_polygon.rotate(origin_point, deg));
+        rotate_polygon(*origin_point, self.origin_vertexes.iter_mut(), deg);
+    }
+}
+
+impl CenterPoint for ConcavePolygon {
+    fn center_point(&self) -> Point {
+        self.center_point
+    }
+}
+
+impl Projector for ConcavePolygon {
+    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
+        projection_polygon_on_vector(self.origin_vertexes.iter(), *vector)
+    }
+}
+
+impl Collider for ConcavePolygon {
+    fn sub_colliders(&'_ self) -> Option<Box<dyn Iterator<Item = &'_ dyn SubCollider> + '_>> {
+        Some(Box::new(
+            self.sub_convex_polygons
+                .iter()
+                .map(|p| p as &dyn SubCollider),
+        ))
+    }
+}
+
+impl EdgeIterable for ConcavePolygon {
+    fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
+        Box::new(VertexesToEdgeIter::new(&self.origin_vertexes))
+    }
+}
+
+impl ComputeMomentOfInertia for ConcavePolygon {
+    fn compute_moment_of_inertia(&self, m: crate::meta::Mass) -> f32 {
+        let area_inv = self.area.recip();
+        self.sub_convex_polygons
+            .iter()
+            .fold(0., |acc, convex_polygon| {
+                let convex_area = convex_polygon.area();
+                let rate = convex_area * area_inv;
+                acc + convex_polygon.compute_moment_of_inertia(m * rate) * rate
+            })
+    }
+}
