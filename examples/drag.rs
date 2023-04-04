@@ -5,10 +5,10 @@ use nannou::{
 use picea::{
     algo::is_point_inside_shape,
     element::{Element, ElementBuilder},
-    math::{edge::Edge, vector::Vector},
+    math::{edge::Edge, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
-    shape::line::Line,
+    shape::{concave::ConcavePolygon, line::Line},
     tools::{collision_view::CollisionStatusViewer, drag::Draggable},
 };
 use std::time::SystemTime;
@@ -66,6 +66,26 @@ fn create_model(_app: &App) -> Model {
     //         meta.clone(),
     //     ));
     // }
+
+    let vertexes = vec![
+        (-1, 5),
+        (0, 0),
+        (1, 0),
+        (1, 10),
+        (-10, 10),
+        (-10, 17),
+        (5, 17),
+        (5, -10),
+        (-1, -11),
+    ]
+    .iter()
+    .map(|&(x, y)| (x as FloatNum * 10., y as FloatNum * 10.))
+    .map(|v| v.into())
+    .collect::<Vec<_>>();
+
+    let concave_polygon = ConcavePolygon::new(&vertexes);
+
+    scene.push_element(ElementBuilder::new(concave_polygon, meta));
 
     scene.push_element(ElementBuilder::new(
         (6, (10., 20.), 200.),
@@ -254,7 +274,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .weight(2.)
             .color(RED)
             .start(vec2(0., 0.))
-            .end(vec2(v.x() * 100., v.y() * 100.));
+            .end(vec2(v.x() * 10., v.y() * 10.));
     }
 
     if let Some(p) = model.draggable.mouse_point() {

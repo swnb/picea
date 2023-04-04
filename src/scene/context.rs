@@ -17,7 +17,7 @@ impl Default for ConstraintParameters {
             factor_position_bias: 0.8,
             factor_elastic: 0.01,
             max_allow_permeate: 0.2,
-            factor_default_friction: 10.,
+            factor_default_friction: 0.2,
         }
     }
 }
@@ -36,7 +36,7 @@ impl Default for Context {
     fn default() -> Self {
         Self {
             constraint_parameters: Default::default(),
-            enable_sleep_mode: true,
+            enable_sleep_mode: false,
             max_enter_sleep_frame: 10,
             max_enter_sleep_motion: 0.07,
         }

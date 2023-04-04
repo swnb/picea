@@ -50,6 +50,11 @@ impl IDDispatcher {
     }
 }
 
+enum SceneManifoldsType {
+    PreviousManifolds,
+    CurrentManifolds,
+}
+
 impl Scene {
     #[inline]
     pub fn new() -> Self {
@@ -91,6 +96,7 @@ impl Scene {
 
                 let a_v = element.meta().angular_velocity();
 
+                // TODO better performance for abs
                 let motion = v.abs().powf(2.) + a_v.powf(2.);
 
                 if motion < max_enter_sleep_motion {
@@ -144,7 +150,7 @@ impl Scene {
 
                 let contact_point_pairs = contact_point_pairs
                     .into_iter()
-                    .map(|contact_point_pair| contact_point_pair.into())
+                    .map(|contact_point_pair| (contact_point_pair, &*a, &*b).into())
                     .collect();
 
                 let contact_manifold = Manifold {
@@ -157,14 +163,11 @@ impl Scene {
             |element_a, element_b| element_a.meta().is_sleeping() && element_b.meta().is_sleeping(),
         );
 
-        let manifolds =
-            unsafe { &mut *(&mut self.pre_contact_manifold as &mut [Manifold] as *mut _) };
+        use SceneManifoldsType::*;
 
-        self.constraint(manifolds, delta_time);
+        self.constraint(PreviousManifolds, delta_time);
 
-        let manifolds = unsafe { &mut *(&mut self.contact_manifolds as &mut [Manifold] as *mut _) };
-
-        self.constraint(manifolds, delta_time);
+        self.constraint(CurrentManifolds, delta_time);
 
         self.elements_iter_mut()
             .for_each(|element| element.integrate_velocity(delta_time));
@@ -192,7 +195,7 @@ impl Scene {
         self.element_store.get_mut_element_by_id(id)
     }
 
-    fn constraint(&mut self, manifolds: &mut [Manifold], delta_time: FloatNum) {
+    fn constraint(&mut self, manifolds_type: SceneManifoldsType, delta_time: FloatNum) {
         let query_element_pair =
             |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
                 let element_a = self
@@ -216,8 +219,16 @@ impl Scene {
             }
         }
 
-        let mut solver = Solver::<'_, '_, [Manifold]>::new(&self.context, manifolds);
-
-        solver.constraint(query_element_pair, delta_time);
+        use SceneManifoldsType::*;
+        match manifolds_type {
+            CurrentManifolds => {
+                Solver::<'_, '_, [Manifold]>::new(&self.context, &mut self.contact_manifolds)
+                    .constraint(query_element_pair, delta_time);
+            }
+            PreviousManifolds => {
+                Solver::<'_, '_, [Manifold]>::new(&self.context, &mut self.pre_contact_manifold)
+                    .constraint(query_element_pair, delta_time);
+            }
+        }
     }
 }

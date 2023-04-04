@@ -7,4 +7,4 @@ pub mod vector;
 
 pub(crate) mod num;
 // TODO rename
-pub(crate) type FloatNum = f32;
+pub type FloatNum = f32;
