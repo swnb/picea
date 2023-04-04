@@ -229,11 +229,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
         let v = info.normal_toward_a();
 
         make_line(RED, (0., 0.).into(), (v * 10f32).to_point());
-        // draw.line()
-        //     .weight(2.)
-        //     .color(RED)
-        //     .start(vec2(0., 0.))
-        //     .end(vec2(v.x() * 100., v.y() * 100.));
     }
 
     draw.to_frame(app, &frame).unwrap();

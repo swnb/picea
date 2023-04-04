@@ -1,9 +1,11 @@
 use crate::{
+    algo::collision::{Collider, Projector},
+    element::ComputeMomentOfInertia,
     math::{edge::Edge, point::Point, segment::Segment, vector::Vector},
     meta::Mass,
 };
 
-use super::{ComputeMomentOfInertia, Shape};
+use super::{CenterPoint, EdgeIterable, GeometryTransform};
 
 #[derive(Clone)]
 pub struct Line {
@@ -40,24 +42,32 @@ impl Line {
     }
 }
 
-impl Shape for Line {
+impl CenterPoint for Line {
     fn center_point(&self) -> Point {
         (self.start_point().to_vector() * 0.5 + self.end_point().to_vector() * 0.5).to_point()
     }
+}
 
-    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
-        let vector = vector.normalize();
-        let &start_point = self.start_point();
-        let &end_point = self.end_point();
-        let start_point_projection_size = start_point.to_vector() * vector;
-        let end_point_projection_size = end_point.to_vector() * vector;
-        if start_point_projection_size < end_point_projection_size {
-            (start_point, end_point)
-        } else {
-            (end_point, start_point)
-        }
+impl EdgeIterable for Line {
+    fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
+        let edges = [
+            Edge::Line {
+                start_point: self.start_point(),
+                end_point: self.end_point(),
+            },
+            Edge::Line {
+                end_point: self.start_point(),
+                start_point: self.end_point(),
+            },
+        ];
+
+        Box::new(edges.into_iter())
     }
+}
 
+impl Collider for Line {}
+
+impl GeometryTransform for Line {
     fn translate(&mut self, vector: &Vector) {
         *self.start_point_mut() += vector;
         *self.end_point_mut() += vector;
@@ -72,20 +82,20 @@ impl Shape for Line {
         update_point(self.start_point_mut());
         update_point(self.end_point_mut());
     }
+}
 
-    fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
-        let edges = [
-            Edge::Line {
-                start_point: self.start_point(),
-                end_point: self.end_point(),
-            },
-            Edge::Line {
-                end_point: self.start_point(),
-                start_point: self.end_point(),
-            },
-        ];
-
-        Box::new(edges.into_iter())
+impl Projector for Line {
+    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
+        let vector = vector.normalize();
+        let &start_point = self.start_point();
+        let &end_point = self.end_point();
+        let start_point_projection_size = start_point.to_vector() * vector;
+        let end_point_projection_size = end_point.to_vector() * vector;
+        if start_point_projection_size < end_point_projection_size {
+            (start_point, end_point)
+        } else {
+            (end_point, start_point)
+        }
     }
 }
 

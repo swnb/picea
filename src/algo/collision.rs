@@ -1,10 +1,13 @@
-use crate::math::{
-    axis::AxisDirection,
-    num::is_same_sign,
-    point::Point,
-    segment::Segment,
-    vector::{Vector, Vector3},
-    FloatNum,
+use crate::{
+    math::{
+        axis::AxisDirection,
+        num::is_same_sign,
+        point::Point,
+        segment::Segment,
+        vector::{Vector, Vector3},
+        FloatNum,
+    },
+    shape::CenterPoint,
 };
 use std::{
     cmp::Ordering,
@@ -12,15 +15,27 @@ use std::{
     ops::{ControlFlow, Deref, DerefMut, IndexMut},
 };
 
-// define Collider trait
-pub trait Collider {
-    fn id(&self) -> u32;
-
-    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32);
-
+pub trait Projector {
     fn projection_on_vector(&self, vector: &Vector) -> (Point, Point);
 
-    fn center_point(&self) -> Point;
+    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
+        use AxisDirection::*;
+        let (p1, p2) = self.projection_on_vector(&axis.into());
+        match axis {
+            X => (p1.x(), p2.x()),
+            Y => (p1.y(), p2.y()),
+        }
+    }
+}
+
+pub trait SubCollider: Projector + CenterPoint {}
+
+impl<T> SubCollider for T where T: Projector + CenterPoint {}
+
+pub trait Collider: Projector + CenterPoint {
+    fn sub_colliders(&'_ self) -> Option<Box<dyn Iterator<Item = &'_ dyn SubCollider> + '_>> {
+        None
+    }
 }
 
 // define collection of elements
@@ -63,7 +78,7 @@ pub fn detect_collision<T, H, F>(elements: T, mut handler: H, skip: F)
 where
     T: CollisionalCollection,
     // TODO use Iterator instead Vec
-    H: FnMut(&mut T::Collider, &mut T::Collider, Vec<ContactPointPair>),
+    H: FnMut(&T::Collider, &T::Collider, Vec<ContactPointPair>),
     F: Fn(&T::Collider, &T::Collider) -> bool,
 {
     // let time = std::time::Instant::now();
@@ -78,8 +93,43 @@ where
         axis,
         |a, b| {
             // TODO special collision algo for circle and circle
-            if let Some(collision_info) = special_collision_detection(a, b) {
-                handler(a, b, collision_info);
+
+            let sub_colliders_a = a.sub_colliders();
+            let sub_colliders_b = b.sub_colliders();
+
+            match (sub_colliders_a, sub_colliders_b) {
+                // TODO
+                (Some(sub_colliders_a), Some(sub_colliders_b)) => {
+                    for collider_a in sub_colliders_a {
+                        let sub_colliders_b = b.sub_colliders().unwrap();
+                        for collider_b in sub_colliders_b {
+                            if let Some(collision_info) =
+                                special_collision_detection(collider_a, collider_b)
+                            {
+                                handler(a, b, collision_info);
+                            }
+                        }
+                    }
+                }
+                (Some(sub_colliders_a), None) => {
+                    for collider_a in sub_colliders_a {
+                        if let Some(collision_info) = special_collision_detection(collider_a, b) {
+                            handler(a, b, collision_info);
+                        }
+                    }
+                }
+                (None, Some(sub_colliders_b)) => {
+                    for collider_b in sub_colliders_b {
+                        if let Some(collision_info) = special_collision_detection(a, collider_b) {
+                            handler(a, b, collision_info);
+                        }
+                    }
+                }
+                (None, None) => {
+                    if let Some(collision_info) = special_collision_detection(a, b) {
+                        handler(a, b, collision_info);
+                    }
+                }
             }
         },
         skip,
@@ -88,9 +138,9 @@ where
     // dbg!(time.elapsed());
 }
 
-pub fn special_collision_detection<C: Collider>(
-    a: &mut C,
-    b: &mut C,
+pub fn special_collision_detection(
+    a: &dyn SubCollider,
+    b: &dyn SubCollider,
 ) -> Option<Vec<ContactPointPair>> {
     let center_point_a = a.center_point();
     let center_point_b = b.center_point();

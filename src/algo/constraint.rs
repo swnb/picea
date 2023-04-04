@@ -42,21 +42,62 @@ fn sequential_impulse() {
     todo!()
 }
 
+// TODO if two element is still collide in current frame, we can reuse this
+// contact info , is two element is not collide anymore , we don't need this frame
 #[derive(Debug, Clone)]
 pub struct ContactPointPairInfo {
     contact_point_pair: ContactPointPair,
     total_friction_lambda: FloatNum,
     total_lambda: FloatNum,
-    mass_effective: Option<FloatNum>,
+    mass_effective: FloatNum,
+    // vector from center point to  contact point
+    r_a: Vector,
+    r_b: Vector,
 }
 
-impl From<ContactPointPair> for ContactPointPairInfo {
-    fn from(contact_point_pair: ContactPointPair) -> Self {
+fn compute_mass_effective<Obj: ConstraintObject>(
+    contact_point_pair: &ContactPointPair,
+    object_a: &Obj,
+    object_b: &Obj,
+    r_a: Vector,
+    r_b: Vector,
+) -> FloatNum {
+    let inv_moment_of_inertia_a = object_a.meta().inv_moment_of_inertia();
+    let inv_moment_of_inertia_b = object_b.meta().inv_moment_of_inertia();
+
+    let inv_mass_a = object_a.meta().inv_mass();
+
+    let inv_mass_b = object_b.meta().inv_mass();
+
+    let normal = contact_point_pair.normal_toward_a;
+
+    // compute and mass_eff and lambda_n
+    let equation_part1 = inv_mass_a;
+    let equation_part2 = inv_mass_b;
+    let equation_part3 = (r_a ^ normal).powf(2.) * inv_moment_of_inertia_a;
+    let equation_part4 = (r_b ^ normal).powf(2.) * inv_moment_of_inertia_b;
+
+    (equation_part1 + equation_part2 + equation_part3 + equation_part4).recip()
+}
+
+impl<Obj> From<(ContactPointPair, &Obj, &Obj)> for ContactPointPairInfo
+where
+    Obj: ConstraintObject,
+{
+    fn from((contact_point_pair, object_a, object_b): (ContactPointPair, &Obj, &Obj)) -> Self {
+        let r_a = (object_a.center_point(), contact_point_pair.contact_point_a).into();
+        let r_b = (object_b.center_point(), contact_point_pair.contact_point_b).into();
+
+        let mass_effective =
+            compute_mass_effective(&contact_point_pair, object_a, object_b, r_a, r_b);
+
         Self {
             contact_point_pair,
             total_friction_lambda: 0.,
             total_lambda: 0.,
-            mass_effective: None,
+            mass_effective,
+            r_a,
+            r_b,
         }
     }
 }
@@ -104,15 +145,6 @@ where
     }
 
     fn solve_velocity_constraint(&mut self, bias: FloatNum) {
-        let mass_effective = match self.contact_info.mass_effective {
-            Some(v) => v,
-            None => {
-                let v = self.compute_mass_effective();
-                self.contact_info.mass_effective = Some(v);
-                v
-            }
-        };
-
         let Self {
             object_a,
             object_b,
@@ -121,6 +153,7 @@ where
         } = self;
 
         let normal = contact_info.normal_toward_a;
+        let mass_effective = contact_info.mass_effective;
         let depth = contact_info.depth;
 
         let sum_velocity_a = object_a.compute_point_velocity(&contact_info.contact_point_a);
@@ -138,52 +171,70 @@ where
         let lambda = (coefficient + bias) * mass_effective;
 
         // TODO factor_friction use two element's factor_friction
-        let max_friction_lambada_n = (lambda * constraint_parameters.factor_default_friction).abs();
+        let max_friction_lambda = (lambda * constraint_parameters.factor_default_friction).abs();
 
         let previous_total_lambda = contact_info.total_lambda;
         contact_info.total_lambda += lambda;
         contact_info.total_lambda = contact_info.total_lambda.max(0.);
         let lambda = contact_info.total_lambda - previous_total_lambda;
 
-        // TODO better friction algo
-        let friction_lambda = -(sum_velocity_a - sum_velocity_b) * !normal * mass_effective * 0.5;
+        object_a
+            .meta_mut()
+            .apply_impulse(lambda, normal, contact_info.r_a);
 
-        // let current_friction_lambda = friction_lambda;
+        object_b
+            .meta_mut()
+            .apply_impulse(lambda, -normal, contact_info.r_b);
+
+        self.solve_friction_constraint(max_friction_lambda);
+    }
+
+    // TODO add static friction , make object static
+    fn solve_friction_constraint(&mut self, max_friction_lambda: FloatNum) {
+        let Self {
+            object_a,
+            object_b,
+            contact_info,
+            constraint_parameters,
+        } = self;
+
+        let mass_effective = contact_info.mass_effective;
+
+        let sum_velocity_a = object_a.compute_point_velocity(&contact_info.contact_point_a);
+
+        let sum_velocity_b = object_b.compute_point_velocity(&contact_info.contact_point_b);
+
+        let tangent_normal = !contact_info.normal_toward_a;
+        let friction_normal_toward_a =
+            if (tangent_normal * (sum_velocity_a - sum_velocity_b)).is_sign_positive() {
+                -tangent_normal
+            } else {
+                tangent_normal
+            };
+
+        // FIXME mass_effective
+        // TODO better friction algo
+        let friction_lambda =
+            (sum_velocity_a - sum_velocity_b) * friction_normal_toward_a * mass_effective;
 
         let previous_total_friction_lambda = contact_info.total_friction_lambda;
         contact_info.total_friction_lambda += friction_lambda;
         contact_info.total_friction_lambda = limit_at_range(
             contact_info.total_friction_lambda,
-            -max_friction_lambada_n..=max_friction_lambada_n,
+            -max_friction_lambda..=max_friction_lambda,
         );
         let friction_lambda = contact_info.total_friction_lambda - previous_total_friction_lambda;
 
-        let center_point_a = object_a.center_point();
-
         object_a.meta_mut().apply_impulse(
-            lambda,
-            contact_info.normal_toward_a,
-            (center_point_a, contact_info.contact_point_a).into(),
-        );
-
-        object_a.meta_mut().apply_impulse(
-            friction_lambda,
-            !contact_info.normal_toward_a,
-            (center_point_a, contact_info.contact_point_a).into(),
-        );
-
-        let center_point_b = object_b.center_point();
-
-        object_b.meta_mut().apply_impulse(
-            lambda,
-            -contact_info.normal_toward_a,
-            (center_point_b, contact_info.contact_point_b).into(),
+            friction_lambda.abs(),
+            friction_normal_toward_a,
+            contact_info.r_a,
         );
 
         object_b.meta_mut().apply_impulse(
-            friction_lambda,
-            -!contact_info.normal_toward_a,
-            (center_point_b, contact_info.contact_point_b).into(),
+            friction_lambda.abs(),
+            -friction_normal_toward_a,
+            contact_info.r_b,
         );
     }
 
@@ -192,7 +243,7 @@ where
             contact_info,
             constraint_parameters,
             ..
-        } = &*self;
+        } = self;
 
         // let mut permeate = (contact_info.depth - self.max_allow_permeate).max(0.);
 
@@ -201,39 +252,6 @@ where
         let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
 
         self.solve_velocity_constraint(bias);
-    }
-
-    fn compute_mass_effective(&self) -> FloatNum {
-        let Self {
-            object_a,
-            object_b,
-            contact_info,
-            ..
-        } = self;
-
-        let center_point_a = object_a.center_point();
-        let center_point_b = object_b.center_point();
-
-        let r_a: Vector = (center_point_a, contact_info.contact_point_a).into();
-        let r_b: Vector = (center_point_b, contact_info.contact_point_b).into();
-
-        let inv_moment_of_inertia_a = object_a.meta().inv_moment_of_inertia();
-        let inv_moment_of_inertia_b = object_b.meta().inv_moment_of_inertia();
-
-        let inv_mass_a = object_a.meta().inv_mass();
-
-        let inv_mass_b = object_b.meta().inv_mass();
-
-        let normal = contact_info.normal_toward_a;
-
-        // compute and mass_eff and lambda_n
-        let equation_part1 = inv_mass_a;
-        let equation_part2 = inv_mass_b;
-        // let equation_part3 = ((normal * (r_a ^ normal)) ^ r_a) * inv_moment_of_inertia_a;
-        let equation_part3 = (r_a ^ normal) * (r_a ^ normal) * inv_moment_of_inertia_a;
-        let equation_part4 = (r_b ^ normal) * (r_b ^ normal) * inv_moment_of_inertia_b;
-
-        (equation_part1 + equation_part2 + equation_part3 + equation_part4).recip()
     }
 }
 
@@ -279,7 +297,7 @@ where
                 if fix_position {
                     solver.solve_position_constraint(delta_time);
                 } else {
-                    solver.solve_velocity_constraint(delta_time);
+                    solver.solve_velocity_constraint(0.);
                 }
             }
         };

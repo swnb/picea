@@ -1,10 +1,10 @@
 use super::{point::Point, segment::Segment, FloatNum};
 use std::{
     fmt::Display,
-    ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign},
+    ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Shr, Sub, SubAssign},
 };
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Default)]
 pub struct Vector<T = FloatNum>
 where
     T: Clone + Copy,
@@ -138,18 +138,18 @@ impl<T: Clone + Copy> From<[T; 2]> for Vector<T> {
     }
 }
 
-impl<T: Clone + Copy> From<Segment<T>> for Vector<T>
+impl<T: Clone + Copy> From<&Segment<T>> for Vector<T>
 where
-    T: std::ops::Neg<Output = T> + std::ops::Sub<Output = T>,
+    T: Neg<Output = T> + Sub<Output = T>,
 {
-    fn from(segment: Segment<T>) -> Self {
+    fn from(segment: &Segment<T>) -> Self {
         (*segment.start_point(), *segment.end_point()).into()
     }
 }
 
 impl<T> From<(Point<T>, Point<T>)> for Vector<T>
 where
-    T: Clone + Copy + std::ops::Neg<Output = T> + std::ops::Sub<Output = T>,
+    T: Clone + Copy + Neg<Output = T> + Sub<Output = T>,
 {
     fn from((p1, p2): (Point<T>, Point<T>)) -> Self {
         let x = p2.x() - p1.x();
@@ -160,7 +160,7 @@ where
 
 impl<T> From<(&Point<T>, &Point<T>)> for Vector<T>
 where
-    T: Clone + Copy + std::ops::Neg<Output = T> + std::ops::Sub<Output = T>,
+    T: Clone + Copy + Neg<Output = T> + Sub<Output = T>,
 {
     fn from((p1, p2): (&Point<T>, &Point<T>)) -> Self {
         let x = p2.x() - p1.x();
@@ -479,7 +479,7 @@ where
     }
 }
 
-impl std::ops::Shr<Vector> for Vector {
+impl Shr<Vector> for Vector {
     type Output = f32;
     fn shr(self, rhs: Vector) -> Self::Output {
         self * rhs * rhs.abs().recip()
