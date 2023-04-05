@@ -150,7 +150,7 @@ impl Scene {
 
                 let contact_point_pairs = contact_point_pairs
                     .into_iter()
-                    .map(|contact_point_pair| (contact_point_pair, &*a, &*b).into())
+                    .map(|contact_point_pair| (contact_point_pair, a, b).into())
                     .collect();
 
                 let contact_manifold = Manifold {
@@ -160,7 +160,13 @@ impl Scene {
 
                 self.contact_manifolds.push(contact_manifold);
             },
-            |element_a, element_b| element_a.meta().is_sleeping() && element_b.meta().is_sleeping(),
+            |element_a, element_b| {
+                let meta_a = element_a.meta();
+                let meta_b = element_b.meta();
+                meta_a.is_transparent()
+                    || meta_b.is_transparent()
+                    || (meta_a.is_sleeping() && meta_b.is_sleeping())
+            },
         );
 
         use SceneManifoldsType::*;
