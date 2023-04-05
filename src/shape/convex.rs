@@ -56,6 +56,12 @@ impl GeometryTransform for ConvexPolygon {
 
     fn rotate(&mut self, origin_point: &Point, deg: f32) {
         rotate_polygon(*origin_point, self.vertexes.iter_mut(), deg);
+
+        if origin_point != &self.center_point {
+            let mut tmp_vector: Vector = (origin_point, &self.center_point).into();
+            tmp_vector.affine_transformation_rotate_self(deg);
+            self.center_point = *origin_point + tmp_vector;
+        }
     }
 }
 
