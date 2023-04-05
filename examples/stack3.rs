@@ -33,8 +33,8 @@ fn create_model(_app: &App) -> Model {
         (0, 0),
         (1, 0),
         (1, 10),
-        (-10, 10),
-        (-10, 17),
+        (-20, 10),
+        (-20, 17),
         (5, 17),
         (5, -10),
         (-1, -11),
@@ -71,6 +71,7 @@ fn create_model(_app: &App) -> Model {
     //     );
     //     scene.push_element(element);
     // }
+
     let element = ElementBuilder::new(
         concave_polygon,
         MetaBuilder::new(10.).force("gravity", (0., -100.)),
