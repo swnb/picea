@@ -43,7 +43,6 @@ impl CollisionStatusViewer {
         let sub_colliders_a = a.sub_colliders();
         let sub_colliders_b = b.sub_colliders();
 
-        dbg!(sub_colliders_a.is_some(), sub_colliders_b.is_some());
         match (sub_colliders_a, sub_colliders_b) {
             // TODO
             (Some(sub_colliders_a), Some(sub_colliders_b)) => {
