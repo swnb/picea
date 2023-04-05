@@ -36,8 +36,8 @@ impl Default for Context {
     fn default() -> Self {
         Self {
             constraint_parameters: Default::default(),
-            enable_sleep_mode: false,
-            max_enter_sleep_frame: 10,
+            enable_sleep_mode: true,
+            max_enter_sleep_frame: 40,
             max_enter_sleep_motion: 0.07,
         }
     }
