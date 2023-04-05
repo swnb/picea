@@ -5,17 +5,24 @@ use crate::{
     meta::Mass,
 };
 
-use super::{CenterPoint, EdgeIterable, GeometryTransform};
+use super::{utils::rotate_point, CenterPoint, EdgeIterable, GeometryTransform};
 
 #[derive(Clone)]
 pub struct Line {
     segment: Segment,
+    center_point: Point,
 }
 
 impl From<(Point, Point)> for Line {
     fn from(value: (Point, Point)) -> Self {
+        let segment: Segment = value.into();
+        let center_point = (segment.start_point().to_vector() * 0.5
+            + segment.end_point().to_vector() * 0.5)
+            .to_point();
+
         Self {
-            segment: value.into(),
+            segment,
+            center_point,
         }
     }
 }
@@ -44,7 +51,7 @@ impl Line {
 
 impl CenterPoint for Line {
     fn center_point(&self) -> Point {
-        (self.start_point().to_vector() * 0.5 + self.end_point().to_vector() * 0.5).to_point()
+        self.center_point
     }
 }
 
@@ -71,6 +78,7 @@ impl GeometryTransform for Line {
     fn translate(&mut self, vector: &Vector) {
         *self.start_point_mut() += vector;
         *self.end_point_mut() += vector;
+        self.center_point += vector;
     }
 
     fn rotate(&mut self, origin_point: &Point, deg: f32) {
@@ -81,6 +89,10 @@ impl GeometryTransform for Line {
         };
         update_point(self.start_point_mut());
         update_point(self.end_point_mut());
+
+        if origin_point != &self.center_point {
+            self.center_point = rotate_point(&self.center_point, origin_point, deg);
+        }
     }
 }
 

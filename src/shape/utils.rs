@@ -537,6 +537,12 @@ pub fn split_concave_polygon_to_convex_polygons(vertexes: &[Point]) -> Vec<Vec<P
     result
 }
 
+pub fn rotate_point(point: &Point, origin_point: &Point, deg: FloatNum) -> Point {
+    let mut tmp_vector: Vector = (origin_point, point).into();
+    tmp_vector.affine_transformation_rotate_self(deg);
+    *origin_point + tmp_vector
+}
+
 mod tests {
 
     #[test]

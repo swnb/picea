@@ -7,8 +7,8 @@ use crate::{
 use super::{
     convex::ConvexPolygon,
     utils::{
-        projection_polygon_on_vector, rotate_polygon, split_concave_polygon_to_convex_polygons,
-        translate_polygon, VertexesToEdgeIter,
+        projection_polygon_on_vector, rotate_point, rotate_polygon,
+        split_concave_polygon_to_convex_polygons, translate_polygon, VertexesToEdgeIter,
     },
     CenterPoint, EdgeIterable, GeometryTransform,
 };
@@ -70,7 +70,12 @@ impl GeometryTransform for ConcavePolygon {
         self.sub_convex_polygons
             .iter_mut()
             .for_each(|convex_polygon| convex_polygon.rotate(origin_point, deg));
+
         rotate_polygon(*origin_point, self.origin_vertexes.iter_mut(), deg);
+
+        if origin_point != &self.center_point {
+            self.center_point = rotate_point(&self.center_point, origin_point, deg);
+        }
     }
 }
 

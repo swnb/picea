@@ -4,11 +4,12 @@ use crate::{
     element::ComputeMomentOfInertia,
     math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
     meta::Mass,
+    shape::utils::rotate_point,
 };
 
 #[derive(Clone, Debug)]
 pub struct Circle {
-    center: Point,
+    center_point: Point,
     r: f32,
     deg: f32,
 }
@@ -24,7 +25,7 @@ impl Circle {
     #[inline]
     pub fn new(center_point: impl Into<Point>, radius: f32) -> Self {
         Self {
-            center: center_point.into(),
+            center_point: center_point.into(),
             r: radius,
             deg: 0.,
         }
@@ -37,12 +38,12 @@ impl Circle {
 
     #[inline]
     pub fn get_center_point(&self) -> Point {
-        self.center
+        self.center_point
     }
 
     #[inline]
     pub fn translate(&mut self, vector: &Vector) {
-        self.center += vector;
+        self.center_point += vector;
     }
 }
 
@@ -71,27 +72,31 @@ impl Projector for Circle {
 
 impl CenterPoint for Circle {
     fn center_point(&self) -> Point {
-        self.center
+        self.center_point
     }
 }
 
 impl GeometryTransform for Circle {
     fn translate(&mut self, vector: &Vector) {
-        self.center += vector
+        self.center_point += vector
     }
 
-    fn rotate(&mut self, &origin: &Point, deg: f32) {
+    fn rotate(&mut self, &origin_point: &Point, deg: f32) {
         use std::f32::consts::TAU;
 
-        if origin != self.center {
-            let center_vector: Vector = (origin, self.center).into();
-            let new_center = origin + center_vector.affine_transformation_rotate(deg);
-            self.center = new_center;
+        if origin_point != self.center_point {
+            let center_vector: Vector = (origin_point, self.center_point).into();
+            let new_center = origin_point + center_vector.affine_transformation_rotate(deg);
+            self.center_point = new_center;
         }
 
         self.deg += deg;
         if self.deg > TAU {
             self.deg %= TAU
+        }
+
+        if origin_point != self.center_point {
+            self.center_point = rotate_point(&self.center_point, &origin_point, deg);
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    algo::collision::{Collider, Projector, SubCollider},
+    algo::collision::{Collider, Projector},
     element::ComputeMomentOfInertia,
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::Mass,
@@ -9,7 +9,7 @@ use crate::{
 use super::{
     utils::{
         compute_area_of_convex, compute_area_of_triangle, compute_convex_center_point,
-        compute_moment_of_inertia_of_triangle, projection_polygon_on_vector,
+        compute_moment_of_inertia_of_triangle, projection_polygon_on_vector, rotate_point,
         split_convex_polygon_to_triangles, VertexesToEdgeIter,
     },
     CenterPoint, EdgeIterable, GeometryTransform,
@@ -58,9 +58,7 @@ impl GeometryTransform for ConvexPolygon {
         rotate_polygon(*origin_point, self.vertexes.iter_mut(), deg);
 
         if origin_point != &self.center_point {
-            let mut tmp_vector: Vector = (origin_point, &self.center_point).into();
-            tmp_vector.affine_transformation_rotate_self(deg);
-            self.center_point = *origin_point + tmp_vector;
+            self.center_point = rotate_point(&self.center_point, origin_point, deg);
         }
     }
 }
