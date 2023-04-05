@@ -808,17 +808,6 @@ fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Poin
     contact_points
 }
 
-fn compute_cross_point_with_segment(segment: Segment<f32>, start_point: &Point, normal: Vector) {
-    // take start_point as C , take start point in segment as A, take end point in segment as B
-    let c_a: Vector = (start_point, segment.start_point()).into();
-
-    let c_b: Vector = (start_point, segment.end_point()).into();
-
-    if (c_a * normal).is_sign_negative() || (c_b * normal).is_sign_negative() {
-        unreachable!();
-    }
-}
-
 // fn sat_collision_detective<T>(a: &T::Element, b: &T::Element) -> Option<Vector>
 // where
 //     T: ElementCollection,
