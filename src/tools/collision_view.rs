@@ -16,14 +16,14 @@ pub struct CollisionInfo {
 
 #[derive(Default)]
 pub struct CollisionStatusViewer {
-    minkowski_different: Vec<Point>,
-    minkowski_different_points: Vec<[Point; 3]>,
+    minkowski_different_gathers: Vec<Point>,
+    minkowski_simplexes: Vec<[Point; 3]>,
     collision_infos: Vec<ContactPointPair>,
 }
 
 impl CollisionStatusViewer {
     pub fn on_update(&mut self, scene: &mut Scene) {
-        self.minkowski_different_points.clear();
+        self.minkowski_simplexes.clear();
         self.collision_infos.clear();
         let elements: Vec<&Element> = scene.elements_iter().collect();
         for i in 0..elements.len() {
@@ -85,12 +85,12 @@ impl CollisionStatusViewer {
             return;
         };
 
-        self.minkowski_different_points.push({
+        self.minkowski_simplexes.push({
             let simplex = simplex.clone();
             simplex.map(|ref p| p.vector.to_point())
         });
 
-        self.minkowski_different = compute_minkowski(compute_support_point)
+        self.minkowski_different_gathers = compute_minkowski(compute_support_point)
             .into_iter()
             .map(|different_point| different_point.vector.to_point())
             .collect();
@@ -102,9 +102,8 @@ impl CollisionStatusViewer {
         self.collision_infos.extend(contact_point_pairs);
     }
 
-    // TODO chore rename
-    pub fn get_minkowski_different_points(&self) -> &[[Point; 3]] {
-        &self.minkowski_different_points
+    pub fn get_minkowski_simplexes(&self) -> &[[Point; 3]] {
+        &self.minkowski_simplexes
     }
 
     pub fn get_collision_infos(&self) -> &[ContactPointPair] {
@@ -112,7 +111,7 @@ impl CollisionStatusViewer {
     }
 
     // TODO chore rename
-    pub fn get_all_minkowski_different_points(&self) -> &[Point] {
-        &self.minkowski_different
+    pub fn get_all_minkowski_different_gathers(&self) -> &[Point] {
+        &self.minkowski_different_gathers
     }
 }
