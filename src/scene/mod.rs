@@ -14,7 +14,6 @@ use crate::{
 
 use self::context::Context;
 
-#[derive(Default)]
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
@@ -55,10 +54,24 @@ enum SceneManifoldsType {
     CurrentManifolds,
 }
 
+impl Default for Scene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Scene {
     #[inline]
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            element_store: Default::default(),
+            id_dispatcher: Default::default(),
+            contact_manifolds: vec![],
+            pre_contact_manifold: vec![],
+            // TODO
+            total_skip_durations: 0.,
+            context: Default::default(),
+        }
     }
 
     #[inline]
@@ -163,9 +176,10 @@ impl Scene {
             |element_a, element_b| {
                 let meta_a = element_a.meta();
                 let meta_b = element_b.meta();
-                meta_a.is_transparent()
-                    || meta_b.is_transparent()
-                    || (meta_a.is_sleeping() && meta_b.is_sleeping())
+
+                let is_both_sleeping = meta_a.is_sleeping() && meta_b.is_sleeping();
+
+                is_both_sleeping || meta_a.is_transparent() || meta_b.is_transparent()
             },
         );
 
