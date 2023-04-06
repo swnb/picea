@@ -266,15 +266,21 @@ pub(crate) fn gjk_collision_detective(
 
     let approximation_vector = -a.vector;
     let mut b = compute_support_point(approximation_vector)?;
+
     if a == b {
         return None;
     }
 
     fn compute_third_reference_vector(a: Vector, b: Vector) -> Vector {
         let inv_b = -b;
-        let base_vector: Vector = a + inv_b;
-        let base_vector: Vector3<f32> = base_vector.into();
-        (base_vector ^ inv_b.into() ^ base_vector).into()
+        let vector_ba: Vector = a + inv_b;
+        let base_vector: Vector3<f32> = vector_ba.into();
+        let tmp_vector = base_vector ^ inv_b.into();
+        if tmp_vector.z().abs() < FloatNum::EPSILON {
+            !vector_ba
+        } else {
+            (tmp_vector ^ base_vector).into()
+        }
     }
 
     let approximation_vector = compute_third_reference_vector(a.vector, b.vector);
