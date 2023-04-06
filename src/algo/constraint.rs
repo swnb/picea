@@ -1,7 +1,9 @@
 use crate::{
+    element::Element,
     math::{num::limit_at_range, point::Point, vector::Vector, FloatNum},
     meta::{collision::Manifold, Meta},
     scene::context::{ConstraintParameters, Context},
+    tools::snapshot::create_element_construct_code_snapshot,
 };
 use std::ops::Deref;
 
@@ -245,9 +247,7 @@ where
             ..
         } = self;
 
-        // let mut permeate = (contact_info.depth - self.max_allow_permeate).max(0.);
-
-        let permeate = contact_info.depth;
+        let permeate = (contact_info.depth - constraint_parameters.max_allow_permeate).max(0.);
 
         let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
 
