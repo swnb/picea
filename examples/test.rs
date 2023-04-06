@@ -1,7 +1,7 @@
 use nannou::{prelude::*, winit::event};
 use picea::{
     element::ElementBuilder,
-    math::{edge::Edge, point::Point},
+    math::{edge::Edge, point::Point, vector::Vector},
     meta::MetaBuilder,
     scene::Scene,
     shape::{convex::ConvexPolygon, line::Line},
@@ -28,55 +28,34 @@ fn create_model(_app: &App) -> Model {
     let id = scene.push_element(ElementBuilder::new(wall_bottom, meta.clone()));
     println!("{id} wall_bottom");
 
-    // let wall_right = Line::new((50., -30.), (50., height));
-    // // let wall_right = (50., -30., 4., 100.);
-    // let id = scene.push_element(ElementBuilder::new(wall_right, meta.clone()));
-    // println!("{id} wall_right");
-
-    // let wall_left = Line::new((-50., -30.), (-50., height));
-    // let id = scene.push_element(ElementBuilder::new(wall_left, meta.clone()));
-    // println!("{id} wall_left ");
-
-    // let ball: Element = ElementBuilder::new(
-    //     ((-40., -10.), 6.),
-    //     MetaBuilder::new(10.).force("gravity", (0., -10.)),
-    // )
-    // .into();
-
-    // scene.push_element(ball);
-
-    // let element = ElementBuilder::new(
-    //     ((200., 200.), 100.),
-    //     MetaBuilder::new(1.)
-    //         .angular(std::f32::consts::FRAC_PI_6)
-    //         .force("gravity", (0., -10.)), // .is_fixed(true),
-    // );
-
-    // scene.push_element(element);
-
     let element = ElementBuilder::new(
-        (7, (-30., 20.), 20.),
+        ConvexPolygon::new(vec![
+            (-3.3667827, -8.111406).into(),
+            (-0.3535416, -10.742087).into(),
+            (2.2771196, -7.728872).into(),
+            (-0.73610747, -5.0982018).into(),
+        ]),
         MetaBuilder::new(10.)
-            .angular(-f32::FRAC_PI_8())
-            // .angular_velocity(-std::f32::consts::FRAC_PI_8)
-            .force("gravity", (10., -10. * 10.)), // .is_fixed(true),
+            .angular_velocity(0.030960504)
+            .velocity((0.087124035, 0.050950255)),
     );
 
-    let points: Vec<Point> = vec![
-        (19.99913, 4.641083).into(),
-        (39.999153, 4.642275).into(),
-        (50.00007, -12.677634).into(),
-        (40.00109, -29.99884).into(),
-        (20.00119, -30.0).into(),
-        (10.000149, -12.680056).into(),
-    ];
+    let id = scene.push_element(element);
 
-    let shape = ConvexPolygon::new(points);
-
-    let id = scene.push_element(ElementBuilder::new(
-        shape,
-        MetaBuilder::new(10.).is_fixed(true),
-    ));
+    let id = scene.push_element({
+        let element = ElementBuilder::new(
+            ConvexPolygon::new(vec![
+                (-6.3700533, -5.4676147).into(),
+                (-3.364275, -8.106848).into(),
+                (-0.72505116, -5.101093).into(),
+                (-3.730817, -2.461854).into(),
+            ]),
+            MetaBuilder::new(10.)
+                .angular_velocity(0.032540783)
+                .velocity((0.10513319, -0.07806133)),
+        );
+        element
+    });
 
     Model {
         scene,
@@ -115,9 +94,9 @@ fn event(app: &App, model: &mut Model, event: Event) {
                 return;
             }
 
-            model
-                .scene
-                .update_elements_by_duration(duration.as_secs_f32());
+            // model
+            //     .scene
+            //     .update_elements_by_duration(duration.as_secs_f32());
         }
         _ => {}
     }
@@ -128,7 +107,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     let draw = app.draw();
 
-    let scale = 5.;
+    let scale = 10.;
 
     let make_line = |color: rgb::Srgb<u8>, start_point: Point, end_point: Point| {
         draw.line()
@@ -188,15 +167,23 @@ fn view(app: &App, model: &Model, frame: Frame) {
         });
     });
 
-    if let Some(collision_info) = &model.collision_info {
-        collision_info.iter().for_each(|point| {
-            make_line(YELLOW, point[0], point[1]);
-        });
+    // if let Some(collision_info) = &model.collision_info {
+    //     collision_info.iter().for_each(|point| {
+    //         make_line(YELLOW, point[0], point[1]);
+    //     });
+    // }
+
+    let points = model.collision_viewer.get_all_minkowski_different_gathers();
+
+    for i in 0..points.len() {
+        let p1 = points[i];
+        let p2 = points[(i + 1) % points.len()];
+        make_line(BLUE, p1, p2);
     }
 
     model
         .collision_viewer
-        .get_minkowski_different_points()
+        .get_minkowski_simplexes()
         .iter()
         .for_each(|points| {
             for i in 0..points.len() {
@@ -211,18 +198,10 @@ fn view(app: &App, model: &Model, frame: Frame) {
             }
         });
 
-    let points = model.collision_viewer.get_all_minkowski_different_points();
-
-    for i in 0..points.len() {
-        let p1 = points[i];
-        let p2 = points[(i + 1) % points.len()];
-        make_line(BLUE, p1, p2);
-    }
-
     for info in model.collision_viewer.get_collision_infos() {
         let point = info.point_a();
 
-        make_ellipse(RED, point, 6. / scale);
+        make_ellipse(YELLOW, point, 6. / scale);
 
         let point = info.point_b();
 
@@ -230,17 +209,18 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
         let v = info.normal_toward_a();
 
-        make_line(RED, (0., 0.).into(), (v * 10f32).to_point());
-        // draw.line()
-        //     .weight(2.)
-        //     .color(RED)
-        //     .start(vec2(0., 0.))
-        //     .end(vec2(v.x() * 100., v.y() * 100.));
+        // make_line(RED, (0., 0.).into(), (v * 10f32).to_point());
     }
 
-    // make_ellipse(RED, (89.99915, 34.642273).into(), 3.);
-    make_ellipse(RED, (39.999153, 4.642275).into(), 3.);
-    make_ellipse(RED, (-50.0, -30.0).into(), 3.);
+    // make_ellipse(PINK, p.into(), 6. / scale);
+    // vec![
+    //     (2.2771196, -7.728872).into(),
+    //     (0.0, 0.0).into(),
+    //     (-6.3700533, -5.4676147).into(),
+    //     (0.0, 0.0).into(),
+    // ]
+    // .iter()
+    // .for_each(|point: &Point| make_ellipse(PINK, *point, 6. / scale));
 
     draw.to_frame(app, &frame).unwrap();
 }

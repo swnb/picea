@@ -231,7 +231,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     model
         .collision_viewer
-        .get_minkowski_different_points()
+        .get_minkowski_simplexes()
         .iter()
         .for_each(|points| {
             let draw = app.draw();

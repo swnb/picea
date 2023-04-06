@@ -80,7 +80,7 @@ fn event(app: &App, model: &mut Model, event: Event) {
             _ => {}
         },
         Event::Update(_) => {
-            // model.collision_viewer.on_update(&mut model.scene);
+            model.collision_viewer.on_update(&mut model.scene);
 
             let now = SystemTime::now();
 
