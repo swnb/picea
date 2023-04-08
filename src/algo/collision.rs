@@ -74,12 +74,41 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
 }
 
 // entry of collision check, if element is collision, handler will call
-pub fn detect_collision<T, H, F>(elements: T, mut handler: H, skip: F)
+pub fn detect_collision<T, H, F>(elements: T, handler: H, skip: F)
 where
     T: CollisionalCollection,
     // TODO use Iterator instead Vec
-    H: FnMut(&T::Collider, &T::Collider, Vec<ContactPointPair>),
+    H: Fn(&T::Collider, &T::Collider, Vec<ContactPointPair>),
     F: Fn(&T::Collider, &T::Collider) -> bool,
+{
+    // let time = std::time::Instant::now();
+    rough_collision_detection(elements, |collider_a, collider_b| {
+        if skip(collider_a, collider_b) {
+            return;
+        }
+        prepare_accurate_collision_detection(
+            collider_a,
+            collider_b,
+            |sub_collider_a, sub_collider_b| {
+                if let Some(result) =
+                    accurate_collision_detection_for_sub_collider(sub_collider_a, sub_collider_b)
+                {
+                    handler(collider_a, collider_b, result);
+                }
+            },
+        )
+    })
+    // dbg!(time.elapsed());
+}
+
+/**
+ * Rough collision detection, get two colliders that may collide
+ */
+pub fn rough_collision_detection<T, H>(elements: T, mut handler: H)
+where
+    T: CollisionalCollection,
+    // TODO use Iterator instead Vec
+    H: FnMut(&T::Collider, &T::Collider),
 {
     // let time = std::time::Instant::now();
 
@@ -88,57 +117,55 @@ where
 
     let elements = CollisionalCollectionWrapper(elements);
 
-    sweep_and_prune_collision_detection(
-        elements,
-        axis,
-        |a, b| {
-            // TODO special collision algo for circle and circle
-
-            let sub_colliders_a = a.sub_colliders();
-            let sub_colliders_b = b.sub_colliders();
-
-            match (sub_colliders_a, sub_colliders_b) {
-                // TODO
-                (Some(sub_colliders_a), Some(sub_colliders_b)) => {
-                    for collider_a in sub_colliders_a {
-                        let sub_colliders_b = b.sub_colliders().unwrap();
-                        for collider_b in sub_colliders_b {
-                            if let Some(collision_info) =
-                                special_collision_detection(collider_a, collider_b)
-                            {
-                                handler(a, b, collision_info);
-                            }
-                        }
-                    }
-                }
-                (Some(sub_colliders_a), None) => {
-                    for collider_a in sub_colliders_a {
-                        if let Some(collision_info) = special_collision_detection(collider_a, b) {
-                            handler(a, b, collision_info);
-                        }
-                    }
-                }
-                (None, Some(sub_colliders_b)) => {
-                    for collider_b in sub_colliders_b {
-                        if let Some(collision_info) = special_collision_detection(a, collider_b) {
-                            handler(a, b, collision_info);
-                        }
-                    }
-                }
-                (None, None) => {
-                    if let Some(collision_info) = special_collision_detection(a, b) {
-                        handler(a, b, collision_info);
-                    }
-                }
-            }
-        },
-        skip,
-    );
+    sweep_and_prune_collision_detection(elements, axis, |a, b| {
+        // TODO special collision algo for circle and circle
+        handler(a, b);
+    });
 
     // dbg!(time.elapsed());
 }
 
-pub fn special_collision_detection(
+/**
+ * Accurate collision detection, extracting subparts that should collide
+ */
+pub fn prepare_accurate_collision_detection<C, H>(collider_a: &C, collider_b: &C, mut handler: H)
+where
+    C: Collider,
+    H: FnMut(&dyn SubCollider, &dyn SubCollider),
+{
+    let sub_colliders_a = collider_a.sub_colliders();
+    let sub_colliders_b = collider_b.sub_colliders();
+
+    match (sub_colliders_a, sub_colliders_b) {
+        // TODO
+        (Some(sub_colliders_a), Some(sub_colliders_b)) => {
+            for collider_a in sub_colliders_a {
+                let sub_colliders_b = collider_b.sub_colliders().unwrap();
+                for collider_b in sub_colliders_b {
+                    handler(collider_a, collider_b);
+                }
+            }
+        }
+        (Some(sub_colliders_a), None) => {
+            for collider_a in sub_colliders_a {
+                handler(collider_a, collider_b);
+            }
+        }
+        (None, Some(sub_colliders_b)) => {
+            for collider_b in sub_colliders_b {
+                handler(collider_a, collider_b);
+            }
+        }
+        (None, None) => {
+            handler(collider_a, collider_b);
+        }
+    }
+}
+
+/**
+ * Accurate collision detection, to obtain information such as collision points
+ */
+pub fn accurate_collision_detection_for_sub_collider(
     a: &dyn SubCollider,
     b: &dyn SubCollider,
 ) -> Option<Vec<ContactPointPair>> {
@@ -164,15 +191,13 @@ pub fn special_collision_detection(
  * 粗检测
  * find the elements that maybe collision
  */
-fn sweep_and_prune_collision_detection<T, Z, F>(
+fn sweep_and_prune_collision_detection<T, Z>(
     mut elements: CollisionalCollectionWrapper<T>,
     axis: AxisDirection,
     mut handler: Z,
-    skip: F,
 ) where
     T: CollisionalCollection,
-    Z: FnMut(&mut T::Collider, &mut T::Collider),
-    F: Fn(&T::Collider, &T::Collider) -> bool,
+    Z: FnMut(&T::Collider, &T::Collider),
 {
     elements.sort(|a, b| {
         let (ref min_a_x, _) = a.projection_on_axis(axis);
@@ -191,14 +216,11 @@ fn sweep_and_prune_collision_detection<T, Z, F>(
                 let (b_min_y, b_max_y) = elements[j].projection_on_axis(!axis);
 
                 if !(a_max_y < b_min_y || b_max_y < a_min_y) {
-                    if skip(&elements[i], &elements[j]) {
-                        continue;
-                    }
                     // detective precise collision
-                    let a: *mut _ = &mut elements[i];
-                    let b: *mut _ = &mut elements[j];
+                    let a: *const _ = &elements[i];
+                    let b: *const _ = &elements[j];
                     unsafe {
-                        handler(&mut *a, &mut *b);
+                        handler(&*a, &*b);
                     };
                 }
             } else {
