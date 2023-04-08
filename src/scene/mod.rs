@@ -4,7 +4,10 @@ use std::slice::IterMut;
 
 use crate::{
     algo::{
-        collision::detect_collision,
+        collision::{
+            accurate_collision_detection_for_sub_collider, detect_collision,
+            prepare_accurate_collision_detection, rough_collision_detection,
+        },
         constraint::{ManifoldsIterMut, Solver},
     },
     element::{store::ElementStore, Element},
@@ -154,34 +157,58 @@ impl Scene {
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
 
-        detect_collision(
-            &mut self.element_store,
-            |a, b, contact_point_pairs| {
-                // TODO remove mark_collision
-                // a.meta_mut().mark_collision(true);
-                // b.meta_mut().mark_collision(true);
-
-                let contact_point_pairs = contact_point_pairs
-                    .into_iter()
-                    .map(|contact_point_pair| (contact_point_pair, a, b).into())
-                    .collect();
-
-                let contact_manifold = Manifold {
-                    collision_element_id_pair: (a.id(), b.id()),
-                    contact_point_pairs,
-                };
-
-                self.contact_manifolds.push(contact_manifold);
-            },
-            |element_a, element_b| {
+        rough_collision_detection(&mut self.element_store, |element_a, element_b| {
+            let should_skip = {
                 let meta_a = element_a.meta();
                 let meta_b = element_b.meta();
 
                 let is_both_sleeping = meta_a.is_sleeping() && meta_b.is_sleeping();
 
                 is_both_sleeping || meta_a.is_transparent() || meta_b.is_transparent()
-            },
-        );
+            };
+
+            if should_skip {
+                return;
+            }
+
+            let (collider_a, collider_b) = if element_a.id() > element_b.id() {
+                (element_b, element_a)
+            } else {
+                (element_a, element_b)
+            };
+
+            prepare_accurate_collision_detection(
+                collider_a,
+                collider_b,
+                |sub_collider_a, sub_collider_b| {
+                    if let Some(contact_point_pairs) = accurate_collision_detection_for_sub_collider(
+                        sub_collider_a,
+                        sub_collider_b,
+                    ) {
+                        let a = collider_a;
+                        let b = collider_b;
+                        // TODO remove mark_collision
+                        // a.meta_mut().mark_collision(true);
+                        // b.meta_mut().mark_collision(true);
+
+                        let contact_point_pairs = contact_point_pairs
+                            .into_iter()
+                            .map(|contact_point_pair| (contact_point_pair, a, b).into())
+                            .collect();
+
+                        let contact_manifold = Manifold {
+                            collision_element_id_pair: (a.id(), b.id()),
+                            contact_point_pairs,
+                        };
+
+                        self.contact_manifolds.push(contact_manifold);
+
+                        // self.manifold_store
+                        // .push(a.id(), b.id(), contact_point_pairs);
+                    }
+                },
+            )
+        });
 
         use SceneManifoldsType::*;
 
