@@ -5,14 +5,14 @@ use std::slice::IterMut;
 use crate::{
     algo::{
         collision::{
-            accurate_collision_detection_for_sub_collider, detect_collision,
-            prepare_accurate_collision_detection, rough_collision_detection,
+            accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
+            rough_collision_detection,
         },
-        constraint::{ManifoldsIterMut, Solver},
+        constraint::{ContactManifold, ContactPointPairInfo, ManifoldsIterMut, Solver},
     },
     element::{store::ElementStore, Element},
     math::FloatNum,
-    meta::collision::Manifold,
+    meta::collision::{Manifold, ManifoldStore},
 };
 
 use self::context::Context;
@@ -20,8 +20,8 @@ use self::context::Context;
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
-    contact_manifolds: Vec<Manifold>,
-    pre_contact_manifold: Vec<Manifold>,
+    // manifold_store: ManifoldStore,
+    manifold_store: Vec<Manifold>,
     total_skip_durations: FloatNum,
     context: Context,
 }
@@ -69,8 +69,7 @@ impl Scene {
         Self {
             element_store: Default::default(),
             id_dispatcher: Default::default(),
-            contact_manifolds: vec![],
-            pre_contact_manifold: vec![],
+            manifold_store: Default::default(),
             // TODO
             total_skip_durations: 0.,
             context: Default::default(),
@@ -157,6 +156,8 @@ impl Scene {
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
 
+        self.manifold_store.clear();
+
         rough_collision_detection(&mut self.element_store, |element_a, element_b| {
             let should_skip = {
                 let meta_a = element_a.meta();
@@ -198,13 +199,11 @@ impl Scene {
 
                         let contact_manifold = Manifold {
                             collision_element_id_pair: (a.id(), b.id()),
+                            is_active: true,
                             contact_point_pairs,
                         };
 
-                        self.contact_manifolds.push(contact_manifold);
-
-                        // self.manifold_store
-                        // .push(a.id(), b.id(), contact_point_pairs);
+                        self.manifold_store.push(contact_manifold);
                     }
                 },
             )
@@ -212,14 +211,15 @@ impl Scene {
 
         use SceneManifoldsType::*;
 
-        self.constraint(PreviousManifolds, delta_time);
+        // self.constraint(delta_time);
 
-        self.constraint(CurrentManifolds, delta_time);
+        self.constraint(delta_time);
 
         self.elements_iter_mut()
             .for_each(|element| element.integrate_velocity(delta_time));
 
-        self.pre_contact_manifold = std::mem::take(&mut self.contact_manifolds);
+        // self.manifold_store.update_all_manifolds_usage();
+        // self.pre_contact_manifold = std::mem::take(&mut self.contact_manifolds);
     }
 
     #[inline]
@@ -242,7 +242,7 @@ impl Scene {
         self.element_store.get_mut_element_by_id(id)
     }
 
-    fn constraint(&mut self, manifolds_type: SceneManifoldsType, delta_time: FloatNum) {
+    fn constraint(&mut self, delta_time: FloatNum) {
         let query_element_pair =
             |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
                 let element_a = self
@@ -259,23 +259,22 @@ impl Scene {
             };
 
         impl ManifoldsIterMut for [Manifold] {
-            type Item<'z> = IterMut<'z, Manifold> where Self:'z;
+            type Manifold = Manifold;
 
-            fn iter_mut(&mut self) -> Self::Item<'_> {
+            type Iter<'a> = IterMut<'a, Self::Manifold>;
+
+            fn iter_mut(&mut self) -> Self::Iter<'_> {
                 <[Manifold]>::iter_mut(self)
             }
         }
 
-        use SceneManifoldsType::*;
-        match manifolds_type {
-            CurrentManifolds => {
-                Solver::<'_, '_, [Manifold]>::new(&self.context, &mut self.contact_manifolds)
-                    .constraint(query_element_pair, delta_time);
-            }
-            PreviousManifolds => {
-                Solver::<'_, '_, [Manifold]>::new(&self.context, &mut self.pre_contact_manifold)
-                    .constraint(query_element_pair, delta_time);
-            }
-        }
+        Solver::<'_, '_, [Manifold]>::new(&self.context, &mut self.manifold_store)
+            .constraint(query_element_pair, delta_time);
+
+        // Solver::<'_, '_, _>::new(
+        //     &self.context,
+        //     &mut self.manifold_store.manifolds_iter_mut_creator(),
+        // )
+        // .constraint(query_element_pair, delta_time);
     }
 }
