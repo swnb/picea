@@ -2,7 +2,7 @@ use nannou::{prelude::*, winit::event};
 use picea::{
     element::ElementBuilder,
     math::{edge::Edge, point::Point, FloatNum},
-    meta::{self, MetaBuilder},
+    meta::MetaBuilder,
     scene::Scene,
     shape::{concave::ConcavePolygon, convex::ConvexPolygon, line::Line, polygon::Square},
     tools::{
@@ -23,10 +23,7 @@ fn create_model(_app: &App) -> Model {
 
     let ground_bottom = Line::new((-200., -25.), (200., -25.));
 
-    scene.push_element(ElementBuilder::new(
-        ground_bottom,
-        MetaBuilder::new(1.).is_fixed(true),
-    ));
+    (&mut scene) << ElementBuilder::new(ground_bottom, MetaBuilder::new(1.).is_fixed(true));
 
     let vertexes = vec![(-15, 5), (0, -8), (15, 5), (10, -20), (-10, -20)];
 
@@ -40,7 +37,7 @@ fn create_model(_app: &App) -> Model {
 
     let element = ElementBuilder::new(
         concave_polygon,
-        MetaBuilder::new(10.).force("gravity", (0., -100.)),
+        MetaBuilder::new(100.).force("gravity", (0., -100.)),
     );
 
     scene.push_element(element);
@@ -80,7 +77,7 @@ fn event(app: &App, model: &mut Model, event: Event) {
             _ => {}
         },
         Event::Update(_) => {
-            model.collision_viewer.on_update(&mut model.scene);
+            // model.collision_viewer.on_update(&mut model.scene);
 
             let now = SystemTime::now();
 
@@ -141,6 +138,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
         //         } => {}
         //         _ => unimplemented!(),
         //     });
+
+        make_line(
+            YELLOWGREEN,
+            element.center_point(),
+            element.center_point() + element.meta().velocity() * 10.,
+        );
 
         make_ellipse(BLUE, element.center_point(), 0.5);
 

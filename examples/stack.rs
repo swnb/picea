@@ -114,10 +114,16 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .height(radius * 2. * scale);
     };
 
-    make_line(WHITE, (-1000., 0.).into(), (1000., 0.).into());
-    make_line(WHITE, (0., -1000.).into(), (0., 1000.).into());
+    // make_line(WHITE, (-1000., 0.).into(), (1000., 0.).into());
+    // make_line(WHITE, (0., -1000.).into(), (0., 1000.).into());
 
     model.scene.elements_iter().for_each(|element| {
+        make_line(
+            YELLOWGREEN,
+            element.center_point(),
+            element.center_point() + element.meta().velocity() * 10.,
+        );
+
         element
             .shape()
             .edge_iter()
