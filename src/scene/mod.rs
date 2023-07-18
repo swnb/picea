@@ -1,6 +1,6 @@
 pub(crate) mod context;
 
-use std::slice::IterMut;
+use std::{ops::Shl, slice::IterMut};
 
 use crate::{
     algo::{
@@ -20,8 +20,8 @@ use self::context::Context;
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
-    // manifold_store: ManifoldStore,
-    manifold_store: Vec<Manifold>,
+    manifold_store: ManifoldStore,
+    // manifold_store: Vec<Manifold>,
     total_skip_durations: FloatNum,
     context: Context,
 }
@@ -156,8 +156,6 @@ impl Scene {
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
 
-        self.manifold_store.clear();
-
         rough_collision_detection(&mut self.element_store, |element_a, element_b| {
             let should_skip = {
                 let meta_a = element_a.meta();
@@ -209,9 +207,7 @@ impl Scene {
             )
         });
 
-        use SceneManifoldsType::*;
-
-        // self.constraint(delta_time);
+        self.manifold_store.update_all_manifolds_usage();
 
         self.constraint(delta_time);
 
@@ -268,7 +264,7 @@ impl Scene {
             }
         }
 
-        Solver::<'_, '_, [Manifold]>::new(&self.context, &mut self.manifold_store)
+        Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_store)
             .constraint(query_element_pair, delta_time);
 
         // Solver::<'_, '_, _>::new(
@@ -276,5 +272,15 @@ impl Scene {
         //     &mut self.manifold_store.manifolds_iter_mut_creator(),
         // )
         // .constraint(query_element_pair, delta_time);
+    }
+}
+
+impl<T> Shl<T> for &mut Scene
+where
+    T: Into<Element>,
+{
+    type Output = ID;
+    fn shl(self, rhs: T) -> Self::Output {
+        self.push_element(rhs.into())
     }
 }
