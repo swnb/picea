@@ -168,6 +168,30 @@ where
     }
 }
 
+impl<T> Sub<Point<T>> for Point<T>
+where
+    T: Clone + Copy + Sub<Output = T>,
+{
+    type Output = Vector<T>;
+    fn sub(self, rhs: Point<T>) -> Self::Output {
+        let new_x = self.x - rhs.x;
+        let new_y = self.y - rhs.y;
+        (new_x, new_y).into()
+    }
+}
+
+impl<T> Sub<&Point<T>> for Point<T>
+where
+    T: Clone + Copy + Sub<Output = T>,
+{
+    type Output = Vector<T>;
+    fn sub(self, rhs: &Point<T>) -> Self::Output {
+        let new_x = self.x - rhs.x;
+        let new_y = self.y - rhs.y;
+        (new_x, new_y).into()
+    }
+}
+
 impl<T> SubAssign<&Vector<T>> for Point<T>
 where
     T: Clone + Copy + Sub<Output = T> + SubAssign<T>,
