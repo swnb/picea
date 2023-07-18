@@ -15,8 +15,6 @@ pub(crate) trait ContactManifold {
     fn collision_element_id_pair(&self) -> (u32, u32);
 
     fn contact_point_pairs_iter_mut(&mut self) -> Self::IterMut<'_>;
-
-    fn is_active(&self) -> bool;
 }
 
 pub(crate) trait ManifoldsIterMut {
@@ -67,6 +65,14 @@ pub struct ContactPointPairInfo {
     // vector from center point to  contact point
     r_a: Vector,
     r_b: Vector,
+}
+
+impl ContactPointPairInfo {
+    // REVIEW
+    pub fn reset(&mut self) {
+        self.total_friction_lambda = 0.;
+        self.total_friction_lambda = 0.;
+    }
 }
 
 fn compute_mass_effective<Obj: ConstraintObject>(
@@ -158,7 +164,7 @@ where
         }
     }
 
-    fn solve_velocity_constraint(&mut self, bias: FloatNum) {
+    fn solve_velocity_constraint(&mut self, bias: FloatNum, use_friction: bool) {
         let Self {
             object_a,
             object_b,
@@ -200,7 +206,9 @@ where
             .meta_mut()
             .apply_impulse(lambda, -normal, contact_info.r_b);
 
-        self.solve_friction_constraint(max_friction_lambda);
+        if use_friction {
+            self.solve_friction_constraint(max_friction_lambda);
+        }
     }
 
     // TODO add static friction , make object static
@@ -263,7 +271,7 @@ where
 
         let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
 
-        self.solve_velocity_constraint(bias);
+        self.solve_velocity_constraint(bias, false);
     }
 }
 
@@ -298,7 +306,8 @@ where
     {
         let solve =
             |(object_a, object_b, manifold): (&'_ mut T, &'_ mut T, &'_ mut M::Manifold),
-             fix_position: bool| {
+             fix_position: bool,
+             use_friction: bool| {
                 for contact_info in manifold.contact_point_pairs_iter_mut() {
                     let mut solver = ContactSolver::new(
                         object_a,
@@ -310,16 +319,14 @@ where
                     if fix_position {
                         solver.solve_position_constraint(delta_time);
                     } else {
-                        solver.solve_velocity_constraint(0.);
+                        solver.solve_velocity_constraint(0., use_friction);
                     }
                 }
             };
 
-        let mut constraint = |fix_position: bool| {
+        let mut constraint = |fix_position: bool, use_friction: bool| {
             self.contact_manifolds
                 .iter_mut()
-                // TODO
-                .filter(|manifold| manifold.is_active())
                 .filter_map(|collision_info| {
                     query_element_pair(collision_info.collision_element_id_pair())
                         .map(|(object_a, object_b)| (object_a, object_b, collision_info))
@@ -327,13 +334,16 @@ where
                 .filter(|(object_a, object_b, _)| {
                     !(object_a.meta().is_fixed() && object_b.meta().is_fixed())
                 })
-                .for_each(|v| solve(v, fix_position));
+                .for_each(|v| solve(v, fix_position, use_friction));
         };
 
-        for _ in 0..MAX_ITERATOR_TIMES {
-            constraint(false);
+        for _ in 0..MAX_ITERATOR_TIMES / 2 {
+            constraint(false, true);
+        }
+        for _ in 0..MAX_ITERATOR_TIMES / 2 {
+            constraint(false, true);
         }
 
-        constraint(true);
+        constraint(true, true);
     }
 }

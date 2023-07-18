@@ -1,11 +1,14 @@
 use std::{
     collections::{btree_map, BTreeMap},
-    iter::{Filter, Map},
+    iter::Map,
     ops::Deref,
     slice::IterMut,
 };
 
-use crate::algo::constraint::{ContactManifold, ContactPointPairInfo, ManifoldsIterMut};
+use crate::{
+    algo::constraint::{ContactManifold, ContactPointPairInfo, ManifoldsIterMut},
+    math::{point::Point, FloatNum},
+};
 
 pub struct Manifold {
     pub(crate) collision_element_id_pair: (u32, u32),
@@ -20,10 +23,6 @@ impl ContactManifold for Manifold {
         self.collision_element_id_pair
     }
 
-    fn is_active(&self) -> bool {
-        true
-    }
-
     fn contact_point_pairs_iter_mut(&mut self) -> Self::IterMut<'_> {
         self.contact_point_pairs.iter_mut()
     }
@@ -32,21 +31,6 @@ impl ContactManifold for Manifold {
 #[derive(Default)]
 pub(crate) struct ManifoldStore {
     inner_manifolds_map: BTreeMap<u64, ContactManifoldsWithState>,
-}
-
-pub(crate) struct ManifoldStoreIterMutCreator<'a> {
-    manifold_store: &'a mut ManifoldStore,
-}
-
-impl ManifoldsIterMut for ManifoldStoreIterMutCreator<'_> {
-    type Manifold = ContactManifoldsWithState;
-
-    type Iter<'a> = btree_map::ValuesMut<'a, u64, ContactManifoldsWithState> where Self:'a;
-
-    fn iter_mut(&mut self) -> Self::Iter<'_> {
-        // TODO performance
-        self.manifold_store.inner_manifolds_map.values_mut()
-    }
 }
 
 pub(crate) struct ContactManifoldsWithState {
@@ -68,10 +52,6 @@ impl ContactManifold for ContactManifoldsWithState {
     fn collision_element_id_pair(&self) -> (u32, u32) {
         (self.collider_id_a, self.collider_id_b)
     }
-
-    fn is_active(&self) -> bool {
-        self.is_active
-    }
 }
 
 pub(crate) struct ContactPointPairInfoWrapper {
@@ -88,6 +68,10 @@ impl Deref for ContactPointPairInfoWrapper {
 }
 
 impl ManifoldStore {
+    pub fn len(&self) -> usize {
+        self.inner_manifolds_map.len()
+    }
+
     pub fn inactive_all_manifolds(&mut self) {
         self.inner_manifolds_map.values_mut().for_each(|state| {
             state.is_active = false;
@@ -106,7 +90,7 @@ impl ManifoldStore {
             ..
         }: Manifold,
     ) {
-        let id_pair: u64 = (id_a as u64) << 32 | (id_a as u64);
+        let id_pair: u64 = (id_a as u64) << 32 | (id_b as u64);
 
         if let Some(state) = self.inner_manifolds_map.get_mut(&id_pair) {
             state.is_active = true;
@@ -116,18 +100,23 @@ impl ManifoldStore {
                 let mut is_found = false;
                 for index in 0..length {
                     let pre_contact_pair = &mut state.contact_pairs[index];
-                    let is_equal =
-                        // TODO use eq trait;
-                        ((&new_contact_pair).contact_point_a == (&pre_contact_pair).contact_point_a
-                            && (&new_contact_pair).contact_point_b
-                                == (&pre_contact_pair).contact_point_b)
-                            || ((&new_contact_pair).contact_point_b
-                                == (&pre_contact_pair).contact_point_a
-                                && (&new_contact_pair).contact_point_a
-                                    == (&pre_contact_pair).contact_point_b);
+
+                    const MAX_TOLERABLE_ERROR: FloatNum = 2e-2;
+
+                    let is_same_point =
+                        |p1: Point, p2: Point| (p1 - p2).abs() <= MAX_TOLERABLE_ERROR;
+
+                    let is_equal = is_same_point(
+                        new_contact_pair.contact_point_a,
+                        pre_contact_pair.contact_point_a,
+                    ) && is_same_point(
+                        new_contact_pair.contact_point_b,
+                        pre_contact_pair.contact_point_b,
+                    );
 
                     if is_equal {
                         pre_contact_pair.reuse_count = 0;
+                        // pre_contact_pair.contact_point_pair_info.reset();
                         is_found = true;
                         break;
                     }
@@ -139,22 +128,24 @@ impl ManifoldStore {
                     });
                 }
             }
-        } else {
-            let new_contact_manifolds = ContactManifoldsWithState {
-                collider_id_a: id_a,
-                collider_id_b: id_b,
-                is_active: true,
-                contact_pairs: contact_point_pairs
-                    .into_iter()
-                    .map(|contact_point_pair_info| ContactPointPairInfoWrapper {
-                        reuse_count: 0,
-                        contact_point_pair_info,
-                    })
-                    .collect(),
-            };
-            self.inner_manifolds_map
-                .insert(id_pair, new_contact_manifolds);
+            return;
         }
+
+        let new_contact_manifolds = ContactManifoldsWithState {
+            collider_id_a: id_a,
+            collider_id_b: id_b,
+            is_active: true,
+            contact_pairs: contact_point_pairs
+                .into_iter()
+                .map(|contact_point_pair_info| ContactPointPairInfoWrapper {
+                    reuse_count: 0,
+                    contact_point_pair_info,
+                })
+                .collect(),
+        };
+
+        self.inner_manifolds_map
+            .insert(id_pair, new_contact_manifolds);
     }
 
     pub fn clear(&mut self) {
@@ -165,11 +156,13 @@ impl ManifoldStore {
         self.inner_manifolds_map.retain(|_, value| value.is_active);
 
         self.inner_manifolds_map.values_mut().for_each(|manifold| {
+            manifold.is_active = false;
+
             let contact_pairs = &mut manifold.contact_pairs;
             let mut new_contact_pairs_len = 0;
 
             for i in 0..contact_pairs.len() {
-                if contact_pairs[i].reuse_count < 2 {
+                if contact_pairs[i].reuse_count <= 3 {
                     contact_pairs[i].reuse_count += 1;
                     contact_pairs.swap(new_contact_pairs_len, i);
                     new_contact_pairs_len += 1;
@@ -180,10 +173,15 @@ impl ManifoldStore {
             }
         });
     }
+}
 
-    pub fn manifolds_iter_mut_creator(&mut self) -> ManifoldStoreIterMutCreator<'_> {
-        ManifoldStoreIterMutCreator {
-            manifold_store: self,
-        }
+impl ManifoldsIterMut for ManifoldStore {
+    type Manifold = ContactManifoldsWithState;
+
+    type Iter<'a> = btree_map::ValuesMut<'a, u64, ContactManifoldsWithState> where Self:'a;
+
+    fn iter_mut(&mut self) -> Self::Iter<'_> {
+        // TODO performance
+        self.inner_manifolds_map.values_mut()
     }
 }
