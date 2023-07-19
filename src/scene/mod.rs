@@ -160,6 +160,10 @@ impl Scene {
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
 
+        self.constraint(delta_time);
+
+        self.manifold_store.clear();
+
         rough_collision_detection(&mut self.element_store, |element_a, element_b| {
             let should_skip = {
                 let meta_a = element_a.meta();
