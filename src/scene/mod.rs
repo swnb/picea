@@ -24,6 +24,7 @@ pub struct Scene {
     // manifold_store: Vec<Manifold>,
     total_skip_durations: FloatNum,
     context: Context,
+    frame_count: u128,
 }
 
 type ID = u32;
@@ -73,6 +74,7 @@ impl Scene {
             // TODO
             total_skip_durations: 0.,
             context: Default::default(),
+            frame_count: 0,
         }
     }
 
@@ -99,6 +101,8 @@ impl Scene {
     }
 
     pub fn update_elements_by_duration(&mut self, delta_time: f32) {
+        self.frame_count += 1;
+
         let Context {
             max_enter_sleep_frame,
             max_enter_sleep_motion,
@@ -272,6 +276,10 @@ impl Scene {
         //     &mut self.manifold_store.manifolds_iter_mut_creator(),
         // )
         // .constraint(query_element_pair, delta_time);
+    }
+
+    fn frame_count(&self) -> u128 {
+        self.frame_count
     }
 }
 
