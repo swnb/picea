@@ -23,7 +23,7 @@ fn create_model(_app: &App) -> Model {
 
     let ground_bottom = Line::new((-200., -25.), (200., -25.));
 
-    (&mut scene) << ElementBuilder::new(ground_bottom, MetaBuilder::new(1.).is_fixed(true));
+    &mut scene << ElementBuilder::new(ground_bottom, MetaBuilder::new(1.).is_fixed(true));
 
     let vertexes = vec![(-15, 5), (0, -8), (15, 5), (10, -20), (-10, -20)];
 
@@ -40,14 +40,15 @@ fn create_model(_app: &App) -> Model {
         MetaBuilder::new(100.).force("gravity", (0., -1000.)),
     );
 
-    scene.push_element(element);
+    &mut scene << element;
 
     for i in 0..4 {
         for j in 0..4 {
-            scene.push_element(ElementBuilder::new(
-                Square::new(-10. + j as FloatNum * 5., 10. + i as FloatNum * 5., 4.),
-                MetaBuilder::new(1.).force("gravity", (0., -10.)),
-            ));
+            &mut scene
+                << ElementBuilder::new(
+                    Square::new(-10. + j as FloatNum * 5., 10. + i as FloatNum * 5., 4.),
+                    MetaBuilder::new(1.).force("gravity", (0., -10.)),
+                );
         }
     }
 
