@@ -37,7 +37,7 @@ fn create_model(_app: &App) -> Model {
 
     let element = ElementBuilder::new(
         concave_polygon,
-        MetaBuilder::new(100.).force("gravity", (0., -100.)),
+        MetaBuilder::new(100.).force("gravity", (0., -1000.)),
     );
 
     scene.push_element(element);
@@ -46,7 +46,7 @@ fn create_model(_app: &App) -> Model {
         for j in 0..4 {
             scene.push_element(ElementBuilder::new(
                 Square::new(-10. + j as FloatNum * 5., 10. + i as FloatNum * 5., 4.),
-                MetaBuilder::new(10.).force("gravity", (0., -100.)),
+                MetaBuilder::new(1.).force("gravity", (0., -10.)),
             ));
         }
     }
