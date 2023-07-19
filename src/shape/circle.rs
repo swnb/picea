@@ -1,4 +1,4 @@
-use super::{CenterPoint, EdgeIterable, GeometryTransform};
+use super::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint};
 use crate::{
     algo::collision::{Collider, Projector},
     element::ComputeMomentOfInertia,
@@ -73,6 +73,17 @@ impl Projector for Circle {
 impl CenterPoint for Circle {
     fn center_point(&self) -> Point {
         self.center_point
+    }
+}
+
+impl NearestPoint for Circle {
+    // TODO maybe return None;
+    // FIXME use direction
+    fn nearest_point(&self, reference_point: &Point, _: &Vector) -> Point {
+        let vector = *reference_point - self.center_point;
+        let vector = vector.normalize();
+        let vector = vector * self.radius();
+        self.center_point + vector
     }
 }
 

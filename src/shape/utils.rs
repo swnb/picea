@@ -543,6 +543,31 @@ pub fn rotate_point(point: &Point, origin_point: &Point, deg: FloatNum) -> Point
     *origin_point + tmp_vector
 }
 
+pub fn find_nearest_point<'a, T: Iterator<Item = &'a Point> + 'a>(
+    vertexes: T,
+    reference_point: &Point,
+    &direction: &Vector,
+) -> Point {
+    let mut closest_point_to_reference_point = *reference_point;
+    let mut min_project_size_to_reference_point = FloatNum::MAX;
+
+    let reference_project_size = reference_point.to_vector() * direction;
+
+    for vertex in vertexes {
+        if vertex == reference_point {
+            continue;
+        }
+        let project_size: f32 = vertex.to_vector() * direction;
+        let project_size_to_reference_point = (project_size - reference_project_size).abs();
+        if project_size_to_reference_point < min_project_size_to_reference_point {
+            min_project_size_to_reference_point = project_size_to_reference_point;
+            closest_point_to_reference_point = *vertex;
+        }
+    }
+
+    closest_point_to_reference_point
+}
+
 mod tests {
 
     #[test]

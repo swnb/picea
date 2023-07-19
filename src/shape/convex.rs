@@ -9,10 +9,10 @@ use crate::{
 use super::{
     utils::{
         compute_area_of_convex, compute_area_of_triangle, compute_convex_center_point,
-        compute_moment_of_inertia_of_triangle, projection_polygon_on_vector, rotate_point,
-        split_convex_polygon_to_triangles, VertexesToEdgeIter,
+        compute_moment_of_inertia_of_triangle, find_nearest_point, projection_polygon_on_vector,
+        rotate_point, split_convex_polygon_to_triangles, VertexesToEdgeIter,
     },
-    CenterPoint, EdgeIterable, GeometryTransform,
+    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
 
 #[derive(Clone)]
@@ -43,6 +43,12 @@ impl ConvexPolygon {
 impl CenterPoint for ConvexPolygon {
     fn center_point(&self) -> Point {
         self.center_point
+    }
+}
+
+impl NearestPoint for ConvexPolygon {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        find_nearest_point(self.vertexes.iter(), reference_point, direction)
     }
 }
 

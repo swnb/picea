@@ -7,10 +7,10 @@ use crate::{
 use super::{
     convex::ConvexPolygon,
     utils::{
-        projection_polygon_on_vector, rotate_point, rotate_polygon,
+        find_nearest_point, projection_polygon_on_vector, rotate_point, rotate_polygon,
         split_concave_polygon_to_convex_polygons, translate_polygon, VertexesToEdgeIter,
     },
-    CenterPoint, EdgeIterable, GeometryTransform,
+    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
 
 #[derive(Clone)]
@@ -82,6 +82,12 @@ impl GeometryTransform for ConcavePolygon {
 impl CenterPoint for ConcavePolygon {
     fn center_point(&self) -> Point {
         self.center_point
+    }
+}
+
+impl NearestPoint for ConcavePolygon {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        find_nearest_point(self.origin_vertexes.iter(), reference_point, direction)
     }
 }
 

@@ -7,7 +7,7 @@ use crate::{
         vector::{Vector, Vector3},
         FloatNum,
     },
-    shape::CenterPoint,
+    shape::{CenterPoint, NearestPoint},
 };
 use std::{
     cmp::Ordering,
@@ -28,11 +28,11 @@ pub trait Projector {
     }
 }
 
-pub trait SubCollider: Projector + CenterPoint {}
+pub trait SubCollider: Projector + CenterPoint + NearestPoint {}
 
-impl<T> SubCollider for T where T: Projector + CenterPoint {}
+impl<T> SubCollider for T where T: Projector + CenterPoint + NearestPoint {}
 
-pub trait Collider: Projector + CenterPoint {
+pub trait Collider: Projector + CenterPoint + NearestPoint {
     fn sub_colliders(&'_ self) -> Option<Box<dyn Iterator<Item = &'_ dyn SubCollider> + '_>> {
         None
     }
