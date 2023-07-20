@@ -66,11 +66,7 @@ impl NearestPoint for Line {
             return *self.start_point();
         }
 
-        find_nearest_point(
-            [*self.start_point(), *self.end_point()].iter(),
-            reference_point,
-            direction,
-        )
+        find_nearest_point(self, reference_point, direction)
     }
 }
 

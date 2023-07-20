@@ -199,6 +199,12 @@ impl CenterPoint for Element {
     }
 }
 
+impl EdgeIterable for Element {
+    fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
+        self.shape.edge_iter()
+    }
+}
+
 impl NearestPoint for Element {
     fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
         self.shape.nearest_point(reference_point, direction)
