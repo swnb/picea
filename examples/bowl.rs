@@ -42,8 +42,8 @@ fn create_model(_app: &App) -> Model {
 
     &mut scene << element;
 
-    for i in 0..4 {
-        for j in 0..4 {
+    for i in 0..1 {
+        for j in 0..1 {
             &mut scene
                 << ElementBuilder::new(
                     Square::new(-10. + j as FloatNum * 5., 10. + i as FloatNum * 5., 4.),
@@ -78,7 +78,7 @@ fn event(app: &App, model: &mut Model, event: Event) {
             _ => {}
         },
         Event::Update(_) => {
-            // model.collision_viewer.on_update(&mut model.scene);
+            model.collision_viewer.on_update(&mut model.scene);
 
             let now = SystemTime::now();
 
