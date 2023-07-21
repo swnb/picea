@@ -1,6 +1,6 @@
 pub(crate) mod context;
 
-use std::{ops::Shl, slice::IterMut};
+use std::ops::Shl;
 
 use crate::{
     algo::{
@@ -8,11 +8,11 @@ use crate::{
             accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
             rough_collision_detection,
         },
-        constraint::{ContactManifold, ContactPointPairInfo, ManifoldsIterMut, Solver},
+        constraint::Solver,
     },
     element::{store::ElementStore, Element},
     math::FloatNum,
-    meta::collision::{Manifold, ManifoldStore},
+    meta::collision::{Manifold, ManifoldTable},
 };
 
 use self::context::Context;
@@ -20,7 +20,7 @@ use self::context::Context;
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
-    manifold_store: ManifoldStore,
+    manifold_table: ManifoldTable,
     // manifold_store: Vec<Manifold>,
     total_skip_durations: FloatNum,
     context: Context,
@@ -70,7 +70,7 @@ impl Scene {
         Self {
             element_store: Default::default(),
             id_dispatcher: Default::default(),
-            manifold_store: Default::default(),
+            manifold_table: Default::default(),
             // TODO
             total_skip_durations: 0.,
             context: Default::default(),
@@ -160,9 +160,7 @@ impl Scene {
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
 
-        self.constraint(delta_time);
-
-        self.manifold_store.clear();
+        self.manifold_table.clear();
 
         rough_collision_detection(&mut self.element_store, |element_a, element_b| {
             let should_skip = {
@@ -205,19 +203,35 @@ impl Scene {
 
                         let contact_manifold = Manifold {
                             collision_element_id_pair: (a.id(), b.id()),
-                            is_active: true,
                             contact_point_pairs,
                         };
 
-                        self.manifold_store.push(contact_manifold);
+                        self.manifold_table.push(contact_manifold);
                     }
                 },
             )
         });
 
-        self.manifold_store.update_all_manifolds_usage();
+        let query_element_pair =
+            &mut |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
+                let element_a = self
+                    .element_store
+                    .get_mut_element_by_id(element_id_pair.0)?
+                    as *mut Element;
 
-        self.constraint(delta_time);
+                let element_b = self
+                    .element_store
+                    .get_mut_element_by_id(element_id_pair.1)?
+                    as *mut Element;
+
+                unsafe { (&mut *element_a, &mut *element_b) }.into()
+            };
+
+        Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_table.pre_manifolds())
+            .constraint(query_element_pair, delta_time);
+
+        Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_table.current_manifolds())
+            .constraint(query_element_pair, delta_time);
 
         self.elements_iter_mut()
             .for_each(|element| element.integrate_velocity(delta_time));
@@ -244,42 +258,6 @@ impl Scene {
     #[inline]
     pub fn get_element_mut(&mut self, id: ID) -> Option<&mut Element> {
         self.element_store.get_mut_element_by_id(id)
-    }
-
-    fn constraint(&mut self, delta_time: FloatNum) {
-        let query_element_pair =
-            |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
-                let element_a = self
-                    .element_store
-                    .get_mut_element_by_id(element_id_pair.0)?
-                    as *mut Element;
-
-                let element_b = self
-                    .element_store
-                    .get_mut_element_by_id(element_id_pair.1)?
-                    as *mut Element;
-
-                unsafe { (&mut *element_a, &mut *element_b) }.into()
-            };
-
-        impl ManifoldsIterMut for [Manifold] {
-            type Manifold = Manifold;
-
-            type Iter<'a> = IterMut<'a, Self::Manifold>;
-
-            fn iter_mut(&mut self) -> Self::Iter<'_> {
-                <[Manifold]>::iter_mut(self)
-            }
-        }
-
-        Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_store)
-            .constraint(query_element_pair, delta_time);
-
-        // Solver::<'_, '_, _>::new(
-        //     &self.context,
-        //     &mut self.manifold_store.manifolds_iter_mut_creator(),
-        // )
-        // .constraint(query_element_pair, delta_time);
     }
 
     fn frame_count(&self) -> u128 {
