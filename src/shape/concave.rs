@@ -85,12 +85,6 @@ impl CenterPoint for ConcavePolygon {
     }
 }
 
-impl NearestPoint for ConcavePolygon {
-    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
-        find_nearest_point(self.origin_vertexes.iter(), reference_point, direction)
-    }
-}
-
 impl Projector for ConcavePolygon {
     fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
         projection_polygon_on_vector(self.origin_vertexes.iter(), *vector)
@@ -110,6 +104,12 @@ impl Collider for ConcavePolygon {
 impl EdgeIterable for ConcavePolygon {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
         Box::new(VertexesToEdgeIter::new(&self.origin_vertexes))
+    }
+}
+
+impl NearestPoint for ConcavePolygon {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        find_nearest_point(self, reference_point, direction)
     }
 }
 

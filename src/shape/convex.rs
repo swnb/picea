@@ -46,12 +46,6 @@ impl CenterPoint for ConvexPolygon {
     }
 }
 
-impl NearestPoint for ConvexPolygon {
-    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
-        find_nearest_point(self.vertexes.iter(), reference_point, direction)
-    }
-}
-
 impl GeometryTransform for ConvexPolygon {
     fn translate(&mut self, vector: &Vector) {
         for point in self.vertexes.iter_mut() {
@@ -72,6 +66,12 @@ impl GeometryTransform for ConvexPolygon {
 impl EdgeIterable for ConvexPolygon {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
         Box::new(VertexesToEdgeIter::new(&self.vertexes))
+    }
+}
+
+impl NearestPoint for ConvexPolygon {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        find_nearest_point(self, reference_point, direction)
     }
 }
 

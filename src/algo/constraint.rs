@@ -1,4 +1,5 @@
 use crate::{
+    element::Element,
     math::{num::limit_at_range, point::Point, vector::Vector, FloatNum},
     meta::Meta,
     scene::context::{ConstraintParameters, Context},
@@ -267,9 +268,17 @@ where
             ..
         } = self;
 
-        let permeate = (contact_info.depth - constraint_parameters.max_allow_permeate).max(0.);
+        let bias = if false {
+            let permeate = (contact_info.depth - constraint_parameters.max_allow_permeate).max(0.);
 
-        let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
+            let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
+
+            bias
+        } else {
+            let permeate = contact_info.depth;
+
+            permeate * delta_time.recip()
+        };
 
         self.solve_velocity_constraint(bias);
     }
@@ -298,7 +307,7 @@ where
 
     pub(crate) fn constraint<'a, 'b: 'a, F, T: 'b>(
         &'a mut self,
-        mut query_element_pair: F,
+        query_element_pair: &mut F,
         delta_time: FloatNum,
     ) where
         T: ConstraintObject,
@@ -336,7 +345,7 @@ where
                 .for_each(|v| solve(v, fix_position));
         };
 
-        for _ in 0..MAX_ITERATOR_TIMES / 2 {
+        for _ in 0..MAX_ITERATOR_TIMES {
             constraint(false);
         }
 

@@ -44,8 +44,8 @@ macro_rules! impl_shape_for_common_polygon {
     };
     (@nearest_point,@inner_impl) => {
         #[inline]
-        fn nearest_point(&self, reference_point: &Point, vector: &Vector) -> Point {
-            find_nearest_point(self.point_iter(), reference_point, vector)
+        fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+            find_nearest_point(self, reference_point, direction)
         }
     };
     (@transform,@inner_impl) => {
