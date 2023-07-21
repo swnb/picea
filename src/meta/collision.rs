@@ -1,8 +1,4 @@
-use std::{
-    collections::{btree_map, BTreeMap},
-    mem,
-    slice::IterMut,
-};
+use std::{mem, slice::IterMut};
 
 use crate::algo::constraint::{ContactConstraint, ContactManifold, ManifoldsIterMut};
 
