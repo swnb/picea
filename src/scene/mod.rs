@@ -12,7 +12,7 @@ use crate::{
     },
     element::{store::ElementStore, Element},
     math::FloatNum,
-    meta::collision::{Manifold, ManifoldTable},
+    meta::manifold::{Manifold, ManifoldTable},
 };
 
 use self::context::Context;
