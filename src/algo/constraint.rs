@@ -1,20 +1,31 @@
 use crate::{
     element::Element,
     math::{num::limit_at_range, point::Point, vector::Vector, FloatNum},
-    meta::{collision::Manifold, Meta},
+    meta::Meta,
     scene::context::{ConstraintParameters, Context},
-    tools::snapshot::create_element_construct_code_snapshot,
 };
 use std::ops::Deref;
 
 use super::collision::ContactPointPair;
 
-pub(crate) trait ManifoldsIterMut {
-    type Item<'a>: Iterator<Item = &'a mut Manifold>
+pub(crate) trait ContactManifold {
+    type IterMut<'a>: Iterator<Item = &'a mut ContactPointPairInfo>
     where
         Self: 'a;
 
-    fn iter_mut(&mut self) -> Self::Item<'_>;
+    fn collision_element_id_pair(&self) -> (u32, u32);
+
+    fn contact_point_pairs_iter_mut(&mut self) -> Self::IterMut<'_>;
+}
+
+pub(crate) trait ManifoldsIterMut {
+    type Manifold: ContactManifold;
+
+    type Iter<'a>: Iterator<Item = &'a mut Self::Manifold>
+    where
+        Self: 'a;
+
+    fn iter_mut(&mut self) -> Self::Iter<'_>;
 }
 
 /**
@@ -55,6 +66,14 @@ pub struct ContactPointPairInfo {
     // vector from center point to  contact point
     r_a: Vector,
     r_b: Vector,
+}
+
+impl ContactPointPairInfo {
+    // REVIEW
+    pub fn reset(&mut self) {
+        self.total_friction_lambda = 0.;
+        self.total_friction_lambda = 0.;
+    }
 }
 
 fn compute_mass_effective<Obj: ConstraintObject>(
@@ -188,7 +207,9 @@ where
             .meta_mut()
             .apply_impulse(lambda, -normal, contact_info.r_b);
 
+        // if use_friction {
         self.solve_friction_constraint(max_friction_lambda);
+        // }
     }
 
     // TODO add static friction , make object static
@@ -247,9 +268,17 @@ where
             ..
         } = self;
 
-        let permeate = (contact_info.depth - constraint_parameters.max_allow_permeate).max(0.);
+        let bias = if false {
+            let permeate = (contact_info.depth - constraint_parameters.max_allow_permeate).max(0.);
 
-        let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
+            let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
+
+            bias
+        } else {
+            let permeate = contact_info.depth;
+
+            permeate * delta_time.recip()
+        };
 
         self.solve_velocity_constraint(bias);
     }
@@ -278,35 +307,36 @@ where
 
     pub(crate) fn constraint<'a, 'b: 'a, F, T: 'b>(
         &'a mut self,
-        mut query_element_pair: F,
+        query_element_pair: &mut F,
         delta_time: FloatNum,
     ) where
         T: ConstraintObject,
         F: FnMut((u32, u32)) -> Option<(&'b mut T, &'b mut T)>,
     {
-        let solve = |(object_a, object_b, manifold): (&'_ mut T, &'_ mut T, &'_ mut Manifold),
-                     fix_position: bool| {
-            for contact_info in manifold.contact_point_pairs_mut() {
-                let mut solver = ContactSolver::new(
-                    object_a,
-                    object_b,
-                    contact_info,
-                    &self.context.constraint_parameters,
-                );
+        let solve =
+            |(object_a, object_b, manifold): (&'_ mut T, &'_ mut T, &'_ mut M::Manifold),
+             fix_position: bool| {
+                for contact_info in manifold.contact_point_pairs_iter_mut() {
+                    let mut solver = ContactSolver::new(
+                        object_a,
+                        object_b,
+                        contact_info,
+                        &self.context.constraint_parameters,
+                    );
 
-                if fix_position {
-                    solver.solve_position_constraint(delta_time);
-                } else {
-                    solver.solve_velocity_constraint(0.);
+                    if fix_position {
+                        solver.solve_position_constraint(delta_time);
+                    } else {
+                        solver.solve_velocity_constraint(0.);
+                    }
                 }
-            }
-        };
+            };
 
         let mut constraint = |fix_position: bool| {
             self.contact_manifolds
                 .iter_mut()
                 .filter_map(|collision_info| {
-                    query_element_pair(collision_info.collision_element_id_pair)
+                    query_element_pair(collision_info.collision_element_id_pair())
                         .map(|(object_a, object_b)| (object_a, object_b, collision_info))
                 })
                 .filter(|(object_a, object_b, _)| {

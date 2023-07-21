@@ -14,7 +14,7 @@ pub(crate) struct ConstraintParameters {
 impl Default for ConstraintParameters {
     fn default() -> Self {
         Self {
-            factor_position_bias: 0.9,
+            factor_position_bias: 0.99,
             factor_elastic: 0.01,
             max_allow_permeate: 0.03,
             factor_default_friction: 0.2,
@@ -36,7 +36,7 @@ impl Default for Context {
     fn default() -> Self {
         Self {
             constraint_parameters: Default::default(),
-            enable_sleep_mode: true,
+            enable_sleep_mode: false,
             max_enter_sleep_frame: 40,
             max_enter_sleep_motion: 0.07,
         }

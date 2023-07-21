@@ -7,6 +7,8 @@ use crate::{
     meta::Mass,
 };
 
+use super::EdgeIterable;
+
 /**
  * useful tool for polygon to transform
  */
@@ -541,6 +543,68 @@ pub fn rotate_point(point: &Point, origin_point: &Point, deg: FloatNum) -> Point
     let mut tmp_vector: Vector = (origin_point, point).into();
     tmp_vector.affine_transformation_rotate_self(deg);
     *origin_point + tmp_vector
+}
+
+pub fn find_nearest_point<T: EdgeIterable + ?Sized>(
+    shape: &T,
+    reference_point: &Point,
+    &direction: &Vector,
+) -> Point {
+    let mut closest_point_to_reference_point = *reference_point;
+    let mut min_project_size_to_reference_point = FloatNum::MAX;
+
+    let reference_project_size = reference_point.to_vector() * direction;
+
+    let mut hit_count = 0;
+
+    for edge in shape.edge_iter() {
+        match edge {
+            Edge::Arc {
+                start_point,
+                support_point,
+                end_point,
+            } => {
+                // TODO
+                unimplemented!()
+            }
+            Edge::Circle {
+                center_point,
+                radius,
+            } => {
+                unimplemented!()
+            }
+            Edge::Line {
+                start_point,
+                end_point,
+            } => {
+                if start_point == reference_point {
+                    let project_size = end_point.to_vector() * direction;
+                    let project_size_to_reference_point =
+                        (project_size - reference_project_size).abs();
+                    if project_size_to_reference_point < min_project_size_to_reference_point {
+                        min_project_size_to_reference_point = project_size_to_reference_point;
+                        closest_point_to_reference_point = *end_point;
+                    }
+                    hit_count += 1;
+                } else if end_point == reference_point {
+                    let project_size = start_point.to_vector() * direction;
+                    let project_size_to_reference_point =
+                        (project_size - reference_project_size).abs();
+                    if project_size_to_reference_point < min_project_size_to_reference_point {
+                        min_project_size_to_reference_point = project_size_to_reference_point;
+                        closest_point_to_reference_point = *start_point;
+                    }
+                    hit_count += 1;
+                }
+
+                if hit_count >= 2 {
+                    break;
+                }
+            }
+        }
+    }
+
+    closest_point_to_reference_point
 }
 
 mod tests {

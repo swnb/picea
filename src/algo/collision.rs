@@ -7,7 +7,7 @@ use crate::{
         vector::{Vector, Vector3},
         FloatNum,
     },
-    shape::CenterPoint,
+    shape::{CenterPoint, NearestPoint},
 };
 use std::{
     cmp::Ordering,
@@ -28,11 +28,11 @@ pub trait Projector {
     }
 }
 
-pub trait SubCollider: Projector + CenterPoint {}
+pub trait SubCollider: Projector + CenterPoint + NearestPoint {}
 
-impl<T> SubCollider for T where T: Projector + CenterPoint {}
+impl<T> SubCollider for T where T: Projector + CenterPoint + NearestPoint {}
 
-pub trait Collider: Projector + CenterPoint {
+pub trait Collider: Projector + CenterPoint + NearestPoint {
     fn sub_colliders(&'_ self) -> Option<Box<dyn Iterator<Item = &'_ dyn SubCollider> + '_>> {
         None
     }
@@ -74,12 +74,41 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
 }
 
 // entry of collision check, if element is collision, handler will call
-pub fn detect_collision<T, H, F>(elements: T, mut handler: H, skip: F)
+pub fn detect_collision<T, H, F>(elements: T, handler: H, skip: F)
 where
     T: CollisionalCollection,
     // TODO use Iterator instead Vec
-    H: FnMut(&T::Collider, &T::Collider, Vec<ContactPointPair>),
+    H: Fn(&T::Collider, &T::Collider, Vec<ContactPointPair>),
     F: Fn(&T::Collider, &T::Collider) -> bool,
+{
+    // let time = std::time::Instant::now();
+    rough_collision_detection(elements, |collider_a, collider_b| {
+        if skip(collider_a, collider_b) {
+            return;
+        }
+        prepare_accurate_collision_detection(
+            collider_a,
+            collider_b,
+            |sub_collider_a, sub_collider_b| {
+                if let Some(result) =
+                    accurate_collision_detection_for_sub_collider(sub_collider_a, sub_collider_b)
+                {
+                    handler(collider_a, collider_b, result);
+                }
+            },
+        )
+    })
+    // dbg!(time.elapsed());
+}
+
+/**
+ * Rough collision detection, get two colliders that may collide
+ */
+pub fn rough_collision_detection<T, H>(elements: T, mut handler: H)
+where
+    T: CollisionalCollection,
+    // TODO use Iterator instead Vec
+    H: FnMut(&T::Collider, &T::Collider),
 {
     // let time = std::time::Instant::now();
 
@@ -88,57 +117,55 @@ where
 
     let elements = CollisionalCollectionWrapper(elements);
 
-    sweep_and_prune_collision_detection(
-        elements,
-        axis,
-        |a, b| {
-            // TODO special collision algo for circle and circle
-
-            let sub_colliders_a = a.sub_colliders();
-            let sub_colliders_b = b.sub_colliders();
-
-            match (sub_colliders_a, sub_colliders_b) {
-                // TODO
-                (Some(sub_colliders_a), Some(sub_colliders_b)) => {
-                    for collider_a in sub_colliders_a {
-                        let sub_colliders_b = b.sub_colliders().unwrap();
-                        for collider_b in sub_colliders_b {
-                            if let Some(collision_info) =
-                                special_collision_detection(collider_a, collider_b)
-                            {
-                                handler(a, b, collision_info);
-                            }
-                        }
-                    }
-                }
-                (Some(sub_colliders_a), None) => {
-                    for collider_a in sub_colliders_a {
-                        if let Some(collision_info) = special_collision_detection(collider_a, b) {
-                            handler(a, b, collision_info);
-                        }
-                    }
-                }
-                (None, Some(sub_colliders_b)) => {
-                    for collider_b in sub_colliders_b {
-                        if let Some(collision_info) = special_collision_detection(a, collider_b) {
-                            handler(a, b, collision_info);
-                        }
-                    }
-                }
-                (None, None) => {
-                    if let Some(collision_info) = special_collision_detection(a, b) {
-                        handler(a, b, collision_info);
-                    }
-                }
-            }
-        },
-        skip,
-    );
+    sweep_and_prune_collision_detection(elements, axis, |a, b| {
+        // TODO special collision algo for circle and circle
+        handler(a, b);
+    });
 
     // dbg!(time.elapsed());
 }
 
-pub fn special_collision_detection(
+/**
+ * Accurate collision detection, extracting subparts that should collide
+ */
+pub fn prepare_accurate_collision_detection<C, H>(collider_a: &C, collider_b: &C, mut handler: H)
+where
+    C: Collider,
+    H: FnMut(&dyn SubCollider, &dyn SubCollider),
+{
+    let sub_colliders_a = collider_a.sub_colliders();
+    let sub_colliders_b = collider_b.sub_colliders();
+
+    match (sub_colliders_a, sub_colliders_b) {
+        // TODO
+        (Some(sub_colliders_a), Some(sub_colliders_b)) => {
+            for collider_a in sub_colliders_a {
+                let sub_colliders_b = collider_b.sub_colliders().unwrap();
+                for collider_b in sub_colliders_b {
+                    handler(collider_a, collider_b);
+                }
+            }
+        }
+        (Some(sub_colliders_a), None) => {
+            for collider_a in sub_colliders_a {
+                handler(collider_a, collider_b);
+            }
+        }
+        (None, Some(sub_colliders_b)) => {
+            for collider_b in sub_colliders_b {
+                handler(collider_a, collider_b);
+            }
+        }
+        (None, None) => {
+            handler(collider_a, collider_b);
+        }
+    }
+}
+
+/**
+ * Accurate collision detection, to obtain information such as collision points
+ */
+pub fn accurate_collision_detection_for_sub_collider(
     a: &dyn SubCollider,
     b: &dyn SubCollider,
 ) -> Option<Vec<ContactPointPair>> {
@@ -155,7 +182,7 @@ pub fn special_collision_detection(
     let simplex = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
     let minkowski_edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-    let contact_infos = minkowski_edge.get_contact_info(center_point_a, center_point_b);
+    let contact_infos: Vec<ContactPointPair> = minkowski_edge.get_contact_info(a, b, true);
 
     contact_infos.into()
 }
@@ -164,15 +191,13 @@ pub fn special_collision_detection(
  * 粗检测
  * find the elements that maybe collision
  */
-fn sweep_and_prune_collision_detection<T, Z, F>(
+fn sweep_and_prune_collision_detection<T, Z>(
     mut elements: CollisionalCollectionWrapper<T>,
     axis: AxisDirection,
     mut handler: Z,
-    skip: F,
 ) where
     T: CollisionalCollection,
-    Z: FnMut(&mut T::Collider, &mut T::Collider),
-    F: Fn(&T::Collider, &T::Collider) -> bool,
+    Z: FnMut(&T::Collider, &T::Collider),
 {
     elements.sort(|a, b| {
         let (ref min_a_x, _) = a.projection_on_axis(axis);
@@ -191,14 +216,11 @@ fn sweep_and_prune_collision_detection<T, Z, F>(
                 let (b_min_y, b_max_y) = elements[j].projection_on_axis(!axis);
 
                 if !(a_max_y < b_min_y || b_max_y < a_min_y) {
-                    if skip(&elements[i], &elements[j]) {
-                        continue;
-                    }
                     // detective precise collision
-                    let a: *mut _ = &mut elements[i];
-                    let b: *mut _ = &mut elements[j];
+                    let a: *const _ = &elements[i];
+                    let b: *const _ = &elements[j];
                     unsafe {
-                        handler(&mut *a, &mut *b);
+                        handler(&*a, &*b);
                     };
                 }
             } else {
@@ -473,10 +495,157 @@ impl MinkowskiEdge {
 
     pub(crate) fn get_contact_info(
         &self,
-        center_point_a: Point,
-        center_point_b: Point,
+        sub_collider_a: &dyn SubCollider,
+        sub_collider_b: &dyn SubCollider,
+        gen_more_contact_points_with_nearest_point: bool,
     ) -> Vec<ContactPointPair> {
-        get_collision_contact_point(self, center_point_a, center_point_b)
+        if gen_more_contact_points_with_nearest_point {
+            return self.get_contact_info_with_nearest_point(sub_collider_a, sub_collider_b);
+        }
+
+        let &Self {
+            normal,
+            depth,
+            ref start_different_point,
+            ref end_different_point,
+        } = self;
+
+        let center_point_a = sub_collider_a.center_point();
+        let center_point_b = sub_collider_b.center_point();
+
+        let a1 = start_different_point.start_point_from_a;
+        let a2 = end_different_point.start_point_from_a;
+
+        let b1 = start_different_point.end_point_from_b;
+        let b2 = end_different_point.end_point_from_b;
+
+        // TODO use v_clip for all situation
+        if a1 == a2 && b1 == b2 {
+            let contact_point_a = a1;
+
+            let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
+
+            // TODO 判断或许有误
+            // FIXME 这里的处理必须要对 Line 做特殊处理
+            let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
+                -normal
+            } else {
+                normal
+            };
+
+            let normal_toward_b = -normal_toward_a;
+
+            let contact_point_pair = ContactPointPair {
+                contact_point_a: a1,
+                contact_point_b: b1,
+                normal_toward_a,
+                depth,
+            };
+
+            vec![contact_point_pair]
+        } else if a1 == a2 {
+            let contact_point_a = a1;
+
+            let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
+            // TODO 判断或许有误
+            let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
+                -normal
+            } else {
+                normal
+            };
+
+            let normal_toward_b = -normal_toward_a;
+
+            let contact_point_b = a1 + (normal_toward_a * depth);
+
+            let contact_point_pair = ContactPointPair {
+                contact_point_a,
+                contact_point_b,
+                normal_toward_a,
+                depth,
+            };
+
+            vec![contact_point_pair]
+        } else if b1 == b2 {
+            let contact_point_b = b1;
+
+            let tmp_vector: Vector<_> = (contact_point_b, center_point_b).into();
+            // TODO 判断或许有误
+            let normal_toward_b = if (tmp_vector * normal).is_sign_negative() {
+                -normal
+            } else {
+                normal
+            };
+
+            let normal_toward_a = -normal_toward_b;
+
+            let contact_point_a = b1 + (normal_toward_b * depth);
+
+            let contact_point_pair = ContactPointPair {
+                contact_point_a,
+                contact_point_b,
+                normal_toward_a,
+                depth,
+            };
+
+            vec![contact_point_pair]
+        } else {
+            let edge_a: Segment<_> = (a1, a2).into();
+            let edge_b: Segment<_> = (b1, b2).into();
+
+            v_clip(edge_a, edge_b, normal, center_point_a, center_point_b)
+        }
+    }
+
+    fn get_contact_info_with_nearest_point(
+        &self,
+        sub_collider_a: &dyn SubCollider,
+        sub_collider_b: &dyn SubCollider,
+    ) -> Vec<ContactPointPair> {
+        let Self {
+            normal,
+            start_different_point,
+            end_different_point,
+            ..
+        } = self;
+
+        let center_point_a = sub_collider_a.center_point();
+        let center_point_b = sub_collider_b.center_point();
+
+        let a1 = start_different_point.start_point_from_a;
+        let a2 = end_different_point.start_point_from_a;
+
+        let b1 = start_different_point.end_point_from_b;
+        let b2 = end_different_point.end_point_from_b;
+
+        let (edge_a, edge_b) = match (a1 == a2, b1 == b2) {
+            (true, true) => {
+                let a2 = sub_collider_a.nearest_point(&a1, &normal);
+                let b2 = sub_collider_b.nearest_point(&b1, &normal);
+                let edge_a: Segment<_> = (a1, a2).into();
+                let edge_b: Segment<_> = (b1, b2).into();
+                (edge_a, edge_b)
+            }
+            (true, false) => {
+                let a2 = sub_collider_a.nearest_point(&a1, &normal);
+                let edge_a: Segment<_> = (a1, a2).into();
+                let edge_b: Segment<_> = (b1, b2).into();
+                (edge_a, edge_b)
+            }
+            (false, true) => {
+                let b2 = sub_collider_b.nearest_point(&b1, &normal);
+                let edge_a: Segment<_> = (a1, a2).into();
+                let edge_b: Segment<_> = (b1, b2).into();
+                (edge_a, edge_b)
+            }
+            (false, false) => {
+                let edge_a: Segment<_> = (a1, a2).into();
+                let edge_b: Segment<_> = (b1, b2).into();
+                (edge_a, edge_b)
+            }
+        };
+
+        v_clip(edge_a, edge_b, *normal, center_point_a, center_point_b)
     }
 }
 
@@ -582,98 +751,6 @@ impl ContactPointPair {
 
     pub fn depth(&self) -> FloatNum {
         self.depth
-    }
-}
-
-fn get_collision_contact_point(
-    minkowski_edge: &MinkowskiEdge,
-    center_point_a: Point,
-    center_point_b: Point,
-) -> Vec<ContactPointPair> {
-    let normal = minkowski_edge.normal;
-    let depth = minkowski_edge.depth;
-
-    let a1 = minkowski_edge.start_different_point.start_point_from_a;
-    let a2 = minkowski_edge.end_different_point.start_point_from_a;
-
-    let b1 = minkowski_edge.start_different_point.end_point_from_b;
-    let b2 = minkowski_edge.end_different_point.end_point_from_b;
-
-    // TODO use v_clip for all situation
-    if a1 == a2 && b1 == b2 {
-        let contact_point_a = a1;
-
-        let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
-
-        // TODO 判断或许有误
-        // FIXME 这里的处理必须要对 Line 做特殊处理
-        let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
-            -normal
-        } else {
-            normal
-        };
-
-        let normal_toward_b = -normal_toward_a;
-
-        let contact_point_pair = ContactPointPair {
-            contact_point_a: a1,
-            contact_point_b: b1,
-            normal_toward_a,
-            depth,
-        };
-
-        vec![contact_point_pair]
-    } else if a1 == a2 {
-        let contact_point_a = a1;
-
-        let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
-        // TODO 判断或许有误
-        let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
-            -normal
-        } else {
-            normal
-        };
-
-        let normal_toward_b = -normal_toward_a;
-
-        let contact_point_b = a1 + (normal_toward_a * depth);
-
-        let contact_point_pair = ContactPointPair {
-            contact_point_a,
-            contact_point_b,
-            normal_toward_a,
-            depth,
-        };
-
-        vec![contact_point_pair]
-    } else if b1 == b2 {
-        let contact_point_b = b1;
-
-        let tmp_vector: Vector<_> = (contact_point_b, center_point_b).into();
-        // TODO 判断或许有误
-        let normal_toward_b = if (tmp_vector * normal).is_sign_negative() {
-            -normal
-        } else {
-            normal
-        };
-
-        let normal_toward_a = -normal_toward_b;
-
-        let contact_point_a = b1 + (normal_toward_b * depth);
-
-        let contact_point_pair = ContactPointPair {
-            contact_point_a,
-            contact_point_b,
-            normal_toward_a,
-            depth,
-        };
-
-        vec![contact_point_pair]
-    } else {
-        let edge_a: Segment<_> = (a1, a2).into();
-        let edge_b: Segment<_> = (b1, b2).into();
-
-        v_clip(edge_a, edge_b, normal, center_point_a, center_point_b)
     }
 }
 

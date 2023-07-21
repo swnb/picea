@@ -1,15 +1,18 @@
 pub(crate) mod context;
 
-use std::slice::IterMut;
+use std::ops::Shl;
 
 use crate::{
     algo::{
-        collision::detect_collision,
-        constraint::{ManifoldsIterMut, Solver},
+        collision::{
+            accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
+            rough_collision_detection,
+        },
+        constraint::Solver,
     },
     element::{store::ElementStore, Element},
     math::FloatNum,
-    meta::collision::Manifold,
+    meta::collision::{Manifold, ManifoldTable},
 };
 
 use self::context::Context;
@@ -17,10 +20,11 @@ use self::context::Context;
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
-    contact_manifolds: Vec<Manifold>,
-    pre_contact_manifold: Vec<Manifold>,
+    manifold_table: ManifoldTable,
+    // manifold_store: Vec<Manifold>,
     total_skip_durations: FloatNum,
     context: Context,
+    frame_count: u128,
 }
 
 type ID = u32;
@@ -66,11 +70,11 @@ impl Scene {
         Self {
             element_store: Default::default(),
             id_dispatcher: Default::default(),
-            contact_manifolds: vec![],
-            pre_contact_manifold: vec![],
+            manifold_table: Default::default(),
             // TODO
             total_skip_durations: 0.,
             context: Default::default(),
+            frame_count: 0,
         }
     }
 
@@ -97,6 +101,8 @@ impl Scene {
     }
 
     pub fn update_elements_by_duration(&mut self, delta_time: f32) {
+        self.frame_count += 1;
+
         let Context {
             max_enter_sleep_frame,
             max_enter_sleep_motion,
@@ -154,45 +160,84 @@ impl Scene {
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
 
-        detect_collision(
-            &mut self.element_store,
-            |a, b, contact_point_pairs| {
-                // TODO remove mark_collision
-                // a.meta_mut().mark_collision(true);
-                // b.meta_mut().mark_collision(true);
+        self.manifold_table.clear();
 
-                let contact_point_pairs = contact_point_pairs
-                    .into_iter()
-                    .map(|contact_point_pair| (contact_point_pair, a, b).into())
-                    .collect();
-
-                let contact_manifold = Manifold {
-                    collision_element_id_pair: (a.id(), b.id()),
-                    contact_point_pairs,
-                };
-
-                self.contact_manifolds.push(contact_manifold);
-            },
-            |element_a, element_b| {
+        rough_collision_detection(&mut self.element_store, |element_a, element_b| {
+            let should_skip = {
                 let meta_a = element_a.meta();
                 let meta_b = element_b.meta();
 
                 let is_both_sleeping = meta_a.is_sleeping() && meta_b.is_sleeping();
 
                 is_both_sleeping || meta_a.is_transparent() || meta_b.is_transparent()
-            },
-        );
+            };
 
-        use SceneManifoldsType::*;
+            if should_skip {
+                return;
+            }
 
-        self.constraint(PreviousManifolds, delta_time);
+            let (collider_a, collider_b) = if element_a.id() > element_b.id() {
+                (element_b, element_a)
+            } else {
+                (element_a, element_b)
+            };
 
-        self.constraint(CurrentManifolds, delta_time);
+            prepare_accurate_collision_detection(
+                collider_a,
+                collider_b,
+                |sub_collider_a, sub_collider_b| {
+                    if let Some(contact_point_pairs) = accurate_collision_detection_for_sub_collider(
+                        sub_collider_a,
+                        sub_collider_b,
+                    ) {
+                        let a = collider_a;
+                        let b = collider_b;
+                        // TODO remove mark_collision
+                        // a.meta_mut().mark_collision(true);
+                        // b.meta_mut().mark_collision(true);
+
+                        let contact_point_pairs = contact_point_pairs
+                            .into_iter()
+                            .map(|contact_point_pair| (contact_point_pair, a, b).into())
+                            .collect();
+
+                        let contact_manifold = Manifold {
+                            collision_element_id_pair: (a.id(), b.id()),
+                            contact_point_pairs,
+                        };
+
+                        self.manifold_table.push(contact_manifold);
+                    }
+                },
+            )
+        });
+
+        let query_element_pair =
+            &mut |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
+                let element_a = self
+                    .element_store
+                    .get_mut_element_by_id(element_id_pair.0)?
+                    as *mut Element;
+
+                let element_b = self
+                    .element_store
+                    .get_mut_element_by_id(element_id_pair.1)?
+                    as *mut Element;
+
+                unsafe { (&mut *element_a, &mut *element_b) }.into()
+            };
+
+        Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_table.pre_manifolds())
+            .constraint(query_element_pair, delta_time);
+
+        Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_table.current_manifolds())
+            .constraint(query_element_pair, delta_time);
 
         self.elements_iter_mut()
             .for_each(|element| element.integrate_velocity(delta_time));
 
-        self.pre_contact_manifold = std::mem::take(&mut self.contact_manifolds);
+        // self.manifold_store.update_all_manifolds_usage();
+        // self.pre_contact_manifold = std::mem::take(&mut self.contact_manifolds);
     }
 
     #[inline]
@@ -215,40 +260,17 @@ impl Scene {
         self.element_store.get_mut_element_by_id(id)
     }
 
-    fn constraint(&mut self, manifolds_type: SceneManifoldsType, delta_time: FloatNum) {
-        let query_element_pair =
-            |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
-                let element_a = self
-                    .element_store
-                    .get_mut_element_by_id(element_id_pair.0)?
-                    as *mut Element;
+    fn frame_count(&self) -> u128 {
+        self.frame_count
+    }
+}
 
-                let element_b = self
-                    .element_store
-                    .get_mut_element_by_id(element_id_pair.1)?
-                    as *mut Element;
-
-                unsafe { (&mut *element_a, &mut *element_b) }.into()
-            };
-
-        impl ManifoldsIterMut for [Manifold] {
-            type Item<'z> = IterMut<'z, Manifold> where Self:'z;
-
-            fn iter_mut(&mut self) -> Self::Item<'_> {
-                <[Manifold]>::iter_mut(self)
-            }
-        }
-
-        use SceneManifoldsType::*;
-        match manifolds_type {
-            CurrentManifolds => {
-                Solver::<'_, '_, [Manifold]>::new(&self.context, &mut self.contact_manifolds)
-                    .constraint(query_element_pair, delta_time);
-            }
-            PreviousManifolds => {
-                Solver::<'_, '_, [Manifold]>::new(&self.context, &mut self.pre_contact_manifold)
-                    .constraint(query_element_pair, delta_time);
-            }
-        }
+impl<T> Shl<T> for &mut Scene
+where
+    T: Into<Element>,
+{
+    type Output = ID;
+    fn shl(self, rhs: T) -> Self::Output {
+        self.push_element(rhs.into())
     }
 }

@@ -97,7 +97,7 @@ impl CollisionStatusViewer {
 
         let edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-        let contact_point_pairs = edge.get_contact_info(center_point_a, center_point_b);
+        let contact_point_pairs = edge.get_contact_info(a, b, true);
 
         self.collision_infos.extend(contact_point_pairs);
     }

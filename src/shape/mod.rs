@@ -20,3 +20,7 @@ pub trait EdgeIterable {
 pub trait CenterPoint {
     fn center_point(&self) -> Point;
 }
+
+pub trait NearestPoint {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point;
+}

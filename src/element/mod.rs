@@ -14,7 +14,7 @@ use crate::{
         FloatNum,
     },
     meta::{Mass, Meta},
-    shape::{CenterPoint, EdgeIterable, GeometryTransform},
+    shape::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint},
 };
 
 type ID = u32;
@@ -31,9 +31,16 @@ pub trait ComputeMomentOfInertia {
 
 // TODO rename
 pub trait ShapeTraitUnion:
-    GeometryTransform + CenterPoint + EdgeIterable + ComputeMomentOfInertia + Projector + Collider
+    GeometryTransform
+    + CenterPoint
+    + NearestPoint
+    + EdgeIterable
+    + ComputeMomentOfInertia
+    + Projector
+    + Collider
 {
 }
+
 impl<T> ShapeTraitUnion for T where
     T: GeometryTransform
         + CenterPoint
@@ -41,6 +48,7 @@ impl<T> ShapeTraitUnion for T where
         + ComputeMomentOfInertia
         + Projector
         + Collider
+        + NearestPoint
 {
 }
 
@@ -188,6 +196,12 @@ impl ConstraintObject for Element {
 impl CenterPoint for Element {
     fn center_point(&self) -> Point {
         self.shape().center_point()
+    }
+}
+
+impl NearestPoint for Element {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        self.shape.nearest_point(reference_point, direction)
     }
 }
 

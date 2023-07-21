@@ -1,10 +1,7 @@
-use crate::{
-    element::Element,
-    math::{edge::Edge, point::Point},
-};
+use crate::{element::Element, math::edge::Edge};
 
 pub fn create_element_construct_code_snapshot(element: &Element) -> String {
-    let points: Vec<Point> = element
+    let points: Vec<_> = element
         .shape()
         .edge_iter()
         .filter_map(|v| {

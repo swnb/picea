@@ -5,7 +5,10 @@ use crate::{
     meta::Mass,
 };
 
-use super::{utils::rotate_point, CenterPoint, EdgeIterable, GeometryTransform};
+use super::{
+    utils::{find_nearest_point, rotate_point},
+    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
+};
 
 #[derive(Clone)]
 pub struct Line {
@@ -52,6 +55,18 @@ impl Line {
 impl CenterPoint for Line {
     fn center_point(&self) -> Point {
         self.center_point
+    }
+}
+
+impl NearestPoint for Line {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        if reference_point == self.start_point() {
+            return *self.end_point();
+        } else if reference_point == self.end_point() {
+            return *self.start_point();
+        }
+
+        find_nearest_point(self, reference_point, direction)
     }
 }
 

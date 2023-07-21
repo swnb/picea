@@ -7,10 +7,10 @@ use crate::{
 use super::{
     convex::ConvexPolygon,
     utils::{
-        projection_polygon_on_vector, rotate_point, rotate_polygon,
+        find_nearest_point, projection_polygon_on_vector, rotate_point, rotate_polygon,
         split_concave_polygon_to_convex_polygons, translate_polygon, VertexesToEdgeIter,
     },
-    CenterPoint, EdgeIterable, GeometryTransform,
+    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
 
 #[derive(Clone)]
@@ -104,6 +104,12 @@ impl Collider for ConcavePolygon {
 impl EdgeIterable for ConcavePolygon {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
         Box::new(VertexesToEdgeIter::new(&self.origin_vertexes))
+    }
+}
+
+impl NearestPoint for ConcavePolygon {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        find_nearest_point(self, reference_point, direction)
     }
 }
 

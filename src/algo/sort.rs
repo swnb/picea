@@ -96,15 +96,27 @@ pub(crate) trait SortableCollection: Index<usize, Output = Self::Item> {
 
     fn swap(&mut self, i: usize, j: usize);
 
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     fn quick_sort<F>(&mut self, compare: F)
     where
         F: Fn(&Self::Item, &Self::Item) -> Ordering,
     {
+        if self.is_empty() {
+            return;
+        }
+
         let length = self.len();
         SortableCollectionWrapper(self).quick_sort(0..length, &compare);
     }
 
     fn insertion_sort(&mut self, compare: impl Fn(&Self::Item, &Self::Item) -> Ordering) {
+        if self.is_empty() {
+            return;
+        }
+
         let length = self.len();
         SortableCollectionWrapper(self).insertion_sort(0..length, &compare)
     }

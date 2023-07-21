@@ -1,27 +1,59 @@
-use crate::algo::constraint::ContactPointPairInfo;
+use std::{
+    collections::{btree_map, BTreeMap},
+    mem,
+    slice::IterMut,
+};
 
-#[derive(Debug)]
+use crate::algo::constraint::{ContactManifold, ContactPointPairInfo, ManifoldsIterMut};
+
 pub struct Manifold {
     pub(crate) collision_element_id_pair: (u32, u32),
     pub(crate) contact_point_pairs: Vec<ContactPointPairInfo>,
 }
 
-impl Manifold {
-    pub fn element_id_a(&self) -> u32 {
-        self.collision_element_id_pair.0
+impl ContactManifold for Manifold {
+    type IterMut<'a> = IterMut<'a, ContactPointPairInfo> where Self:'a;
+
+    fn collision_element_id_pair(&self) -> (u32, u32) {
+        self.collision_element_id_pair
     }
 
-    pub fn element_id_b(&self) -> u32 {
-        self.collision_element_id_pair.1
-    }
-
-    pub fn contact_point_pairs(&self) -> impl Iterator<Item = &'_ ContactPointPairInfo> {
-        self.contact_point_pairs.iter()
-    }
-
-    pub fn contact_point_pairs_mut(
-        &mut self,
-    ) -> impl Iterator<Item = &'_ mut ContactPointPairInfo> {
+    fn contact_point_pairs_iter_mut(&mut self) -> Self::IterMut<'_> {
         self.contact_point_pairs.iter_mut()
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ManifoldTable {
+    pre_manifolds: Vec<Manifold>,
+    current_manifolds: Vec<Manifold>,
+}
+
+impl ManifoldTable {
+    pub fn clear(&mut self) {
+        mem::swap(&mut self.pre_manifolds, &mut self.current_manifolds);
+        self.current_manifolds.clear();
+    }
+
+    pub fn push(&mut self, manifold: Manifold) {
+        self.current_manifolds.push(manifold);
+    }
+
+    pub fn pre_manifolds(&mut self) -> impl ManifoldsIterMut + '_ {
+        &mut self.pre_manifolds[..]
+    }
+
+    pub fn current_manifolds(&mut self) -> impl ManifoldsIterMut + '_ {
+        &mut self.current_manifolds[..]
+    }
+}
+
+impl<'a> ManifoldsIterMut for &'a mut [Manifold] {
+    type Manifold = Manifold;
+
+    type Iter<'b> = IterMut<'b, Manifold> where Self:'b;
+
+    fn iter_mut(&mut self) -> Self::Iter<'_> {
+        <[Manifold]>::iter_mut(self)
     }
 }
