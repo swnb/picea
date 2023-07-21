@@ -9,7 +9,7 @@ use std::ops::Deref;
 use super::collision::ContactPointPair;
 
 pub(crate) trait ContactManifold {
-    type IterMut<'a>: Iterator<Item = &'a mut ContactPointPairInfo>
+    type IterMut<'a>: Iterator<Item = &'a mut ContactConstraint>
     where
         Self: 'a;
 
@@ -58,7 +58,7 @@ fn sequential_impulse() {
 // TODO if two element is still collide in current frame, we can reuse this
 // contact info , is two element is not collide anymore , we don't need this frame
 #[derive(Debug, Clone)]
-pub struct ContactPointPairInfo {
+pub struct ContactConstraint {
     contact_point_pair: ContactPointPair,
     total_friction_lambda: FloatNum,
     total_lambda: FloatNum,
@@ -68,7 +68,7 @@ pub struct ContactPointPairInfo {
     r_b: Vector,
 }
 
-impl ContactPointPairInfo {
+impl ContactConstraint {
     // REVIEW
     pub fn reset(&mut self) {
         self.total_friction_lambda = 0.;
@@ -101,7 +101,7 @@ fn compute_mass_effective<Obj: ConstraintObject>(
     (equation_part1 + equation_part2 + equation_part3 + equation_part4).recip()
 }
 
-impl<Obj> From<(ContactPointPair, &Obj, &Obj)> for ContactPointPairInfo
+impl<Obj> From<(ContactPointPair, &Obj, &Obj)> for ContactConstraint
 where
     Obj: ConstraintObject,
 {
@@ -123,7 +123,7 @@ where
     }
 }
 
-impl Deref for ContactPointPairInfo {
+impl Deref for ContactConstraint {
     type Target = ContactPointPair;
     fn deref(&self) -> &Self::Target {
         &self.contact_point_pair
@@ -143,7 +143,7 @@ pub trait ConstraintObject {
 pub(crate) struct ContactSolver<'a: 'b, 'b, 'c, Object: ConstraintObject> {
     object_a: &'a mut Object,
     object_b: &'a mut Object,
-    contact_info: &'b mut ContactPointPairInfo,
+    contact_info: &'b mut ContactConstraint,
     constraint_parameters: &'c ConstraintParameters,
 }
 
@@ -154,7 +154,7 @@ where
     pub(crate) fn new(
         object_a: &'a mut Object,
         object_b: &'a mut Object,
-        contact_info: &'b mut ContactPointPairInfo,
+        contact_info: &'b mut ContactConstraint,
         constraint_parameters: &'c ConstraintParameters,
     ) -> Self {
         Self {

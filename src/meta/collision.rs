@@ -4,15 +4,15 @@ use std::{
     slice::IterMut,
 };
 
-use crate::algo::constraint::{ContactManifold, ContactPointPairInfo, ManifoldsIterMut};
+use crate::algo::constraint::{ContactConstraint, ContactManifold, ManifoldsIterMut};
 
 pub struct Manifold {
     pub(crate) collision_element_id_pair: (u32, u32),
-    pub(crate) contact_point_pairs: Vec<ContactPointPairInfo>,
+    pub(crate) contact_point_pairs: Vec<ContactConstraint>,
 }
 
 impl ContactManifold for Manifold {
-    type IterMut<'a> = IterMut<'a, ContactPointPairInfo> where Self:'a;
+    type IterMut<'a> = IterMut<'a, ContactConstraint> where Self:'a;
 
     fn collision_element_id_pair(&self) -> (u32, u32) {
         self.collision_element_id_pair
