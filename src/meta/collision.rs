@@ -8,7 +8,7 @@ use crate::algo::constraint::{ContactConstraint, ContactManifold, ManifoldsIterM
 
 pub struct Manifold {
     pub(crate) collision_element_id_pair: (u32, u32),
-    pub(crate) contact_point_pairs: Vec<ContactConstraint>,
+    pub(crate) contact_constraints: Vec<ContactConstraint>,
 }
 
 impl ContactManifold for Manifold {
@@ -18,8 +18,8 @@ impl ContactManifold for Manifold {
         self.collision_element_id_pair
     }
 
-    fn contact_point_pairs_iter_mut(&mut self) -> Self::IterMut<'_> {
-        self.contact_point_pairs.iter_mut()
+    fn contact_constraints_iter_mut(&mut self) -> Self::IterMut<'_> {
+        self.contact_constraints.iter_mut()
     }
 }
 

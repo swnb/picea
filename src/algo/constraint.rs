@@ -15,7 +15,7 @@ pub(crate) trait ContactManifold {
 
     fn collision_element_id_pair(&self) -> (u32, u32);
 
-    fn contact_point_pairs_iter_mut(&mut self) -> Self::IterMut<'_>;
+    fn contact_constraints_iter_mut(&mut self) -> Self::IterMut<'_>;
 }
 
 pub(crate) trait ManifoldsIterMut {
@@ -316,7 +316,7 @@ where
         let solve =
             |(object_a, object_b, manifold): (&'_ mut T, &'_ mut T, &'_ mut M::Manifold),
              fix_position: bool| {
-                for contact_info in manifold.contact_point_pairs_iter_mut() {
+                for contact_info in manifold.contact_constraints_iter_mut() {
                     let mut solver = ContactSolver::new(
                         object_a,
                         object_b,

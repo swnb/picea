@@ -186,7 +186,7 @@ impl Scene {
                 collider_a,
                 collider_b,
                 |sub_collider_a, sub_collider_b| {
-                    if let Some(contact_point_pairs) = accurate_collision_detection_for_sub_collider(
+                    if let Some(contact_constraints) = accurate_collision_detection_for_sub_collider(
                         sub_collider_a,
                         sub_collider_b,
                     ) {
@@ -196,14 +196,14 @@ impl Scene {
                         // a.meta_mut().mark_collision(true);
                         // b.meta_mut().mark_collision(true);
 
-                        let contact_point_pairs = contact_point_pairs
+                        let contact_constraints = contact_constraints
                             .into_iter()
                             .map(|contact_point_pair| (contact_point_pair, a, b).into())
                             .collect();
 
                         let contact_manifold = Manifold {
                             collision_element_id_pair: (a.id(), b.id()),
-                            contact_point_pairs,
+                            contact_constraints,
                         };
 
                         self.manifold_table.push(contact_manifold);
