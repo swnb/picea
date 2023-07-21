@@ -1,8 +1,8 @@
 use super::{
     utils::{
         compute_area_of_triangle, compute_moment_of_inertia_of_triangle,
-        compute_polygon_approximate_center_point, projection_polygon_on_vector, rotate_point,
-        rotate_polygon, translate_polygon,
+        compute_polygon_approximate_center_point, find_nearest_point, projection_polygon_on_vector,
+        rotate_point, rotate_polygon, translate_polygon,
     },
     CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
@@ -43,7 +43,10 @@ macro_rules! impl_shape_for_common_polygon {
         }
     };
     (@nearest_point,@inner_impl) => {
-
+        #[inline]
+        fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+            find_nearest_point(self, reference_point, direction)
+        }
     };
     (@transform,@inner_impl) => {
         #[inline]

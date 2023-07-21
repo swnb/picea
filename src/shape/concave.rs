@@ -7,7 +7,7 @@ use crate::{
 use super::{
     convex::ConvexPolygon,
     utils::{
-        projection_polygon_on_vector, rotate_point, rotate_polygon,
+        find_nearest_point, projection_polygon_on_vector, rotate_point, rotate_polygon,
         split_concave_polygon_to_convex_polygons, translate_polygon, VertexesToEdgeIter,
     },
     CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
@@ -107,7 +107,11 @@ impl EdgeIterable for ConcavePolygon {
     }
 }
 
-impl NearestPoint for ConcavePolygon {}
+impl NearestPoint for ConcavePolygon {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        find_nearest_point(self, reference_point, direction)
+    }
+}
 
 impl ComputeMomentOfInertia for ConcavePolygon {
     fn compute_moment_of_inertia(&self, m: crate::meta::Mass) -> f32 {

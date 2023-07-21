@@ -1,7 +1,5 @@
 use crate::math::{edge::Edge, point::Point, vector::Vector};
 
-use self::utils::find_nearest_point;
-
 pub mod circle;
 pub mod concave;
 pub mod convex;
@@ -23,8 +21,6 @@ pub trait CenterPoint {
     fn center_point(&self) -> Point;
 }
 
-pub trait NearestPoint: EdgeIterable {
-    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
-        find_nearest_point(self, reference_point, direction)
-    }
+pub trait NearestPoint {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point;
 }
