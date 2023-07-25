@@ -136,10 +136,6 @@ pub trait ConstraintObject {
 
     fn meta(&self) -> &Meta;
 
-    fn id(&self) -> ID;
-
-    fn element(&self) -> &Element;
-
     fn meta_mut(&mut self) -> &mut Meta;
 
     fn compute_point_velocity(&self, contact_point: &Point) -> Vector;
