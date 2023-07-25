@@ -436,7 +436,7 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
 
         //  NOTE maybe z < EPSILON
         // ao_x_ab.z() == 0 means ab pass origin, follow compute will get NaN
-        if (ao_x_ab).z() == 0. {
+        if (ao_x_ab).z().abs() < 1e-7 {
             let ab: Vector = ab.into();
             //  NOTE current normal direction need to be corrected when we need to know the orientation
             let normal = !ab;
@@ -683,7 +683,7 @@ impl Simplex {
         let min_index = self.find_min_edge_index();
 
         // TODO how to stop expand
-        if self.edges[min_index].depth <= (3. * FloatNum::EPSILON) {
+        if self.edges[min_index].depth == 0. {
             // no need to expand
             return Err(());
         }
