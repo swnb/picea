@@ -280,7 +280,9 @@ where
 
         let bias = permeate * delta_time.recip();
 
-        self.solve_velocity_constraint(bias);
+        let (max_friction_lambda, _) = self.solve_velocity_constraint(bias);
+        // TODO
+        self.solve_friction_constraint(max_friction_lambda);
     }
 }
 
