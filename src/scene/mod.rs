@@ -8,7 +8,9 @@ use crate::{
             accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
             rough_collision_detection,
         },
-        constraint::Solver,
+        constraint::{
+            ConstraintSolver, ContactConstraint, ContactManifold, ManifoldsIterMut, Solver,
+        },
     },
     element::{store::ElementStore, Element},
     math::FloatNum,
@@ -160,7 +162,7 @@ impl Scene {
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
 
-        self.manifold_table.clear();
+        self.manifold_table.flip();
 
         rough_collision_detection(&mut self.element_store, |element_a, element_b| {
             let should_skip = {
@@ -203,6 +205,7 @@ impl Scene {
 
                         let contact_manifold = Manifold {
                             collision_element_id_pair: (a.id(), b.id()),
+                            reusable: false,
                             contact_constraints,
                         };
 
@@ -226,6 +229,8 @@ impl Scene {
 
                 unsafe { (&mut *element_a, &mut *element_b) }.into()
             };
+
+        // self.manifold_table.shrink_pre_manifolds();
 
         Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_table.pre_manifolds())
             .constraint(query_element_pair, delta_time);
@@ -260,8 +265,21 @@ impl Scene {
         self.element_store.get_mut_element_by_id(id)
     }
 
+    pub fn contact_constraint(&mut self) {
+        for manifold in self.manifold_table.current_manifolds().iter_mut() {
+            let (id_a, id_b) = manifold.collision_element_id_pair();
+        }
+    }
+
     fn frame_count(&self) -> u128 {
         self.frame_count
+    }
+
+    // remove all elements;
+    pub fn clear(&mut self) {
+        self.manifold_table.clear();
+        self.element_store.clear();
+        self.frame_count = 0;
     }
 }
 
