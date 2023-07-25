@@ -1,5 +1,5 @@
-pub mod collision;
 pub mod force;
+pub mod manifold;
 
 use std::ops::Deref;
 

@@ -97,9 +97,9 @@ impl CollisionStatusViewer {
 
         let edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-        let contact_point_pairs = edge.get_contact_info(a, b, true);
+        let contact_constraints = edge.get_contact_info(a, b, true);
 
-        self.collision_infos.extend(contact_point_pairs);
+        self.collision_infos.extend(contact_constraints);
     }
 
     pub fn get_minkowski_simplexes(&self) -> &[[Point; 3]] {

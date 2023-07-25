@@ -88,6 +88,13 @@ impl ElementStore {
         todo!()
     }
 
+    pub fn clear(&mut self) {
+        self.elements.clear();
+        self.region_sort_result.clear();
+        self.map.clear();
+        self.is_sorted = false;
+    }
+
     pub fn get_element_by_id(&self, id: ID) -> Option<&Element> {
         self.map.get(&id).map(|v| &v.element)
     }

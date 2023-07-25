@@ -8,7 +8,6 @@ use crate::{
     },
     math::{
         axis::AxisDirection,
-        edge::Edge,
         point::Point,
         vector::{Vector, Vector3},
         FloatNum,
@@ -17,7 +16,7 @@ use crate::{
     shape::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint},
 };
 
-type ID = u32;
+pub(crate) type ID = u32;
 
 // TODO refactor element builder
 pub struct ElementBuilder {
@@ -147,12 +146,6 @@ impl Element {
         self.translate(&path);
         // NOTE this is important, all rotate is reverse
         self.rotate(-angular);
-    }
-
-    // TODO remove
-    pub fn debug_shape(&self) {
-        let edges: Vec<Edge> = self.shape().edge_iter().collect();
-        dbg!(edges);
     }
 }
 

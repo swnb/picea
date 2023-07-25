@@ -1,21 +1,22 @@
 use crate::{
-    element::Element,
+    element::{Element, ID},
     math::{num::limit_at_range, point::Point, vector::Vector, FloatNum},
     meta::Meta,
     scene::context::{ConstraintParameters, Context},
+    tools::snapshot,
 };
 use std::ops::Deref;
 
 use super::collision::ContactPointPair;
 
 pub(crate) trait ContactManifold {
-    type IterMut<'a>: Iterator<Item = &'a mut ContactPointPairInfo>
+    type IterMut<'a>: Iterator<Item = &'a mut ContactConstraint>
     where
         Self: 'a;
 
     fn collision_element_id_pair(&self) -> (u32, u32);
 
-    fn contact_point_pairs_iter_mut(&mut self) -> Self::IterMut<'_>;
+    fn contact_constraints_iter_mut(&mut self) -> Self::IterMut<'_>;
 }
 
 pub(crate) trait ManifoldsIterMut {
@@ -58,7 +59,7 @@ fn sequential_impulse() {
 // TODO if two element is still collide in current frame, we can reuse this
 // contact info , is two element is not collide anymore , we don't need this frame
 #[derive(Debug, Clone)]
-pub struct ContactPointPairInfo {
+pub struct ContactConstraint {
     contact_point_pair: ContactPointPair,
     total_friction_lambda: FloatNum,
     total_lambda: FloatNum,
@@ -68,7 +69,7 @@ pub struct ContactPointPairInfo {
     r_b: Vector,
 }
 
-impl ContactPointPairInfo {
+impl ContactConstraint {
     // REVIEW
     pub fn reset(&mut self) {
         self.total_friction_lambda = 0.;
@@ -101,7 +102,7 @@ fn compute_mass_effective<Obj: ConstraintObject>(
     (equation_part1 + equation_part2 + equation_part3 + equation_part4).recip()
 }
 
-impl<Obj> From<(ContactPointPair, &Obj, &Obj)> for ContactPointPairInfo
+impl<Obj> From<(ContactPointPair, &Obj, &Obj)> for ContactConstraint
 where
     Obj: ConstraintObject,
 {
@@ -123,7 +124,7 @@ where
     }
 }
 
-impl Deref for ContactPointPairInfo {
+impl Deref for ContactConstraint {
     type Target = ContactPointPair;
     fn deref(&self) -> &Self::Target {
         &self.contact_point_pair
@@ -143,7 +144,7 @@ pub trait ConstraintObject {
 pub(crate) struct ContactSolver<'a: 'b, 'b, 'c, Object: ConstraintObject> {
     object_a: &'a mut Object,
     object_b: &'a mut Object,
-    contact_info: &'b mut ContactPointPairInfo,
+    contact_info: &'b mut ContactConstraint,
     constraint_parameters: &'c ConstraintParameters,
 }
 
@@ -154,7 +155,7 @@ where
     pub(crate) fn new(
         object_a: &'a mut Object,
         object_b: &'a mut Object,
-        contact_info: &'b mut ContactPointPairInfo,
+        contact_info: &'b mut ContactConstraint,
         constraint_parameters: &'c ConstraintParameters,
     ) -> Self {
         Self {
@@ -165,7 +166,7 @@ where
         }
     }
 
-    fn solve_velocity_constraint(&mut self, bias: FloatNum) {
+    fn solve_velocity_constraint(&mut self, bias: FloatNum) -> (FloatNum, FloatNum) {
         let Self {
             object_a,
             object_b,
@@ -207,9 +208,7 @@ where
             .meta_mut()
             .apply_impulse(lambda, -normal, contact_info.r_b);
 
-        // if use_friction {
-        self.solve_friction_constraint(max_friction_lambda);
-        // }
+        (lambda, max_friction_lambda)
     }
 
     // TODO add static friction , make object static
@@ -268,19 +267,22 @@ where
             ..
         } = self;
 
-        let bias = if false {
-            let permeate = (contact_info.depth - constraint_parameters.max_allow_permeate).max(0.);
+        // let permeate = (contact_info.depth - constraint_parameters.max_allow_permeate).max(0.);
 
-            let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
+        // let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
 
-            bias
-        } else {
-            let permeate = contact_info.depth;
+        // REVIEW
+        let mut permeate = contact_info.depth - constraint_parameters.max_allow_permeate;
 
-            permeate * delta_time.recip()
-        };
+        if !constraint_parameters.allow_permeate_negative {
+            permeate = permeate.max(0.)
+        }
 
-        self.solve_velocity_constraint(bias);
+        let bias = permeate * delta_time.recip();
+
+        let (max_friction_lambda, _) = self.solve_velocity_constraint(bias);
+        // TODO
+        self.solve_friction_constraint(max_friction_lambda);
     }
 }
 
@@ -290,6 +292,31 @@ where
 {
     context: &'e Context,
     contact_manifolds: &'z mut M,
+}
+
+pub(crate) struct ConstraintSolver<'a: 'b, 'b, 'c, M: ConstraintObject> {
+    contact_solver: ContactSolver<'a, 'b, 'c, M>,
+}
+
+impl<'a: 'b, 'b, 'c, M> ConstraintSolver<'a, 'b, 'c, M>
+where
+    M: ConstraintObject,
+{
+    pub fn new(
+        object_a: &'a mut M,
+        object_b: &'a mut M,
+        contact_constraint: &'b mut ContactConstraint,
+        constraint_parameters: &'c ConstraintParameters,
+    ) -> Self {
+        let contact_solver = ContactSolver::new(
+            object_a,
+            object_b,
+            contact_constraint,
+            constraint_parameters,
+        );
+
+        Self { contact_solver }
+    }
 }
 
 const MAX_ITERATOR_TIMES: usize = 10;
@@ -316,7 +343,7 @@ where
         let solve =
             |(object_a, object_b, manifold): (&'_ mut T, &'_ mut T, &'_ mut M::Manifold),
              fix_position: bool| {
-                for contact_info in manifold.contact_point_pairs_iter_mut() {
+                for contact_info in manifold.contact_constraints_iter_mut() {
                     let mut solver = ContactSolver::new(
                         object_a,
                         object_b,

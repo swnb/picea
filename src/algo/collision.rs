@@ -180,6 +180,17 @@ pub fn accurate_collision_detection_for_sub_collider(
     };
 
     let simplex = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
+
+    // REVIEW move this into gjk
+    const MAX_TOLERABLE_CONTACT_DEPTH: FloatNum = 0.01;
+
+    if simplex
+        .iter()
+        .any(|p| p.vector.abs() < MAX_TOLERABLE_CONTACT_DEPTH)
+    {
+        return None;
+    }
+
     let minkowski_edge = epa_compute_collision_edge(simplex, compute_support_point);
 
     let contact_infos: Vec<ContactPointPair> = minkowski_edge.get_contact_info(a, b, true);
@@ -425,7 +436,7 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
 
         //  NOTE maybe z < EPSILON
         // ao_x_ab.z() == 0 means ab pass origin, follow compute will get NaN
-        if (ao_x_ab).z() == 0. {
+        if (ao_x_ab).z().abs() < 1e-7 {
             let ab: Vector = ab.into();
             //  NOTE current normal direction need to be corrected when we need to know the orientation
             let normal = !ab;
@@ -473,15 +484,11 @@ impl MinkowskiEdge {
             return None;
         }
 
-        if ((self.start_different_point.vector - different_point.vector) * self.normal).abs()
-            <= MAX_TOLERABLE_ERROR
-        {
+        if ((new_point - self.start_different_point.vector) * self.normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
-        if ((self.end_different_point.vector - different_point.vector) * self.normal).abs()
-            <= MAX_TOLERABLE_ERROR
-        {
+        if ((new_point - self.end_different_point.vector) * self.normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
@@ -675,6 +682,7 @@ impl Simplex {
     {
         let min_index = self.find_min_edge_index();
 
+        // TODO how to stop expand
         if self.edges[min_index].depth == 0. {
             // no need to expand
             return Err(());
