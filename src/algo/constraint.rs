@@ -192,18 +192,6 @@ where
 
         let lambda = (coefficient + bias) * mass_effective;
 
-        let is_large_lambda = lambda > 153.;
-
-        if is_large_lambda {
-            dbg!(object_a.id(), object_b.id(), lambda);
-            dbg!(snapshot::create_element_construct_code_snapshot(
-                object_a.element()
-            ));
-            dbg!(snapshot::create_element_construct_code_snapshot(
-                object_b.element()
-            ));
-        }
-
         // TODO factor_friction use two element's factor_friction
         let max_friction_lambda = (lambda * constraint_parameters.factor_default_friction).abs();
 
