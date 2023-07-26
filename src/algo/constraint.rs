@@ -1,9 +1,7 @@
 use crate::{
-    element::{Element, ID},
     math::{num::limit_at_range, point::Point, vector::Vector, FloatNum},
     meta::Meta,
     scene::context::{ConstraintParameters, Context},
-    tools::snapshot,
 };
 use std::ops::Deref;
 
@@ -282,7 +280,7 @@ where
 
         let (max_friction_lambda, _) = self.solve_velocity_constraint(bias);
         // TODO
-        self.solve_friction_constraint(max_friction_lambda);
+        // self.solve_friction_constraint(max_friction_lambda);
     }
 }
 
