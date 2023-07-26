@@ -446,6 +446,8 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
         // NOTE this can't be negative
         let min_projection_size_on_cut_edge = FloatNum::MAX;
 
+        let mut cut_point_at_end_point = false;
+
         for j in 0..vertexes_len {
             // j can't index adjoin edge
             if j == i || (i + 1) % vertexes_len == j || (j + 1) % vertexes_len == i {
@@ -457,6 +459,10 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
             }
             // TODO what is cross_point equal one of cut_edge's point;
             let cross_point = compute_cross_point_between_two_segment(&cut_edge, &reference_edge);
+
+            if &cross_point == cut_edge.start_point() || &cross_point == cut_edge.end_point() {
+                cut_point_at_end_point = true;
+            }
 
             let ray: Vector = (reference_edge.start_point(), &cross_point).into();
             let projection_size = ray * reference_vector;
@@ -492,6 +498,27 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
         polygon_two.push(cut_point);
 
         debug_assert_eq!(polygon_two.len(), z - e + 1);
+
+        let remove_same_cut_point = |vertexes: &mut Vec<Point>| {
+            let mut i = 0;
+            while i < vertexes.len() {
+                if &vertexes[i] == &cut_point {
+                    let j = i + 1;
+                    if vertexes.len() > j {
+                        while &vertexes[j] == &cut_point {
+                            vertexes.remove(j);
+                        }
+                    }
+                    break;
+                }
+                i += 1;
+            }
+        };
+
+        if cut_point_at_end_point {
+            remove_same_cut_point(&mut polygon_one);
+            remove_same_cut_point(&mut polygon_two);
+        }
 
         return [polygon_one, polygon_two].into();
     }
