@@ -11,6 +11,8 @@ pub(crate) struct ConstraintParameters {
     pub(crate) factor_default_friction: FloatNum,
     // 允许碰撞深度是负值
     pub(crate) allow_permeate_negative: bool,
+
+    pub(crate) skip_friction_constraints: bool,
 }
 
 impl Default for ConstraintParameters {
@@ -21,6 +23,7 @@ impl Default for ConstraintParameters {
             max_allow_permeate: 0.03,
             factor_default_friction: 0.2,
             allow_permeate_negative: true,
+            skip_friction_constraints: false,
         }
     }
 }

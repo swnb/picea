@@ -232,8 +232,12 @@ impl Scene {
 
         // self.manifold_table.shrink_pre_manifolds();
 
+        self.context.constraint_parameters.skip_friction_constraints = false;
+
         Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_table.pre_manifolds())
             .constraint(query_element_pair, delta_time);
+
+        self.context.constraint_parameters.skip_friction_constraints = false;
 
         Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_table.current_manifolds())
             .constraint(query_element_pair, delta_time);
