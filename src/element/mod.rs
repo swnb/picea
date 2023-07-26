@@ -137,15 +137,17 @@ impl Element {
         &*self.shape
     }
 
-    pub fn integrate_velocity(&mut self, delta_time: FloatNum) {
+    pub fn integrate_velocity(&mut self, delta_time: FloatNum) -> Option<(Vector, FloatNum)> {
         if self.meta().is_fixed() {
-            return;
+            return None;
         }
         let path = self.meta().velocity() * delta_time;
         let angular = self.meta().angular_velocity() * delta_time;
         self.translate(&path);
         // NOTE this is important, all rotate is reverse
         self.rotate(-angular);
+
+        return (path, angular).into();
     }
 }
 

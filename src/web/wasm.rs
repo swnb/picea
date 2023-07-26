@@ -2,7 +2,7 @@ extern crate console_error_panic_hook;
 extern crate wasm_bindgen;
 use crate::{
     element::ElementBuilder,
-    math::{edge::Edge, point::Point, FloatNum},
+    math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
     shape::{line::Line, polygon::Rect},
@@ -63,6 +63,15 @@ impl Into<Point> for Tuple2 {
     }
 }
 
+impl From<Vector> for Tuple2 {
+    fn from(value: Vector) -> Self {
+        Tuple2 {
+            x: value.x(),
+            y: value.y(),
+        }
+    }
+}
+
 // TODO should keep copy of element for web
 // each time engine update element, get update vector and angular should be more fast
 
@@ -70,6 +79,13 @@ impl Into<Point> for Tuple2 {
 const FOREACH_ELEMENT_CALLBACK: &'static str = r#"
 interface WebScene {
     for_each_element(callback: (points:{x:number,y:number}[],id :number) => void): void;
+}
+"#;
+
+#[wasm_bindgen(typescript_custom_section)]
+const ELEMENT_POSITION_UPDATE_CALLBACK: &'static str = r#"
+interface WebScene {
+    register_element_position_update_callback(callback: (id:number,translate:{x:number,y:number},rotation:number) => void): void;
 }
 "#;
 
@@ -99,6 +115,22 @@ impl WebScene {
 
     pub fn tick(&mut self, delta_t: f32) {
         self.scene.update_elements_by_duration(delta_t);
+    }
+
+    #[wasm_bindgen(skip_typescript, typescript_type = "ELEMENT_POSITION_UPDATE_CALLBACK")]
+    pub fn register_element_position_update_callback(&mut self, callback: Function) {
+        self.scene
+            .register_element_position_update_callback(move |id, translate, rotation| {
+                let this = JsValue::null();
+                callback
+                    .call3(
+                        &this,
+                        &JsValue::from(id),
+                        &JsValue::from(Tuple2::from(translate)),
+                        &JsValue::from(rotation),
+                    )
+                    .unwrap();
+            });
     }
 
     #[wasm_bindgen(skip_typescript, typescript_type = "FOREACH_ELEMENT_CALLBACK")]
