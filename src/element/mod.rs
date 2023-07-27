@@ -28,6 +28,10 @@ pub trait ComputeMomentOfInertia {
     fn compute_moment_of_inertia(&self, m: Mass) -> f32;
 }
 
+pub trait SelfClone {
+    fn self_clone(&self) -> Box<dyn ShapeTraitUnion>;
+}
+
 // TODO rename
 pub trait ShapeTraitUnion:
     GeometryTransform
@@ -37,6 +41,7 @@ pub trait ShapeTraitUnion:
     + ComputeMomentOfInertia
     + Projector
     + Collider
+    + SelfClone
 {
 }
 
@@ -48,6 +53,7 @@ impl<T> ShapeTraitUnion for T where
         + Projector
         + Collider
         + NearestPoint
+        + SelfClone
 {
 }
 
