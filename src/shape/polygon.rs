@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     algo::collision::{Collider, Projector},
-    element::ComputeMomentOfInertia,
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::Mass,
 };
@@ -100,6 +100,11 @@ macro_rules! impl_shape_for_common_polygon {
             point_iter.fold((f32::MAX, f32::MIN), reducer)
         }
     };
+    (@self_clone,@inner_impl) => {
+        fn self_clone(&self) -> Box<dyn ShapeTraitUnion>{
+            self.clone().into()
+        }
+    };
     ($struct_name:ident) => {
         impl GeometryTransform for $struct_name {
             impl_shape_for_common_polygon!(@transform, @inner_impl);
@@ -117,6 +122,9 @@ macro_rules! impl_shape_for_common_polygon {
             impl_shape_for_common_polygon!(@projector,@inner_impl);
         }
         impl Collider for $struct_name {}
+        impl SelfClone for $struct_name {
+            impl_shape_for_common_polygon!(@self_clone,@inner_impl);
+        }
     };
     (@const,$struct_name:ident) => {
         impl<const N:usize> GeometryTransform for $struct_name<N> {
@@ -135,6 +143,9 @@ macro_rules! impl_shape_for_common_polygon {
             impl_shape_for_common_polygon!(@projector,@inner_impl);
         }
         impl<const N:usize> Collider for $struct_name<N> {}
+        impl<const N:usize> SelfClone for $struct_name<N> {
+            impl_shape_for_common_polygon!(@self_clone,@inner_impl);
+        }
     };
 }
 
@@ -312,6 +323,7 @@ impl<const N: usize> ComputeMomentOfInertia for ConstRegularPolygon<N> {
 }
 
 // common shape  Rectangle
+#[derive(Clone)]
 pub struct Rect {
     width: f32,
     height: f32,
@@ -352,6 +364,7 @@ impl ComputeMomentOfInertia for Rect {
 impl_common_polygon!(Rect, inner);
 
 // common shape triangle
+#[derive(Clone)]
 pub struct Triangle {
     inner: ConstPolygon<3>,
 }
@@ -374,6 +387,7 @@ impl ComputeMomentOfInertia for Triangle {
     }
 }
 
+#[derive(Clone)]
 pub struct RegularTriangle {
     inner: ConstRegularPolygon<3>,
 }
@@ -405,6 +419,7 @@ impl ComputeMomentOfInertia for RegularTriangle {
     }
 }
 
+#[derive(Clone)]
 pub struct Square {
     inner_rect: Rect,
 }
@@ -426,6 +441,7 @@ impl ComputeMomentOfInertia for Square {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct NormalPolygon {
     vertexes: Vec<Point>,
     center_point: Point,
@@ -473,6 +489,7 @@ impl CommonPolygon for NormalPolygon {
     }
 }
 
+#[derive(Clone)]
 pub struct RegularPolygon {
     inner_polygon: NormalPolygon,
     edge_count: usize,

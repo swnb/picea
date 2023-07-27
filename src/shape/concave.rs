@@ -1,6 +1,6 @@
 use crate::{
     algo::collision::{Collider, Projector, SubCollider},
-    element::ComputeMomentOfInertia,
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
 };
 
@@ -123,5 +123,11 @@ impl ComputeMomentOfInertia for ConcavePolygon {
                 let rate = convex_area * area_inv;
                 acc + convex_polygon.compute_moment_of_inertia(m * rate) * rate
             })
+    }
+}
+
+impl SelfClone for ConcavePolygon {
+    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
+        self.clone().into()
     }
 }

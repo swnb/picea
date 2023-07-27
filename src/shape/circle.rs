@@ -1,7 +1,7 @@
 use super::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint};
 use crate::{
     algo::collision::{Collider, Projector},
-    element::ComputeMomentOfInertia,
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
     meta::Mass,
     shape::utils::rotate_point,
@@ -149,6 +149,12 @@ impl ComputeMomentOfInertia for Circle {
 }
 
 impl Collider for Circle {}
+
+impl SelfClone for Circle {
+    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
+        self.clone().into()
+    }
+}
 
 #[cfg(test)]
 mod tests {

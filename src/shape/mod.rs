@@ -1,4 +1,7 @@
-use crate::math::{edge::Edge, point::Point, vector::Vector};
+use crate::{
+    element::ShapeTraitUnion,
+    math::{edge::Edge, point::Point, vector::Vector},
+};
 
 pub mod circle;
 pub mod concave;

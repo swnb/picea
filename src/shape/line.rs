@@ -1,6 +1,6 @@
 use crate::{
     algo::collision::{Collider, Projector},
-    element::ComputeMomentOfInertia,
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{edge::Edge, point::Point, segment::Segment, vector::Vector},
     meta::Mass,
 };
@@ -134,5 +134,11 @@ impl ComputeMomentOfInertia for Line {
         let l = l.x().powf(2.) + l.y().powf(2.);
 
         m * 12f32.recip() * l
+    }
+}
+
+impl SelfClone for Line {
+    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
+        self.clone().into()
     }
 }
