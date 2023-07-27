@@ -1,4 +1,5 @@
 pub(crate) mod context;
+pub(crate) mod hooks;
 
 use std::ops::Shl;
 
@@ -8,16 +9,15 @@ use crate::{
             accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
             rough_collision_detection,
         },
-        constraint::{
-            ConstraintSolver, ContactConstraint, ContactManifold, ManifoldsIterMut, Solver,
-        },
+        constraint::{ContactManifold, ManifoldsIterMut, Solver},
     },
     element::{store::ElementStore, Element},
-    math::FloatNum,
+    math::{vector::Vector, FloatNum},
     meta::manifold::{Manifold, ManifoldTable},
+    scene::hooks::CallbackHook,
 };
 
-use self::context::Context;
+use self::{context::Context, hooks::ElementPositionUpdateCallback};
 
 pub struct Scene {
     element_store: ElementStore,
@@ -27,6 +27,7 @@ pub struct Scene {
     total_skip_durations: FloatNum,
     context: Context,
     frame_count: u128,
+    callback_hook: hooks::CallbackHook,
 }
 
 type ID = u32;
@@ -55,11 +56,6 @@ impl IDDispatcher {
     }
 }
 
-enum SceneManifoldsType {
-    PreviousManifolds,
-    CurrentManifolds,
-}
-
 impl Default for Scene {
     fn default() -> Self {
         Self::new()
@@ -77,6 +73,7 @@ impl Scene {
             total_skip_durations: 0.,
             context: Default::default(),
             frame_count: 0,
+            callback_hook: Default::default(),
         }
     }
 
@@ -91,9 +88,10 @@ impl Scene {
 
     #[inline]
     pub fn push_element(&mut self, element: impl Into<Element>) -> u32 {
-        let mut element = element.into();
+        let mut element: Element = element.into();
         let element_id = self.id_dispatcher.gen_id();
         element.inject_id(element_id);
+
         self.element_store.push(element);
         element_id
     }
@@ -242,11 +240,25 @@ impl Scene {
         Solver::<'_, '_, _>::new(&self.context, &mut self.manifold_table.current_manifolds())
             .constraint(query_element_pair, delta_time);
 
-        self.elements_iter_mut()
-            .for_each(|element| element.integrate_velocity(delta_time));
+        let element_update_callback = &mut self.callback_hook as *mut CallbackHook;
+
+        self.elements_iter_mut().for_each(|element| {
+            if let Some((translate, rotation)) = element.integrate_velocity(delta_time) {
+                unsafe {
+                    (*element_update_callback).emit(element.id(), translate, rotation);
+                }
+            }
+        });
 
         // self.manifold_store.update_all_manifolds_usage();
         // self.pre_contact_manifold = std::mem::take(&mut self.contact_manifolds);
+    }
+
+    pub fn register_element_position_update_callback<F>(&mut self, callback: F)
+    where
+        F: FnMut(ID, Vector, FloatNum) + 'static,
+    {
+        self.callback_hook.register_callback(callback);
     }
 
     #[inline]
