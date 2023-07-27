@@ -17,7 +17,7 @@ use crate::{
     scene::hooks::CallbackHook,
 };
 
-use self::{context::Context, hooks::ElementPositionUpdateCallback};
+use self::context::Context;
 
 pub struct Scene {
     element_store: ElementStore,
@@ -249,16 +249,17 @@ impl Scene {
                 }
             }
         });
-
-        // self.manifold_store.update_all_manifolds_usage();
-        // self.pre_contact_manifold = std::mem::take(&mut self.contact_manifolds);
     }
 
-    pub fn register_element_position_update_callback<F>(&mut self, callback: F)
+    pub fn register_element_position_update_callback<F>(&mut self, callback: F) -> u32
     where
         F: FnMut(ID, Vector, FloatNum) + 'static,
     {
-        self.callback_hook.register_callback(callback);
+        self.callback_hook.register_callback(callback)
+    }
+
+    pub fn unregister_element_position_update_callback(&mut self, callback_id: u32) {
+        self.callback_hook.unregister_callback(callback_id);
     }
 
     #[inline]
