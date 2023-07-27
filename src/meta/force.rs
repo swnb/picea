@@ -89,4 +89,10 @@ impl ForceGroup {
                 acc
             })
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Force)> {
+        self.force_set
+            .iter()
+            .map(|(id, force)| (id.as_str(), force))
+    }
 }
