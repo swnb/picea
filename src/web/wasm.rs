@@ -2,7 +2,7 @@ extern crate console_error_panic_hook;
 extern crate wasm_bindgen;
 use crate::{
     algo::is_point_inside_shape,
-    element::{ElementBuilder, ID},
+    element::{ElementBuilder, ShapeTraitUnion, ID},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
@@ -114,6 +114,23 @@ impl Into<MetaBuilder> for MetaData {
 
 #[wasm_bindgen]
 impl WebScene {
+    fn create_element(
+        &mut self,
+        shape: impl Into<Box<dyn ShapeTraitUnion>>,
+        meta_data: JsValue,
+    ) -> u32 {
+        let meta_data: MetaData =
+            serde_wasm_bindgen::from_value(meta_data).unwrap_or(Default::default());
+
+        let meta_builder: MetaBuilder = meta_data.into();
+
+        let meta = meta_builder.force("gravity", (0., 20.));
+
+        let element = ElementBuilder::new(shape, meta);
+
+        self.scene.push_element(element)
+    }
+
     pub fn create_rect(
         &mut self,
         x: FloatNum,
@@ -122,16 +139,9 @@ impl WebScene {
         height: FloatNum,
         meta_data: JsValue,
     ) -> u32 {
-        let rect = Rect::new(x, y, width, height);
+        let shape = Rect::new(x, y, width, height);
 
-        let meta_data: MetaData =
-            serde_wasm_bindgen::from_value(meta_data).unwrap_or(Default::default());
-        let meta_builder: MetaBuilder = meta_data.into();
-
-        let meta = meta_builder.force("gravity", (0., 20.));
-
-        let element = ElementBuilder::new(rect, meta);
-        self.scene.push_element(element)
+        self.create_element(shape, meta_data)
     }
 
     pub fn create_regular_polygon(
@@ -140,31 +150,22 @@ impl WebScene {
         y: FloatNum,
         edge_count: usize,
         radius: FloatNum,
-        meta_data: Option<MetaData>,
+        meta_data: JsValue,
     ) -> u32 {
         let shape = RegularPolygon::new((x, y), edge_count, radius);
 
-        let meta_data = meta_data.unwrap_or(Default::default());
-        let meta_builder: MetaBuilder = meta_data.into();
-
-        let meta = meta_builder.force("gravity", (0., 20.));
-
-        let element = ElementBuilder::new(shape, meta);
-        self.scene.push_element(element)
+        self.create_element(shape, meta_data)
     }
 
     pub fn create_line(
         &mut self,
         start_point: Tuple2,
         end_point: Tuple2,
-        meta_data: Option<MetaData>,
+        meta_data: JsValue,
     ) -> u32 {
-        let line = Line::new(start_point, end_point);
-        let meta_data = meta_data.unwrap_or(Default::default());
-        let meta_builder: MetaBuilder = meta_data.into();
-        let meta = meta_builder.force("gravity", (0., 20.));
-        let element = ElementBuilder::new(line, meta);
-        self.scene.push_element(element)
+        let shape = Line::new(start_point, end_point);
+
+        self.create_element(shape, meta_data)
     }
 
     pub fn tick(&mut self, delta_t: f32) {
