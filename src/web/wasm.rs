@@ -1,11 +1,16 @@
 extern crate console_error_panic_hook;
 extern crate wasm_bindgen;
 use crate::{
-    element::ElementBuilder,
+    algo::is_point_inside_shape,
+    element::{ElementBuilder, ID},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{line::Line, polygon::Rect},
+    shape::{
+        line::Line,
+        polygon::{Rect, RegularPolygon},
+    },
+    tools::snapshot,
 };
 use js_sys::Function;
 use serde::{Deserialize, Serialize};
@@ -20,7 +25,7 @@ pub fn set_panic_console_hook() {
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
+    pub fn log(s: &str);
 }
 
 #[wasm_bindgen]
@@ -85,9 +90,27 @@ interface WebScene {
 #[wasm_bindgen(typescript_custom_section)]
 const ELEMENT_POSITION_UPDATE_CALLBACK: &'static str = r#"
 interface WebScene {
-    register_element_position_update_callback(callback: (id:number,translate:{x:number,y:number},rotation:number) => void): void;
+    register_element_position_update_callback(callback: (id:number,translate:{x:number,y:number},rotation:number) => void): number;
 }
 "#;
+
+#[wasm_bindgen]
+#[derive(Default, Deserialize)]
+pub struct MetaData {
+    pub mass: Option<FloatNum>,
+    pub is_fixed: Option<bool>,
+    pub is_transparent: Option<bool>,
+    pub angular: Option<FloatNum>,
+}
+
+impl Into<MetaBuilder> for MetaData {
+    fn into(self) -> MetaBuilder {
+        MetaBuilder::new(self.mass.unwrap_or(1.))
+            .is_fixed(self.is_fixed.unwrap_or(false))
+            .is_transparent(self.is_transparent.unwrap_or(false))
+            .angular(self.angular.unwrap_or(0.))
+    }
+}
 
 #[wasm_bindgen]
 impl WebScene {
@@ -97,24 +120,84 @@ impl WebScene {
         y: FloatNum,
         width: FloatNum,
         height: FloatNum,
+        meta_data: JsValue,
     ) -> u32 {
         let rect = Rect::new(x, y, width, height);
-        let meta = MetaBuilder::new(1.).force("gravity", (0., 20.));
+
+        let meta_data: MetaData =
+            serde_wasm_bindgen::from_value(meta_data).unwrap_or(Default::default());
+        let meta_builder: MetaBuilder = meta_data.into();
+
+        let meta = meta_builder.force("gravity", (0., 20.));
+
         let element = ElementBuilder::new(rect, meta);
         self.scene.push_element(element)
     }
 
-    pub fn create_line(&mut self, start_point: Tuple2, end_point: Tuple2) -> u32 {
+    pub fn create_regular_polygon(
+        &mut self,
+        x: FloatNum,
+        y: FloatNum,
+        edge_count: usize,
+        radius: FloatNum,
+        meta_data: Option<MetaData>,
+    ) -> u32 {
+        let shape = RegularPolygon::new((x, y), edge_count, radius);
+
+        let meta_data = meta_data.unwrap_or(Default::default());
+        let meta_builder: MetaBuilder = meta_data.into();
+
+        let meta = meta_builder.force("gravity", (0., 20.));
+
+        let element = ElementBuilder::new(shape, meta);
+        self.scene.push_element(element)
+    }
+
+    pub fn create_line(
+        &mut self,
+        start_point: Tuple2,
+        end_point: Tuple2,
+        meta_data: Option<MetaData>,
+    ) -> u32 {
         let line = Line::new(start_point, end_point);
-        let meta = MetaBuilder::new(1.)
-            .force("gravity", (0., 10.))
-            .is_fixed(true);
+        let meta_data = meta_data.unwrap_or(Default::default());
+        let meta_builder: MetaBuilder = meta_data.into();
+        let meta = meta_builder.force("gravity", (0., 20.));
         let element = ElementBuilder::new(line, meta);
         self.scene.push_element(element)
     }
 
     pub fn tick(&mut self, delta_t: f32) {
         self.scene.update_elements_by_duration(delta_t);
+    }
+
+    pub fn clone_element(&mut self, element_id: ID, meta_data: JsValue) -> Option<u32> {
+        self.scene
+            .get_element(element_id)
+            .map(|element| element.shape())
+            .map(|shape| shape.self_clone())
+            .map(|shape| {
+                let meta_data: MetaData =
+                    serde_wasm_bindgen::from_value(meta_data).unwrap_or(Default::default());
+
+                let meta_builder: MetaBuilder = meta_data.into();
+
+                let element: ElementBuilder = ElementBuilder::new(shape, meta_builder);
+
+                self.scene.push_element(element)
+            })
+    }
+
+    pub fn update_element_position(
+        &mut self,
+        element_id: ID,
+        translate: Tuple2,
+        rotation: FloatNum,
+    ) {
+        if let Some(element) = self.scene.get_element_mut(element_id) {
+            element.translate(&(translate.x, translate.y).into());
+            element.rotate(rotation)
+        }
     }
 
     #[wasm_bindgen(skip_typescript, typescript_type = "ELEMENT_POSITION_UPDATE_CALLBACK")]
@@ -127,10 +210,61 @@ impl WebScene {
                         &this,
                         &JsValue::from(id),
                         &JsValue::from(Tuple2::from(translate)),
-                        &JsValue::from(rotation),
+                        &JsValue::from_f64(rotation as f64),
                     )
                     .unwrap();
             });
+    }
+
+    pub fn to_raw_code(&self, element_id: ID) -> String {
+        let element = self.scene.get_element(element_id);
+        element
+            .map(snapshot::create_element_construct_code_snapshot)
+            .unwrap_or(String::new())
+    }
+
+    pub fn is_point_inside(&self, x: FloatNum, y: FloatNum, element_id: ID) -> bool {
+        self.scene
+            .get_element(element_id)
+            .map(|element| is_point_inside_shape((x, y), &mut element.shape().edge_iter()))
+            .unwrap_or(false)
+    }
+
+    pub fn unregister_element_position_update_callback(&mut self, callback_id: u32) {
+        self.scene
+            .unregister_element_position_update_callback(callback_id)
+    }
+
+    pub fn element_ids(&self) -> Vec<ID> {
+        self.scene.elements_iter().map(|ele| ele.id()).collect()
+    }
+
+    pub fn element_vertexes(&self, element_id: ID) -> Vec<JsValue> {
+        self.scene
+            .get_element(element_id)
+            .map(|element| {
+                element
+                    .shape()
+                    .edge_iter()
+                    .map(|edge| match edge {
+                        Edge::Arc {
+                            start_point,
+                            support_point,
+                            end_point,
+                        } => {
+                            todo!()
+                        }
+                        Edge::Circle {
+                            center_point,
+                            radius,
+                        } => {
+                            todo!()
+                        }
+                        Edge::Line { start_point, .. } => JsValue::from(Tuple2::from(*start_point)),
+                    })
+                    .collect::<Vec<JsValue>>()
+            })
+            .unwrap_or(Default::default())
     }
 
     #[wasm_bindgen(skip_typescript, typescript_type = "FOREACH_ELEMENT_CALLBACK")]
@@ -165,9 +299,13 @@ impl WebScene {
             });
 
             callback
-                .call2(&this, &JsValue::from(result), &JsValue::from(id))
+                .call2(&this, &JsValue::from(id), &JsValue::from(result))
                 .unwrap();
         });
+    }
+
+    pub fn clear(&mut self) {
+        self.scene.clear();
     }
 }
 
