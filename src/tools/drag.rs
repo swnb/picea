@@ -15,7 +15,7 @@ impl Draggable {
     pub fn on_mouse_down(&mut self, scene: &mut Scene) {
         self.is_mouse_down = true;
         for element in scene.elements_iter_mut() {
-            element.meta_mut().mark_transparent(true);
+            element.meta_mut().mark_is_transparent(true);
         }
     }
 

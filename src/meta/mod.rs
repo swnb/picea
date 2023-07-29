@@ -173,7 +173,7 @@ impl Meta {
         self.is_transparent
     }
 
-    pub fn mark_transparent(&mut self, is_transparent: bool) -> &mut Self {
+    pub fn mark_is_transparent(&mut self, is_transparent: bool) -> &mut Self {
         self.is_transparent = is_transparent;
         self
     }
