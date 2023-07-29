@@ -4,7 +4,7 @@ use crate::{
     algo::is_point_inside_shape,
     element::{ElementBuilder, ShapeTraitUnion, ID},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
-    meta::MetaBuilder,
+    meta::{Meta, MetaBuilder},
     scene::Scene,
     shape::{
         line::Line,
@@ -96,12 +96,23 @@ interface WebScene {
 "#;
 
 #[wasm_bindgen]
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, Serialize)]
 pub struct MetaData {
     pub mass: Option<FloatNum>,
     pub is_fixed: Option<bool>,
     pub is_transparent: Option<bool>,
     pub angular: Option<FloatNum>,
+}
+
+impl From<&Meta> for MetaData {
+    fn from(value: &Meta) -> Self {
+        Self {
+            mass: Some(value.mass()),
+            is_fixed: Some(value.is_fixed()),
+            is_transparent: Some(value.is_transparent()),
+            angular: Some(value.angular()),
+        }
+    }
 }
 
 impl Into<MetaBuilder> for MetaData {
@@ -219,6 +230,21 @@ impl WebScene {
                     element.meta_mut().set_angular(|_| angular);
                 }
             }
+        }
+    }
+
+    pub fn get_element_meta_data(&self, element_id: ID) -> JsValue {
+        let meta_data = self
+            .scene
+            .get_element(element_id)
+            .map(|element| element.meta());
+
+        // REVIEW
+        if let Some(meta_data) = meta_data {
+            let meta_data: MetaData = meta_data.into();
+            serde_wasm_bindgen::to_value(&meta_data).unwrap()
+        } else {
+            JsValue::UNDEFINED
         }
     }
 
