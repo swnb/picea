@@ -14,6 +14,7 @@ use crate::{
 };
 use js_sys::Function;
 use serde::{Deserialize, Serialize};
+use serde_wasm_bindgen::from_value;
 use std::panic;
 use wasm_bindgen::prelude::*;
 
@@ -119,8 +120,7 @@ impl WebScene {
         shape: impl Into<Box<dyn ShapeTraitUnion>>,
         meta_data: JsValue,
     ) -> u32 {
-        let meta_data: MetaData =
-            serde_wasm_bindgen::from_value(meta_data).unwrap_or(Default::default());
+        let meta_data: MetaData = from_value(meta_data).unwrap_or(Default::default());
 
         let meta_builder: MetaBuilder = meta_data.into();
 
@@ -178,8 +178,7 @@ impl WebScene {
             .map(|element| element.shape())
             .map(|shape| shape.self_clone())
             .map(|shape| {
-                let meta_data: MetaData =
-                    serde_wasm_bindgen::from_value(meta_data).unwrap_or(Default::default());
+                let meta_data: MetaData = from_value(meta_data).unwrap_or(Default::default());
 
                 let meta_builder: MetaBuilder = meta_data.into();
 
@@ -198,6 +197,28 @@ impl WebScene {
         if let Some(element) = self.scene.get_element_mut(element_id) {
             element.translate(&(translate.x, translate.y).into());
             element.rotate(rotation)
+        }
+    }
+
+    pub fn update_element_meta_data(&mut self, element_id: ID, meta_data: JsValue) {
+        if let Ok(meta_data) = from_value::<MetaData>(meta_data) {
+            if let Some(element) = self.scene.get_element_mut(element_id) {
+                if let Some(mass) = meta_data.mass {
+                    element.meta_mut().set_mass(|_| mass);
+                }
+
+                if let Some(is_fixed) = meta_data.is_fixed {
+                    element.meta_mut().mark_is_fixed(is_fixed);
+                }
+
+                if let Some(is_transparent) = meta_data.is_transparent {
+                    element.meta_mut().mark_is_transparent(is_transparent);
+                };
+
+                if let Some(angular) = meta_data.angular {
+                    element.meta_mut().set_angular(|_| angular);
+                }
+            }
         }
     }
 
