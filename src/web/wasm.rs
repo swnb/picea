@@ -249,7 +249,7 @@ impl WebScene {
     }
 
     #[wasm_bindgen(skip_typescript, typescript_type = "ELEMENT_POSITION_UPDATE_CALLBACK")]
-    pub fn register_element_position_update_callback(&mut self, callback: Function) {
+    pub fn register_element_position_update_callback(&mut self, callback: Function) -> u32 {
         self.scene
             .register_element_position_update_callback(move |id, translate, rotation| {
                 let this = JsValue::null();
@@ -261,7 +261,7 @@ impl WebScene {
                         &JsValue::from_f64(rotation as f64),
                     )
                     .unwrap();
-            });
+            })
     }
 
     pub fn to_raw_code(&self, element_id: ID) -> String {
@@ -354,6 +354,10 @@ impl WebScene {
 
     pub fn clear(&mut self) {
         self.scene.clear();
+    }
+
+    pub fn frame_count(&self) -> u64 {
+        self.scene.frame_count() as u64
     }
 }
 
