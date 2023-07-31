@@ -282,13 +282,8 @@ impl Scene {
         self.element_store.get_mut_element_by_id(id)
     }
 
-    pub fn contact_constraint(&mut self) {
-        for manifold in self.manifold_table.current_manifolds().iter_mut() {
-            let (id_a, id_b) = manifold.collision_element_id_pair();
-        }
-    }
-
-    fn frame_count(&self) -> u128 {
+    #[inline]
+    pub fn frame_count(&self) -> u128 {
         self.frame_count
     }
 
@@ -297,6 +292,13 @@ impl Scene {
         self.manifold_table.clear();
         self.element_store.clear();
         self.frame_count = 0;
+    }
+
+    // TODO
+    fn contact_constraint(&mut self) {
+        for manifold in self.manifold_table.current_manifolds().iter_mut() {
+            let (id_a, id_b) = manifold.collision_element_id_pair();
+        }
     }
 }
 
