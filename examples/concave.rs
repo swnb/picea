@@ -25,7 +25,7 @@ fn create_model(_app: &App) -> Model {
 
     &mut scene << ElementBuilder::new(ground_bottom, MetaBuilder::new(1.).is_fixed(true));
 
-    let vertexes = vec![(-15, 5), (0, -8), (15, 5), (10, -20), (-10, -20)];
+    let vertexes = vec![(-15, 5), (0, -10), (15, 5), (10, -20), (-10, -20)];
 
     let vertexes = vertexes
         .iter()

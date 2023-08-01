@@ -4,7 +4,7 @@ use picea::{
     math::{edge::Edge, point::Point, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{concave::ConcavePolygon, convex::ConvexPolygon, line::Line, polygon::Square},
+    shape::{concave::ConcavePolygon, line::Line, polygon::Square},
     tools::{
         collision_view::CollisionStatusViewer, snapshot::create_element_construct_code_snapshot,
     },
@@ -25,7 +25,7 @@ fn create_model(_app: &App) -> Model {
 
     &mut scene << ElementBuilder::new(ground_bottom, MetaBuilder::new(1.).is_fixed(true));
 
-    let vertexes = vec![(-15, 5), (0, -8), (15, 5), (10, -20), (-10, -20)];
+    let vertexes = vec![(-35, 10), (0, -10), (35, 10), (10, -20), (-10, -20)];
 
     let vertexes = vertexes
         .iter()
@@ -42,8 +42,8 @@ fn create_model(_app: &App) -> Model {
 
     &mut scene << element;
 
-    for i in 0..1 {
-        for j in 0..1 {
+    for i in 0..6 {
+        for j in 0..6 {
             &mut scene
                 << ElementBuilder::new(
                     Square::new(-10. + j as FloatNum * 5., 10. + i as FloatNum * 5., 4.),
@@ -78,7 +78,7 @@ fn event(app: &App, model: &mut Model, event: Event) {
             _ => {}
         },
         Event::Update(_) => {
-            model.collision_viewer.on_update(&mut model.scene);
+            // model.collision_viewer.on_update(&mut model.scene);
 
             let now = SystemTime::now();
 
@@ -140,13 +140,13 @@ fn view(app: &App, model: &Model, frame: Frame) {
         //         _ => unimplemented!(),
         //     });
 
-        make_line(
-            YELLOWGREEN,
-            element.center_point(),
-            element.center_point() + element.meta().velocity() * 10.,
-        );
+        // make_line(
+        // YELLOWGREEN,
+        // element.center_point(),
+        // element.center_point() + element.meta().velocity() * 10.,
+        // );
 
-        make_ellipse(BLUE, element.center_point(), 0.5);
+        // make_ellipse(BLUE, element.center_point(), 0.5);
 
         element.shape().edge_iter().for_each(|edge| match edge {
             Edge::Line {

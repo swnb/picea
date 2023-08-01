@@ -49,17 +49,17 @@ fn create_model(_app: &App) -> Model {
 
     let meta = MetaBuilder::new(1.)
         .is_transparent(true)
-        .angular(f32::PI() / 3.);
+        .angle(f32::PI() / 3.);
 
     // scene.push_element(ElementBuilder::new(
     //     (3, (-1000. + 3. * 200., 250.), 100.),
-    //     meta.clone().angular(f32::PI() / 6.),
+    //     meta.clone().angle(f32::PI() / 6.),
     // ));
 
     // for edge_size in 3..=6 {
     //     scene.push_element(ElementBuilder::new(
     //         (edge_size, (-1000. + edge_size as f32 * 200., 250.), 100.),
-    //         meta.clone(), // .angular(f32::PI() / 6.),
+    //         meta.clone(), // .angle(f32::PI() / 6.),
     //     ));
     //     scene.push_element(ElementBuilder::new(
     //         (edge_size, (-1000. + edge_size as f32 * 200., -250.), 100.),
@@ -89,12 +89,12 @@ fn create_model(_app: &App) -> Model {
 
     scene.push_element(ElementBuilder::new(
         (6, (10., 20.), 200.),
-        MetaBuilder::new(1.).angular(f32::FRAC_PI_8() / 22.), // .angular(f32::PI() / 6.),
+        MetaBuilder::new(1.).angle(f32::FRAC_PI_8() / 22.), // .angle(f32::PI() / 6.),
     ));
 
     scene.push_element(ElementBuilder::new(
         (250., 250., 50., 500.),
-        MetaBuilder::new(1.), // .angular(f32::PI() / 6.),
+        MetaBuilder::new(1.), // .angle(f32::PI() / 6.),
     ));
 
     Model {

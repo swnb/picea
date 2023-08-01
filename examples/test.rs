@@ -36,32 +36,52 @@ fn create_model(_app: &App) -> Model {
             (-0.73610747, -5.0982018).into(),
         ]),
         MetaBuilder::new(10.)
-            .angular_velocity(0.030960504)
+            .angle_velocity(0.030960504)
             .velocity((0.087124035, 0.050950255)),
     );
 
     let id = scene.push_element(element);
 
-    let id = scene.push_element({
-        let element = ElementBuilder::new(
-            ConvexPolygon::new(vec![
-                (-6.3700533, -5.4676147).into(),
-                (-3.364275, -8.106848).into(),
-                (-0.72505116, -5.101093).into(),
-                (-3.730817, -2.461854).into(),
-            ]),
-            MetaBuilder::new(10.)
-                .angular_velocity(0.032540783)
-                .velocity((0.10513319, -0.07806133)),
-        );
-        element
-    });
+    scene.clear();
+
+    let element = ElementBuilder::new(
+        ConvexPolygon::new(vec![
+            (180.000, 400.000).into(),
+            (280.000, 400.000).into(),
+            (280.000, 600.000).into(),
+            (180.000, 600.000).into(),
+        ]),
+        MetaBuilder::new(1.000)
+            .angle_velocity(0.000)
+            .velocity((0.000, 0.000))
+            .is_transparent(false)
+            .is_fixed(true)
+            .force("gravity", (0.000, 20.000)),
+    );
+
+    scene.push_element(element);
+
+    let element = ElementBuilder::new(
+        ConvexPolygon::new(vec![
+            (200.000, 250.000).into(),
+            (243.301, 175.000).into(),
+            (156.699, 175.000).into(),
+        ]),
+        MetaBuilder::new(1.000)
+            .angle_velocity(0.000)
+            .velocity((0.000, 0.000))
+            .is_transparent(false)
+            .is_fixed(false)
+            .force("gravity", (0.000, 20.000)),
+    );
+
+    scene.push_element(element);
 
     Model {
         scene,
         timer: SystemTime::now(),
         collision_info: None,
-        is_paused: false,
+        is_paused: true,
         collision_viewer: Default::default(),
     }
 }
@@ -94,9 +114,9 @@ fn event(app: &App, model: &mut Model, event: Event) {
                 return;
             }
 
-            // model
-            //     .scene
-            //     .update_elements_by_duration(duration.as_secs_f32());
+            model
+                .scene
+                .update_elements_by_duration(duration.as_secs_f32());
         }
         _ => {}
     }
@@ -107,7 +127,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     let draw = app.draw();
 
-    let scale = 10.;
+    let scale = 0.5;
 
     let make_line = |color: rgb::Srgb<u8>, start_point: Point, end_point: Point| {
         draw.line()

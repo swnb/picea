@@ -48,7 +48,7 @@ fn create_model(_app: &App) -> Model {
     // let element = ElementBuilder::new(
     //     ((200., 200.), 100.),
     //     MetaBuilder::new(1.)
-    //         .angular(std::f32::consts::FRAC_PI_6)
+    //         .angle(std::f32::consts::FRAC_PI_6)
     //         .force("gravity", (0., -10.)), // .is_fixed(true),
     // );
 
@@ -57,8 +57,8 @@ fn create_model(_app: &App) -> Model {
     let element = ElementBuilder::new(
         (7, (-30., 20.), 20.),
         MetaBuilder::new(10.)
-            .angular(-f32::FRAC_PI_8())
-            // .angular_velocity(-std::f32::consts::FRAC_PI_8)
+            .angle(-f32::FRAC_PI_8())
+            // .angle_velocity(-std::f32::consts::FRAC_PI_8)
             .force("gravity", (10., -10. * 10.)), // .is_fixed(true),
     );
 
@@ -68,8 +68,8 @@ fn create_model(_app: &App) -> Model {
     let element = ElementBuilder::new(
         (6, (10., 20.), 20.),
         MetaBuilder::new(10.)
-            .angular(-f32::FRAC_PI_8())
-            // .angular_velocity(-std::f32::consts::FRAC_PI_8)
+            .angle(-f32::FRAC_PI_8())
+            // .angle_velocity(-std::f32::consts::FRAC_PI_8)
             .force("gravity", (10., -10. * 10.)), // .is_fixed(true),
     );
 
