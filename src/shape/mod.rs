@@ -13,7 +13,7 @@ pub mod utils;
 pub trait GeometryTransform {
     fn translate(&mut self, vector: &Vector);
 
-    fn rotate(&mut self, origin_point: &Point, deg: f32);
+    fn rotate(&mut self, origin_point: &Point, rad: f32);
 }
 
 pub trait EdgeIterable {

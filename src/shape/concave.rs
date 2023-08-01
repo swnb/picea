@@ -65,16 +65,16 @@ impl GeometryTransform for ConcavePolygon {
         self.center_point += vector;
     }
 
-    fn rotate(&mut self, origin_point: &Point, deg: f32) {
+    fn rotate(&mut self, origin_point: &Point, rad: f32) {
         // TODO update center point ?
         self.sub_convex_polygons
             .iter_mut()
-            .for_each(|convex_polygon| convex_polygon.rotate(origin_point, deg));
+            .for_each(|convex_polygon| convex_polygon.rotate(origin_point, rad));
 
-        rotate_polygon(*origin_point, self.origin_vertexes.iter_mut(), deg);
+        rotate_polygon(*origin_point, self.origin_vertexes.iter_mut(), rad);
 
         if origin_point != &self.center_point {
-            self.center_point = rotate_point(&self.center_point, origin_point, deg);
+            self.center_point = rotate_point(&self.center_point, origin_point, rad);
         }
     }
 }

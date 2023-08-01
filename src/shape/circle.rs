@@ -11,7 +11,7 @@ use crate::{
 pub struct Circle {
     center_point: Point,
     r: f32,
-    deg: f32,
+    rad: f32,
 }
 
 impl<P: Into<Point>> From<(P, f32)> for Circle {
@@ -27,7 +27,7 @@ impl Circle {
         Self {
             center_point: center_point.into(),
             r: radius,
-            deg: 0.,
+            rad: 0.,
         }
     }
 
@@ -92,22 +92,22 @@ impl GeometryTransform for Circle {
         self.center_point += vector
     }
 
-    fn rotate(&mut self, &origin_point: &Point, deg: f32) {
+    fn rotate(&mut self, &origin_point: &Point, rad: f32) {
         use std::f32::consts::TAU;
 
         if origin_point != self.center_point {
             let center_vector: Vector = (origin_point, self.center_point).into();
-            let new_center = origin_point + center_vector.affine_transformation_rotate(deg);
+            let new_center = origin_point + center_vector.affine_transformation_rotate(rad);
             self.center_point = new_center;
         }
 
-        self.deg += deg;
-        if self.deg > TAU {
-            self.deg %= TAU
+        self.rad += rad;
+        if self.rad > TAU {
+            self.rad %= TAU
         }
 
         if origin_point != self.center_point {
-            self.center_point = rotate_point(&self.center_point, &origin_point, deg);
+            self.center_point = rotate_point(&self.center_point, &origin_point, rad);
         }
     }
 }

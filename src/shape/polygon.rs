@@ -56,11 +56,11 @@ macro_rules! impl_shape_for_common_polygon {
         }
 
         #[inline]
-        fn rotate(&mut self, &origin_point: &Point, deg: f32) {
-            rotate_polygon(origin_point, self.point_iter_mut(), deg);
+        fn rotate(&mut self, &origin_point: &Point, rad: f32) {
+            rotate_polygon(origin_point, self.point_iter_mut(), rad);
 
             if origin_point != self.center_point() {
-                *self.center_point_mut() = rotate_point(&self.center_point(), &origin_point, deg);
+                *self.center_point_mut() = rotate_point(&self.center_point(), &origin_point, rad);
             }
         }
     };

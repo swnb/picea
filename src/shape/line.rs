@@ -96,17 +96,17 @@ impl GeometryTransform for Line {
         self.center_point += vector;
     }
 
-    fn rotate(&mut self, origin_point: &Point, deg: f32) {
+    fn rotate(&mut self, origin_point: &Point, rad: f32) {
         let update_point = |point: &mut Point| {
             let mut tmp_vector: Vector = (*origin_point, *point).into();
-            tmp_vector.affine_transformation_rotate_self(deg);
+            tmp_vector.affine_transformation_rotate_self(rad);
             *point = *origin_point + tmp_vector;
         };
         update_point(self.start_point_mut());
         update_point(self.end_point_mut());
 
         if origin_point != &self.center_point {
-            self.center_point = rotate_point(&self.center_point, origin_point, deg);
+            self.center_point = rotate_point(&self.center_point, origin_point, rad);
         }
     }
 }

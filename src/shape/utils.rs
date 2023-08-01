@@ -130,11 +130,11 @@ pub fn translate_polygon<'a>(point_iter_mut: impl Iterator<Item = &'a mut Point>
 pub fn rotate_polygon<'a>(
     center_point: Point,
     point_iter_mut: impl Iterator<Item = &'a mut Point>,
-    deg: f32,
+    rad: f32,
 ) {
     point_iter_mut.for_each(|corner| {
         let mut corner_vector: Vector = (center_point, *corner).into();
-        corner_vector.affine_transformation_rotate_self(deg);
+        corner_vector.affine_transformation_rotate_self(rad);
         *corner = center_point + corner_vector;
     })
 }
@@ -566,9 +566,9 @@ pub fn split_concave_polygon_to_convex_polygons(vertexes: &[Point]) -> Vec<Vec<P
     result
 }
 
-pub fn rotate_point(point: &Point, origin_point: &Point, deg: FloatNum) -> Point {
+pub fn rotate_point(point: &Point, origin_point: &Point, rad: FloatNum) -> Point {
     let mut tmp_vector: Vector = (origin_point, point).into();
-    tmp_vector.affine_transformation_rotate_self(deg);
+    tmp_vector.affine_transformation_rotate_self(rad);
     *origin_point + tmp_vector
 }
 

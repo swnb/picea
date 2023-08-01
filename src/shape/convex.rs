@@ -54,11 +54,11 @@ impl GeometryTransform for ConvexPolygon {
         self.center_point += vector;
     }
 
-    fn rotate(&mut self, origin_point: &Point, deg: f32) {
-        rotate_polygon(*origin_point, self.vertexes.iter_mut(), deg);
+    fn rotate(&mut self, origin_point: &Point, rad: f32) {
+        rotate_polygon(*origin_point, self.vertexes.iter_mut(), rad);
 
         if origin_point != &self.center_point {
-            self.center_point = rotate_point(&self.center_point, origin_point, deg);
+            self.center_point = rotate_point(&self.center_point, origin_point, rad);
         }
     }
 }

@@ -128,9 +128,9 @@ impl Element {
     }
 
     #[inline]
-    pub fn rotate(&mut self, deg: f32) {
-        self.shape.rotate(&self.shape.center_point(), deg);
-        self.meta_mut().set_angle(|pre| pre - deg);
+    pub fn rotate(&mut self, rad: f32) {
+        self.shape.rotate(&self.shape.center_point(), rad);
+        self.meta_mut().set_angle(|pre| pre - rad);
     }
 
     #[inline]
