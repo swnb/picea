@@ -130,6 +130,7 @@ impl Element {
     #[inline]
     pub fn rotate(&mut self, deg: f32) {
         self.shape.rotate(&self.shape.center_point(), deg);
+        self.meta_mut().set_angle(|pre| pre - deg);
     }
 
     #[inline]
