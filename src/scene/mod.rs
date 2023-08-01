@@ -113,7 +113,7 @@ impl Scene {
             self.elements_iter_mut().for_each(|element| {
                 let v = element.meta().velocity();
 
-                let a_v = element.meta().angular_velocity();
+                let a_v = element.meta().angle_velocity();
 
                 // TODO better performance for abs
                 let motion = v.abs().powf(2.) + a_v.powf(2.);

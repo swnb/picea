@@ -33,7 +33,7 @@ pub(crate) trait ManifoldsIterMut {
  * n is the collision direction normal vector that could separate two object
  * depth define how depth two object collide,
  * the constraint define blow:
- * ( velocity_A + (angular_velocity_A X radius_A) - velocity_B - (angular_velocity_B X radius_B) ) * n == 0
+ * ( velocity_A + (angle_velocity_A X radius_A) - velocity_B - (angle_velocity_B X radius_B) ) * n == 0
  * which mean ，the **relatively** velocity in the collide direction must be zero，that is what constraint means.
  * and previous velocity plus delta_velocity equal current velocity, what change object's velocity is F * t , also know as **Impulse** (I)
  * velocity = previous_velocity + delta_velocity

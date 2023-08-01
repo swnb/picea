@@ -95,7 +95,7 @@ impl Element {
     pub fn new(mut shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>) -> Self {
         let mut meta = meta.into();
 
-        shape.rotate(&shape.center_point(), meta.angular());
+        shape.rotate(&shape.center_point(), meta.angle());
 
         // FIXME update moment_of_inertia when meta update
         let moment_of_inertia = shape.compute_moment_of_inertia(meta.mass());
@@ -148,13 +148,13 @@ impl Element {
             return None;
         }
         let path = self.meta().velocity() * delta_time;
-        let angular = self.meta().angular_velocity() * delta_time;
+        let angle = self.meta().angle_velocity() * delta_time;
 
         self.translate(&path);
         // NOTE this is important, all rotate is reverse
-        self.rotate(-angular);
+        self.rotate(-angle);
 
-        (path, angular).into()
+        (path, angle).into()
     }
 }
 
@@ -186,8 +186,8 @@ impl ConstraintObject for Element {
 
         let center_point = self.center_point();
         let r: Vector = (center_point, *point).into();
-        let angular_velocity = meta.angular_velocity();
-        let w: Vector3 = (0., 0., angular_velocity).into();
+        let angle_velocity = meta.angle_velocity();
+        let w: Vector3 = (0., 0., angle_velocity).into();
         let mut v: Vector = (w ^ r.into()).into();
         v += meta.velocity();
 

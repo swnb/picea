@@ -24,7 +24,7 @@ pub fn create_element_construct_code_snapshot(element: &Element) -> String {
     let raw_vertexes = tmp_string;
 
     let mass = element.meta().mass();
-    let angular_velocity = element.meta().angular_velocity();
+    let angle_velocity = element.meta().angle_velocity();
     let velocity = element.meta().velocity();
     let is_fixed = element.meta().is_fixed();
 
@@ -51,14 +51,14 @@ pub fn create_element_construct_code_snapshot(element: &Element) -> String {
         r#"let element = ElementBuilder::new(
             {}::new(vec![{}]),
             MetaBuilder::new({:.3})
-                .angular_velocity({:.3})
+                .angle_velocity({:.3})
                 .velocity(({:.3},{:.3}))
                 .is_transparent({})
                 .is_fixed({}){});"#,
         element_type,
         raw_vertexes,
         mass,
-        angular_velocity,
+        angle_velocity,
         velocity.x(),
         velocity.y(),
         is_transparent,

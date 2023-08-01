@@ -79,7 +79,7 @@ impl From<Vector> for Tuple2 {
 }
 
 // TODO should keep copy of element for web
-// each time engine update element, get update vector and angular should be more fast
+// each time engine update element, get update vector and angle should be more fast
 
 #[wasm_bindgen(typescript_custom_section)]
 const FOREACH_ELEMENT_CALLBACK: &'static str = r#"
@@ -101,7 +101,7 @@ pub struct MetaData {
     pub mass: Option<FloatNum>,
     pub is_fixed: Option<bool>,
     pub is_transparent: Option<bool>,
-    pub angular: Option<FloatNum>,
+    pub angle: Option<FloatNum>,
 }
 
 impl From<&Meta> for MetaData {
@@ -110,7 +110,7 @@ impl From<&Meta> for MetaData {
             mass: Some(value.mass()),
             is_fixed: Some(value.is_fixed()),
             is_transparent: Some(value.is_transparent()),
-            angular: Some(value.angular()),
+            angle: Some(value.angle()),
         }
     }
 }
@@ -120,7 +120,7 @@ impl Into<MetaBuilder> for MetaData {
         MetaBuilder::new(self.mass.unwrap_or(1.))
             .is_fixed(self.is_fixed.unwrap_or(false))
             .is_transparent(self.is_transparent.unwrap_or(false))
-            .angular(self.angular.unwrap_or(0.))
+            .angle(self.angle.unwrap_or(0.))
     }
 }
 
@@ -226,8 +226,8 @@ impl WebScene {
                     element.meta_mut().mark_is_transparent(is_transparent);
                 };
 
-                if let Some(angular) = meta_data.angular {
-                    element.meta_mut().set_angular(|_| angular);
+                if let Some(angle) = meta_data.angle {
+                    element.meta_mut().set_angle(|_| angle);
                 }
             }
         }
