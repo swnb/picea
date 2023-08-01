@@ -9,7 +9,7 @@ use super::{
 use crate::{
     algo::collision::{Collider, Projector},
     element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
-    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, FloatNum},
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, FloatNum, PI, TAU},
     meta::Mass,
 };
 use std::{mem::MaybeUninit, slice};
@@ -267,7 +267,7 @@ pub struct ConstRegularPolygon<const N: usize> {
 impl<const N: usize> ConstRegularPolygon<N> {
     const EDGE_COUNT: usize = N;
 
-    const EDGE_ANGLE: f32 = std::f32::consts::TAU / (N as f32);
+    const EDGE_ANGLE: FloatNum = TAU() / (N as FloatNum);
 
     const IS_EVENT: bool = Self::EDGE_COUNT & 1 == 0;
 
@@ -311,14 +311,12 @@ impl<const N: usize> ConstRegularPolygon<N> {
 impl_common_polygon!(@const,ConstRegularPolygon, inner);
 
 impl<const N: usize> ComputeMomentOfInertia for ConstRegularPolygon<N> {
-    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
-        use std::f32::consts::PI;
-
+    fn compute_moment_of_inertia(&self, m: Mass) -> FloatNum {
         let radius = self.radius;
 
         0.5 * m
             * radius.powf(2.)
-            * (1. - (2. / 3. * (PI * (Self::EDGE_COUNT as f32).recip()).sin().powf(2.)))
+            * (1. - (2. / 3. * (PI() * (Self::EDGE_COUNT as f32).recip()).sin().powf(2.)))
     }
 }
 
@@ -499,11 +497,9 @@ pub struct RegularPolygon {
 
 impl RegularPolygon {
     pub fn new(center_point: impl Into<Point>, edge_count: usize, radius: f32) -> Self {
-        use std::f32::consts::TAU;
-
         let mut vertexes: Vec<Point> = Vec::with_capacity(edge_count);
 
-        let edge_angle = TAU * (edge_count as f32).recip();
+        let edge_angle = TAU() * (edge_count as f32).recip();
 
         let mut point: Vector<_> = (0., radius).into();
         vertexes.push(point.to_point());
@@ -554,13 +550,11 @@ impl RegularPolygon {
 impl_common_polygon!(RegularPolygon, inner_polygon);
 
 impl ComputeMomentOfInertia for RegularPolygon {
-    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
-        use std::f32::consts::PI;
-
+    fn compute_moment_of_inertia(&self, m: Mass) -> FloatNum {
         let radius = self.radius;
 
         let edge_count = self.inner_polygon.edge_count() as f32;
 
-        0.5 * m * radius.powf(2.) * (1. - (2. / 3. * (PI * edge_count.recip()).sin().powf(2.)))
+        0.5 * m * radius.powf(2.) * (1. - (2. / 3. * (PI() * edge_count.recip()).sin().powf(2.)))
     }
 }

@@ -2,7 +2,7 @@ use super::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint};
 use crate::{
     algo::collision::{Collider, Projector},
     element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
-    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, TAU},
     meta::Mass,
     shape::utils::rotate_point,
 };
@@ -93,8 +93,6 @@ impl GeometryTransform for Circle {
     }
 
     fn rotate(&mut self, &origin_point: &Point, rad: f32) {
-        use std::f32::consts::TAU;
-
         if origin_point != self.center_point {
             let center_vector: Vector = (origin_point, self.center_point).into();
             let new_center = origin_point + center_vector.affine_transformation_rotate(rad);
@@ -102,8 +100,8 @@ impl GeometryTransform for Circle {
         }
 
         self.rad += rad;
-        if self.rad > TAU {
-            self.rad %= TAU
+        if self.rad > TAU() {
+            self.rad %= TAU()
         }
 
         if origin_point != self.center_point {

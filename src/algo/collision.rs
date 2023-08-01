@@ -5,7 +5,7 @@ use crate::{
         point::Point,
         segment::Segment,
         vector::{Vector, Vector3},
-        FloatNum,
+        FloatNum, PI,
     },
     shape::{CenterPoint, NearestPoint},
 };
@@ -391,7 +391,7 @@ where
 
     let mut vector: Vector = (0., 1.).into();
     let mut result = Vec::with_capacity(SAMPLE_SIZE);
-    let rad = std::f32::consts::PI * 2. * (SAMPLE_SIZE as FloatNum).recip();
+    let rad = PI() * 2. * (SAMPLE_SIZE as FloatNum).recip();
     for _ in 0..SAMPLE_SIZE {
         vector.affine_transformation_rotate_self(rad);
         let p = compute_support_point(vector);
