@@ -140,45 +140,23 @@ pub fn rotate_polygon<'a>(
 }
 
 pub fn resize_by_vector<'a>(
-    point_iter_mut: impl Iterator<Item = &'a mut Point>,
-    vector: impl Into<Vector>,
-    is_increase: bool,
+    vertexes: impl Iterator<Item = &'a mut Point>,
+    center_point: &Point,
+    from: &Point,
+    to: &Point,
 ) {
-    let vector: Vector = vector.into();
-    let (x, y) = vector.into();
+    let hold_point = from;
+    let resize_vector: &Vector = &(from, to).into();
 
-    let mut half_x = (x * 0.5).abs();
-    let mut half_y = (y * 0.5).abs();
+    let hold_vector: Vector = (center_point, hold_point).into();
+    let project_size = resize_vector >> &hold_vector;
 
-    if !is_increase {
-        half_x = -half_x;
-        half_y = -half_y;
-    }
-
-    // TODO impl resize method
-    unimplemented!()
-}
-
-/// It resizes the rectangle by a vector.
-///
-/// Arguments:
-///
-/// * `size`: the size of the vector to resize by
-/// * `is_increase`: true if the rectangle is to be increased, false if it is to be decreased
-pub fn resize_by_vector_size<'a>(
-    point_iter_mut: impl Iterator<Item = &'a mut Point>,
-    size: f32,
-    is_increase: bool,
-) {
-    // TODO impl
-    unimplemented!()
-
-    // let size = size.abs();
-    // self.compute_aspect();
-    // let aspect: f32 = self.compute_aspect();
-    // let y = size * aspect.hypot(1.).recip();
-    // let x = aspect * y;
-    // self.resize_by_vector((x, y), is_increase)
+    vertexes.for_each(|point| {
+        let v: Vector = (center_point, &*point).into();
+        let abs_vector = v.abs();
+        let resized_vector = &(v.normalize() * (abs_vector + project_size));
+        *point = *center_point + resized_vector
+    })
 }
 
 // TODO comment

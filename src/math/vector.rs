@@ -223,6 +223,16 @@ where
     }
 }
 
+impl<T: Clone + Copy> Mul<&Vector<T>> for &Vector<T>
+where
+    T: Mul<Output = T> + Add<Output = T>,
+{
+    type Output = T;
+    fn mul(self, rhs: &Vector<T>) -> Self::Output {
+        (self.x * rhs.x) + (self.y * rhs.y)
+    }
+}
+
 impl<T> MulAssign<Vector<T>> for Vector<T>
 where
     T: Clone + Copy + MulAssign<T>,
@@ -482,6 +492,13 @@ where
 impl Shr<Vector> for Vector {
     type Output = f32;
     fn shr(self, rhs: Vector) -> Self::Output {
+        self * rhs * rhs.abs().recip()
+    }
+}
+
+impl Shr<&Vector> for &Vector {
+    type Output = f32;
+    fn shr(self, rhs: &Vector) -> Self::Output {
         self * rhs * rhs.abs().recip()
     }
 }

@@ -78,6 +78,12 @@ impl From<Vector> for Tuple2 {
     }
 }
 
+impl Into<Vector> for Tuple2 {
+    fn into(self) -> Vector {
+        (self.x, self.y).into()
+    }
+}
+
 // TODO should keep copy of element for web
 // each time engine update element, get update vector and angle should be more fast
 
@@ -208,6 +214,12 @@ impl WebScene {
         if let Some(element) = self.scene.get_element_mut(element_id) {
             element.translate(&(translate.x, translate.y).into());
             element.rotate(rotation)
+        }
+    }
+
+    pub fn resize_element(&mut self, element_id: ID, from: Tuple2, to: Tuple2) {
+        if let Some(element) = self.scene.get_element_mut(element_id) {
+            element.scale(&(from.x, from.y).into(), &(to.x, to.y).into());
         }
     }
 

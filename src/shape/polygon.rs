@@ -2,7 +2,7 @@ use super::{
     utils::{
         compute_area_of_triangle, compute_moment_of_inertia_of_triangle,
         compute_polygon_approximate_center_point, find_nearest_point, projection_polygon_on_vector,
-        rotate_point, rotate_polygon, translate_polygon,
+        resize_by_vector, rotate_point, rotate_polygon, translate_polygon,
     },
     CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
@@ -62,6 +62,11 @@ macro_rules! impl_shape_for_common_polygon {
             if origin_point != self.center_point() {
                 *self.center_point_mut() = rotate_point(&self.center_point(), &origin_point, rad);
             }
+        }
+
+        fn scale(&mut self, from:&Point,to:&Point) {
+            let center_point = self.center_point();
+            resize_by_vector(self.point_iter_mut(), &center_point, from,to);
         }
     };
     (@edge_iter,@inner_impl) => {

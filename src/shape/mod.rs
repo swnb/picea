@@ -14,6 +14,8 @@ pub trait GeometryTransform {
     fn translate(&mut self, vector: &Vector);
 
     fn rotate(&mut self, origin_point: &Point, rad: f32);
+
+    fn scale(&mut self, from: &Point, to: &Point);
 }
 
 pub trait EdgeIterable {

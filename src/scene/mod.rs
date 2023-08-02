@@ -96,6 +96,12 @@ impl Scene {
         element_id
     }
 
+    #[inline]
+    pub fn remove_elements(&mut self, element_id: ID) {
+        self.element_store.remove_element(element_id);
+    }
+
+    #[inline]
     pub fn element_size(&self) -> usize {
         self.element_store.size()
     }

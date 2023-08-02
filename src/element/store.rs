@@ -83,9 +83,10 @@ impl ElementStore {
         self.is_sorted = false;
     }
 
-    pub fn remove(&mut self, id: ID) {
-        // TODO
-        todo!()
+    pub fn remove_element(&mut self, id: ID) {
+        self.elements.retain(|v| v.element.id != id);
+        self.map.remove(&id);
+        self.is_sorted = false;
     }
 
     pub fn clear(&mut self) {

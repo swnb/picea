@@ -66,7 +66,6 @@ impl GeometryTransform for ConcavePolygon {
     }
 
     fn rotate(&mut self, origin_point: &Point, rad: f32) {
-        // TODO update center point ?
         self.sub_convex_polygons
             .iter_mut()
             .for_each(|convex_polygon| convex_polygon.rotate(origin_point, rad));
@@ -76,6 +75,14 @@ impl GeometryTransform for ConcavePolygon {
         if origin_point != &self.center_point {
             self.center_point = rotate_point(&self.center_point, origin_point, rad);
         }
+    }
+
+    fn scale(&mut self, from: &Point, to: &Point) {
+        self.sub_convex_polygons
+            .iter_mut()
+            .for_each(|convex_polygon| {
+                convex_polygon.scale_with_center_point(&self.center_point, from, to)
+            });
     }
 }
 

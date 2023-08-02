@@ -133,6 +133,10 @@ impl Element {
         self.meta_mut().set_angle(|pre| pre - rad);
     }
 
+    pub fn scale(&mut self, from: &Point, to: &Point) {
+        self.shape.scale(from, to);
+    }
+
     #[inline]
     pub fn tick(&mut self, secs: f32) {
         if !self.meta.is_fixed() {

@@ -10,7 +10,7 @@ use super::{
     utils::{
         compute_area_of_convex, compute_area_of_triangle, compute_convex_center_point,
         compute_moment_of_inertia_of_triangle, find_nearest_point, projection_polygon_on_vector,
-        rotate_point, split_convex_polygon_to_triangles, VertexesToEdgeIter,
+        resize_by_vector, rotate_point, split_convex_polygon_to_triangles, VertexesToEdgeIter,
     },
     CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
@@ -38,6 +38,10 @@ impl ConvexPolygon {
     pub fn area(&self) -> FloatNum {
         self.area
     }
+
+    pub fn scale_with_center_point(&mut self, center_point: &Point, from: &Point, to: &Point) {
+        resize_by_vector(self.vertexes.iter_mut(), center_point, from, to);
+    }
 }
 
 impl CenterPoint for ConvexPolygon {
@@ -60,6 +64,10 @@ impl GeometryTransform for ConvexPolygon {
         if origin_point != &self.center_point {
             self.center_point = rotate_point(&self.center_point, origin_point, rad);
         }
+    }
+
+    fn scale(&mut self, from: &Point, to: &Point) {
+        self.scale_with_center_point(&self.center_point.clone(), from, to)
     }
 }
 

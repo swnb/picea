@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    utils::{find_nearest_point, rotate_point},
+    utils::{find_nearest_point, resize_by_vector, rotate_point},
     CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
 
@@ -108,6 +108,16 @@ impl GeometryTransform for Line {
         if origin_point != &self.center_point {
             self.center_point = rotate_point(&self.center_point, origin_point, rad);
         }
+    }
+
+    fn scale(&mut self, from: &Point, to: &Point) {
+        let (start_point, end_point) = self.segment.ends_mut();
+        resize_by_vector(
+            [start_point, end_point].into_iter(),
+            &self.center_point,
+            from,
+            to,
+        )
     }
 }
 

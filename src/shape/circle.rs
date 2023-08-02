@@ -108,6 +108,12 @@ impl GeometryTransform for Circle {
             self.center_point = rotate_point(&self.center_point, &origin_point, rad);
         }
     }
+
+    fn scale(&mut self, from: &Point, to: &Point) {
+        let resize_vector: Vector = (from, to).into();
+        // TODO resize to ellipse
+        self.r += resize_vector.abs();
+    }
 }
 
 impl EdgeIterable for Circle {
