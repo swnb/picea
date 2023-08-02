@@ -7,6 +7,7 @@ use crate::{
     meta::{Meta, MetaBuilder},
     scene::Scene,
     shape::{
+        concave::ConcavePolygon,
         line::Line,
         polygon::{Rect, RegularPolygon},
     },
@@ -170,6 +171,19 @@ impl WebScene {
         meta_data: JsValue,
     ) -> u32 {
         let shape = RegularPolygon::new((x, y), edge_count, radius);
+
+        self.create_element(shape, meta_data)
+    }
+
+    pub fn create_polygon(&mut self, vertexes: Vec<JsValue>, meta_data: JsValue) -> u32 {
+        let shape = ConcavePolygon::new(
+            &vertexes
+                .into_iter()
+                .map(serde_wasm_bindgen::from_value::<Tuple2>)
+                .map(|tuple| tuple.unwrap_or(Tuple2 { x: 0., y: 0. }))
+                .map(|v| v.into())
+                .collect::<Vec<Point>>(),
+        );
 
         self.create_element(shape, meta_data)
     }
