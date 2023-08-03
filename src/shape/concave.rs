@@ -22,8 +22,8 @@ pub struct ConcavePolygon {
 }
 
 impl ConcavePolygon {
-    pub fn new(vertexes: &[Point]) -> Self {
-        let origin_vertexes = vertexes.to_owned();
+    pub fn new(vertexes: impl Into<Vec<Point>>) -> Self {
+        let origin_vertexes: Vec<Point> = vertexes.into();
         let sub_convex_polygons: Vec<_> =
             split_concave_polygon_to_convex_polygons(&origin_vertexes)
                 .into_iter()

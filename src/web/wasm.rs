@@ -177,7 +177,7 @@ impl WebScene {
 
     pub fn create_polygon(&mut self, vertexes: Vec<JsValue>, meta_data: JsValue) -> u32 {
         let shape = ConcavePolygon::new(
-            &vertexes
+            vertexes
                 .into_iter()
                 .map(serde_wasm_bindgen::from_value::<Tuple2>)
                 .map(|tuple| tuple.unwrap_or(Tuple2 { x: 0., y: 0. }))
