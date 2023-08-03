@@ -83,7 +83,7 @@ fn create_model(_app: &App) -> Model {
     .map(|v| v.into())
     .collect::<Vec<_>>();
 
-    let concave_polygon = ConcavePolygon::new(&vertexes);
+    let concave_polygon = ConcavePolygon::new(vertexes);
 
     scene.push_element(ElementBuilder::new(concave_polygon, meta));
 

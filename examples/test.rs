@@ -4,7 +4,7 @@ use picea::{
     math::{edge::Edge, point::Point, vector::Vector},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{convex::ConvexPolygon, line::Line},
+    shape::{concave::ConcavePolygon, convex::ConvexPolygon, line::Line},
     tools::collision_view::CollisionStatusViewer,
 };
 use std::time::SystemTime;
@@ -43,13 +43,64 @@ fn create_model(_app: &App) -> Model {
     let id = scene.push_element(element);
 
     scene.clear();
+    let element = ElementBuilder::new(
+        ConcavePolygon::new(vec![
+            (871.690, 558.672).into(),
+            (793.794, 805.451).into(),
+            (1015.292, 829.839).into(),
+            (1000.075, 790.480).into(),
+            (954.031, 664.203).into(),
+        ]),
+        MetaBuilder::new(1.000)
+            .angle_velocity(0.000)
+            .velocity((-0.001, 0.000))
+            .is_transparent(false)
+            .is_fixed(false)
+            .force("gravity", (0.000, 20.000)),
+    );
+    scene.push_element(element);
+    let element = ElementBuilder::new(
+        ConcavePolygon::new(vec![
+            (447.786, 617.250).into(),
+            (632.589, 787.701).into(),
+            (640.413, 712.804).into(),
+            (702.224, 791.051).into(),
+            (738.230, 773.095).into(),
+            (744.619, 722.822).into(),
+            (685.803, 643.534).into(),
+        ]),
+        MetaBuilder::new(1.000)
+            .angle_velocity(-0.000)
+            .velocity((-0.014, -0.002))
+            .is_transparent(false)
+            .is_fixed(false)
+            .force("gravity", (0.000, 20.000)),
+    );
+    scene.push_element(element);
+
+    let element: ElementBuilder = ElementBuilder::new(
+        ConcavePolygon::new(vec![
+            (185.598, 779.852).into(),
+            (460.693, 779.788).into(),
+            (407.040, 695.286).into(),
+            (490.216, 656.344).into(),
+            (230.336, 566.650).into(),
+            (360.754, 688.447).into(),
+        ]),
+        MetaBuilder::new(1.000)
+            .angle_velocity(-0.000)
+            .velocity((-0.020, -0.001))
+            .is_transparent(false)
+            .is_fixed(false)
+            .force("gravity", (0.000, 20.000)),
+    );
+    scene.push_element(element);
 
     let element = ElementBuilder::new(
         ConvexPolygon::new(vec![
-            (180.000, 400.000).into(),
-            (280.000, 400.000).into(),
-            (280.000, 600.000).into(),
-            (180.000, 600.000).into(),
+            (56.297, 779.852).into(),
+            (1214.066, 851.695).into(),
+            (560.508, 779.734).into(),
         ]),
         MetaBuilder::new(1.000)
             .angle_velocity(0.000)
@@ -58,23 +109,22 @@ fn create_model(_app: &App) -> Model {
             .is_fixed(true)
             .force("gravity", (0.000, 20.000)),
     );
-
     scene.push_element(element);
 
     let element = ElementBuilder::new(
         ConvexPolygon::new(vec![
-            (200.000, 250.000).into(),
-            (243.301, 175.000).into(),
-            (156.699, 175.000).into(),
+            (1027.941, 421.984).into(),
+            (1014.113, 866.789).into(),
+            (1177.469, 872.812).into(),
+            (1167.922, 431.371).into(),
         ]),
         MetaBuilder::new(1.000)
             .angle_velocity(0.000)
             .velocity((0.000, 0.000))
             .is_transparent(false)
-            .is_fixed(false)
+            .is_fixed(true)
             .force("gravity", (0.000, 20.000)),
     );
-
     scene.push_element(element);
 
     Model {
@@ -127,7 +177,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     let draw = app.draw();
 
-    let scale = 0.5;
+    let scale = 0.4;
 
     let make_line = |color: rgb::Srgb<u8>, start_point: Point, end_point: Point| {
         draw.line()

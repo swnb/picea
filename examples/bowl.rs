@@ -37,7 +37,7 @@ fn create_model(_app: &App) -> Model {
 
     let element = ElementBuilder::new(
         concave_polygon,
-        MetaBuilder::new(100.).force("gravity", (0., -1000.)),
+        MetaBuilder::new(100.).force("gravity", (0., -1000.)).angle(0.2),
     );
 
     &mut scene << element;
