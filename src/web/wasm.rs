@@ -341,6 +341,14 @@ impl WebScene {
             .unwrap_or(Default::default())
     }
 
+    pub fn element_center_point(&self, element_id: ID) -> Tuple2 {
+        let element = self.scene.get_element(element_id);
+        element
+            .map(|element| element.shape().center_point())
+            .map(|point| point.into())
+            .unwrap_or(Tuple2::new(0., 0.))
+    }
+
     #[wasm_bindgen(skip_typescript, typescript_type = "FOREACH_ELEMENT_CALLBACK")]
     pub fn for_each_element(&self, callback: Function) {
         let this = JsValue::null();
