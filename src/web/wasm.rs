@@ -151,13 +151,13 @@ impl WebScene {
 
     pub fn create_rect(
         &mut self,
-        x: FloatNum,
-        y: FloatNum,
+        top_left_x: FloatNum,
+        top_right_y: FloatNum,
         width: FloatNum,
         height: FloatNum,
         meta_data: JsValue,
     ) -> u32 {
-        let shape = Rect::new(x, y, width, height);
+        let shape = Rect::new(top_left_x, top_right_y, width, height);
 
         self.create_element(shape, meta_data)
     }
@@ -190,10 +190,16 @@ impl WebScene {
 
     pub fn create_line(
         &mut self,
-        start_point: Tuple2,
-        end_point: Tuple2,
+        start_point: JsValue,
+        end_point: JsValue,
         meta_data: JsValue,
     ) -> u32 {
+        let start_point: Tuple2 = serde_wasm_bindgen::from_value(start_point)
+            .expect("start_point must be {x:number,y:number}");
+
+        let end_point: Tuple2 = serde_wasm_bindgen::from_value(end_point)
+            .expect("end_point must be {x:number,y:number}");
+
         let shape = Line::new(start_point, end_point);
 
         self.create_element(shape, meta_data)
@@ -222,18 +228,30 @@ impl WebScene {
     pub fn update_element_position(
         &mut self,
         element_id: ID,
-        translate: Tuple2,
+        translate_vector: JsValue,
         rotation: FloatNum,
     ) {
+        let translate_vector: Tuple2 = serde_wasm_bindgen::from_value(translate_vector)
+            .expect("translate_vector must be {x:number,y:number}");
+
+        let translate_vector: Vector = translate_vector.into();
         if let Some(element) = self.scene.get_element_mut(element_id) {
-            element.translate(&(translate.x, translate.y).into());
+            element.translate(&translate_vector);
             element.rotate(rotation)
         }
     }
 
-    pub fn resize_element(&mut self, element_id: ID, from: Tuple2, to: Tuple2) {
+    pub fn scale_element_by_movement(&mut self, element_id: ID, from: JsValue, to: JsValue) {
+        let from: Point = serde_wasm_bindgen::from_value(from)
+            .map(|from: Tuple2| from.into())
+            .expect("from must be {x:number,y:number}");
+
+        let to: Point = serde_wasm_bindgen::from_value(to)
+            .map(|to: Tuple2| to.into())
+            .expect("to must be {x:number,y:number}");
+
         if let Some(element) = self.scene.get_element_mut(element_id) {
-            element.scale(&(from.x, from.y).into(), &(to.x, to.y).into());
+            element.scale(&from, &to);
         }
     }
 
@@ -290,14 +308,17 @@ impl WebScene {
             })
     }
 
-    pub fn to_raw_code(&self, element_id: ID) -> String {
+    /**
+     * get raw construct rust code of element by element id
+     */
+    pub fn get_element_raw_rust_code(&self, element_id: ID) -> String {
         let element = self.scene.get_element(element_id);
         element
             .map(snapshot::create_element_construct_code_snapshot)
             .unwrap_or(String::new())
     }
 
-    pub fn is_point_inside(&self, x: FloatNum, y: FloatNum, element_id: ID) -> bool {
+    pub fn is_point_inside_element(&self, x: FloatNum, y: FloatNum, element_id: ID) -> bool {
         self.scene
             .get_element(element_id)
             .map(|element| is_point_inside_shape((x, y), &mut element.shape().edge_iter()))
@@ -313,7 +334,7 @@ impl WebScene {
         self.scene.elements_iter().map(|ele| ele.id()).collect()
     }
 
-    pub fn element_vertexes(&self, element_id: ID) -> Vec<JsValue> {
+    pub fn get_element_vertexes(&self, element_id: ID) -> Vec<JsValue> {
         self.scene
             .get_element(element_id)
             .map(|element| {
@@ -341,7 +362,7 @@ impl WebScene {
             .unwrap_or(Default::default())
     }
 
-    pub fn element_center_point(&self, element_id: ID) -> Tuple2 {
+    pub fn get_element_center_point(&self, element_id: ID) -> Tuple2 {
         let element = self.scene.get_element(element_id);
         element
             .map(|element| element.shape().center_point())
