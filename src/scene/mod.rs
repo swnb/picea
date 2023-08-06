@@ -153,10 +153,57 @@ impl Scene {
 
         let delta_time: FloatNum = 1. / 61.;
 
-        // self.element_store
-        //     .iter_mut()
-        //     .for_each(|element| element.tick(delta_time));
+        self.integrate_velocity(delta_time);
 
+        self.detective_collision();
+
+        self.constraints(delta_time);
+    }
+
+    pub fn register_element_position_update_callback<F>(&mut self, callback: F) -> u32
+    where
+        F: FnMut(ID, Vector, FloatNum) + 'static,
+    {
+        self.callback_hook.register_callback(callback)
+    }
+
+    pub fn unregister_element_position_update_callback(&mut self, callback_id: u32) {
+        self.callback_hook.unregister_callback(callback_id);
+    }
+
+    #[inline]
+    pub fn elements_iter(&self) -> impl Iterator<Item = &Element> {
+        self.element_store.iter()
+    }
+
+    #[inline]
+    pub fn elements_iter_mut(&mut self) -> impl Iterator<Item = &mut Element> {
+        self.element_store.iter_mut()
+    }
+
+    #[inline]
+    pub fn get_element(&self, id: ID) -> Option<&Element> {
+        self.element_store.get_element_by_id(id)
+    }
+
+    #[inline]
+    pub fn get_element_mut(&mut self, id: ID) -> Option<&mut Element> {
+        self.element_store.get_mut_element_by_id(id)
+    }
+
+    #[inline]
+    pub fn frame_count(&self) -> u128 {
+        self.frame_count
+    }
+
+    // remove all elements;
+    pub fn clear(&mut self) {
+        self.manifold_table.clear();
+        self.element_store.clear();
+        self.frame_count = 0;
+    }
+
+    fn integrate_velocity(&mut self, delta_time: FloatNum) {
         self.elements_iter_mut()
             .filter(|element| !element.meta().is_fixed())
             .filter(|element| !element.meta().is_sleeping())
@@ -165,7 +212,9 @@ impl Scene {
                 let a = force * element.meta().inv_mass();
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
+    }
 
+    fn detective_collision(&mut self) {
         self.manifold_table.flip();
 
         rough_collision_detection(&mut self.element_store, |element_a, element_b| {
@@ -218,7 +267,9 @@ impl Scene {
                 },
             )
         });
+    }
 
+    fn constraints(&mut self, delta_time: FloatNum) {
         let query_element_pair =
             &mut |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
                 let element_a = self
@@ -256,50 +307,6 @@ impl Scene {
             }
         });
     }
-
-    pub fn register_element_position_update_callback<F>(&mut self, callback: F) -> u32
-    where
-        F: FnMut(ID, Vector, FloatNum) + 'static,
-    {
-        self.callback_hook.register_callback(callback)
-    }
-
-    pub fn unregister_element_position_update_callback(&mut self, callback_id: u32) {
-        self.callback_hook.unregister_callback(callback_id);
-    }
-
-    #[inline]
-    pub fn elements_iter(&self) -> impl Iterator<Item = &Element> {
-        self.element_store.iter()
-    }
-
-    #[inline]
-    pub fn elements_iter_mut(&mut self) -> impl Iterator<Item = &mut Element> {
-        self.element_store.iter_mut()
-    }
-
-    #[inline]
-    pub fn get_element(&self, id: ID) -> Option<&Element> {
-        self.element_store.get_element_by_id(id)
-    }
-
-    #[inline]
-    pub fn get_element_mut(&mut self, id: ID) -> Option<&mut Element> {
-        self.element_store.get_mut_element_by_id(id)
-    }
-
-    #[inline]
-    pub fn frame_count(&self) -> u128 {
-        self.frame_count
-    }
-
-    // remove all elements;
-    pub fn clear(&mut self) {
-        self.manifold_table.clear();
-        self.element_store.clear();
-        self.frame_count = 0;
-    }
-
     // TODO
     fn contact_constraint(&mut self) {
         for manifold in self.manifold_table.current_manifolds().iter_mut() {
