@@ -43,7 +43,7 @@ fn create_model(_app: &App) -> Model {
                     (-300. + (col as f32 * 210.), 700. - level as f32 * 100.),
                     50.,
                 ),
-                MetaBuilder::new(10.).force("gravity", (0., -10. * 10.)),
+                MetaBuilder::new(10.),
             );
             scene.push_element(element);
         }

@@ -90,12 +90,7 @@ fn create_model(_app: &App) -> Model {
 
     let concave_polygon = ConcavePolygon::new(&Vec::from(vertexes)[..]);
 
-    let element = ElementBuilder::new(
-        concave_polygon,
-        MetaBuilder::new(200.)
-            .force("gravity", (0., -2000.))
-            .is_fixed(true),
-    );
+    let element = ElementBuilder::new(concave_polygon, MetaBuilder::new(200.).is_fixed(true));
 
     &mut scene << element;
 
@@ -115,8 +110,7 @@ fn create_model(_app: &App) -> Model {
 
             let shape = RegularPolygon::new((x, y), edge as usize, 2.);
 
-            &mut scene
-                << ElementBuilder::new(shape, MetaBuilder::new(10.).force("gravity", (0., -100.)));
+            &mut scene << ElementBuilder::new(shape, MetaBuilder::new(10.));
         }
     }
 

@@ -35,7 +35,7 @@ fn create_model(_app: &App) -> Model {
         for col in 0..max_col {
             let element = ElementBuilder::new(
                 (4, (-30. + (col as f32 * 21.), 70. - level as f32 * 10.), 5.),
-                MetaBuilder::new(10.).force("gravity", (0., -10. * 10.)),
+                MetaBuilder::new(10.),
             );
             scene.push_element(element);
         }

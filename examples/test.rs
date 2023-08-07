@@ -55,8 +55,7 @@ fn create_model(_app: &App) -> Model {
             .angle_velocity(0.000)
             .velocity((-0.001, 0.000))
             .is_transparent(false)
-            .is_fixed(false)
-            .force("gravity", (0.000, 20.000)),
+            .is_fixed(false),
     );
     scene.push_element(element);
     let element = ElementBuilder::new(
@@ -73,8 +72,7 @@ fn create_model(_app: &App) -> Model {
             .angle_velocity(-0.000)
             .velocity((-0.014, -0.002))
             .is_transparent(false)
-            .is_fixed(false)
-            .force("gravity", (0.000, 20.000)),
+            .is_fixed(false),
     );
     scene.push_element(element);
 
@@ -91,8 +89,7 @@ fn create_model(_app: &App) -> Model {
             .angle_velocity(-0.000)
             .velocity((-0.020, -0.001))
             .is_transparent(false)
-            .is_fixed(false)
-            .force("gravity", (0.000, 20.000)),
+            .is_fixed(false),
     );
     scene.push_element(element);
 
@@ -106,8 +103,7 @@ fn create_model(_app: &App) -> Model {
             .angle_velocity(0.000)
             .velocity((0.000, 0.000))
             .is_transparent(false)
-            .is_fixed(true)
-            .force("gravity", (0.000, 20.000)),
+            .is_fixed(true),
     );
     scene.push_element(element);
 
@@ -122,8 +118,7 @@ fn create_model(_app: &App) -> Model {
             .angle_velocity(0.000)
             .velocity((0.000, 0.000))
             .is_transparent(false)
-            .is_fixed(true)
-            .force("gravity", (0.000, 20.000)),
+            .is_fixed(true),
     );
     scene.push_element(element);
 

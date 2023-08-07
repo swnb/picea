@@ -37,29 +37,9 @@ fn create_model(_app: &App) -> Model {
     let id = scene.push_element(ElementBuilder::new(wall_left, meta.clone()));
     println!("{id} wall_left ");
 
-    // let ball: Element = ElementBuilder::new(
-    //     ((-40., -10.), 6.),
-    //     MetaBuilder::new(10.).force("gravity", (0., -10.)),
-    // )
-    // .into();
-
-    // scene.push_element(ball);
-
-    // let element = ElementBuilder::new(
-    //     ((200., 200.), 100.),
-    //     MetaBuilder::new(1.)
-    //         .angle(std::f32::consts::FRAC_PI_6)
-    //         .force("gravity", (0., -10.)), // .is_fixed(true),
-    // );
-
-    // scene.push_element(element);
-
     let element = ElementBuilder::new(
         (7, (-30., 20.), 20.),
-        MetaBuilder::new(10.)
-            .angle(-f32::FRAC_PI_8())
-            // .angle_velocity(-std::f32::consts::FRAC_PI_8)
-            .force("gravity", (10., -10. * 10.)), // .is_fixed(true),
+        MetaBuilder::new(10.).angle(-f32::FRAC_PI_8()), // .angle_velocity(-std::f32::consts::FRAC_PI_8)
     );
 
     let id = scene.push_element(element);
@@ -67,10 +47,7 @@ fn create_model(_app: &App) -> Model {
 
     let element = ElementBuilder::new(
         (6, (10., 20.), 20.),
-        MetaBuilder::new(10.)
-            .angle(-f32::FRAC_PI_8())
-            // .angle_velocity(-std::f32::consts::FRAC_PI_8)
-            .force("gravity", (10., -10. * 10.)), // .is_fixed(true),
+        MetaBuilder::new(10.).angle(-f32::FRAC_PI_8()), // .angle_velocity(-std::f32::consts::FRAC_PI_8)
     );
 
     let id = scene.push_element(element);
