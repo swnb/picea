@@ -1,18 +1,18 @@
 use crate::math::{vector::Vector, FloatNum};
 
 #[derive(Debug)]
-pub(crate) struct ConstraintParameters {
+pub struct ConstraintParameters {
     // 位子修正的系数
-    pub(crate) factor_position_bias: FloatNum,
+    pub factor_position_bias: FloatNum,
     // 弹性系数
-    pub(crate) factor_elastic: FloatNum,
+    pub factor_elastic: FloatNum,
     // FIXME remove
-    pub(crate) max_allow_permeate: FloatNum,
-    pub(crate) factor_default_friction: FloatNum,
+    pub max_allow_permeate: FloatNum,
+    pub factor_default_friction: FloatNum,
     // 允许碰撞深度是负值
-    pub(crate) allow_permeate_negative: bool,
+    pub allow_permeate_negative: bool,
 
-    pub(crate) skip_friction_constraints: bool,
+    pub skip_friction_constraints: bool,
 }
 
 impl Default for ConstraintParameters {
@@ -30,14 +30,14 @@ impl Default for ConstraintParameters {
 
 #[derive(Debug)]
 /// define global config and state
-pub(crate) struct Context {
-    pub(crate) constraint_parameters: ConstraintParameters,
+pub struct Context {
+    pub constraint_parameters: ConstraintParameters,
     // element will ignore sleep when when motion less than max_enter_sleep_motion for max_enter_sleep_frame times
-    pub(crate) enable_sleep_mode: bool,
-    pub(crate) max_enter_sleep_motion: FloatNum,
-    pub(crate) max_enter_sleep_frame: u8,
-    pub(crate) enable_gravity: bool,
-    pub(crate) default_gravity: Vector,
+    pub enable_sleep_mode: bool,
+    pub max_enter_sleep_motion: FloatNum,
+    pub max_enter_sleep_frame: u8,
+    pub enable_gravity: bool,
+    pub default_gravity: Vector,
 }
 
 impl Default for Context {

@@ -23,7 +23,6 @@ pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
     manifold_table: ManifoldTable,
-    // manifold_store: Vec<Manifold>,
     total_skip_durations: FloatNum,
     context: Context,
     frame_count: u128,
@@ -194,6 +193,10 @@ impl Scene {
     #[inline]
     pub fn frame_count(&self) -> u128 {
         self.frame_count
+    }
+
+    pub fn get_context_mut(&mut self) -> &mut Context {
+        &mut self.context
     }
 
     // remove all elements;
