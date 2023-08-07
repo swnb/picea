@@ -204,12 +204,17 @@ impl Scene {
     }
 
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
+        let gravity = self.context.default_gravity;
+        let enable_gravity = self.context.enable_gravity;
         self.elements_iter_mut()
             .filter(|element| !element.meta().is_fixed())
             .filter(|element| !element.meta().is_sleeping())
             .for_each(|element| {
                 let force = element.meta().force_group().sum_force();
-                let a = force * element.meta().inv_mass();
+                let mut a = force * element.meta().inv_mass();
+                if enable_gravity {
+                    a += gravity;
+                }
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
     }

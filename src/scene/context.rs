@@ -1,4 +1,4 @@
-use crate::math::FloatNum;
+use crate::math::{vector::Vector, FloatNum};
 
 #[derive(Debug)]
 pub(crate) struct ConstraintParameters {
@@ -36,6 +36,8 @@ pub(crate) struct Context {
     pub(crate) enable_sleep_mode: bool,
     pub(crate) max_enter_sleep_motion: FloatNum,
     pub(crate) max_enter_sleep_frame: u8,
+    pub(crate) enable_gravity: bool,
+    pub(crate) default_gravity: Vector,
 }
 
 impl Default for Context {
@@ -45,6 +47,8 @@ impl Default for Context {
             enable_sleep_mode: false,
             max_enter_sleep_frame: 40,
             max_enter_sleep_motion: 0.07,
+            enable_gravity: true,
+            default_gravity: (0., 9.8).into(),
         }
     }
 }

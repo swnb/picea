@@ -461,9 +461,7 @@ impl WebScene {
 
         let meta_builder: MetaBuilder = meta_data.into();
 
-        let meta = meta_builder.force("gravity", (0., 20.));
-
-        let element = ElementBuilder::new(shape, meta);
+        let element = ElementBuilder::new(shape, meta_builder);
 
         self.scene.push_element(element)
     }
