@@ -262,6 +262,16 @@ impl WebScene {
             })
     }
 
+    #[wasm_bindgen(js_name = "hasElement")]
+    pub fn has_element(&self, element_id: ID) -> bool {
+        self.scene.has_element(element_id)
+    }
+
+    #[wasm_bindgen(js_name = "removeElement")]
+    pub fn remove_element(&mut self, element_id: ID) {
+        self.scene.remove_element(element_id);
+    }
+
     #[wasm_bindgen(js_name = "updateElementPosition")]
     pub fn update_element_position(
         &mut self,

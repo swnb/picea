@@ -96,8 +96,15 @@ impl Scene {
     }
 
     #[inline]
-    pub fn remove_elements(&mut self, element_id: ID) {
-        self.element_store.remove_element(element_id);
+    pub fn has_element(&self, element_id: ID) -> bool {
+        self.element_store.has_element(element_id)
+    }
+
+    #[inline]
+    pub fn remove_element(&mut self, element_id: ID) {
+        if self.has_element(element_id) {
+            self.element_store.remove_element(element_id);
+        }
     }
 
     #[inline]
