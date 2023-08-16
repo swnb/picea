@@ -83,6 +83,10 @@ impl ElementStore {
         self.is_sorted = false;
     }
 
+    pub fn has_element(&self, id: ID) -> bool {
+        self.map.contains_key(&id)
+    }
+
     pub fn remove_element(&mut self, id: ID) {
         self.elements.retain(|v| v.element.id != id);
         self.map.remove(&id);
