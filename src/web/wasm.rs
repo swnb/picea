@@ -41,8 +41,8 @@ pub struct WebPicea;
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize, Clone, Copy)]
 struct Tuple2 {
-    x: FloatNum,
-    y: FloatNum,
+    pub x: FloatNum,
+    pub y: FloatNum,
 }
 
 impl From<Point> for Tuple2 {
