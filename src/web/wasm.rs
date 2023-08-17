@@ -2,14 +2,14 @@ extern crate console_error_panic_hook;
 extern crate wasm_bindgen;
 use crate::{
     element::{ElementBuilder, ShapeTraitUnion, ID},
-    math::{edge::Edge, point::Point, vector::Vector, FloatNum},
+    math::{edge::Edge, point::Point, segment::Segment, vector::Vector, FloatNum},
     meta::{Meta, MetaBuilder},
     scene::Scene,
     shape::{
         concave::ConcavePolygon,
         line::Line,
         polygon::{Rect, RegularPolygon},
-        utils::is_point_inside_shape,
+        utils::{check_is_segment_cross, is_point_inside_shape},
     },
     tools::snapshot,
 };
@@ -468,6 +468,51 @@ impl WebScene {
 
         self.scene.push_element(element)
     }
+}
+
+/**
+ * must be sure vertexes blew to a valid polygon
+ */
+#[wasm_bindgen(js_name = "isPointValidAddIntoPolygon")]
+pub fn is_point_valid_add_into_polygon(point: WebPoint, vertexes: Vec<WebPoint>) -> bool {
+    if vertexes.len() <= 2 {
+        return true;
+    }
+
+    let point: Tuple2 = serde_wasm_bindgen::from_value(point.into()).unwrap();
+    let point: Point = point.into();
+
+    let vertexes: Vec<Point> = vertexes
+        .into_iter()
+        .map(|v| serde_wasm_bindgen::from_value::<Tuple2>(v.into()).unwrap())
+        .map(|v| v.into())
+        .collect();
+
+    let segment1: Segment = (vertexes[0], point).into();
+    let segment2: Segment = (*(vertexes.last().unwrap()), point).into();
+
+    let vertexes_len = vertexes.len();
+    for i in 0..(vertexes_len - 1) {
+        let start_point = vertexes[i];
+        let end_point = vertexes[(i + 1) % vertexes.len()];
+        let segment: Segment = (start_point, end_point).into();
+
+        if i == 0 {
+            if check_is_segment_cross(&segment, &segment2) {
+                return false;
+            }
+        } else if i == vertexes_len - 2 {
+            if check_is_segment_cross(&segment, &segment1) {
+                return false;
+            }
+        } else if check_is_segment_cross(&segment, &segment1)
+            || check_is_segment_cross(&segment, &segment2)
+        {
+            return false;
+        }
+    }
+
+    true
 }
 
 #[wasm_bindgen]
