@@ -40,16 +40,9 @@ pub struct WebPicea;
 
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize, Clone, Copy)]
-pub struct Tuple2 {
+struct Tuple2 {
     pub x: FloatNum,
     pub y: FloatNum,
-}
-
-#[wasm_bindgen]
-impl Tuple2 {
-    pub fn new(x: FloatNum, y: FloatNum) -> Self {
-        Self { x, y }
-    }
 }
 
 impl From<Point> for Tuple2 {
