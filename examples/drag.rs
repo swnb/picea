@@ -3,12 +3,11 @@ use nannou::{
     winit::event::{self},
 };
 use picea::{
-    algo::is_point_inside_shape,
     element::{Element, ElementBuilder},
     math::{edge::Edge, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{concave::ConcavePolygon, line::Line},
+    shape::{concave::ConcavePolygon, line::Line, utils::is_point_inside_shape},
     tools::{collision_view::CollisionStatusViewer, drag::Draggable},
 };
 use std::time::SystemTime;
