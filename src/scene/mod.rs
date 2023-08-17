@@ -202,15 +202,40 @@ impl Scene {
         self.frame_count
     }
 
+    #[inline]
     pub fn get_context_mut(&mut self) -> &mut Context {
         &mut self.context
     }
 
     // remove all elements;
+    #[inline]
     pub fn clear(&mut self) {
         self.manifold_table.clear();
         self.element_store.clear();
         self.frame_count = 0;
+    }
+
+    pub fn is_element_collide(&self, element_a_id: ID, element_b_id: ID) -> bool {
+        let collider_a = self.element_store.get_element_by_id(element_a_id);
+        let collider_b = self.element_store.get_element_by_id(element_b_id);
+        if let (Some(collider_a), Some(collider_b)) = (collider_a, collider_b) {
+            let mut is_collide = false;
+            prepare_accurate_collision_detection(
+                collider_a,
+                collider_b,
+                |sub_collider_a, sub_collider_b| {
+                    if let Some(contact_constraints) = accurate_collision_detection_for_sub_collider(
+                        sub_collider_a,
+                        sub_collider_b,
+                    ) {
+                        is_collide = !contact_constraints.is_empty()
+                    }
+                },
+            );
+            is_collide
+        } else {
+            false
+        }
     }
 
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
