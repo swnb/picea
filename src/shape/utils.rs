@@ -400,7 +400,7 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
     let helper = VertexesHelper(vertexes);
 
     let vertexes_len = helper.len();
-    if vertexes_len < 3 {
+    if vertexes_len <= 3 {
         return None;
     }
 
@@ -456,7 +456,10 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
         }
 
         if min_cut_edge_index == vertexes_len {
-            unreachable!("cant' found the cut edge , something is wrong");
+            unreachable!(
+                "polygon {:?} cant' found the cut edge , something is wrong",
+                vertexes
+            )
         }
 
         let z = min_cut_edge_index.max(i);
@@ -480,10 +483,10 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
         let remove_same_cut_point = |vertexes: &mut Vec<Point>| {
             let mut i = 0;
             while i < vertexes.len() {
-                if &vertexes[i] == &cut_point {
+                if vertexes[i] == cut_point {
                     let j = i + 1;
                     if vertexes.len() > j {
-                        while &vertexes[j] == &cut_point {
+                        while vertexes[j] == cut_point {
                             vertexes.remove(j);
                         }
                     }
