@@ -1,7 +1,7 @@
 use crate::{
-    algo::is_point_inside_shape,
     math::{point::Point, vector::Vector},
     scene::Scene,
+    shape::utils::is_point_inside_shape,
 };
 
 #[derive(Default)]

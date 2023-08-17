@@ -1,7 +1,6 @@
 extern crate console_error_panic_hook;
 extern crate wasm_bindgen;
 use crate::{
-    algo::is_point_inside_shape,
     element::{ElementBuilder, ShapeTraitUnion, ID},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::{Meta, MetaBuilder},
@@ -10,6 +9,7 @@ use crate::{
         concave::ConcavePolygon,
         line::Line,
         polygon::{Rect, RegularPolygon},
+        utils::is_point_inside_shape,
     },
     tools::snapshot,
 };
