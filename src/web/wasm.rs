@@ -454,6 +454,7 @@ impl WebScene {
         self.scene.frame_count() as u64
     }
 
+    #[wasm_bindgen(js_name = "isElementCollide")]
     pub fn is_element_collide(&self, element_a_id: ID, element_b_id: ID) -> bool {
         self.scene.is_element_collide(element_a_id, element_b_id)
     }
