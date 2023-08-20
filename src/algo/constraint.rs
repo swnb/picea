@@ -211,13 +211,13 @@ where
         let max_friction_lambda =
             contact_info.total_lambda * constraint_parameters.factor_default_friction;
 
-        object_a
-            .meta_mut()
-            .apply_impulse(lambda, normal, contact_info.r_a);
+        let impulse = normal * lambda;
+
+        object_a.meta_mut().apply_impulse(impulse, contact_info.r_a);
 
         object_b
             .meta_mut()
-            .apply_impulse(lambda, -normal, contact_info.r_b);
+            .apply_impulse(-impulse, contact_info.r_b);
 
         if !self.constraint_parameters.skip_friction_constraints {
             self.solve_friction_constraint(max_friction_lambda);
@@ -251,13 +251,15 @@ where
         );
         let friction_lambda = contact_info.total_friction_lambda - previous_total_friction_lambda;
 
+        let friction_impulse: Vector = tangent_normal * friction_lambda;
+
         object_a
             .meta_mut()
-            .apply_impulse(friction_lambda, -tangent_normal, contact_info.r_a);
+            .apply_impulse(-friction_impulse, contact_info.r_a);
 
         object_b
             .meta_mut()
-            .apply_impulse(friction_lambda, tangent_normal, contact_info.r_b);
+            .apply_impulse(friction_impulse, contact_info.r_b);
     }
 
     fn solve_position_constraint(&mut self, delta_time: FloatNum) {

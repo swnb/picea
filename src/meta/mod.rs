@@ -1,5 +1,5 @@
 pub mod force;
-pub mod manifold;
+pub(crate) mod nail;
 
 use std::ops::Deref;
 
@@ -9,7 +9,7 @@ use self::force::{Force, ForceGroup};
 
 pub type Mass = f32;
 
-pub type angle = f32;
+pub type Angle = f32;
 
 pub type Speed = Vector;
 
@@ -202,7 +202,8 @@ impl Meta {
         self.is_sleeping
     }
 
-    pub fn apply_impulse(&mut self, lambda: FloatNum, normal: Vector, r: Vector) {
+    // r is vector from shape center_point to contact_point
+    pub fn apply_impulse(&mut self, impulse: Vector, r: Vector) {
         // can't apply impulse to element when element fixed
         if self.is_fixed() {
             return;
@@ -210,13 +211,13 @@ impl Meta {
 
         let inv_mass = self.inv_mass();
 
-        self.set_velocity(|pre_velocity| pre_velocity + normal * lambda * inv_mass);
+        self.set_velocity(|pre_velocity| pre_velocity + impulse * inv_mass);
 
         let inv_moment_of_inertia = self.inv_moment_of_inertia();
 
         self.set_angle_velocity(|pre_angle_velocity| {
             // TODO (r ^ (normal * lambda))
-            pre_angle_velocity + (r ^ normal) * lambda * inv_moment_of_inertia
+            pre_angle_velocity + (r ^ impulse) * inv_moment_of_inertia
         });
     }
 
