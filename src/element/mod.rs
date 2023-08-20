@@ -12,7 +12,7 @@ use crate::{
         vector::{Vector, Vector3},
         FloatNum,
     },
-    meta::{Mass, Meta},
+    meta::{nail::Nail, Mass, Meta},
     shape::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint},
 };
 
@@ -79,6 +79,7 @@ pub struct Element {
     id: ID,
     meta: Meta,
     shape: Box<dyn ShapeTraitUnion>,
+    nails: Vec<Nail>,
 }
 
 impl Element {
@@ -104,7 +105,12 @@ impl Element {
 
         let id = 0;
 
-        Self { id, shape, meta }
+        Self {
+            id,
+            shape,
+            meta,
+            nails: Default::default(),
+        }
     }
 
     #[inline]
@@ -124,12 +130,20 @@ impl Element {
 
     #[inline]
     pub fn translate(&mut self, vector: &Vector) {
-        self.shape.translate(vector)
+        self.shape.translate(vector);
+        self.nails.iter_mut().for_each(|nail| *nail += vector);
     }
 
     #[inline]
     pub fn rotate(&mut self, rad: f32) {
-        self.shape.rotate(&self.shape.center_point(), rad);
+        let center_point = &self.center_point();
+
+        self.shape.rotate(center_point, rad);
+
+        self.nails
+            .iter_mut()
+            .for_each(|nail| nail.rotate(center_point, rad));
+
         self.meta_mut().set_angle(|pre| pre - rad);
     }
 
@@ -160,6 +174,15 @@ impl Element {
         self.rotate(-angle);
 
         (path, angle).into()
+    }
+
+    pub fn nails_iter(&self) -> impl Iterator<Item = &Nail> {
+        self.nails.iter()
+    }
+
+    pub fn create_nail(&mut self, nail: impl Into<Nail>) {
+        let nail = nail.into();
+        self.nails.push(nail);
     }
 }
 

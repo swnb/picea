@@ -12,8 +12,8 @@ use crate::{
         constraint::{ContactManifold, ManifoldsIterMut, Solver},
     },
     element::{store::ElementStore, Element},
-    math::{vector::Vector, FloatNum},
-    meta::manifold::{Manifold, ManifoldTable},
+    manifold::{Manifold, ManifoldTable},
+    math::{point::Point, vector::Vector, FloatNum},
     scene::hooks::CallbackHook,
 };
 
@@ -164,6 +164,8 @@ impl Scene {
         self.detective_collision();
 
         self.constraints(delta_time);
+
+        self.solve_join_constraints();
     }
 
     pub fn register_element_position_update_callback<F>(&mut self, callback: F) -> u32
@@ -236,6 +238,17 @@ impl Scene {
         } else {
             false
         }
+    }
+
+    pub fn pin_element_on_point(&mut self, element_id: ID, point: Point) {
+        if let Some(element) = self.get_element_mut(element_id) {
+            element.create_nail(point)
+        }
+    }
+
+    pub fn set_gravity(&mut self, reducer: impl Fn(&Vector) -> Vector) {
+        let context = &mut self.context;
+        context.default_gravity = reducer(&context.default_gravity);
     }
 
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
@@ -352,6 +365,18 @@ impl Scene {
         for manifold in self.manifold_table.current_manifolds().iter_mut() {
             let (id_a, id_b) = manifold.collision_element_id_pair();
         }
+    }
+
+    fn solve_join_constraints(&mut self) {
+        self.elements_iter_mut().for_each(|element| unsafe {
+            let center_point = &element.center_point();
+            let element_mut = element as *mut Element;
+            (*element_mut).nails_iter().for_each(|nail| {
+                let impulse = nail.stretch_length() * 0.2;
+                let r = (center_point, nail.point_bind_with_element()).into();
+                (*element_mut).meta_mut().apply_impulse(impulse, r);
+            });
+        })
     }
 }
 
