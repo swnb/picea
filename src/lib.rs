@@ -8,3 +8,5 @@ pub mod shape;
 pub mod tools;
 #[cfg(feature = "wasm-web")]
 pub mod web;
+
+pub(crate) mod manifold;
