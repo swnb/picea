@@ -10,7 +10,7 @@ use crate::{
         axis::AxisDirection,
         point::Point,
         vector::{Vector, Vector3},
-        FloatNum,
+        FloatNum, PI,
     },
     meta::{nail::Nail, Mass, Meta},
     shape::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint},
@@ -162,7 +162,7 @@ impl Element {
         &*self.shape
     }
 
-    pub fn integrate_velocity(&mut self, delta_time: FloatNum) -> Option<(Vector, FloatNum)> {
+    pub fn integrate_position(&mut self, delta_time: FloatNum) -> Option<(Vector, FloatNum)> {
         if self.meta().is_fixed() {
             return None;
         }
@@ -183,6 +183,53 @@ impl Element {
     pub fn create_nail(&mut self, nail: impl Into<Nail>) {
         let nail = nail.into();
         self.nails.push(nail);
+    }
+
+    pub(crate) fn solve_nail_constraints(&mut self, delta_time: FloatNum) {
+        let meta = self.meta();
+        let mass = meta.mass();
+        let inv_mass = meta.inv_mass();
+        let inv_moment_of_inertia = meta.inv_moment_of_inertia();
+        let center_point = self.center_point();
+
+        let self_ptr = self as *mut Self;
+
+        for nail in &self.nails {
+            const F: f32 = 0.4;
+
+            let normal_frequency_omega = F * PI() * 2.;
+
+            // 胡克定律 f = kx
+            let k = mass * normal_frequency_omega * normal_frequency_omega;
+            // f = cv
+            let c = 2. * mass * normal_frequency_omega; // * 0.1
+
+            // (b * distance / delta_time) == position fix
+            let b = k * delta_time * (c + k * delta_time).recip();
+            // r is the coefficient for impulse lambda
+            let r = (c + k * delta_time).recip();
+
+            let stretch_length = nail.stretch_length();
+
+            // NOTE  if stretch_length == 0
+            let n = stretch_length.normalize();
+
+            let r_t: Vector = (&center_point, nail.point_bind_with_element()).into();
+
+            let inv_mass_efficiency =
+                (inv_mass + (r_t ^ n).powf(2.) * inv_moment_of_inertia).recip();
+
+            let v = self.compute_point_velocity(nail.point_bind_with_element());
+
+            let lambda = -(v * n + b * stretch_length.abs() / delta_time)
+                * (inv_mass_efficiency + r * delta_time.recip()).recip();
+
+            let impulse = n * lambda;
+
+            unsafe {
+                (*self_ptr).meta_mut().apply_impulse(-impulse, r_t);
+            }
+        }
     }
 }
 
