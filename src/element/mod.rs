@@ -194,21 +194,22 @@ impl Element {
 
         let self_ptr = self as *mut Self;
 
+        const F: f32 = 2.0;
+
+        let normal_frequency_omega = F * PI() * 2.;
+
+        // 胡克定律 f = kx
+        let k = mass * normal_frequency_omega * normal_frequency_omega;
+        // f = cv
+        let c = 2. * mass * normal_frequency_omega * 2.0; // * 0.1
+
+        let tmp = (c + k * delta_time).recip();
+        // (b * distance / delta_time) == position fix
+        let b = k * delta_time * tmp;
+        // r is the coefficient for impulse lambda
+        let r = tmp;
+
         for nail in &self.nails {
-            const F: f32 = 0.4;
-
-            let normal_frequency_omega = F * PI() * 2.;
-
-            // 胡克定律 f = kx
-            let k = mass * normal_frequency_omega * normal_frequency_omega;
-            // f = cv
-            let c = 2. * mass * normal_frequency_omega; // * 0.1
-
-            // (b * distance / delta_time) == position fix
-            let b = k * delta_time * (c + k * delta_time).recip();
-            // r is the coefficient for impulse lambda
-            let r = (c + k * delta_time).recip();
-
             let stretch_length = nail.stretch_length();
 
             // NOTE  if stretch_length == 0
@@ -216,12 +217,12 @@ impl Element {
 
             let r_t: Vector = (&center_point, nail.point_bind_with_element()).into();
 
+            let v = self.compute_point_velocity(nail.point_bind_with_element());
+
             let inv_mass_efficiency =
                 (inv_mass + (r_t ^ n).powf(2.) * inv_moment_of_inertia).recip();
 
-            let v = self.compute_point_velocity(nail.point_bind_with_element());
-
-            let lambda = -(v * n + b * stretch_length.abs() / delta_time)
+            let lambda = -(-v * n + (b * stretch_length.abs() / delta_time))
                 * (inv_mass_efficiency + r * delta_time.recip()).recip();
 
             let impulse = n * lambda;
