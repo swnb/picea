@@ -135,6 +135,10 @@ impl Meta {
         self
     }
 
+    pub fn motion(&self) -> Vector {
+        self.velocity() * self.mass()
+    }
+
     // TODO remove this because of fixed
     pub fn moment_of_inertia(&self) -> Mass {
         *self.moment_of_inertia
