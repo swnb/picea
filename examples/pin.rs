@@ -1,15 +1,15 @@
 use nannou::{prelude::*, winit::event};
 use picea::{
     element::ElementBuilder,
-    math::{edge::Edge, point::Point, FloatNum},
+    math::{edge::Edge, point::Point},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{concave::ConcavePolygon, line::Line, polygon::Square},
+    shape::{polygon::Square, CenterPoint, GeometryTransform},
     tools::{
         collision_view::CollisionStatusViewer, snapshot::create_element_construct_code_snapshot,
     },
 };
-use std::{collections::VecDeque, time::SystemTime};
+use std::time::SystemTime;
 
 struct Model {
     scene: Scene,
@@ -21,11 +21,21 @@ struct Model {
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
-    scene.set_gravity(|_| (0., -10.).into());
+    scene.set_gravity(|_| (0., -40.).into());
 
-    let id = (&mut scene) << ElementBuilder::new(Square::new(20., -10., 10.), MetaBuilder::new(1.));
+    // scene.set_gravity(|_| Vector::new(0., 0.));
 
-    scene.pin_element_on_point(id, (20., -10.).into());
+    let mut shape = Square::new(20., -10., 10.);
+
+    // shape.rotate(&(20., -10.).into(), 3. * PI() / 4.);
+
+    let id = (&mut scene) << ElementBuilder::new(shape, MetaBuilder::new(1.));
+
+    scene.pin_element_on_point(id, (25., -5.).into());
+
+    if let Some(element) = scene.get_element_mut(id) {
+        element.translate(&(10., -10.).into());
+    }
 
     Model {
         scene,
@@ -96,7 +106,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .height(radius * 2. * scale);
     };
 
-    make_ellipse(RED, (20., -10.).into(), 5.);
+    make_ellipse(RED, (25., -5.).into(), 0.5);
 
     model.scene.elements_iter().for_each(|element| {
         // element

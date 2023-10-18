@@ -10,7 +10,7 @@ use crate::{
         axis::AxisDirection,
         point::Point,
         vector::{Vector, Vector3},
-        FloatNum, PI,
+        FloatNum, PI, TAU,
     },
     meta::{nail::Nail, Mass, Meta},
     shape::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint},
@@ -194,20 +194,20 @@ impl Element {
 
         let self_ptr = self as *mut Self;
 
-        const F: f32 = 2.0;
+        const F: f32 = 0.8;
 
-        let normal_frequency_omega = F * PI() * 2.;
+        let normal_frequency_omega = F * TAU();
 
         // 胡克定律 f = kx
-        let k = mass * normal_frequency_omega * normal_frequency_omega;
+        let k = mass * normal_frequency_omega.powf(2.);
         // f = cv
-        let c = 2. * mass * normal_frequency_omega * 2.0; // * 0.1
+        let c = 2. * mass * normal_frequency_omega * 2.;
 
         let tmp = (c + k * delta_time).recip();
         // (b * distance / delta_time) == position fix
         let b = k * delta_time * tmp;
         // r is the coefficient for impulse lambda
-        let r = tmp;
+        let g = tmp;
 
         for nail in &self.nails {
             let stretch_length = nail.stretch_length();
@@ -223,7 +223,7 @@ impl Element {
                 (inv_mass + (r_t ^ n).powf(2.) * inv_moment_of_inertia).recip();
 
             let lambda = -(-v * n + (b * stretch_length.abs() / delta_time))
-                * (inv_mass_efficiency + r * delta_time.recip()).recip();
+                * (inv_mass_efficiency + g * delta_time.recip()).recip();
 
             let impulse = n * lambda;
 
