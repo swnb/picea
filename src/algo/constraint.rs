@@ -74,6 +74,13 @@ impl ContactConstraint {
         self.total_friction_lambda = 0.;
         self.total_friction_lambda = 0.;
     }
+
+    // restrict total lambda must big than zero
+    fn restrict_lambda(&mut self, lambda: FloatNum) -> FloatNum {
+        let previous_total_lambda = self.total_lambda;
+        self.total_lambda = (self.total_lambda + lambda).max(0.);
+        self.total_lambda - previous_total_lambda
+    }
 }
 
 fn compute_mass_effective<Obj: ConstraintObject>(
@@ -203,10 +210,7 @@ where
 
         // TODO factor_friction use two element's factor_friction
 
-        let previous_total_lambda = contact_info.total_lambda;
-        contact_info.total_lambda += lambda;
-        contact_info.total_lambda = contact_info.total_lambda.max(0.);
-        let lambda = contact_info.total_lambda - previous_total_lambda;
+        let lambda = contact_info.restrict_lambda(lambda);
 
         let max_friction_lambda =
             contact_info.total_lambda * constraint_parameters.factor_default_friction;
