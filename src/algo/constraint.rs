@@ -198,9 +198,8 @@ where
 
         let sum_velocity_b = object_b.compute_point_velocity(&contact_info.contact_point_b);
 
-        let coefficient = (sum_velocity_a - sum_velocity_b)
-            * -normal
-            * (1. + constraint_parameters.factor_elastic);
+        let coefficient =
+            (sum_velocity_a - sum_velocity_b) * -normal * (constraint_parameters.factor_elastic);
 
         debug_assert!(depth.is_sign_positive());
 
@@ -298,31 +297,6 @@ where
     contact_manifolds: &'z mut M,
 }
 
-pub(crate) struct ConstraintSolver<'a: 'b, 'b, 'c, M: ConstraintObject> {
-    contact_solver: ContactSolver<'a, 'b, 'c, M>,
-}
-
-impl<'a: 'b, 'b, 'c, M> ConstraintSolver<'a, 'b, 'c, M>
-where
-    M: ConstraintObject,
-{
-    pub fn new(
-        object_a: &'a mut M,
-        object_b: &'a mut M,
-        contact_constraint: &'b mut ContactConstraint,
-        constraint_parameters: &'c ConstraintParameters,
-    ) -> Self {
-        let contact_solver = ContactSolver::new(
-            object_a,
-            object_b,
-            contact_constraint,
-            constraint_parameters,
-        );
-
-        Self { contact_solver }
-    }
-}
-
 const MAX_ITERATOR_TIMES: usize = 10;
 
 impl<'z, 'e, M> Solver<'z, 'e, M>
@@ -382,4 +356,71 @@ where
 
         constraint(true);
     }
+}
+
+pub fn compute_soft_constraints_params(
+    mass: FloatNum,
+    damping_ratio: FloatNum,
+    frequency: FloatNum,
+    delta_time: FloatNum,
+) -> (FloatNum, FloatNum) {
+    let spring_constant = mass * frequency.powf(2.);
+    let damping_coefficient = 2. * mass * damping_ratio * frequency;
+
+    let tmp1 = delta_time * spring_constant; // h * k
+    let tmp2 = damping_coefficient + tmp1;
+
+    let force_soft_factor = tmp2.recip();
+    let position_fix_factor = tmp1 * tmp2.recip();
+
+    (force_soft_factor, position_fix_factor)
+}
+
+pub(crate) fn solve_join_constraint<Obj: ConstraintObject>(
+    parameters: &ConstraintParameters,
+    element_a: &mut Obj,
+    point_a: &Point,
+    element_b: &mut Obj,
+    point_b: &Point,
+    delta_time: FloatNum,
+) {
+    let meta_a = element_a.meta();
+    let meta_b = element_b.meta();
+    let inv_mass_a = meta_a.inv_mass();
+    let inv_mass_b = meta_b.inv_mass();
+    let inv_i_a = meta_a.inv_moment_of_inertia();
+    let inv_i_b = meta_b.inv_moment_of_inertia();
+    let point_a_v = element_a.compute_point_velocity(point_a);
+    let point_b_v = element_b.compute_point_velocity(point_b);
+    let mass = meta_a.mass() + meta_b.mass();
+    let damping_ratio = 2.;
+    let frequency = 5.6;
+    let inv_delta_time = delta_time.recip();
+
+    let (force_soft_factor, position_fix_factor) =
+        compute_soft_constraints_params(mass, damping_ratio, frequency, delta_time);
+
+    let distance: Vector = (point_b, point_a).into();
+    // TODO remove this
+    if distance.abs() < parameters.max_allow_permeate {
+        return;
+    }
+
+    let n = distance.normalize();
+
+    let r_a: Vector = (element_a.center_point(), *point_a).into();
+
+    let r_b: Vector = (element_b.center_point(), *point_b).into();
+
+    let mass_effective =
+        inv_mass_a + inv_mass_b + inv_i_a * (r_a ^ n).powf(2.) + inv_i_b * (r_b ^ n).powf(2.);
+
+    let position_fix = (distance.abs() - parameters.max_allow_permeate).max(0.);
+
+    let lambda = -(n * (point_a_v - point_b_v)
+        + position_fix_factor * position_fix * inv_delta_time)
+        * (mass_effective + (force_soft_factor * inv_delta_time)).recip();
+
+    element_a.meta_mut().apply_impulse(n * lambda, r_a);
+    element_b.meta_mut().apply_impulse(-n * lambda, r_b);
 }

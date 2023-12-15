@@ -6,6 +6,7 @@ pub struct Nail {
     origin_point: Point,
     // follow with element
     current_point: Point,
+    total_lambda: FloatNum,
 }
 
 impl From<Point> for Nail {
@@ -20,12 +21,30 @@ impl AddAssign<&Vector> for Nail {
     }
 }
 
+impl AsRef<Point> for Nail {
+    fn as_ref(&self) -> &Point {
+        &self.origin_point
+    }
+}
+
 impl Nail {
     pub fn new(point: Point) -> Self {
         Self {
             origin_point: point,
             current_point: point,
+            total_lambda: 0.,
         }
+    }
+
+    pub fn restrict_lambda(&mut self, lambda: FloatNum) -> FloatNum {
+        let previous_lambda = self.total_lambda;
+        self.total_lambda += lambda;
+        self.total_lambda = self.total_lambda.max(5.0);
+        self.total_lambda - previous_lambda
+    }
+
+    pub(crate) fn reset_total_lambda(&mut self) {
+        self.total_lambda = 0.;
     }
 
     pub fn rotate(&mut self, center_point: &Point, rad: FloatNum) {

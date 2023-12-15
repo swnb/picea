@@ -4,7 +4,7 @@ use crate::math::{vector::Vector, FloatNum};
 pub struct ConstraintParameters {
     // 位子修正的系数
     pub factor_position_bias: FloatNum,
-    // 弹性系数
+    // 弹性系数  0 - 1 之间
     pub factor_elastic: FloatNum,
     // FIXME remove
     pub max_allow_permeate: FloatNum,
@@ -19,7 +19,7 @@ impl Default for ConstraintParameters {
     fn default() -> Self {
         Self {
             factor_position_bias: 0.99,
-            factor_elastic: 0.01,
+            factor_elastic: 0.5,
             max_allow_permeate: 0.03,
             factor_default_friction: 0.2,
             allow_permeate_negative: true,
