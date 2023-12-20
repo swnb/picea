@@ -21,6 +21,7 @@ struct Model {
 
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
+    scene.set_gravity(|default| -*default);
 
     // let ground_bottom = Line::new((-200., -25.), (200., -25.));
 

@@ -1,15 +1,15 @@
 use nannou::{prelude::*, winit::event};
 use picea::{
     element::ElementBuilder,
-    math::{edge::Edge, point::Point, FloatNum},
+    math::{edge::Edge, point::Point, vector::Vector},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{concave::ConcavePolygon, line::Line, polygon::Square},
+    shape::{polygon::Square, CenterPoint, GeometryTransform},
     tools::{
         collision_view::CollisionStatusViewer, snapshot::create_element_construct_code_snapshot,
     },
 };
-use std::{collections::VecDeque, time::SystemTime};
+use std::time::SystemTime;
 
 struct Model {
     scene: Scene,
@@ -21,11 +21,26 @@ struct Model {
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
-    scene.set_gravity(|_| (0., -10.).into());
+    scene.set_gravity(|_| (0., -40.).into());
 
-    let id = (&mut scene) << ElementBuilder::new(Square::new(20., -10., 10.), MetaBuilder::new(1.));
+    // scene.set_gravity(|_| Vector::new(0., 0.));
 
-    scene.pin_element_on_point(id, (20., -10.).into());
+    let mut shape = Square::new(20., -10., 10.);
+
+    let shape_a = shape.clone();
+
+    shape.translate(&(15., 0.).into());
+
+    let shape_b = shape.clone();
+    // shape.rotate(&(20., -10.).into(), 3. * PI() / 4.);
+
+    let element_a_id = (&mut scene) << ElementBuilder::new(shape_a, MetaBuilder::new(1.));
+
+    scene.pin_element_on_point(element_a_id, (20., 0.).into());
+
+    let element_b_id = (&mut scene) << ElementBuilder::new(shape_b, MetaBuilder::new(1.));
+
+    scene.create_join(element_a_id, (30., -10.), element_b_id, (30. + 5., -10.));
 
     Model {
         scene,
@@ -96,7 +111,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .height(radius * 2. * scale);
     };
 
-    make_ellipse(RED, (20., -10.).into(), 5.);
+    make_ellipse(RED, (20., 0.).into(), 0.5);
 
     model.scene.elements_iter().for_each(|element| {
         // element
@@ -117,13 +132,18 @@ fn view(app: &App, model: &Model, frame: Frame) {
         //         _ => unimplemented!(),
         //     });
 
-        make_line(
-            YELLOWGREEN,
-            element.center_point(),
-            element.center_point() + element.meta().velocity() * 10.,
-        );
+        // make_line(
+        //     YELLOWGREEN,
+        //     element.center_point(),
+        //     element.center_point() + element.meta().velocity() * 10.,
+        // );
 
         make_ellipse(BLUE, element.center_point(), 0.5);
+
+        element.nails_iter().for_each(|nail| {
+            let p = nail.point_bind_with_element();
+            make_line(ORANGERED, *p, *nail.as_ref());
+        });
 
         element.shape().edge_iter().for_each(|edge| match edge {
             Edge::Line {
@@ -139,6 +159,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
             _ => unimplemented!(),
         });
     });
+
+    model
+        .scene
+        .join_points()
+        .into_iter()
+        .for_each(|(point_a, point_b)| make_line(RED, point_a, point_b));
 
     for info in model.collision_viewer.get_collision_infos() {
         let point = info.point_a();

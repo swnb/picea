@@ -7,7 +7,14 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-wasm-web = ["dep:console_error_panic_hook", "dep:js-sys", 'dep:serde', "dep:serde-wasm-bindgen", "dep:wasm-bindgen"]
+default = ["wasm-web"]
+wasm-web = [
+  "dep:console_error_panic_hook",
+  "dep:js-sys",
+  'dep:serde',
+  "dep:serde-wasm-bindgen",
+  "dep:wasm-bindgen",
+]
 
 [dependencies]
 console_error_panic_hook = { version = "0.1.7", optional = true }

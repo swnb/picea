@@ -1,18 +1,21 @@
 pub mod alias;
 pub(crate) mod store;
 
+use std::collections::BTreeMap;
+
 use crate::{
     algo::{
         collision::{Collider, Projector, SubCollider},
-        constraint::ConstraintObject,
+        constraint::{compute_soft_constraints_params, ConstraintObject},
     },
+    manifold::join,
     math::{
         axis::AxisDirection,
         point::Point,
         vector::{Vector, Vector3},
-        FloatNum, PI,
+        FloatNum, PI, TAU,
     },
-    meta::{nail::Nail, Mass, Meta},
+    meta::{force, join::JoinPoint, nail::Nail, Mass, Meta},
     shape::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint},
 };
 
@@ -80,6 +83,7 @@ pub struct Element {
     meta: Meta,
     shape: Box<dyn ShapeTraitUnion>,
     nails: Vec<Nail>,
+    join_points: BTreeMap<u32, JoinPoint>,
 }
 
 impl Element {
@@ -110,6 +114,7 @@ impl Element {
             shape,
             meta,
             nails: Default::default(),
+            join_points: Default::default(),
         }
     }
 
@@ -131,7 +136,12 @@ impl Element {
     #[inline]
     pub fn translate(&mut self, vector: &Vector) {
         self.shape.translate(vector);
+
         self.nails.iter_mut().for_each(|nail| *nail += vector);
+
+        self.join_points
+            .values_mut()
+            .for_each(|join_point| *join_point.point_mut() += vector)
     }
 
     #[inline]
@@ -143,6 +153,10 @@ impl Element {
         self.nails
             .iter_mut()
             .for_each(|nail| nail.rotate(center_point, rad));
+
+        self.join_points
+            .values_mut()
+            .for_each(|join_point| join_point.rotate(center_point, rad));
 
         self.meta_mut().set_angle(|pre| pre - rad);
     }
@@ -185,6 +199,62 @@ impl Element {
         self.nails.push(nail);
     }
 
+    pub fn create_join_point(&mut self, join_point: JoinPoint) {
+        self.join_points.insert(join_point.id(), join_point);
+    }
+
+    pub fn remove_join_point(&mut self, join_point_id: u32) {
+        self.join_points.remove(&join_point_id);
+    }
+
+    pub fn get_join_point(&self, join_point_id: u32) -> Option<&JoinPoint> {
+        self.join_points.get(&join_point_id)
+    }
+
+    pub fn get_join_point_mut(&mut self, join_point_id: u32) -> Option<&mut JoinPoint> {
+        self.join_points.get_mut(&join_point_id)
+    }
+
+    pub fn solve_nail_constraint(
+        &mut self,
+        nail: &Nail,
+        delta_time: FloatNum,
+        damping_ratio: FloatNum,
+        frequency: FloatNum,
+    ) {
+        let mass = self.meta().mass();
+        let inv_mass = self.meta().inv_mass();
+        let inv_i = self.meta().inv_moment_of_inertia();
+
+        let (force_soft_factor, position_fix_factor) =
+            compute_soft_constraints_params(mass, damping_ratio, frequency, delta_time);
+
+        let r_t: Vector = (&self.center_point(), nail.point_bind_with_element()).into();
+
+        // TODO when strength length zero
+        let strength_length = nail.stretch_length();
+
+        if strength_length.abs() < FloatNum::EPSILON {
+            return;
+        }
+
+        let n = -strength_length.normalize();
+
+        let v: Vector = self.compute_point_velocity(nail.point_bind_with_element());
+
+        let position_bias = position_fix_factor * strength_length.abs() * delta_time.recip();
+
+        let jv_b: f32 = -(v * n + position_bias);
+
+        let lambda = jv_b
+            * (force_soft_factor * delta_time.recip() + inv_mass + (r_t ^ n).powf(2.) * inv_i)
+                .recip();
+
+        let impulse = n * lambda;
+
+        self.meta_mut().apply_impulse(impulse, r_t);
+    }
+
     pub(crate) fn solve_nail_constraints(&mut self, delta_time: FloatNum) {
         let meta = self.meta();
         let mass = meta.mass();
@@ -194,43 +264,63 @@ impl Element {
 
         let self_ptr = self as *mut Self;
 
-        const F: f32 = 2.0;
+        const F: f32 = 0.9;
 
-        let normal_frequency_omega = F * PI() * 2.;
+        let normal_frequency_omega = F * TAU();
 
         // 胡克定律 f = kx
-        let k = mass * normal_frequency_omega * normal_frequency_omega;
+        let k = mass * normal_frequency_omega.powf(2.);
         // f = cv
-        let c = 2. * mass * normal_frequency_omega * 2.0; // * 0.1
+        let c = 2. * mass * normal_frequency_omega * 2.;
 
         let tmp = (c + k * delta_time).recip();
         // (b * distance / delta_time) == position fix
         let b = k * delta_time * tmp;
         // r is the coefficient for impulse lambda
-        let r = tmp;
+        let g = tmp;
+
+        let self_ptr = self as *mut _ as *mut ();
 
         for nail in &self.nails {
-            let stretch_length = nail.stretch_length();
-
-            // NOTE  if stretch_length == 0
-            let n = stretch_length.normalize();
-
-            let r_t: Vector = (&center_point, nail.point_bind_with_element()).into();
-
-            let v = self.compute_point_velocity(nail.point_bind_with_element());
-
-            let inv_mass_efficiency =
-                (inv_mass + (r_t ^ n).powf(2.) * inv_moment_of_inertia).recip();
-
-            let lambda = -(-v * n + (b * stretch_length.abs() / delta_time))
-                * (inv_mass_efficiency + r * delta_time.recip()).recip();
-
-            let impulse = n * lambda;
-
             unsafe {
-                (*self_ptr).meta_mut().apply_impulse(-impulse, r_t);
+                let self_mut = &mut *(self_ptr as *mut Element);
+                self_mut.solve_nail_constraint(nail, delta_time, 2., 5.6548667);
             }
         }
+
+        // for nail in &self.nails {
+        //     let stretch_length = nail.stretch_length();
+
+        //     // NOTE if stretch_length == 0
+        //     // TODO fix stretch_length equal to zero
+        //     let n = stretch_length.normalize();
+
+        //     let r_t: Vector = (&center_point, nail.point_bind_with_element()).into();
+
+        //     let v: Vector = self.compute_point_velocity(nail.point_bind_with_element());
+
+        //     let inv_mass_efficiency =
+        //         (inv_mass + (r_t ^ n).powf(2.) * inv_moment_of_inertia).recip();
+
+        //     let jv_b: FloatNum = -(v * -n + (b * stretch_length.abs() * delta_time.recip()));
+
+        //     let lambda = -(v * -n + (b * stretch_length.abs() * delta_time.recip()))
+        //         * (inv_mass_efficiency + g * delta_time.recip()).recip();
+
+        //     // let lambda = nail.restrict_lambda(lambda);
+        //     let impulse = n * lambda;
+
+        //     // unsafe {
+        //     //     (*self_ptr).meta_mut().apply_impulse(-impulse, r_t);
+        //     // }
+
+        //     // let position_bias =
+        //     //     stretch_length * delta_time.recip() * inv_mass_efficiency.recip() * 0.001;
+
+        //     // unsafe {
+        //     //     (*self_ptr).meta_mut().apply_impulse(position_bias, r_t);
+        //     // }
+        // }
     }
 }
 

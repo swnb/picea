@@ -66,7 +66,8 @@ impl ElementStore {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Element> {
         self.elements.iter_mut().map(|v| {
-            let element = &v.element as *const _ as *mut _;
+            let element = &v.element as *const _ as *const ();
+            let element = element as *mut Element;
             unsafe { &mut *element }
         })
     }
@@ -106,7 +107,8 @@ impl ElementStore {
 
     pub fn get_mut_element_by_id(&mut self, id: ID) -> Option<&mut Element> {
         let value = self.map.get_mut(&id)?;
-        let result = &value.element as *const _ as *mut Element;
+        let result = &value.element as *const _ as *const ();
+        let result = result as *mut Element;
         unsafe { &mut *result }.into()
     }
 
