@@ -519,6 +519,38 @@ impl Scene {
                 .apply_impulse(air_friction, (0., 0.).into());
         })
     }
+
+    unsafe fn query_element_pair(
+        &self,
+        element_a_id: ID,
+        element_b_id: ID,
+    ) -> Option<(*const Element, *const Element)> {
+        if element_a_id == element_b_id {
+            return None;
+        }
+
+        let element_a = self.element_store.get_element_by_id(element_a_id)? as *const Element;
+
+        let element_b = self.element_store.get_element_by_id(element_b_id)? as *const Element;
+
+        (element_a, element_b).into()
+    }
+
+    unsafe fn query_element_pair_mut(
+        &mut self,
+        element_a_id: ID,
+        element_b_id: ID,
+    ) -> Option<(*mut Element, *mut Element)> {
+        if element_a_id == element_b_id {
+            return None;
+        }
+
+        let element_a = self.element_store.get_mut_element_by_id(element_a_id)? as *mut Element;
+
+        let element_b = self.element_store.get_mut_element_by_id(element_b_id)? as *mut Element;
+
+        (element_a, element_b).into()
+    }
 }
 
 impl<T> Shl<T> for &mut Scene
