@@ -3,8 +3,6 @@ pub(crate) mod hooks;
 
 use std::ops::Shl;
 
-use serde::__private::de;
-
 use crate::{
     algo::{
         collision::{
