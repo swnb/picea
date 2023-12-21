@@ -1,9 +1,10 @@
 use crate::{
-    algo::constraint::{compute_soft_constraints_params, ConstraintObject},
     element::{Element, ID},
     math::{point::Point, vector::Vector, FloatNum},
     scene::context::ConstraintParameters,
 };
+
+use super::{compute_soft_constraints_params, ConstraintObject};
 
 pub struct JoinConstraint<Obj: ConstraintObject = Element> {
     id: u32,
@@ -44,12 +45,8 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
         self.id
     }
 
-    pub fn obj_a_id(&self) -> ID {
-        self.obj_a_id
-    }
-
-    pub fn obj_b_id(&self) -> ID {
-        self.obj_b_id
+    pub fn obj_id_pair(&self) -> (ID, ID) {
+        (self.obj_a_id, self.obj_b_id)
     }
 
     pub fn stretch_length(&self) -> Vector {

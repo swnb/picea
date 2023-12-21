@@ -1,9 +1,10 @@
 use crate::{
-    algo::constraint::{compute_soft_constraints_params, ConstraintObject},
     element::{Element, ID},
     math::{point::Point, vector::Vector, FloatNum},
     scene::context::ConstraintParameters,
 };
+
+use super::{compute_soft_constraints_params, ConstraintObject};
 
 pub struct PointConstraint<Obj: ConstraintObject = Element> {
     id: u32,

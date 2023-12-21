@@ -10,4 +10,3 @@ pub mod tools;
 pub mod web;
 
 pub(crate) mod constraints;
-pub(crate) mod manifold;

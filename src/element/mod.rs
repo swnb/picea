@@ -4,10 +4,8 @@ pub(crate) mod store;
 use std::collections::BTreeMap;
 
 use crate::{
-    algo::{
-        collision::{Collider, Projector, SubCollider},
-        constraint::ConstraintObject,
-    },
+    algo::collision::{Collider, Projector, SubCollider},
+    constraints::ConstraintObject,
     math::{
         axis::AxisDirection,
         point::Point,
