@@ -46,7 +46,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         (self.obj_id_a, self.obj_id_b)
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset_total_lambda(&mut self) {
         self.total_friction_lambda = 0.;
         self.total_friction_lambda = 0.;
     }

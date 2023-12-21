@@ -86,6 +86,7 @@ pub trait ConstraintObject {
  *
  * more details , visit https://zhuanlan.zhihu.com/p/411876276
  */
+#[allow(unused)]
 fn sequential_impulse() -> ! {
     panic!("don't use")
 }
