@@ -40,7 +40,7 @@ fn create_model(_app: &App) -> Model {
 
     let element_b_id = (&mut scene) << ElementBuilder::new(shape_b, MetaBuilder::new(1.));
 
-    scene.create_join(element_a_id, (30., -10.), element_b_id, (30. + 5., -10.));
+    scene.create_join_constraint(element_a_id, (30., -10.), element_b_id, (30. + 5., -10.));
 
     Model {
         scene,
@@ -155,11 +155,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
         });
     });
 
-    model
-        .scene
-        .join_points()
-        .into_iter()
-        .for_each(|(point_a, point_b)| make_line(RED, point_a, point_b));
+    // model
+    //     .scene
+    //     .join_points()
+    //     .into_iter()
+    //     .for_each(|(point_a, point_b)| make_line(RED, point_a, point_b));
 
     for info in model.collision_viewer.get_collision_infos() {
         let point = info.point_a();

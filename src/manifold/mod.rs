@@ -1,5 +1,3 @@
-pub(crate) mod join;
-
 use std::{
     collections::{btree_map::ValuesMut, BTreeMap},
     mem,

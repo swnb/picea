@@ -10,16 +10,12 @@ use crate::{
             accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
             rough_collision_detection,
         },
-        constraint::{solve_join_constraint, ContactManifold, ManifoldsIterMut, Solver},
+        constraint::{ContactManifold, ManifoldsIterMut, Solver},
     },
-    constraints::point::PointConstraint,
-    element::{self, store::ElementStore, Element},
-    manifold::{
-        join::{self, JoinManifold},
-        Manifold, ManifoldTable,
-    },
+    constraints::{join::JoinConstraint, point::PointConstraint},
+    element::{store::ElementStore, Element},
+    manifold::{Manifold, ManifoldTable},
     math::{point::Point, vector::Vector, FloatNum},
-    meta::join::JoinPoint,
     scene::hooks::CallbackHook,
 };
 
@@ -29,15 +25,14 @@ use self::context::Context;
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
-    join_point_id_dispatcher: IDDispatcher,
     manifold_table: ManifoldTable,
-    join_manifolds: BTreeMap<u32, JoinManifold>,
     total_skip_durations: FloatNum,
     context: Context,
     frame_count: u128,
     callback_hook: hooks::CallbackHook,
     constraints_id_dispatcher: IDDispatcher,
     point_constraints: BTreeMap<u32, PointConstraint>,
+    join_constraints: BTreeMap<u32, JoinConstraint>,
 }
 
 type ID = u32;
@@ -166,12 +161,10 @@ impl Scene {
         unsafe {
             self.reset_constraints_params(delta_time);
         }
-        // for _ in 0..4 {
 
         self.solve_point_constraints();
-        // for i in 0..3 {
-        self.solve_join_constraints(delta_time);
-        // }
+
+        self.solve_join_constraints();
 
         self.integrate_position(delta_time);
 
@@ -274,70 +267,35 @@ impl Scene {
         id.into()
     }
 
-    pub fn create_join(
+    pub fn create_join_constraint(
         &mut self,
-        element_a_id: u32,
+        element_a_id: ID,
         element_a_point: impl Into<Point>,
-        element_b_id: u32,
+        element_b_id: ID,
         element_b_point: impl Into<Point>,
-        // TODO error
-    ) -> Result<(), ()> {
+    ) -> Option<u32> {
+        let id = self.constraints_id_dispatcher.gen_id();
         if element_a_id == element_b_id {
-            return Err(());
-        }
-        let join_point_id = self.join_point_id_dispatcher.gen_id();
-
-        if let Some(element) = self.get_element_mut(element_a_id) {
-            element.create_join_point(JoinPoint::new(join_point_id, element_a_point))
+            // TODO result
+            panic!("can't be the same id");
         }
 
-        if let Some(element) = self.get_element_mut(element_b_id) {
-            element.create_join_point(JoinPoint::new(join_point_id, element_b_point))
+        let (element_a, element_b) =
+            unsafe { self.query_element_pair_mut(element_a_id, element_b_id)? };
+
+        let element_a_point = element_a_point.into();
+        let element_b_point = element_b_point.into();
+
+        unsafe {
+            (*element_a).create_bind_point(id, element_a_point);
+            (*element_b).create_bind_point(id, element_b_point);
         }
 
-        let join_manifold = JoinManifold::new(join_point_id, element_a_id, element_b_id);
+        let join_constraint = JoinConstraint::new(id, element_a_id, element_b_id);
 
-        self.join_manifolds.insert(join_point_id, join_manifold);
+        self.join_constraints.insert(id, join_constraint);
 
-        Ok(())
-    }
-
-    pub fn join_points(&self) -> Vec<(Point, Point)> {
-        let query_element_pair = |element_id_pair: (u32, u32)| -> Option<(&Element, &Element)> {
-            let element_a =
-                self.element_store.get_element_by_id(element_id_pair.0)? as *const Element;
-
-            let element_b =
-                self.element_store.get_element_by_id(element_id_pair.1)? as *const Element;
-
-            unsafe { (&*element_a, &*element_b) }.into()
-        };
-
-        let result = self
-            .join_manifolds
-            .values()
-            .filter_map(|j| {
-                let join_point_id = j.id();
-                query_element_pair((j.object_a_id(), j.object_b_id())).and_then(
-                    |(element_a, element_b)| {
-                        if let Some(join_point_a) = element_a.get_join_point(join_point_id) {
-                            let join_point_a = join_point_a as *const JoinPoint;
-                            if let Some(join_point_b) = element_b.get_join_point(join_point_id) {
-                                let join_point_b = join_point_b as *const JoinPoint;
-                                unsafe {
-                                    return Some((
-                                        *(*join_point_a).point(),
-                                        *(*join_point_b).point(),
-                                    ));
-                                }
-                            }
-                        }
-                        None
-                    },
-                )
-            })
-            .collect::<Vec<(Point, Point)>>();
-        result
+        id.into()
     }
 
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
@@ -479,6 +437,42 @@ impl Scene {
         legacy_constraint_ids.iter().for_each(|id| {
             self.point_constraints.remove(id);
         });
+
+        legacy_constraint_ids.truncate(0);
+
+        for join_constraint in (*self_ptr).join_constraints.values_mut() {
+            let Some((element_a, element_b)) = (*self_ptr)
+                .query_element_pair_mut(join_constraint.obj_a_id(), join_constraint.obj_b_id())
+            else {
+                legacy_constraint_ids.push(join_constraint.id());
+                continue;
+            };
+
+            let Some(move_point_a) = (*element_a).get_bind_point(join_constraint.id()) else {
+                legacy_constraint_ids.push(join_constraint.id());
+                continue;
+            };
+            let Some(move_point_b) = (*element_b).get_bind_point(join_constraint.id()) else {
+                legacy_constraint_ids.push(join_constraint.id());
+                continue;
+            };
+
+            let obj_a = element_a as *mut _;
+            let obj_b = element_b as *mut _;
+
+            join_constraint.reset_params(
+                &self.context.constraint_parameters,
+                (obj_a, obj_b),
+                (*move_point_a, *move_point_b),
+                2.0,
+                5.4,
+                delta_time,
+            );
+        }
+
+        legacy_constraint_ids.iter().for_each(|id| {
+            self.join_constraints.remove(id);
+        });
     }
 
     fn solve_point_constraints(&mut self) {
@@ -487,51 +481,12 @@ impl Scene {
             .for_each(|constraint| unsafe { constraint.solve(&self.context.constraint_parameters) })
     }
 
-    fn solve_join_constraints(&mut self, delta_time: FloatNum) {
-        let query_element_pair =
-            &mut |element_id_pair: (u32, u32)| -> Option<(&mut Element, &mut Element)> {
-                let element_a = self
-                    .element_store
-                    .get_mut_element_by_id(element_id_pair.0)?
-                    as *mut Element;
-
-                let element_b = self
-                    .element_store
-                    .get_mut_element_by_id(element_id_pair.1)?
-                    as *mut Element;
-
-                unsafe { (&mut *element_a, &mut *element_b) }.into()
-            };
-
-        self.join_manifolds
+    fn solve_join_constraints(&mut self) {
+        self.join_constraints
             .values_mut()
-            .filter_map(|join_manifold| {
-                let join_point_id = join_manifold.id();
-                query_element_pair((join_manifold.object_a_id(), join_manifold.object_b_id()))
-                    .map(|element_pair| (join_point_id, element_pair))
+            .for_each(|join_constraint| unsafe {
+                join_constraint.solve(&self.context.constraint_parameters)
             })
-            .filter_map(|(join_point_id, (element_a, element_b))| {
-                if let Some(join_point_a) = element_a.get_join_point_mut(join_point_id) {
-                    let join_point_a = join_point_a as *mut JoinPoint;
-                    if let Some(join_point_b) = element_b.get_join_point_mut(join_point_id) {
-                        let join_point_b = join_point_b as *mut JoinPoint;
-                        return Some((element_a, join_point_a, element_b, join_point_b));
-                    }
-                }
-                None
-            })
-            .for_each(
-                |(element_a, join_point_a, element_b, join_point_b)| unsafe {
-                    solve_join_constraint(
-                        &self.context.constraint_parameters,
-                        element_a,
-                        (*join_point_a).point(),
-                        element_b,
-                        (*join_point_b).point(),
-                        delta_time,
-                    )
-                },
-            );
     }
 
     fn solve_air_friction(&mut self) {
@@ -572,9 +527,9 @@ impl Scene {
             return None;
         }
 
-        let element_a = self.element_store.get_mut_element_by_id(element_a_id)? as *mut Element;
+        let element_a = self.get_element_mut(element_a_id)? as *mut Element;
 
-        let element_b = self.element_store.get_mut_element_by_id(element_b_id)? as *mut Element;
+        let element_b = self.get_element_mut(element_b_id)? as *mut Element;
 
         (element_a, element_b).into()
     }
