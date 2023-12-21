@@ -73,7 +73,7 @@ where
     {
         let (start_index, end_index) = RangeBoundsToIndex(range).to_index_bound();
 
-        for i in (start_index + 1)..end_index {
+        for i in (start_index + 1)..=end_index {
             let mut index = i;
             for j in (start_index..index).rev() {
                 if compare(&self[index], &self[j]).is_lt() {
