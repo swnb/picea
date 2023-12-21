@@ -14,7 +14,7 @@ use crate::{
         vector::{Vector, Vector3},
         FloatNum,
     },
-    meta::{join::JoinPoint, Mass, Meta},
+    meta::{Mass, Meta},
     shape::{utils::rotate_point, CenterPoint, EdgeIterable, GeometryTransform, NearestPoint},
 };
 
@@ -81,7 +81,6 @@ pub struct Element {
     id: ID,
     meta: Meta,
     shape: Box<dyn ShapeTraitUnion>,
-    join_points: BTreeMap<u32, JoinPoint>,
     bind_points: BTreeMap<u32, Point>, // move with element
 }
 
@@ -112,7 +111,6 @@ impl Element {
             id,
             shape,
             meta,
-            join_points: Default::default(),
             bind_points: Default::default(),
         }
     }
@@ -136,10 +134,6 @@ impl Element {
     pub fn translate(&mut self, vector: &Vector) {
         self.shape.translate(vector);
 
-        self.join_points
-            .values_mut()
-            .for_each(|join_point| *join_point.point_mut() += vector);
-
         self.bind_points
             .values_mut()
             .for_each(|point| *point += vector)
@@ -150,10 +144,6 @@ impl Element {
         let center_point = &self.center_point();
 
         self.shape.rotate(center_point, rad);
-
-        self.join_points
-            .values_mut()
-            .for_each(|join_point| join_point.rotate(center_point, rad));
 
         self.bind_points.values_mut().for_each(|point| {
             *point = rotate_point(point, center_point, rad);
@@ -189,22 +179,6 @@ impl Element {
         self.rotate(-angle);
 
         (path, angle).into()
-    }
-
-    pub fn create_join_point(&mut self, join_point: JoinPoint) {
-        self.join_points.insert(join_point.id(), join_point);
-    }
-
-    pub fn remove_join_point(&mut self, join_point_id: u32) {
-        self.join_points.remove(&join_point_id);
-    }
-
-    pub fn get_join_point(&self, join_point_id: u32) -> Option<&JoinPoint> {
-        self.join_points.get(&join_point_id)
-    }
-
-    pub fn get_join_point_mut(&mut self, join_point_id: u32) -> Option<&mut JoinPoint> {
-        self.join_points.get_mut(&join_point_id)
     }
 
     pub(crate) fn create_bind_point(&mut self, id: u32, point: Point) {

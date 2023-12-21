@@ -1,5 +1,4 @@
 pub mod force;
-pub(crate) mod join;
 
 use std::ops::Deref;
 
