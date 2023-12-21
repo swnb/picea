@@ -53,7 +53,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
         (self.move_point_with_b, self.move_point_with_a).into()
     }
 
-    pub unsafe fn reset_params(
+    pub(crate) unsafe fn reset_params(
         &mut self,
         parameters: &ConstraintParameters,
         (obj_a, obj_b): (*mut Obj, *mut Obj),

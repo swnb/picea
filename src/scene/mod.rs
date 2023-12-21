@@ -165,7 +165,7 @@ impl Scene {
 
             self.solve_join_constraints();
 
-            self.solve_contact_constraints(delta_time, false);
+            self.solve_contact_constraints(delta_time, true);
         }
 
         self.solve_contact_constraints(delta_time, true);
@@ -263,7 +263,8 @@ impl Scene {
 
         element.create_bind_point(id, element_point);
 
-        let point_constraint = PointConstraint::<Element>::new(id, element_id, fixed_point);
+        let point_constraint =
+            PointConstraint::<Element>::new(id, element_id, fixed_point, element_point);
 
         self.point_constraints.insert(id, point_constraint);
 
@@ -299,6 +300,22 @@ impl Scene {
         self.join_constraints.insert(id, join_constraint);
 
         id.into()
+    }
+
+    pub fn point_constraint(&self) -> impl Iterator<Item = &PointConstraint> {
+        self.point_constraints.values()
+    }
+
+    pub fn get_point_constraint(&self, id: u32) -> Option<&PointConstraint> {
+        self.point_constraints.get(&id)
+    }
+
+    pub fn get_point_constraint_mut(&mut self, id: u32) -> Option<&mut PointConstraint> {
+        self.point_constraints.get_mut(&id)
+    }
+
+    pub fn remove_point_constraint(&mut self, id: u32) -> Option<PointConstraint> {
+        self.point_constraints.remove(&id)
     }
 
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
@@ -420,7 +437,7 @@ impl Scene {
             };
             let move_point = *move_point;
             let obj = element as *mut _;
-            point_constraint.reset_params(move_point, 2.0, 5.4, obj, delta_time);
+            point_constraint.reset_params(move_point, 1.0, 10., obj, delta_time);
         }
 
         legacy_constraint_ids.iter().for_each(|id| {

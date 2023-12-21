@@ -7,7 +7,7 @@ pub mod contact;
 pub mod join;
 pub mod point;
 
-fn compute_mass_effective<Obj: ConstraintObject>(
+pub fn compute_mass_effective<Obj: ConstraintObject>(
     &normal: &Vector,
     object_a: &Obj,
     object_b: &Obj,

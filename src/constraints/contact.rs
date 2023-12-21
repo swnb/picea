@@ -46,19 +46,19 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         (self.obj_id_a, self.obj_id_b)
     }
 
-    pub fn reset_total_lambda(&mut self) {
+    pub(crate) fn reset_total_lambda(&mut self) {
         self.total_friction_lambda = 0.;
         self.total_friction_lambda = 0.;
     }
 
     // restrict total lambda must big than zero
-    fn restrict_lambda(&mut self, lambda: FloatNum) -> FloatNum {
+    pub(crate) fn restrict_lambda(&mut self, lambda: FloatNum) -> FloatNum {
         let previous_total_lambda = self.total_lambda;
         self.total_lambda = (self.total_lambda + lambda).max(0.);
         self.total_lambda - previous_total_lambda
     }
 
-    pub unsafe fn reset_params(
+    pub(crate) unsafe fn reset_params(
         &mut self,
         parameters: &ConstraintParameters,
         (obj_a, obj_b): (*mut Obj, *mut Obj),

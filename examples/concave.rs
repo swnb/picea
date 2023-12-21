@@ -21,6 +21,8 @@ struct Model {
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
+    scene.set_gravity(|pre| -*pre);
+
     let ground_bottom = Line::new((-200., -25.), (200., -25.));
 
     &mut scene << ElementBuilder::new(ground_bottom, MetaBuilder::new(1.).is_fixed(true));

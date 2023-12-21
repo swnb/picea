@@ -4,7 +4,7 @@ use picea::{
     math::{edge::Edge, point::Point, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{concave::ConcavePolygon, line::Line, polygon::Square},
+    shape::{circle::Circle, concave::ConcavePolygon, line::Line, polygon::Square},
     tools::{
         collision_view::CollisionStatusViewer, snapshot::create_element_construct_code_snapshot,
     },
@@ -20,6 +20,8 @@ struct Model {
 
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
+
+    scene.set_gravity(|pre| -*pre);
 
     let ground_bottom = Line::new((-200., -25.), (200., -25.));
 
@@ -43,9 +45,20 @@ fn create_model(_app: &App) -> Model {
         for j in 0..6 {
             &mut scene
                 << ElementBuilder::new(
-                    Square::new(-10. + j as FloatNum * 5., 10. + i as FloatNum * 5., 4.),
+                    Circle::new(
+                        (
+                            -10. + j as FloatNum * 5. + 2.,
+                            10. + i as FloatNum * 5. + 2.,
+                        ),
+                        2.,
+                    ),
                     MetaBuilder::new(10.),
                 );
+            // &mut scene
+            //     << ElementBuilder::new(
+            //         Square::new(-10. + j as FloatNum * 5., 10. + i as FloatNum * 5., 4.),
+            //         MetaBuilder::new(10.),
+            //     );
         }
     }
 

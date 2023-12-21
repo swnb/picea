@@ -21,12 +21,12 @@ pub struct PointConstraint<Obj: ConstraintObject = Element> {
 }
 
 impl<Obj: ConstraintObject> PointConstraint<Obj> {
-    pub fn new(id: u32, element_id: ID, fixed_point: Point) -> Self {
+    pub fn new(id: u32, element_id: ID, fixed_point: Point, move_point: Point) -> Self {
         Self {
             id,
             element_id,
             fixed_point,
-            move_point: Default::default(),
+            move_point,
             total_lambda: 0.,
             position_bias: 0.,
             soft_part: 0.,
@@ -34,6 +34,7 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
             obj: std::ptr::null_mut(),
         }
     }
+
     pub fn id(&self) -> u32 {
         self.id
     }
@@ -46,7 +47,19 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
         (self.move_point, self.fixed_point).into()
     }
 
-    pub unsafe fn reset_params(
+    pub fn move_point(&self) -> Point {
+        self.move_point
+    }
+
+    pub fn fixed_point(&self) -> &Point {
+        &self.fixed_point
+    }
+
+    pub fn fixed_point_mut(&mut self) -> &mut Point {
+        &mut self.fixed_point
+    }
+
+    pub(crate) unsafe fn reset_params(
         &mut self,
         move_point: Point,
         damping_ratio: FloatNum,
@@ -84,7 +97,7 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
         self.obj = obj;
     }
 
-    pub unsafe fn solve(&mut self, parameters: &ConstraintParameters) {
+    pub(crate) unsafe fn solve(&mut self, parameters: &ConstraintParameters) {
         let strength_length = self.stretch_length();
         if strength_length.abs() < parameters.max_allow_permeate {
             // no constraint if there is no need

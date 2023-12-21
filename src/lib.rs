@@ -9,4 +9,4 @@ pub mod tools;
 #[cfg(feature = "wasm-web")]
 pub mod web;
 
-pub(crate) mod constraints;
+pub mod constraints;
