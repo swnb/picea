@@ -12,6 +12,7 @@ use crate::{
         },
         constraint::{solve_join_constraint, ContactManifold, ManifoldsIterMut, Solver},
     },
+    constraints::point::PointConstraint,
     element::{self, store::ElementStore, Element},
     manifold::{
         join::{self, JoinManifold},
@@ -24,6 +25,7 @@ use crate::{
 
 use self::context::Context;
 
+#[derive(Default)]
 pub struct Scene {
     element_store: ElementStore,
     id_dispatcher: IDDispatcher,
@@ -34,6 +36,8 @@ pub struct Scene {
     context: Context,
     frame_count: u128,
     callback_hook: hooks::CallbackHook,
+    constraints_id_dispatcher: IDDispatcher,
+    point_constraints: BTreeMap<u32, PointConstraint>,
 }
 
 type ID = u32;
@@ -62,27 +66,11 @@ impl IDDispatcher {
     }
 }
 
-impl Default for Scene {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Scene {
     #[inline]
     pub fn new() -> Self {
-        // TODO use default to gen
-        Self {
-            element_store: Default::default(),
-            id_dispatcher: Default::default(),
-            join_point_id_dispatcher: Default::default(),
-            manifold_table: Default::default(),
-            join_manifolds: Default::default(),
-            // TODO
-            total_skip_durations: 0.,
-            context: Default::default(),
-            frame_count: 0,
-            callback_hook: Default::default(),
+        Scene {
+            ..Default::default()
         }
     }
 
@@ -175,9 +163,12 @@ impl Scene {
 
         self.constraints(delta_time);
 
+        unsafe {
+            self.reset_constraints_params(delta_time);
+        }
         // for _ in 0..4 {
 
-        self.solve_nail_constraints(delta_time);
+        self.solve_point_constraints();
         // for i in 0..3 {
         self.solve_join_constraints(delta_time);
         // }
@@ -259,15 +250,28 @@ impl Scene {
         }
     }
 
-    pub fn pin_element_on_point(&mut self, element_id: ID, point: Point) {
-        if let Some(element) = self.get_element_mut(element_id) {
-            element.create_nail(point)
-        }
-    }
-
     pub fn set_gravity(&mut self, reducer: impl Fn(&Vector) -> Vector) {
         let context = &mut self.context;
         context.default_gravity = reducer(&context.default_gravity);
+    }
+
+    pub fn create_point_constraint(
+        &mut self,
+        element_id: ID,
+        element_point: Point,
+        fixed_point: Point,
+    ) -> Option<u32> {
+        let id = self.constraints_id_dispatcher.gen_id();
+
+        let element = self.get_element_mut(element_id)?;
+
+        element.create_bind_point(id, element_point);
+
+        let point_constraint = PointConstraint::<Element>::new(id, element_id, fixed_point);
+
+        self.point_constraints.insert(id, point_constraint);
+
+        id.into()
     }
 
     pub fn create_join(
@@ -454,10 +458,33 @@ impl Scene {
         }
     }
 
-    fn solve_nail_constraints(&mut self, delta_time: FloatNum) {
-        self.elements_iter_mut().for_each(|element| {
-            element.solve_nail_constraints(delta_time);
-        })
+    unsafe fn reset_constraints_params(&mut self, delta_time: FloatNum) {
+        let mut legacy_constraint_ids = vec![];
+        let self_ptr = self as *mut Scene;
+
+        for point_constraint in (*self_ptr).point_constraints.values_mut() {
+            let Some(element) = (*self_ptr).get_element_mut(point_constraint.element_id()) else {
+                legacy_constraint_ids.push(point_constraint.id());
+                continue;
+            };
+            let Some(move_point) = element.get_bind_point(point_constraint.id()) else {
+                legacy_constraint_ids.push(point_constraint.id());
+                continue;
+            };
+            let move_point = *move_point;
+            let obj = element as *mut _;
+            point_constraint.reset_params(move_point, 2.0, 5.4, obj, delta_time);
+        }
+
+        legacy_constraint_ids.iter().for_each(|id| {
+            self.point_constraints.remove(id);
+        });
+    }
+
+    fn solve_point_constraints(&mut self) {
+        self.point_constraints
+            .values_mut()
+            .for_each(|constraint| unsafe { constraint.solve(&self.context.constraint_parameters) })
     }
 
     fn solve_join_constraints(&mut self, delta_time: FloatNum) {
