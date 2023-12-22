@@ -28,6 +28,7 @@ pub struct Meta {
     is_transparent: bool,
     // if element is is_sleeping , skip constraint or collision
     is_sleeping: bool,
+    is_ignore_gravity: bool,
     motionless_frame_counter: u8,
 }
 
@@ -233,6 +234,10 @@ impl Meta {
 
         0.5 * (self.mass() * velocity_square + self.moment_of_inertia() * angle_velocity_square)
     }
+
+    pub fn is_ignore_gravity(&self) -> bool {
+        self.is_ignore_gravity
+    }
 }
 
 #[derive(Clone)]
@@ -268,6 +273,7 @@ impl MetaBuilder {
                 is_collision: false,
                 is_transparent: false,
                 is_sleeping: false,
+                is_ignore_gravity: false,
                 motionless_frame_counter: 0,
             },
         }
@@ -307,6 +313,11 @@ impl MetaBuilder {
 
     pub fn is_transparent(mut self, is_transparent: bool) -> Self {
         self.meta.is_transparent = is_transparent;
+        self
+    }
+
+    pub fn is_ignore_gravity(mut self, is_ignore_gravity: bool) -> Self {
+        self.meta.is_ignore_gravity = is_ignore_gravity;
         self
     }
 }
