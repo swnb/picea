@@ -165,7 +165,7 @@ impl Scene {
 
             self.solve_join_constraints();
 
-            self.solve_contact_constraints(delta_time, true);
+            self.solve_contact_constraints(delta_time, false);
         }
 
         self.solve_contact_constraints(delta_time, true);
