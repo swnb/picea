@@ -179,19 +179,19 @@ pub fn accurate_collision_detection_for_sub_collider(
         (max_point_a, max_point_b).into()
     };
 
-    let minkowski = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
+    let simplex = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
 
     // REVIEW move this into gjk
     const MAX_TOLERABLE_CONTACT_DEPTH: FloatNum = 0.01;
 
-    if minkowski
+    if simplex
         .iter()
         .any(|p| p.vector.abs() < MAX_TOLERABLE_CONTACT_DEPTH)
     {
         return None;
     }
 
-    let minkowski_edge = epa_compute_collision_edge(minkowski, compute_support_point);
+    let minkowski_edge = epa_compute_collision_edge(simplex, compute_support_point);
 
     let contact_infos: Vec<ContactPointPair> = minkowski_edge.get_contact_info(a, b, true);
 
@@ -299,14 +299,14 @@ impl From<(Point, Point)> for MinkowskiDifferencePoint {
     }
 }
 
-type Triangle = [MinkowskiDifferencePoint; 3];
+type Simplex = [MinkowskiDifferencePoint; 3];
 
 // for rectangle , avg compare is 1 to 2 time;
 // https://youtu.be/ajv46BSqcK4 gjk algo explain
 pub(crate) fn gjk_collision_detective(
     first_approximation_vector: Vector,
     compute_support_point: impl Fn(Vector) -> MinkowskiDifferencePoint,
-) -> Option<Triangle> {
+) -> Option<Simplex> {
     let approximation_vector = first_approximation_vector;
 
     let mut a = compute_support_point(approximation_vector);
@@ -358,8 +358,8 @@ pub(crate) fn gjk_collision_detective(
         Failure,
     }
 
-    // image triangle with point a, b, c, keep c as the updated point
-    let mut is_origin_inside_triangle = || -> Option<ControlFlow<(), Res>> {
+    // image simplex with point a, b, c, keep c as the updated point
+    let mut is_origin_inside_simplex = || -> Option<ControlFlow<(), Res>> {
         use Res::*;
 
         let inv_c = -c.vector;
@@ -404,7 +404,7 @@ pub(crate) fn gjk_collision_detective(
         use ControlFlow::*;
         use Res::*;
 
-        return match is_origin_inside_triangle()? {
+        return match is_origin_inside_simplex()? {
             Break(_) => None,
             Continue(Success) => Some([a, b, c]),
             Continue(Failure) => continue,
@@ -711,13 +711,13 @@ impl Deref for Minkowski {
 }
 
 impl Minkowski {
-    pub(crate) fn new(triangle: Triangle) -> Self {
+    pub(crate) fn new(simplex: Simplex) -> Self {
         // expect two iter to find the close edge
         let mut edges: Vec<MinkowskiEdge> = Vec::with_capacity(3 + 2);
         for i in 0..3 {
             let j = (i + 1) % 3;
-            let a = triangle[i].clone();
-            let b = triangle[j].clone();
+            let a = simplex[i].clone();
+            let b = simplex[j].clone();
             let edge = (a, b).into();
             edges.push(edge);
         }
@@ -770,13 +770,13 @@ impl Minkowski {
 
 // https://dyn4j.org/2010/05/epa-expanding-polytope-algorithm/ epa algo explain
 pub(crate) fn epa_compute_collision_edge<F>(
-    triangle: Triangle,
+    simplex: Simplex,
     compute_support_point: F,
 ) -> MinkowskiEdge
 where
     F: Fn(Vector) -> MinkowskiDifferencePoint,
 {
-    let mut minkowski = Minkowski::new(triangle);
+    let mut minkowski = Minkowski::new(simplex);
 
     while minkowski.expand(&compute_support_point).is_ok() {}
 
