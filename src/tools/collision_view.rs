@@ -89,12 +89,12 @@ impl CollisionStatusViewer {
 
         self.minkowski_simplexes.push({
             let simplex = simplex.clone();
-            simplex.map(|ref p| p.vector.to_point())
+            simplex.map(|ref p| p.to_point())
         });
 
         self.minkowski_different_gathers = compute_minkowski(compute_support_point)
             .into_iter()
-            .map(|different_point| different_point.vector.to_point())
+            .map(|different_point| different_point.to_point())
             .collect();
 
         let edge = epa_compute_collision_edge(simplex, compute_support_point);
