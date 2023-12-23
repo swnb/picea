@@ -138,7 +138,7 @@ where
 
     match (sub_colliders_a, sub_colliders_b) {
         // TODO
-        (Some(sub_colliders_a), Some(sub_colliders_b)) => {
+        (Some(sub_colliders_a), Some(_)) => {
             for collider_a in sub_colliders_a {
                 let sub_colliders_b = collider_b.sub_colliders().unwrap();
                 for collider_b in sub_colliders_b {
@@ -586,8 +586,6 @@ impl MinkowskiEdge {
                 normal
             };
 
-            let normal_toward_b = -normal_toward_a;
-
             let contact_point_pair = ContactPointPair {
                 contact_point_a: a1,
                 contact_point_b: b1,
@@ -606,8 +604,6 @@ impl MinkowskiEdge {
             } else {
                 normal
             };
-
-            let normal_toward_b = -normal_toward_a;
 
             let contact_point_b = a1 + (normal_toward_a * depth);
 
@@ -673,20 +669,20 @@ impl MinkowskiEdge {
 
         let (edge_a, edge_b) = match (a1 == a2, b1 == b2) {
             (true, true) => {
-                let a2 = sub_collider_a.nearest_point(&a1, &normal);
-                let b2 = sub_collider_b.nearest_point(&b1, &normal);
+                let a2 = sub_collider_a.nearest_point(&a1, normal);
+                let b2 = sub_collider_b.nearest_point(&b1, normal);
                 let edge_a: Segment<_> = (a1, a2).into();
                 let edge_b: Segment<_> = (b1, b2).into();
                 (edge_a, edge_b)
             }
             (true, false) => {
-                let a2 = sub_collider_a.nearest_point(&a1, &normal);
+                let a2 = sub_collider_a.nearest_point(&a1, normal);
                 let edge_a: Segment<_> = (a1, a2).into();
                 let edge_b: Segment<_> = (b1, b2).into();
                 (edge_a, edge_b)
             }
             (false, true) => {
-                let b2 = sub_collider_b.nearest_point(&b1, &normal);
+                let b2 = sub_collider_b.nearest_point(&b1, normal);
                 let edge_a: Segment<_> = (a1, a2).into();
                 let edge_b: Segment<_> = (b1, b2).into();
                 (edge_a, edge_b)
