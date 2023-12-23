@@ -186,7 +186,7 @@ pub fn accurate_collision_detection_for_sub_collider(
 
     if simplex
         .iter()
-        .any(|p| p.vector.abs() < MAX_TOLERABLE_CONTACT_DEPTH)
+        .any(|p| p.abs() < MAX_TOLERABLE_CONTACT_DEPTH)
     {
         return None;
     }
@@ -274,18 +274,26 @@ fn sweep_and_prune_collision_detection<T, Z>(
 pub(crate) struct MinkowskiDifferencePoint {
     pub(crate) start_point_from_a: Point,
     pub(crate) end_point_from_b: Point,
-    pub(crate) vector: Vector,
+    pub(crate) value: Vector,
+}
+
+impl Deref for MinkowskiDifferencePoint {
+    type Target = Vector;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
 }
 
 impl Display for MinkowskiDifferencePoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&format!("{},", self.vector))
+        f.write_str(&format!("{},", self.value))
     }
 }
 
 impl PartialEq for MinkowskiDifferencePoint {
     fn eq(&self, other: &Self) -> bool {
-        self.vector == other.vector
+        self.value == other.value
     }
 }
 
@@ -294,24 +302,24 @@ impl From<(Point, Point)> for MinkowskiDifferencePoint {
         Self {
             start_point_from_a: s,
             end_point_from_b: e,
-            vector: (e, s).into(),
+            value: (e, s).into(),
         }
     }
 }
 
-type Triangle = [MinkowskiDifferencePoint; 3];
+type Simplex = [MinkowskiDifferencePoint; 3];
 
 // for rectangle , avg compare is 1 to 2 time;
 // https://youtu.be/ajv46BSqcK4 gjk algo explain
 pub(crate) fn gjk_collision_detective(
     first_approximation_vector: Vector,
     compute_support_point: impl Fn(Vector) -> MinkowskiDifferencePoint,
-) -> Option<Triangle> {
+) -> Option<Simplex> {
     let approximation_vector = first_approximation_vector;
 
     let mut a = compute_support_point(approximation_vector);
 
-    if a.vector == (0., 0.).into() {
+    if a.value == (0., 0.).into() {
         return None;
     }
 
@@ -319,14 +327,14 @@ pub(crate) fn gjk_collision_detective(
         let result = compute_support_point(reference_vector);
         // dbg!(&result, reference_vector);
         // FIXME this is wrong? <= 0
-        if (result.vector * reference_vector) < 0. {
+        if (result.value * reference_vector) < 0. {
             None
         } else {
             Some(result)
         }
     };
 
-    let approximation_vector = -a.vector;
+    let approximation_vector = -a.value;
     let mut b = compute_support_point(approximation_vector)?;
 
     if a == b {
@@ -345,7 +353,7 @@ pub(crate) fn gjk_collision_detective(
         }
     }
 
-    let approximation_vector = compute_third_reference_vector(a.vector, b.vector);
+    let approximation_vector = compute_third_reference_vector(a.value, b.value);
 
     let mut c = compute_support_point(approximation_vector)?;
 
@@ -358,14 +366,14 @@ pub(crate) fn gjk_collision_detective(
         Failure,
     }
 
-    // image triangle with point a, b, c, keep c as the updated point
-    let mut is_origin_inside_triangle = || -> Option<ControlFlow<(), Res>> {
+    // image simplex with point a, b, c, keep c as the updated point
+    let mut is_origin_inside_simplex = || -> Option<ControlFlow<(), Res>> {
         use Res::*;
 
-        let inv_c = -c.vector;
+        let inv_c = -c.value;
 
-        let ca: Vector3<_> = (a.vector + inv_c).into();
-        let cb: Vector3<_> = (b.vector + inv_c).into();
+        let ca: Vector3<_> = (a.value + inv_c).into();
+        let cb: Vector3<_> = (b.value + inv_c).into();
         let cb_normal = (cb ^ (cb ^ ca)).into();
 
         if inv_c * cb_normal > f32::EPSILON {
@@ -404,7 +412,7 @@ pub(crate) fn gjk_collision_detective(
         use ControlFlow::*;
         use Res::*;
 
-        return match is_origin_inside_triangle()? {
+        return match is_origin_inside_simplex()? {
             Break(_) => None,
             Continue(Success) => Some([a, b, c]),
             Continue(Failure) => continue,
@@ -445,9 +453,9 @@ impl Display for MinkowskiEdge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_char('[')?;
         let start_point = &self.start_different_point;
-        f.write_str(&format!("{},", start_point.vector))?;
+        f.write_str(&format!("{},", start_point.value))?;
         let end_point = &self.end_different_point;
-        f.write_str(&format!("{}", end_point.vector))?;
+        f.write_str(&format!("{}", end_point.value))?;
         f.write_char(']')
     }
 }
@@ -458,8 +466,8 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
     ) -> Self {
         let a = start_point;
         let b = end_point;
-        let ab = (b.vector - a.vector).into();
-        let ao: Vector3<_> = (-a.vector).into();
+        let ab = (b.value - a.value).into();
+        let ao: Vector3<_> = (-a.value).into();
 
         let ao_x_ab = ao ^ ab;
 
@@ -478,7 +486,7 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
             }
         } else {
             let normal: Vector<_> = (ao_x_ab ^ ab).into();
-            let depth = a.vector >> normal;
+            let depth = a.value >> normal;
 
             debug_assert!(depth.is_sign_positive());
 
@@ -508,13 +516,12 @@ impl MinkowskiEdge {
             let center_point = compute_minkowski_center_point();
             let normal_toward_origin = -center_point.to_vector();
             if !(normal * normal_toward_origin).is_sign_positive() {
-                dbg!("hit");
                 normal = -normal;
             }
         }
 
         let different_point = compute_support_point(normal);
-        let new_point = different_point.vector;
+        let new_point = different_point.value;
 
         // consider this const variable is same as zero
         const MAX_TOLERABLE_ERROR: f32 = 1e-4;
@@ -523,18 +530,17 @@ impl MinkowskiEdge {
             return None;
         }
 
-        if (different_point.vector - self.start_different_point.vector).abs() < MAX_TOLERABLE_ERROR
-            || (different_point.vector - self.end_different_point.vector).abs()
-                < MAX_TOLERABLE_ERROR
+        if (different_point.value - self.start_different_point.value).abs() < MAX_TOLERABLE_ERROR
+            || (different_point.value - self.end_different_point.value).abs() < MAX_TOLERABLE_ERROR
         {
             return None;
         }
 
-        if ((new_point - self.start_different_point.vector) * normal) <= MAX_TOLERABLE_ERROR {
+        if ((new_point - self.start_different_point.value) * normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
-        if ((new_point - self.end_different_point.vector) * normal) <= MAX_TOLERABLE_ERROR {
+        if ((new_point - self.end_different_point.value) * normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
@@ -698,11 +704,11 @@ impl MinkowskiEdge {
     }
 }
 
-struct Simplex {
+struct Minkowski {
     edges: Vec<MinkowskiEdge>,
 }
 
-impl Deref for Simplex {
+impl Deref for Minkowski {
     type Target = Vec<MinkowskiEdge>;
 
     fn deref(&self) -> &Self::Target {
@@ -710,14 +716,14 @@ impl Deref for Simplex {
     }
 }
 
-impl Simplex {
-    pub(crate) fn new(triangle: Triangle) -> Self {
+impl Minkowski {
+    pub(crate) fn new(simplex: Simplex) -> Self {
         // expect two iter to find the close edge
         let mut edges: Vec<MinkowskiEdge> = Vec::with_capacity(3 + 2);
         for i in 0..3 {
             let j = (i + 1) % 3;
-            let a = triangle[i].clone();
-            let b = triangle[j].clone();
+            let a = simplex[i].clone();
+            let b = simplex[j].clone();
             let edge = (a, b).into();
             edges.push(edge);
         }
@@ -727,14 +733,14 @@ impl Simplex {
 
     pub(crate) fn compute_center_point(&self) -> Point {
         let sum_result: Vector = self.edges.iter().fold(Default::default(), |mut acc, cur| {
-            acc += cur.start_different_point.vector;
+            acc += cur.start_different_point.value;
             acc
         });
 
         (sum_result * (self.len() as FloatNum).recip()).to_point()
     }
 
-    // expand the simplex, find the min
+    // expand the minkowski, find the min
     pub(crate) fn expand<F>(&mut self, compute_support_point: F) -> Result<(), ()>
     where
         F: Fn(Vector) -> MinkowskiDifferencePoint,
@@ -770,17 +776,17 @@ impl Simplex {
 
 // https://dyn4j.org/2010/05/epa-expanding-polytope-algorithm/ epa algo explain
 pub(crate) fn epa_compute_collision_edge<F>(
-    triangle: Triangle,
+    simplex: Simplex,
     compute_support_point: F,
 ) -> MinkowskiEdge
 where
     F: Fn(Vector) -> MinkowskiDifferencePoint,
 {
-    let mut simplex = Simplex::new(triangle);
+    let mut minkowski = Minkowski::new(simplex);
 
-    while simplex.expand(&compute_support_point).is_ok() {}
+    while minkowski.expand(&compute_support_point).is_ok() {}
 
-    simplex.find_min_edge()
+    minkowski.find_min_edge()
 }
 
 #[derive(Clone, Debug)]
@@ -1036,7 +1042,7 @@ mod tests {
                 x: 50.0,
                 y: -9.469273,
             },
-            vector: (0.0, 79.46927).into(),
+            value: (0.0, 79.46927).into(),
         };
         let end_different_point = MinkowskiDifferencePoint {
             start_point_from_a: Point { x: 50.0, y: -30.0 },
@@ -1044,7 +1050,7 @@ mod tests {
                 x: 50.0,
                 y: -9.469273,
             },
-            vector: (0.0, -20.530727).into(),
+            value: (0.0, -20.530727).into(),
         };
 
         let edge: MinkowskiEdge = (start_different_point, end_different_point).into();

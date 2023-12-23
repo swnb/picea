@@ -1,4 +1,4 @@
-use crate::algo::{collision::CollisionalCollection, sort::SortableCollection};
+use crate::{algo::sort::SortableCollection, collision::CollisionalCollection};
 
 use super::{Element, ID};
 use std::{

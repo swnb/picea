@@ -5,7 +5,7 @@ pub(crate) mod hooks;
 use std::{collections::BTreeMap, ops::Shl};
 
 use crate::{
-    algo::collision::{
+    collision::{
         accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
         rough_collision_detection,
     },

@@ -1,4 +1,5 @@
 pub mod algo;
+pub mod collision;
 pub mod element;
 pub mod math;
 pub mod meta;

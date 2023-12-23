@@ -1,5 +1,5 @@
 use crate::{
-    algo::collision::{
+    collision::{
         compute_minkowski, epa_compute_collision_edge, gjk_collision_detective, Collider,
         ContactPointPair, SubCollider,
     },
@@ -81,18 +81,20 @@ impl CollisionStatusViewer {
 
         let first_approximation_vector: Vector = (center_point_a, center_point_b).into();
 
-        let Some(simplex) = gjk_collision_detective(first_approximation_vector, compute_support_point) else {
+        let Some(simplex) =
+            gjk_collision_detective(first_approximation_vector, compute_support_point)
+        else {
             return;
         };
 
         self.minkowski_simplexes.push({
             let simplex = simplex.clone();
-            simplex.map(|ref p| p.vector.to_point())
+            simplex.map(|ref p| p.to_point())
         });
 
         self.minkowski_different_gathers = compute_minkowski(compute_support_point)
             .into_iter()
-            .map(|different_point| different_point.vector.to_point())
+            .map(|different_point| different_point.to_point())
             .collect();
 
         let edge = epa_compute_collision_edge(simplex, compute_support_point);
