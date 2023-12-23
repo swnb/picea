@@ -1,6 +1,6 @@
 use super::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint};
 use crate::{
-    algo::collision::{Collider, Projector},
+    collision::{Collider, Projector},
     element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, TAU},
     meta::Mass,

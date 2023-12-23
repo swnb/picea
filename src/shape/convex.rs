@@ -1,5 +1,5 @@
 use crate::{
-    algo::collision::{Collider, Projector},
+    collision::{Collider, Projector},
     element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::Mass,
