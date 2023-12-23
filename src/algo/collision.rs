@@ -311,6 +311,10 @@ pub(crate) fn gjk_collision_detective(
 
     let mut a = compute_support_point(approximation_vector);
 
+    if a.vector == (0., 0.).into() {
+        return None;
+    }
+
     let compute_support_point = |reference_vector: Vector| {
         let result = compute_support_point(reference_vector);
         // dbg!(&result, reference_vector);
@@ -489,31 +493,48 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
 }
 
 impl MinkowskiEdge {
-    pub(crate) fn expand<F>(&self, compute_support_point: F) -> Option<[MinkowskiEdge; 2]>
+    pub(crate) fn expand<F, C>(
+        &self,
+        compute_support_point: F,
+        compute_minkowski_center_point: C,
+    ) -> Option<[MinkowskiEdge; 2]>
     where
         F: Fn(Vector) -> MinkowskiDifferencePoint,
+        C: Fn() -> Point,
     {
-        let different_point = compute_support_point(self.normal);
+        let mut normal = self.normal;
+
+        if self.depth == 0. {
+            let center_point = compute_minkowski_center_point();
+            let normal_toward_origin = -center_point.to_vector();
+            if !(normal * normal_toward_origin).is_sign_positive() {
+                dbg!("hit");
+                normal = -normal;
+            }
+        }
+
+        let different_point = compute_support_point(normal);
         let new_point = different_point.vector;
 
         // consider this const variable is same as zero
         const MAX_TOLERABLE_ERROR: f32 = 1e-4;
 
-        if (new_point * self.normal) <= MAX_TOLERABLE_ERROR {
+        if (new_point * normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
-        if different_point == self.start_different_point
-            || different_point == self.end_different_point
+        if (different_point.vector - self.start_different_point.vector).abs() < MAX_TOLERABLE_ERROR
+            || (different_point.vector - self.end_different_point.vector).abs()
+                < MAX_TOLERABLE_ERROR
         {
             return None;
         }
 
-        if ((new_point - self.start_different_point.vector) * self.normal) <= MAX_TOLERABLE_ERROR {
+        if ((new_point - self.start_different_point.vector) * normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
-        if ((new_point - self.end_different_point.vector) * self.normal) <= MAX_TOLERABLE_ERROR {
+        if ((new_point - self.end_different_point.vector) * normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
@@ -685,6 +706,14 @@ struct Simplex {
     edges: Vec<MinkowskiEdge>,
 }
 
+impl Deref for Simplex {
+    type Target = Vec<MinkowskiEdge>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.edges
+    }
+}
+
 impl Simplex {
     pub(crate) fn new(triangle: Triangle) -> Self {
         // expect two iter to find the close edge
@@ -700,6 +729,15 @@ impl Simplex {
         Self { edges }
     }
 
+    pub(crate) fn compute_center_point(&self) -> Point {
+        let sum_result: Vector = self.edges.iter().fold(Default::default(), |mut acc, cur| {
+            acc += cur.start_different_point.vector;
+            acc
+        });
+
+        (sum_result * (self.len() as FloatNum).recip()).to_point()
+    }
+
     // expand the simplex, find the min
     pub(crate) fn expand<F>(&mut self, compute_support_point: F) -> Result<(), ()>
     where
@@ -707,14 +745,8 @@ impl Simplex {
     {
         let min_index = self.find_min_edge_index();
 
-        // TODO how to stop expand
-        if self.edges[min_index].depth == 0. {
-            // no need to expand
-            return Err(());
-        }
-
-        self.edges[min_index]
-            .expand(&compute_support_point)
+        self[min_index]
+            .expand(&compute_support_point, || self.compute_center_point())
             .map(|new_edges| {
                 self.edges.splice(min_index..min_index + 1, new_edges);
             })
@@ -724,13 +756,13 @@ impl Simplex {
     pub(crate) fn find_min_edge(&self) -> MinkowskiEdge {
         let min_index = self.find_min_edge_index();
 
-        self.edges[min_index].clone()
+        self[min_index].clone()
     }
 
     fn find_min_edge_index(&self) -> usize {
         let mut min_depth = f32::MAX;
         let mut min_index = 0;
-        for (i, edge) in self.edges.iter().enumerate() {
+        for (i, edge) in self.iter().enumerate() {
             if edge.depth < min_depth {
                 min_index = i;
                 min_depth = edge.depth;
