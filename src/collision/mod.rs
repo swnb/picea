@@ -179,19 +179,19 @@ pub fn accurate_collision_detection_for_sub_collider(
         (max_point_a, max_point_b).into()
     };
 
-    let simplex = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
+    let minkowski = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
 
     // REVIEW move this into gjk
     const MAX_TOLERABLE_CONTACT_DEPTH: FloatNum = 0.01;
 
-    if simplex
+    if minkowski
         .iter()
         .any(|p| p.vector.abs() < MAX_TOLERABLE_CONTACT_DEPTH)
     {
         return None;
     }
 
-    let minkowski_edge = epa_compute_collision_edge(simplex, compute_support_point);
+    let minkowski_edge = epa_compute_collision_edge(minkowski, compute_support_point);
 
     let contact_infos: Vec<ContactPointPair> = minkowski_edge.get_contact_info(a, b, true);
 
@@ -698,11 +698,11 @@ impl MinkowskiEdge {
     }
 }
 
-struct Simplex {
+struct Minkowski {
     edges: Vec<MinkowskiEdge>,
 }
 
-impl Deref for Simplex {
+impl Deref for Minkowski {
     type Target = Vec<MinkowskiEdge>;
 
     fn deref(&self) -> &Self::Target {
@@ -710,7 +710,7 @@ impl Deref for Simplex {
     }
 }
 
-impl Simplex {
+impl Minkowski {
     pub(crate) fn new(triangle: Triangle) -> Self {
         // expect two iter to find the close edge
         let mut edges: Vec<MinkowskiEdge> = Vec::with_capacity(3 + 2);
@@ -734,7 +734,7 @@ impl Simplex {
         (sum_result * (self.len() as FloatNum).recip()).to_point()
     }
 
-    // expand the simplex, find the min
+    // expand the minkowski, find the min
     pub(crate) fn expand<F>(&mut self, compute_support_point: F) -> Result<(), ()>
     where
         F: Fn(Vector) -> MinkowskiDifferencePoint,
@@ -776,11 +776,11 @@ pub(crate) fn epa_compute_collision_edge<F>(
 where
     F: Fn(Vector) -> MinkowskiDifferencePoint,
 {
-    let mut simplex = Simplex::new(triangle);
+    let mut minkowski = Minkowski::new(triangle);
 
-    while simplex.expand(&compute_support_point).is_ok() {}
+    while minkowski.expand(&compute_support_point).is_ok() {}
 
-    simplex.find_min_edge()
+    minkowski.find_min_edge()
 }
 
 #[derive(Clone, Debug)]
