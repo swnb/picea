@@ -158,7 +158,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
     };
 
     model.scene.point_constraint().for_each(|constraint| {
-        if let Some(element) = model.scene.get_element(constraint.element_id()) {
+        if let Some(element) = model.scene.get_element(constraint.obj_id()) {
             make_line(RED, element.center_point(), *constraint.fixed_point())
         }
     });
