@@ -66,7 +66,7 @@ fn create_model(_app: &App) -> Model {
     //     ));
     // }
 
-    let vertexes = vec![
+    let vertexes = [
         (-1, 5),
         (0, 0),
         (1, 0),
