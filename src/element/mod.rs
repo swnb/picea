@@ -1,4 +1,3 @@
-pub mod alias;
 pub(crate) mod store;
 
 use std::collections::BTreeMap;
@@ -80,6 +79,18 @@ pub struct Element {
     meta: Meta,
     shape: Box<dyn ShapeTraitUnion>,
     bind_points: BTreeMap<u32, Point>, // move with element
+}
+
+impl Clone for Element {
+    fn clone(&self) -> Self {
+        // clone element will return element with id unset
+        Self {
+            id: 0,
+            meta: self.meta.clone(),
+            shape: self.shape.self_clone(),
+            bind_points: Default::default(),
+        }
+    }
 }
 
 impl Element {
