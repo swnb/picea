@@ -20,7 +20,7 @@ impl Default for ConstraintParameters {
         Self {
             factor_position_bias: 0.99,
             factor_elastic: 0.5,
-            max_allow_permeate: 0.03,
+            max_allow_permeate: 0.01,
             factor_default_friction: 0.2,
             allow_permeate_negative: true,
             skip_friction_constraints: false,
