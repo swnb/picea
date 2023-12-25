@@ -5,7 +5,7 @@ pub(crate) mod hooks;
 use std::{collections::BTreeMap, ops::Shl};
 
 use crate::{
-    algo::collision::{
+    collision::{
         accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
         rough_collision_detection,
     },
@@ -315,7 +315,12 @@ impl Scene {
     }
 
     pub fn remove_point_constraint(&mut self, id: u32) -> Option<PointConstraint> {
-        self.point_constraints.remove(&id)
+        self.point_constraints.remove(&id).map(|point_constraint| {
+            if let Some(element) = self.get_element_mut(point_constraint.obj_id()) {
+                element.remove_bind_point(point_constraint.id())
+            }
+            point_constraint
+        })
     }
 
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
@@ -427,7 +432,7 @@ impl Scene {
         }
 
         for point_constraint in (*self_ptr).point_constraints.values_mut() {
-            let Some(element) = (*self_ptr).get_element_mut(point_constraint.element_id()) else {
+            let Some(element) = (*self_ptr).get_element_mut(point_constraint.obj_id()) else {
                 legacy_constraint_ids.push(point_constraint.id());
                 continue;
             };

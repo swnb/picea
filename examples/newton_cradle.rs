@@ -21,14 +21,14 @@ struct Model {
 fn create_model(_app: &App) -> Model {
     let mut scene = Scene::new();
 
-    // scene.set_gravity(|_| (0., -100.).into());
+    scene.set_gravity(|_| (0., 0.).into());
 
     scene
         .get_context_mut()
         .constraint_parameters
         .skip_friction_constraints = true;
 
-    scene.get_context_mut().constraint_parameters.factor_elastic = 1.3;
+    scene.get_context_mut().constraint_parameters.factor_elastic = 1.0;
 
     let boxes: Vec<Square> = vec![];
 
@@ -158,7 +158,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
     };
 
     model.scene.point_constraint().for_each(|constraint| {
-        if let Some(element) = model.scene.get_element(constraint.element_id()) {
+        if let Some(element) = model.scene.get_element(constraint.obj_id()) {
             make_line(RED, element.center_point(), *constraint.fixed_point())
         }
     });

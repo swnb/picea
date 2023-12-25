@@ -54,34 +54,12 @@ fn create_model(_app: &App) -> Model {
         }
     }
 
-    vertexes.push((155, -20));
-    vertexes.push((-155, -20));
+    const wall_height: i32 = 100;
 
-    // let vertexes = vec![
-    //     (-55, top),
-    //     (-50, down),
-    //     (-45, top + 1),
-    //     (-40, down),
-    //     (-35, top + 2),
-    //     (-30, down),
-    //     (-25, top + 3),
-    //     (-20, down),
-    //     (-15, top + 4),
-    //     (-10, down),
-    //     (0, top + 5),
-    //     (10, down),
-    //     (15, top + 4),
-    //     (20, down),
-    //     (25, top + 3),
-    //     (30, down),
-    //     (35, top + 2),
-    //     (40, down),
-    //     (45, top + 1),
-    //     (50, down),
-    //     (55, top),
-    //     (55, -20),
-    //     (-55, -20),
-    // ];
+    vertexes.push((100, wall_height));
+    vertexes.push((100, -wall_height));
+    vertexes.push((-100, -wall_height));
+    vertexes.push((-100, wall_height));
 
     let vertexes = vertexes
         .iter()

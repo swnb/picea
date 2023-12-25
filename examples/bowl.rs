@@ -11,6 +11,9 @@ use picea::{
 };
 use std::{collections::VecDeque, time::SystemTime};
 
+#[path = "../examples_common.rs"]
+mod common;
+
 struct Model {
     scene: Scene,
     timer: SystemTime,

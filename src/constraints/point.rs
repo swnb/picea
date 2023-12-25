@@ -8,7 +8,7 @@ use super::{compute_soft_constraints_params, ConstraintObject};
 
 pub struct PointConstraint<Obj: ConstraintObject = Element> {
     id: u32,
-    element_id: ID,
+    obj_id: ID,
     fixed_point: Point,
     move_point: Point, // bind with element
     total_lambda: FloatNum,
@@ -21,10 +21,10 @@ pub struct PointConstraint<Obj: ConstraintObject = Element> {
 }
 
 impl<Obj: ConstraintObject> PointConstraint<Obj> {
-    pub fn new(id: u32, element_id: ID, fixed_point: Point, move_point: Point) -> Self {
+    pub fn new(id: u32, obj_id: ID, fixed_point: Point, move_point: Point) -> Self {
         Self {
             id,
-            element_id,
+            obj_id,
             fixed_point,
             move_point,
             total_lambda: 0.,
@@ -39,8 +39,8 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
         self.id
     }
 
-    pub fn element_id(&self) -> ID {
-        self.element_id
+    pub fn obj_id(&self) -> ID {
+        self.obj_id
     }
 
     pub fn stretch_length(&self) -> Vector {

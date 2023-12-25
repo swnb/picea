@@ -1,5 +1,5 @@
 use crate::{
-    algo::collision::ContactPointPair,
+    collision::ContactPointPair,
     element::{Element, ID},
     math::{num::limit_at_range, vector::Vector, FloatNum},
     scene::context::ConstraintParameters,
