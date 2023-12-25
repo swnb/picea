@@ -701,6 +701,7 @@ mod test {
 }
 
 mod tests {
+    use crate::math::point::Point;
 
     #[test]
     fn test_split_concave_polygon() {
@@ -742,5 +743,51 @@ mod tests {
         let result = split_clockwise_concave_polygon_to_two_convex_polygon(vertexes).unwrap();
 
         dbg!(result);
+    }
+
+    #[test]
+    fn test_split_concave_polygon1() {
+        let vertexes = vec![
+            Point { x: 15.0, y: 55.0 },
+            Point { x: 20.0, y: 60.0 },
+            Point { x: 25.0, y: 58.0 },
+            Point { x: 30.0, y: 63.0 },
+            Point { x: 35.0, y: 61.0 },
+            Point { x: 40.0, y: 66.0 },
+            Point { x: 45.0, y: 64.0 },
+            Point { x: 50.0, y: 69.0 },
+            Point { x: 55.0, y: 67.0 },
+            Point { x: 60.0, y: 72.0 },
+            Point { x: 65.0, y: 70.0 },
+            Point { x: 70.0, y: 75.0 },
+            Point { x: 75.0, y: 73.0 },
+            Point { x: 80.0, y: 78.0 },
+            Point { x: 85.0, y: 76.0 },
+            Point { x: 90.0, y: 81.0 },
+            Point { x: 95.0, y: 79.0 },
+            Point { x: 100.0, y: 84.0 },
+            Point { x: 105.0, y: 79.0 },
+            Point { x: 110.0, y: 81.0 },
+            Point { x: 115.0, y: 76.0 },
+            Point { x: 120.0, y: 78.0 },
+            Point { x: 125.0, y: 73.0 },
+            Point { x: 130.0, y: 75.0 },
+            Point { x: 135.0, y: 70.0 },
+            Point { x: 140.0, y: 72.0 },
+            Point { x: 145.0, y: 67.0 },
+            Point { x: 150.0, y: 69.0 },
+            Point { x: 155.0, y: 64.0 },
+            Point { x: 160.0, y: 66.0 },
+            Point { x: 165.0, y: 61.0 },
+            Point { x: 170.0, y: 63.0 },
+            Point { x: 175.0, y: 58.0 },
+            Point { x: 180.0, y: 60.0 },
+            Point { x: 180.0, y: -30.0 },
+            Point { x: 181.0, y: 110.0 },
+            Point { x: 0.0, y: 110.0 },
+            Point { x: 10.0, y: -30.0 },
+        ];
+
+        super::split_concave_polygon_to_convex_polygons(&vertexes);
     }
 }
