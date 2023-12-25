@@ -701,7 +701,6 @@ mod test {
 }
 
 mod tests {
-    use crate::math::point::Point;
 
     #[test]
     fn test_split_concave_polygon() {
@@ -747,6 +746,8 @@ mod tests {
 
     #[test]
     fn test_split_concave_polygon1() {
+        use crate::math::point::Point;
+
         let vertexes = vec![
             Point { x: 15.0, y: 55.0 },
             Point { x: 20.0, y: 60.0 },
