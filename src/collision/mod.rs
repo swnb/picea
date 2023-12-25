@@ -210,9 +210,10 @@ fn sweep_and_prune_collision_detection<T, Z>(
     T: CollisionalCollection,
     Z: FnMut(&T::Collider, &T::Collider),
 {
-    if elements.is_empty() {
-        return;
-    }
+    // FIXME
+    // if elements.is_empty() {
+    // return;
+    // }
 
     elements.sort(|a, b| {
         let (min_a_x, _) = a.projection_on_axis(axis);
