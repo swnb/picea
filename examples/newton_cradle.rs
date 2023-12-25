@@ -3,8 +3,8 @@ use picea::{
     element::ElementBuilder,
     math::{edge::Edge, point::Point, vector::Vector},
     meta::MetaBuilder,
-    scene::{self, Scene},
-    shape::{circle::Circle, polygon::Square, CenterPoint, GeometryTransform},
+    scene::Scene,
+    shape::{circle::Circle, polygon::Square, CenterPoint},
     tools::snapshot::create_element_construct_code_snapshot,
 };
 use std::time::SystemTime;
