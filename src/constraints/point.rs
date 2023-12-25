@@ -14,6 +14,8 @@ pub struct PointConstraint<Obj: ConstraintObject = Element> {
     total_lambda: FloatNum,
     // force_soft_factor: FloatNum,
     // position_fix_factor: FloatNum,
+    // distance must large than zero
+    distance: FloatNum,
     position_bias: FloatNum,
     soft_part: FloatNum,
     mass_effective: FloatNum,
@@ -21,7 +23,15 @@ pub struct PointConstraint<Obj: ConstraintObject = Element> {
 }
 
 impl<Obj: ConstraintObject> PointConstraint<Obj> {
-    pub fn new(id: u32, obj_id: ID, fixed_point: Point, move_point: Point) -> Self {
+    pub fn new(
+        id: u32,
+        obj_id: ID,
+        fixed_point: Point,
+        move_point: Point,
+        distance: FloatNum,
+    ) -> Self {
+        assert!(distance >= 0., "distance must large than or equal to zero");
+
         Self {
             id,
             obj_id,
@@ -31,6 +41,7 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
             position_bias: 0.,
             soft_part: 0.,
             mass_effective: 0.,
+            distance,
             obj: std::ptr::null_mut(),
         }
     }
@@ -47,8 +58,8 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
         (self.move_point, self.fixed_point).into()
     }
 
-    pub fn move_point(&self) -> Point {
-        self.move_point
+    pub fn move_point(&self) -> &Point {
+        &self.move_point
     }
 
     pub fn fixed_point(&self) -> &Point {
@@ -81,7 +92,8 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
         let strength_length = self.stretch_length();
         let n = -strength_length.normalize();
 
-        let position_bias = position_fix_factor * strength_length.abs() * delta_time.recip();
+        let position_bias =
+            position_fix_factor * (strength_length.abs() - self.distance) * delta_time.recip();
 
         let soft_part = force_soft_factor * delta_time.recip();
 

@@ -17,24 +17,34 @@ pub struct JoinConstraint<Obj: ConstraintObject = Element> {
     total_lambda: FloatNum,
     // force_soft_factor: FloatNum,
     // position_fix_factor: FloatNum,
+    // distance must large than or equal to zero
+    distance: FloatNum,
     position_bias: FloatNum,
     soft_part: FloatNum,
     mass_effective: FloatNum,
 }
 
 impl<Obj: ConstraintObject> JoinConstraint<Obj> {
-    pub fn new(id: u32, obj_a_id: ID, obj_b_id: ID) -> Self {
+    pub fn new(
+        id: u32,
+        (obj_a_id, obj_b_id): (ID, ID),
+        (move_point_with_a, move_point_with_b): (Point, Point),
+        distance: FloatNum,
+    ) -> Self {
+        assert!(distance >= 0., "distance must large than or equal to zero");
+
         Self {
             id,
             obj_a_id,
             obj_b_id,
-            move_point_with_a: Default::default(),
-            move_point_with_b: Default::default(),
+            move_point_with_a,
+            move_point_with_b,
             obj_a: std::ptr::null_mut(),
             obj_b: std::ptr::null_mut(),
             total_lambda: 0.,
             // force_soft_factor: 0.,
             // position_fix_factor: 0.,
+            distance,
             position_bias: 0.,
             soft_part: 0.,
             mass_effective: 0.,
@@ -47,6 +57,10 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
 
     pub fn obj_id_pair(&self) -> (ID, ID) {
         (self.obj_a_id, self.obj_b_id)
+    }
+
+    pub fn move_point_pair(&self) -> (&Point, &Point) {
+        (&self.move_point_with_a, &self.move_point_with_b)
     }
 
     pub fn stretch_length(&self) -> Vector {
@@ -93,7 +107,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
         let mass_effective =
             inv_mass_a + inv_mass_b + inv_i_a * (r_a ^ n).powf(2.) + inv_i_b * (r_b ^ n).powf(2.);
 
-        let position_fix = (distance.abs() - parameters.max_allow_permeate).max(0.);
+        let position_fix = (distance.abs() - self.distance).max(0.);
 
         let position_bias = position_fix_factor * position_fix * inv_delta_time;
 

@@ -55,6 +55,10 @@ impl IDDispatcher {
         self.current_id = self.current_id.checked_add(1).expect("create too much id");
         self.current_id
     }
+
+    fn reset(&mut self) {
+        self.current_id = 0;
+    }
 }
 
 impl Scene {
@@ -212,7 +216,7 @@ impl Scene {
     }
 
     #[inline]
-    pub fn get_context_mut(&mut self) -> &mut Context {
+    pub fn context_mut(&mut self) -> &mut Context {
         &mut self.context
     }
 
@@ -220,6 +224,11 @@ impl Scene {
     #[inline]
     pub fn clear(&mut self) {
         self.element_store.clear();
+        self.id_dispatcher.reset();
+        self.constraints_id_dispatcher.reset();
+        self.contact_constraints.clear();
+        self.point_constraints.clear();
+        self.join_constraints.clear();
         self.frame_count = 0;
     }
 
@@ -251,58 +260,34 @@ impl Scene {
         context.default_gravity = reducer(&context.default_gravity);
     }
 
+    // TODO doc
     pub fn create_point_constraint(
         &mut self,
         element_id: ID,
-        element_point: Point,
-        fixed_point: Point,
+        element_point: impl Into<Point>,
+        fixed_point: impl Into<Point>,
+        distance: FloatNum,
     ) -> Option<u32> {
+        assert!(distance >= 0., "distance must large than or equal to zero");
+
         let id = self.constraints_id_dispatcher.gen_id();
 
         let element = self.get_element_mut(element_id)?;
 
+        let element_point = element_point.into();
+        let fixed_point = fixed_point.into();
+
         element.create_bind_point(id, element_point);
 
         let point_constraint =
-            PointConstraint::<Element>::new(id, element_id, fixed_point, element_point);
+            PointConstraint::<Element>::new(id, element_id, fixed_point, element_point, distance);
 
         self.point_constraints.insert(id, point_constraint);
 
         id.into()
     }
 
-    pub fn create_join_constraint(
-        &mut self,
-        element_a_id: ID,
-        element_a_point: impl Into<Point>,
-        element_b_id: ID,
-        element_b_point: impl Into<Point>,
-    ) -> Option<u32> {
-        let id = self.constraints_id_dispatcher.gen_id();
-        if element_a_id == element_b_id {
-            // TODO result
-            panic!("can't be the same id");
-        }
-
-        let (element_a, element_b) =
-            unsafe { self.query_element_pair_mut((element_a_id, element_b_id))? };
-
-        let element_a_point = element_a_point.into();
-        let element_b_point = element_b_point.into();
-
-        unsafe {
-            (*element_a).create_bind_point(id, element_a_point);
-            (*element_b).create_bind_point(id, element_b_point);
-        }
-
-        let join_constraint = JoinConstraint::new(id, element_a_id, element_b_id);
-
-        self.join_constraints.insert(id, join_constraint);
-
-        id.into()
-    }
-
-    pub fn point_constraint(&self) -> impl Iterator<Item = &PointConstraint> {
+    pub fn point_constraints(&self) -> impl Iterator<Item = &PointConstraint> {
         self.point_constraints.values()
     }
 
@@ -321,6 +306,71 @@ impl Scene {
             }
             point_constraint
         })
+    }
+
+    pub fn create_join_constraint(
+        &mut self,
+        element_a_id: ID,
+        element_a_point: impl Into<Point>,
+        element_b_id: ID,
+        element_b_point: impl Into<Point>,
+        distance: FloatNum,
+    ) -> Option<u32> {
+        assert!(distance >= 0., "distance must large than or equal to zero");
+
+        let id = self.constraints_id_dispatcher.gen_id();
+        if element_a_id == element_b_id {
+            // TODO result
+            panic!("can't be the same id");
+        }
+
+        let (element_a, element_b) =
+            unsafe { self.query_element_pair_mut((element_a_id, element_b_id))? };
+
+        let element_a_point = element_a_point.into();
+        let element_b_point = element_b_point.into();
+
+        unsafe {
+            (*element_a).create_bind_point(id, element_a_point);
+            (*element_b).create_bind_point(id, element_b_point);
+        }
+
+        let join_constraint = JoinConstraint::new(
+            id,
+            (element_a_id, element_b_id),
+            (element_a_point, element_b_point),
+            distance,
+        );
+
+        self.join_constraints.insert(id, join_constraint);
+
+        id.into()
+    }
+
+    pub fn join_constraints(&self) -> impl Iterator<Item = &JoinConstraint> {
+        self.join_constraints.values()
+    }
+
+    pub fn get_join_constraint(&self, id: u32) -> Option<&JoinConstraint> {
+        self.join_constraints.get(&id)
+    }
+
+    pub fn get_join_constraint_mut(&mut self, id: u32) -> Option<&mut JoinConstraint> {
+        self.join_constraints.get_mut(&id)
+    }
+
+    pub fn remove_join_constraint(&mut self, id: u32) -> Option<JoinConstraint> {
+        self.join_constraints
+            .remove(&id)
+            .map(|join_constraint| unsafe {
+                if let Some((element_a, element_b)) =
+                    self.query_element_pair_mut(join_constraint.obj_id_pair())
+                {
+                    (*element_a).remove_bind_point(join_constraint.id());
+                    (*element_b).remove_bind_point(join_constraint.id());
+                }
+                join_constraint
+            })
     }
 
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
