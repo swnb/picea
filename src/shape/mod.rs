@@ -1,5 +1,6 @@
 use crate::math::{edge::Edge, point::Point, vector::Vector};
 
+pub mod alias;
 pub mod circle;
 pub mod concave;
 pub mod convex;
