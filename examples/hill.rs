@@ -1,10 +1,10 @@
 use common::ConfigBuilder;
 use picea::{
-    element::ElementBuilder,
+    element::{ElementBuilder, ShapeTraitUnion},
     math::{point::Point, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
-    shape::{concave::ConcavePolygon, polygon::RegularPolygon},
+    shape::{circle::Circle, concave::ConcavePolygon, polygon::RegularPolygon},
 };
 use rand::Rng;
 use std::collections::VecDeque;
@@ -64,16 +64,16 @@ fn init(scene: &mut Scene) {
     for i in 0..70 {
         for j in 0..17 {
             let x = 40. + j as FloatNum * 5.;
-            let y = -400. + i as FloatNum * 5.;
+            let y = -300. + i as FloatNum * 5.;
 
             let value: u8 = gen.gen();
 
-            let mut edge = value % 10;
-            if edge < 3 {
-                edge = 3;
-            }
-
-            let shape = RegularPolygon::new((x, y), edge as usize, 2.);
+            let edge = value % 10;
+            let shape: Box<dyn ShapeTraitUnion> = if edge < 3 {
+                Box::new(Circle::new((x, y), 2.))
+            } else {
+                Box::new(RegularPolygon::new((x, y), edge as usize, 2.))
+            };
 
             scene.push_element(ElementBuilder::new(shape, MetaBuilder::new(10.)));
         }
