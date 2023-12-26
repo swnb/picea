@@ -21,7 +21,7 @@ pub struct JoinConstraint<Obj: ConstraintObject = Element> {
     distance: FloatNum,
     position_bias: FloatNum,
     soft_part: FloatNum,
-    mass_effective: FloatNum,
+    inv_mass_effective: FloatNum,
 }
 
 impl<Obj: ConstraintObject> JoinConstraint<Obj> {
@@ -47,7 +47,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
             distance,
             position_bias: 0.,
             soft_part: 0.,
-            mass_effective: 0.,
+            inv_mass_effective: 0.,
         }
     }
 
@@ -104,7 +104,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
 
         let n = -distance.normalize();
 
-        let mass_effective =
+        let inv_mass_effective =
             inv_mass_a + inv_mass_b + inv_i_a * (r_a ^ n).powf(2.) + inv_i_b * (r_b ^ n).powf(2.);
 
         let position_fix = (distance.abs() - self.distance).max(0.);
@@ -113,7 +113,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
 
         let force_soft_part = force_soft_factor * inv_delta_time;
 
-        self.mass_effective = mass_effective;
+        self.inv_mass_effective = inv_mass_effective;
         self.position_bias = position_bias;
         self.soft_part = force_soft_part;
         self.obj_a = obj_a;
@@ -142,7 +142,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
         let r_b: Vector = (obj_b.center_point(), point_b).into();
 
         let &mut Self {
-            mass_effective,
+            inv_mass_effective,
             position_bias,
             soft_part,
             ..
@@ -150,7 +150,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
 
         let jv_b = -(n * (point_a_v - point_b_v) + position_bias);
 
-        let lambda = jv_b * (mass_effective + soft_part).recip();
+        let lambda = jv_b * (inv_mass_effective + soft_part).recip();
 
         obj_a.meta_mut().apply_impulse(n * lambda, r_a);
         obj_b.meta_mut().apply_impulse(-n * lambda, r_b);
