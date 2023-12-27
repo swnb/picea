@@ -379,6 +379,7 @@ impl Scene {
         self.elements_iter_mut()
             .filter(|element| !element.meta().is_fixed())
             .filter(|element| !element.meta().is_sleeping())
+            .filter(|element| !element.meta().is_ignore_gravity())
             .for_each(|element| {
                 let force = element.meta().force_group().sum_force();
                 let mut a = force * element.meta().inv_mass();

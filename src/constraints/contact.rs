@@ -23,6 +23,7 @@ pub struct ContactConstraint<Obj: ConstraintObject = Element> {
     obj_id_b: ID,
     obj_a: *mut Obj,
     obj_b: *mut Obj,
+    inv_delta_time: FloatNum,
 }
 
 impl<Obj: ConstraintObject> ContactConstraint<Obj> {
@@ -39,6 +40,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             obj_id_b,
             obj_a: std::ptr::null_mut(),
             obj_b: std::ptr::null_mut(),
+            inv_delta_time: 0.,
         }
     }
 
@@ -67,9 +69,10 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         self.obj_a = obj_a;
         self.obj_b = obj_b;
         self.total_friction_lambda = 0.;
+        self.inv_delta_time = delta_time.recip();
 
         let object_a = &mut *self.obj_a;
-        let object_b: &mut Obj = &mut *self.obj_b;
+        let object_b = &mut *self.obj_b;
         let contact_point_pair = &self.contact_point_pair;
 
         let r_a = (object_a.center_point(), contact_point_pair.contact_point_a).into();
@@ -124,17 +127,41 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
 
         debug_assert!(depth.is_sign_positive());
 
+        let jv = sum_velocity_a - sum_velocity_b;
+
+        let jv_b = normal * jv - bias;
+
         let lambda = (coefficient + bias) * mass_effective;
 
-        let lambda = self.restrict_lambda(lambda);
+        {
+            let r_a = self.r_a;
+            let r_b = self.r_b;
+            let n = -contact_info.normal_toward_a;
+
+            let meta_a = obj_a.meta();
+            let meta_b = obj_b.meta();
+            let inv_mass_effective = meta_a.inv_mass()
+                + meta_b.inv_mass()
+                + (r_a ^ n).powf(2.) * meta_a.inv_moment_of_inertia()
+                + (r_b ^ n).powf(2.) * meta_b.inv_moment_of_inertia();
+            let v_a = obj_a.compute_point_velocity(&contact_info.contact_point_a);
+            let v_b = obj_b.compute_point_velocity(&contact_info.contact_point_b);
+            let jv = n * (v_a - v_b);
+            let position_bias =
+                (contact_info.depth - parameters.max_allow_permeate).max(0.) * self.inv_delta_time;
+
+            let lambda = -(jv + position_bias) * inv_mass_effective.recip();
+            let lambda = self.restrict_lambda(-lambda);
+            let impulse = n * -lambda;
+            obj_a.meta_mut().apply_impulse(impulse, self.r_a);
+            obj_b.meta_mut().apply_impulse(-impulse, self.r_b);
+        };
 
         let max_friction_lambda = self.total_lambda * parameters.factor_default_friction;
 
-        let impulse = normal * lambda;
+        // obj_a.meta_mut().apply_impulse(impulse, self.r_a);
 
-        obj_a.meta_mut().apply_impulse(impulse, self.r_a);
-
-        obj_b.meta_mut().apply_impulse(-impulse, self.r_b);
+        // obj_b.meta_mut().apply_impulse(-impulse, self.r_b);
 
         if !parameters.skip_friction_constraints {
             // TODO factor_friction use two element's factor_friction
