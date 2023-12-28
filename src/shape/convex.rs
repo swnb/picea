@@ -1,6 +1,6 @@
 use crate::{
-    algo::collision::{Collider, Projector, SubCollider},
-    element::ComputeMomentOfInertia,
+    collision::{Collider, Projector},
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::Mass,
     shape::utils::rotate_polygon,
@@ -9,10 +9,10 @@ use crate::{
 use super::{
     utils::{
         compute_area_of_convex, compute_area_of_triangle, compute_convex_center_point,
-        compute_moment_of_inertia_of_triangle, projection_polygon_on_vector,
-        split_convex_polygon_to_triangles, VertexesToEdgeIter,
+        compute_moment_of_inertia_of_triangle, find_nearest_point, projection_polygon_on_vector,
+        resize_by_vector, rotate_point, split_convex_polygon_to_triangles, VertexesToEdgeIter,
     },
-    CenterPoint, EdgeIterable, GeometryTransform,
+    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
 
 #[derive(Clone)]
@@ -38,6 +38,10 @@ impl ConvexPolygon {
     pub fn area(&self) -> FloatNum {
         self.area
     }
+
+    pub fn scale_with_center_point(&mut self, center_point: &Point, from: &Point, to: &Point) {
+        resize_by_vector(self.vertexes.iter_mut(), center_point, from, to);
+    }
 }
 
 impl CenterPoint for ConvexPolygon {
@@ -54,14 +58,28 @@ impl GeometryTransform for ConvexPolygon {
         self.center_point += vector;
     }
 
-    fn rotate(&mut self, origin_point: &Point, deg: f32) {
-        rotate_polygon(*origin_point, self.vertexes.iter_mut(), deg);
+    fn rotate(&mut self, origin_point: &Point, rad: f32) {
+        rotate_polygon(*origin_point, self.vertexes.iter_mut(), rad);
+
+        if origin_point != &self.center_point {
+            self.center_point = rotate_point(&self.center_point, origin_point, rad);
+        }
+    }
+
+    fn scale(&mut self, from: &Point, to: &Point) {
+        self.scale_with_center_point(&self.center_point.clone(), from, to)
     }
 }
 
 impl EdgeIterable for ConvexPolygon {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
         Box::new(VertexesToEdgeIter::new(&self.vertexes))
+    }
+}
+
+impl NearestPoint for ConvexPolygon {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        find_nearest_point(self, reference_point, direction)
     }
 }
 
@@ -86,5 +104,11 @@ impl ComputeMomentOfInertia for ConvexPolygon {
             let mass = m * compute_area_of_triangle(&triangle) * total_area_inv;
             compute_moment_of_inertia_of_triangle(&triangle, mass) + acc
         })
+    }
+}
+
+impl SelfClone for ConvexPolygon {
+    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
+        self.clone().into()
     }
 }

@@ -82,14 +82,14 @@ macro_rules! impl_vector {
                 }
 
                 #[inline]
-                pub fn deg(&self, vector: &Vector<$T>) -> $T {
+                pub fn rad(&self, vector: &Vector<$T>) -> $T {
                     vector.y.atan2(vector.x) - self.y.atan2(self.x)
                 }
 
                 #[inline]
-                pub fn affine_transformation_rotate(&self, deg: $T) -> Vector<$T> {
-                    let c = deg.cos();
-                    let s = deg.sin();
+                pub fn affine_transformation_rotate(&self, rad: $T) -> Vector<$T> {
+                    let c = rad.cos();
+                    let s = rad.sin();
                     // clockwise
                     let new_x = self.y * s + self.x * c;
                     let new_y = self.y * c - self.x * s;
@@ -97,9 +97,9 @@ macro_rules! impl_vector {
                 }
 
                 #[inline]
-                pub fn affine_transformation_rotate_self(&mut self, deg: $T) {
-                    let c = deg.cos();
-                    let s = deg.sin();
+                pub fn affine_transformation_rotate_self(&mut self, rad: $T) {
+                    let c = rad.cos();
+                    let s = rad.sin();
                     let new_x = self.y * s + self.x * c;
                     let new_y = self.y * c - self.x * s;
                     self.x = new_x;
@@ -219,6 +219,16 @@ where
 {
     type Output = T;
     fn mul(self, rhs: Vector<T>) -> Self::Output {
+        (self.x * rhs.x) + (self.y * rhs.y)
+    }
+}
+
+impl<T: Clone + Copy> Mul<&Vector<T>> for &Vector<T>
+where
+    T: Mul<Output = T> + Add<Output = T>,
+{
+    type Output = T;
+    fn mul(self, rhs: &Vector<T>) -> Self::Output {
         (self.x * rhs.x) + (self.y * rhs.y)
     }
 }
@@ -482,6 +492,13 @@ where
 impl Shr<Vector> for Vector {
     type Output = f32;
     fn shr(self, rhs: Vector) -> Self::Output {
+        self * rhs * rhs.abs().recip()
+    }
+}
+
+impl Shr<&Vector> for &Vector {
+    type Output = f32;
+    fn shr(self, rhs: &Vector) -> Self::Output {
         self * rhs * rhs.abs().recip()
     }
 }

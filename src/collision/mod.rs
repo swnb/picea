@@ -5,9 +5,9 @@ use crate::{
         point::Point,
         segment::Segment,
         vector::{Vector, Vector3},
-        FloatNum,
+        FloatNum, PI,
     },
-    shape::CenterPoint,
+    shape::{CenterPoint, NearestPoint},
 };
 use std::{
     cmp::Ordering,
@@ -28,11 +28,11 @@ pub trait Projector {
     }
 }
 
-pub trait SubCollider: Projector + CenterPoint {}
+pub trait SubCollider: Projector + CenterPoint + NearestPoint {}
 
-impl<T> SubCollider for T where T: Projector + CenterPoint {}
+impl<T> SubCollider for T where T: Projector + CenterPoint + NearestPoint {}
 
-pub trait Collider: Projector + CenterPoint {
+pub trait Collider: Projector + CenterPoint + NearestPoint {
     fn sub_colliders(&'_ self) -> Option<Box<dyn Iterator<Item = &'_ dyn SubCollider> + '_>> {
         None
     }
@@ -74,12 +74,41 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
 }
 
 // entry of collision check, if element is collision, handler will call
-pub fn detect_collision<T, H, F>(elements: T, mut handler: H, skip: F)
+pub fn detect_collision<T, H, F>(elements: T, handler: H, skip: F)
 where
     T: CollisionalCollection,
     // TODO use Iterator instead Vec
-    H: FnMut(&T::Collider, &T::Collider, Vec<ContactPointPair>),
+    H: Fn(&T::Collider, &T::Collider, Vec<ContactPointPair>),
     F: Fn(&T::Collider, &T::Collider) -> bool,
+{
+    // let time = std::time::Instant::now();
+    rough_collision_detection(elements, |collider_a, collider_b| {
+        if skip(collider_a, collider_b) {
+            return;
+        }
+        prepare_accurate_collision_detection(
+            collider_a,
+            collider_b,
+            |sub_collider_a, sub_collider_b| {
+                if let Some(result) =
+                    accurate_collision_detection_for_sub_collider(sub_collider_a, sub_collider_b)
+                {
+                    handler(collider_a, collider_b, result);
+                }
+            },
+        )
+    })
+    // dbg!(time.elapsed());
+}
+
+/**
+ * Rough collision detection, get two colliders that may collide
+ */
+pub fn rough_collision_detection<T, H>(elements: T, mut handler: H)
+where
+    T: CollisionalCollection,
+    // TODO use Iterator instead Vec
+    H: FnMut(&T::Collider, &T::Collider),
 {
     // let time = std::time::Instant::now();
 
@@ -88,57 +117,55 @@ where
 
     let elements = CollisionalCollectionWrapper(elements);
 
-    sweep_and_prune_collision_detection(
-        elements,
-        axis,
-        |a, b| {
-            // TODO special collision algo for circle and circle
-
-            let sub_colliders_a = a.sub_colliders();
-            let sub_colliders_b = b.sub_colliders();
-
-            match (sub_colliders_a, sub_colliders_b) {
-                // TODO
-                (Some(sub_colliders_a), Some(sub_colliders_b)) => {
-                    for collider_a in sub_colliders_a {
-                        let sub_colliders_b = b.sub_colliders().unwrap();
-                        for collider_b in sub_colliders_b {
-                            if let Some(collision_info) =
-                                special_collision_detection(collider_a, collider_b)
-                            {
-                                handler(a, b, collision_info);
-                            }
-                        }
-                    }
-                }
-                (Some(sub_colliders_a), None) => {
-                    for collider_a in sub_colliders_a {
-                        if let Some(collision_info) = special_collision_detection(collider_a, b) {
-                            handler(a, b, collision_info);
-                        }
-                    }
-                }
-                (None, Some(sub_colliders_b)) => {
-                    for collider_b in sub_colliders_b {
-                        if let Some(collision_info) = special_collision_detection(a, collider_b) {
-                            handler(a, b, collision_info);
-                        }
-                    }
-                }
-                (None, None) => {
-                    if let Some(collision_info) = special_collision_detection(a, b) {
-                        handler(a, b, collision_info);
-                    }
-                }
-            }
-        },
-        skip,
-    );
+    sweep_and_prune_collision_detection(elements, axis, |a, b| {
+        // TODO special collision algo for circle and circle
+        handler(a, b);
+    });
 
     // dbg!(time.elapsed());
 }
 
-pub fn special_collision_detection(
+/**
+ * Accurate collision detection, extracting subparts that should collide
+ */
+pub fn prepare_accurate_collision_detection<C, H>(collider_a: &C, collider_b: &C, mut handler: H)
+where
+    C: Collider,
+    H: FnMut(&dyn SubCollider, &dyn SubCollider),
+{
+    let sub_colliders_a = collider_a.sub_colliders();
+    let sub_colliders_b = collider_b.sub_colliders();
+
+    match (sub_colliders_a, sub_colliders_b) {
+        // TODO
+        (Some(sub_colliders_a), Some(_)) => {
+            for collider_a in sub_colliders_a {
+                let sub_colliders_b = collider_b.sub_colliders().unwrap();
+                for collider_b in sub_colliders_b {
+                    handler(collider_a, collider_b);
+                }
+            }
+        }
+        (Some(sub_colliders_a), None) => {
+            for collider_a in sub_colliders_a {
+                handler(collider_a, collider_b);
+            }
+        }
+        (None, Some(sub_colliders_b)) => {
+            for collider_b in sub_colliders_b {
+                handler(collider_a, collider_b);
+            }
+        }
+        (None, None) => {
+            handler(collider_a, collider_b);
+        }
+    }
+}
+
+/**
+ * Accurate collision detection, to obtain information such as collision points
+ */
+pub fn accurate_collision_detection_for_sub_collider(
     a: &dyn SubCollider,
     b: &dyn SubCollider,
 ) -> Option<Vec<ContactPointPair>> {
@@ -153,9 +180,20 @@ pub fn special_collision_detection(
     };
 
     let simplex = gjk_collision_detective(first_approximation_vector, compute_support_point)?;
+
+    // REVIEW move this into gjk
+    const MAX_TOLERABLE_CONTACT_DEPTH: FloatNum = 0.01;
+
+    if simplex
+        .iter()
+        .any(|p| p.abs() < MAX_TOLERABLE_CONTACT_DEPTH)
+    {
+        return None;
+    }
+
     let minkowski_edge = epa_compute_collision_edge(simplex, compute_support_point);
 
-    let contact_infos = minkowski_edge.get_contact_info(center_point_a, center_point_b);
+    let contact_infos: Vec<ContactPointPair> = minkowski_edge.get_contact_info(a, b, true);
 
     contact_infos.into()
 }
@@ -164,50 +202,74 @@ pub fn special_collision_detection(
  * 粗检测
  * find the elements that maybe collision
  */
-fn sweep_and_prune_collision_detection<T, Z, F>(
+fn sweep_and_prune_collision_detection<T, Z>(
     mut elements: CollisionalCollectionWrapper<T>,
     axis: AxisDirection,
     mut handler: Z,
-    skip: F,
 ) where
     T: CollisionalCollection,
-    Z: FnMut(&mut T::Collider, &mut T::Collider),
-    F: Fn(&T::Collider, &T::Collider) -> bool,
+    Z: FnMut(&T::Collider, &T::Collider),
 {
+    if elements.is_empty() {
+        return;
+    }
+
     elements.sort(|a, b| {
-        let (ref min_a_x, _) = a.projection_on_axis(axis);
-        let (ref min_b_x, _) = b.projection_on_axis(axis);
-        min_a_x.partial_cmp(min_b_x).unwrap()
+        let (min_a_x, _) = a.projection_on_axis(axis);
+        let (min_b_x, _) = b.projection_on_axis(axis);
+        min_a_x.partial_cmp(&min_b_x).unwrap()
     });
 
-    for i in 1..elements.len() {
-        let cur = &elements[i];
-        let (min_x, _) = cur.projection_on_axis(axis);
-        for j in (0..i).rev() {
-            let is_collision_on_x = elements[j].projection_on_axis(axis).1 >= min_x;
+    let len = elements.len();
 
+    for i in 0..(len - 1) {
+        let cur = &elements[i];
+        let (_, max_x) = cur.projection_on_axis(axis);
+        for j in (i + 1)..len {
+            let is_collision_on_x = elements[j].projection_on_axis(axis).0 <= max_x;
             if is_collision_on_x {
                 let (a_min_y, a_max_y) = elements[i].projection_on_axis(!axis);
                 let (b_min_y, b_max_y) = elements[j].projection_on_axis(!axis);
 
                 if !(a_max_y < b_min_y || b_max_y < a_min_y) {
-                    if skip(&elements[i], &elements[j]) {
-                        continue;
-                    }
                     // detective precise collision
-                    let a: *mut _ = &mut elements[i];
-                    let b: *mut _ = &mut elements[j];
+                    let a: *const _ = &elements[i];
+                    let b: *const _ = &elements[j];
                     unsafe {
-                        handler(&mut *a, &mut *b);
+                        handler(&*a, &*b);
                     };
                 }
             } else {
-                // no element is collision
-                // FIXME
-                // break;
+                break;
             }
         }
     }
+
+    // for i in 1..elements.len() {
+    //     let cur = &elements[i];
+    //     let (min_x, _) = cur.projection_on_axis(axis);
+    //     for j in (0..i).rev() {
+    //         let is_collision_on_x = elements[j].projection_on_axis(axis).1 >= min_x;
+
+    //         if is_collision_on_x {
+    //             let (a_min_y, a_max_y) = elements[i].projection_on_axis(!axis);
+    //             let (b_min_y, b_max_y) = elements[j].projection_on_axis(!axis);
+
+    //             if !(a_max_y < b_min_y || b_max_y < a_min_y) {
+    //                 // detective precise collision
+    //                 let a: *const _ = &elements[i];
+    //                 let b: *const _ = &elements[j];
+    //                 unsafe {
+    //                     handler(&*a, &*b);
+    //                 };
+    //             }
+    //         } else {
+    //             // no element is collision
+    //             // FIXME
+    //             // break;
+    //         }
+    //     }
+    // }
 }
 
 // TODO object is too large , we need shrink this struct in the future， rm start_point and end_point
@@ -216,18 +278,26 @@ fn sweep_and_prune_collision_detection<T, Z, F>(
 pub(crate) struct MinkowskiDifferencePoint {
     pub(crate) start_point_from_a: Point,
     pub(crate) end_point_from_b: Point,
-    pub(crate) vector: Vector,
+    pub(crate) value: Vector,
+}
+
+impl Deref for MinkowskiDifferencePoint {
+    type Target = Vector;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
 }
 
 impl Display for MinkowskiDifferencePoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&format!("{},", self.vector))
+        f.write_str(&format!("{},", self.value))
     }
 }
 
 impl PartialEq for MinkowskiDifferencePoint {
     fn eq(&self, other: &Self) -> bool {
-        self.vector == other.vector
+        self.value == other.value
     }
 }
 
@@ -236,48 +306,58 @@ impl From<(Point, Point)> for MinkowskiDifferencePoint {
         Self {
             start_point_from_a: s,
             end_point_from_b: e,
-            vector: (e, s).into(),
+            value: (e, s).into(),
         }
     }
 }
 
-type Triangle = [MinkowskiDifferencePoint; 3];
+type Simplex = [MinkowskiDifferencePoint; 3];
 
 // for rectangle , avg compare is 1 to 2 time;
 // https://youtu.be/ajv46BSqcK4 gjk algo explain
 pub(crate) fn gjk_collision_detective(
     first_approximation_vector: Vector,
     compute_support_point: impl Fn(Vector) -> MinkowskiDifferencePoint,
-) -> Option<Triangle> {
+) -> Option<Simplex> {
     let approximation_vector = first_approximation_vector;
 
     let mut a = compute_support_point(approximation_vector);
+
+    if a.value == (0., 0.).into() {
+        return None;
+    }
 
     let compute_support_point = |reference_vector: Vector| {
         let result = compute_support_point(reference_vector);
         // dbg!(&result, reference_vector);
         // FIXME this is wrong? <= 0
-        if (result.vector * reference_vector) < 0. {
+        if (result.value * reference_vector) < 0. {
             None
         } else {
             Some(result)
         }
     };
 
-    let approximation_vector = -a.vector;
+    let approximation_vector = -a.value;
     let mut b = compute_support_point(approximation_vector)?;
+
     if a == b {
         return None;
     }
 
     fn compute_third_reference_vector(a: Vector, b: Vector) -> Vector {
         let inv_b = -b;
-        let base_vector: Vector = a + inv_b;
-        let base_vector: Vector3<f32> = base_vector.into();
-        (base_vector ^ inv_b.into() ^ base_vector).into()
+        let vector_ba: Vector = a + inv_b;
+        let base_vector: Vector3<f32> = vector_ba.into();
+        let tmp_vector = base_vector ^ inv_b.into();
+        if tmp_vector.z().abs() < FloatNum::EPSILON {
+            !vector_ba
+        } else {
+            (tmp_vector ^ base_vector).into()
+        }
     }
 
-    let approximation_vector = compute_third_reference_vector(a.vector, b.vector);
+    let approximation_vector = compute_third_reference_vector(a.value, b.value);
 
     let mut c = compute_support_point(approximation_vector)?;
 
@@ -290,14 +370,14 @@ pub(crate) fn gjk_collision_detective(
         Failure,
     }
 
-    // image triangle with point a, b, c, keep c as the updated point
-    let mut is_origin_inside_triangle = || -> Option<ControlFlow<(), Res>> {
+    // image simplex with point a, b, c, keep c as the updated point
+    let mut is_origin_inside_simplex = || -> Option<ControlFlow<(), Res>> {
         use Res::*;
 
-        let inv_c = -c.vector;
+        let inv_c = -c.value;
 
-        let ca: Vector3<_> = (a.vector + inv_c).into();
-        let cb: Vector3<_> = (b.vector + inv_c).into();
+        let ca: Vector3<_> = (a.value + inv_c).into();
+        let cb: Vector3<_> = (b.value + inv_c).into();
         let cb_normal = (cb ^ (cb ^ ca)).into();
 
         if inv_c * cb_normal > f32::EPSILON {
@@ -336,7 +416,7 @@ pub(crate) fn gjk_collision_detective(
         use ControlFlow::*;
         use Res::*;
 
-        return match is_origin_inside_triangle()? {
+        return match is_origin_inside_simplex()? {
             Break(_) => None,
             Continue(Success) => Some([a, b, c]),
             Continue(Failure) => continue,
@@ -352,9 +432,9 @@ where
 
     let mut vector: Vector = (0., 1.).into();
     let mut result = Vec::with_capacity(SAMPLE_SIZE);
-    let deg = std::f32::consts::PI * 2. * (SAMPLE_SIZE as FloatNum).recip();
+    let rad = PI() * 2. * (SAMPLE_SIZE as FloatNum).recip();
     for _ in 0..SAMPLE_SIZE {
-        vector.affine_transformation_rotate_self(deg);
+        vector.affine_transformation_rotate_self(rad);
         let p = compute_support_point(vector);
         result.push(p);
     }
@@ -377,9 +457,9 @@ impl Display for MinkowskiEdge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_char('[')?;
         let start_point = &self.start_different_point;
-        f.write_str(&format!("{},", start_point.vector))?;
+        f.write_str(&format!("{},", start_point.value))?;
         let end_point = &self.end_different_point;
-        f.write_str(&format!("{}", end_point.vector))?;
+        f.write_str(&format!("{}", end_point.value))?;
         f.write_char(']')
     }
 }
@@ -390,14 +470,14 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
     ) -> Self {
         let a = start_point;
         let b = end_point;
-        let ab = (b.vector - a.vector).into();
-        let ao: Vector3<_> = (-a.vector).into();
+        let ab = (b.value - a.value).into();
+        let ao: Vector3<_> = (-a.value).into();
 
         let ao_x_ab = ao ^ ab;
 
         //  NOTE maybe z < EPSILON
         // ao_x_ab.z() == 0 means ab pass origin, follow compute will get NaN
-        if (ao_x_ab).z() == 0. {
+        if (ao_x_ab).z().abs() < 1e-7 {
             let ab: Vector = ab.into();
             //  NOTE current normal direction need to be corrected when we need to know the orientation
             let normal = !ab;
@@ -410,7 +490,7 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
             }
         } else {
             let normal: Vector<_> = (ao_x_ab ^ ab).into();
-            let depth = a.vector >> normal;
+            let depth = a.value >> normal;
 
             debug_assert!(depth.is_sign_positive());
 
@@ -425,35 +505,46 @@ impl From<(MinkowskiDifferencePoint, MinkowskiDifferencePoint)> for MinkowskiEdg
 }
 
 impl MinkowskiEdge {
-    pub(crate) fn expand<F>(&self, compute_support_point: F) -> Option<[MinkowskiEdge; 2]>
+    pub(crate) fn expand<F, C>(
+        &self,
+        compute_support_point: F,
+        compute_minkowski_center_point: C,
+    ) -> Option<[MinkowskiEdge; 2]>
     where
         F: Fn(Vector) -> MinkowskiDifferencePoint,
+        C: Fn() -> Point,
     {
-        let different_point = compute_support_point(self.normal);
-        let new_point = different_point.vector;
+        let mut normal = self.normal;
+
+        if self.depth == 0. {
+            let center_point = compute_minkowski_center_point();
+            let normal_toward_origin = -center_point.to_vector();
+            if !(normal * normal_toward_origin).is_sign_positive() {
+                normal = -normal;
+            }
+        }
+
+        let different_point = compute_support_point(normal);
+        let new_point = different_point.value;
 
         // consider this const variable is same as zero
         const MAX_TOLERABLE_ERROR: f32 = 1e-4;
 
-        if (new_point * self.normal) <= MAX_TOLERABLE_ERROR {
+        if (new_point * normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
-        if different_point == self.start_different_point
-            || different_point == self.end_different_point
+        if (different_point.value - self.start_different_point.value).abs() < MAX_TOLERABLE_ERROR
+            || (different_point.value - self.end_different_point.value).abs() < MAX_TOLERABLE_ERROR
         {
             return None;
         }
 
-        if ((self.start_different_point.vector - different_point.vector) * self.normal).abs()
-            <= MAX_TOLERABLE_ERROR
-        {
+        if ((new_point - self.start_different_point.value) * normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
-        if ((self.end_different_point.vector - different_point.vector) * self.normal).abs()
-            <= MAX_TOLERABLE_ERROR
-        {
+        if ((new_point - self.end_different_point.value) * normal) <= MAX_TOLERABLE_ERROR {
             return None;
         }
 
@@ -467,25 +558,176 @@ impl MinkowskiEdge {
 
     pub(crate) fn get_contact_info(
         &self,
-        center_point_a: Point,
-        center_point_b: Point,
+        sub_collider_a: &dyn SubCollider,
+        sub_collider_b: &dyn SubCollider,
+        gen_more_contact_points_with_nearest_point: bool,
     ) -> Vec<ContactPointPair> {
-        get_collision_contact_point(self, center_point_a, center_point_b)
+        if gen_more_contact_points_with_nearest_point {
+            return self.get_contact_info_with_nearest_point(sub_collider_a, sub_collider_b);
+        }
+
+        let &Self {
+            normal,
+            depth,
+            ref start_different_point,
+            ref end_different_point,
+        } = self;
+
+        let center_point_a = sub_collider_a.center_point();
+        let center_point_b = sub_collider_b.center_point();
+
+        let a1 = start_different_point.start_point_from_a;
+        let a2 = end_different_point.start_point_from_a;
+
+        let b1 = start_different_point.end_point_from_b;
+        let b2 = end_different_point.end_point_from_b;
+
+        // TODO use v_clip for all situation
+        if a1 == a2 && b1 == b2 {
+            let contact_point_a = a1;
+
+            let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
+
+            // TODO 判断或许有误
+            // FIXME 这里的处理必须要对 Line 做特殊处理
+            let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
+                -normal
+            } else {
+                normal
+            };
+
+            let contact_point_pair = ContactPointPair {
+                contact_point_a: a1,
+                contact_point_b: b1,
+                normal_toward_a,
+                depth,
+            };
+
+            vec![contact_point_pair]
+        } else if a1 == a2 {
+            let contact_point_a = a1;
+
+            let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
+            // TODO 判断或许有误
+            let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
+                -normal
+            } else {
+                normal
+            };
+
+            let contact_point_b = a1 + (normal_toward_a * depth);
+
+            let contact_point_pair = ContactPointPair {
+                contact_point_a,
+                contact_point_b,
+                normal_toward_a,
+                depth,
+            };
+
+            vec![contact_point_pair]
+        } else if b1 == b2 {
+            let contact_point_b = b1;
+
+            let tmp_vector: Vector<_> = (contact_point_b, center_point_b).into();
+            // TODO 判断或许有误
+            let normal_toward_b = if (tmp_vector * normal).is_sign_negative() {
+                -normal
+            } else {
+                normal
+            };
+
+            let normal_toward_a = -normal_toward_b;
+
+            let contact_point_a = b1 + (normal_toward_b * depth);
+
+            let contact_point_pair = ContactPointPair {
+                contact_point_a,
+                contact_point_b,
+                normal_toward_a,
+                depth,
+            };
+
+            vec![contact_point_pair]
+        } else {
+            let edge_a: Segment<_> = (a1, a2).into();
+            let edge_b: Segment<_> = (b1, b2).into();
+
+            v_clip(edge_a, edge_b, normal, center_point_a, center_point_b)
+        }
+    }
+
+    fn get_contact_info_with_nearest_point(
+        &self,
+        sub_collider_a: &dyn SubCollider,
+        sub_collider_b: &dyn SubCollider,
+    ) -> Vec<ContactPointPair> {
+        let Self {
+            normal,
+            start_different_point,
+            end_different_point,
+            ..
+        } = self;
+
+        let center_point_a = sub_collider_a.center_point();
+        let center_point_b = sub_collider_b.center_point();
+
+        let a1 = start_different_point.start_point_from_a;
+        let a2 = end_different_point.start_point_from_a;
+
+        let b1 = start_different_point.end_point_from_b;
+        let b2 = end_different_point.end_point_from_b;
+
+        let (edge_a, edge_b) = match (a1 == a2, b1 == b2) {
+            (true, true) => {
+                let a2 = sub_collider_a.nearest_point(&a1, normal);
+                let b2 = sub_collider_b.nearest_point(&b1, normal);
+                let edge_a: Segment<_> = (a1, a2).into();
+                let edge_b: Segment<_> = (b1, b2).into();
+                (edge_a, edge_b)
+            }
+            (true, false) => {
+                let a2 = sub_collider_a.nearest_point(&a1, normal);
+                let edge_a: Segment<_> = (a1, a2).into();
+                let edge_b: Segment<_> = (b1, b2).into();
+                (edge_a, edge_b)
+            }
+            (false, true) => {
+                let b2 = sub_collider_b.nearest_point(&b1, normal);
+                let edge_a: Segment<_> = (a1, a2).into();
+                let edge_b: Segment<_> = (b1, b2).into();
+                (edge_a, edge_b)
+            }
+            (false, false) => {
+                let edge_a: Segment<_> = (a1, a2).into();
+                let edge_b: Segment<_> = (b1, b2).into();
+                (edge_a, edge_b)
+            }
+        };
+
+        v_clip(edge_a, edge_b, *normal, center_point_a, center_point_b)
     }
 }
 
-struct Simplex {
+struct Minkowski {
     edges: Vec<MinkowskiEdge>,
 }
 
-impl Simplex {
-    pub(crate) fn new(triangle: Triangle) -> Self {
+impl Deref for Minkowski {
+    type Target = Vec<MinkowskiEdge>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.edges
+    }
+}
+
+impl Minkowski {
+    pub(crate) fn new(simplex: Simplex) -> Self {
         // expect two iter to find the close edge
         let mut edges: Vec<MinkowskiEdge> = Vec::with_capacity(3 + 2);
         for i in 0..3 {
             let j = (i + 1) % 3;
-            let a = triangle[i].clone();
-            let b = triangle[j].clone();
+            let a = simplex[i].clone();
+            let b = simplex[j].clone();
             let edge = (a, b).into();
             edges.push(edge);
         }
@@ -493,20 +735,24 @@ impl Simplex {
         Self { edges }
     }
 
-    // expand the simplex, find the min
+    pub(crate) fn compute_center_point(&self) -> Point {
+        let sum_result: Vector = self.edges.iter().fold(Default::default(), |mut acc, cur| {
+            acc += cur.start_different_point.value;
+            acc
+        });
+
+        (sum_result * (self.len() as FloatNum).recip()).to_point()
+    }
+
+    // expand the minkowski, find the min
     pub(crate) fn expand<F>(&mut self, compute_support_point: F) -> Result<(), ()>
     where
         F: Fn(Vector) -> MinkowskiDifferencePoint,
     {
         let min_index = self.find_min_edge_index();
 
-        if self.edges[min_index].depth == 0. {
-            // no need to expand
-            return Err(());
-        }
-
-        self.edges[min_index]
-            .expand(&compute_support_point)
+        self[min_index]
+            .expand(&compute_support_point, || self.compute_center_point())
             .map(|new_edges| {
                 self.edges.splice(min_index..min_index + 1, new_edges);
             })
@@ -516,13 +762,13 @@ impl Simplex {
     pub(crate) fn find_min_edge(&self) -> MinkowskiEdge {
         let min_index = self.find_min_edge_index();
 
-        self.edges[min_index].clone()
+        self[min_index].clone()
     }
 
     fn find_min_edge_index(&self) -> usize {
         let mut min_depth = f32::MAX;
         let mut min_index = 0;
-        for (i, edge) in self.edges.iter().enumerate() {
+        for (i, edge) in self.iter().enumerate() {
             if edge.depth < min_depth {
                 min_index = i;
                 min_depth = edge.depth;
@@ -534,17 +780,17 @@ impl Simplex {
 
 // https://dyn4j.org/2010/05/epa-expanding-polytope-algorithm/ epa algo explain
 pub(crate) fn epa_compute_collision_edge<F>(
-    triangle: Triangle,
+    simplex: Simplex,
     compute_support_point: F,
 ) -> MinkowskiEdge
 where
     F: Fn(Vector) -> MinkowskiDifferencePoint,
 {
-    let mut simplex = Simplex::new(triangle);
+    let mut minkowski = Minkowski::new(simplex);
 
-    while simplex.expand(&compute_support_point).is_ok() {}
+    while minkowski.expand(&compute_support_point).is_ok() {}
 
-    simplex.find_min_edge()
+    minkowski.find_min_edge()
 }
 
 #[derive(Clone, Debug)]
@@ -576,98 +822,6 @@ impl ContactPointPair {
 
     pub fn depth(&self) -> FloatNum {
         self.depth
-    }
-}
-
-fn get_collision_contact_point(
-    minkowski_edge: &MinkowskiEdge,
-    center_point_a: Point,
-    center_point_b: Point,
-) -> Vec<ContactPointPair> {
-    let normal = minkowski_edge.normal;
-    let depth = minkowski_edge.depth;
-
-    let a1 = minkowski_edge.start_different_point.start_point_from_a;
-    let a2 = minkowski_edge.end_different_point.start_point_from_a;
-
-    let b1 = minkowski_edge.start_different_point.end_point_from_b;
-    let b2 = minkowski_edge.end_different_point.end_point_from_b;
-
-    // TODO use v_clip for all situation
-    if a1 == a2 && b1 == b2 {
-        let contact_point_a = a1;
-
-        let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
-
-        // TODO 判断或许有误
-        // FIXME 这里的处理必须要对 Line 做特殊处理
-        let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
-            -normal
-        } else {
-            normal
-        };
-
-        let normal_toward_b = -normal_toward_a;
-
-        let contact_point_pair = ContactPointPair {
-            contact_point_a: a1,
-            contact_point_b: b1,
-            normal_toward_a,
-            depth,
-        };
-
-        vec![contact_point_pair]
-    } else if a1 == a2 {
-        let contact_point_a = a1;
-
-        let tmp_vector: Vector<_> = (contact_point_a, center_point_a).into();
-        // TODO 判断或许有误
-        let normal_toward_a = if (tmp_vector * normal).is_sign_negative() {
-            -normal
-        } else {
-            normal
-        };
-
-        let normal_toward_b = -normal_toward_a;
-
-        let contact_point_b = a1 + (normal_toward_a * depth);
-
-        let contact_point_pair = ContactPointPair {
-            contact_point_a,
-            contact_point_b,
-            normal_toward_a,
-            depth,
-        };
-
-        vec![contact_point_pair]
-    } else if b1 == b2 {
-        let contact_point_b = b1;
-
-        let tmp_vector: Vector<_> = (contact_point_b, center_point_b).into();
-        // TODO 判断或许有误
-        let normal_toward_b = if (tmp_vector * normal).is_sign_negative() {
-            -normal
-        } else {
-            normal
-        };
-
-        let normal_toward_a = -normal_toward_b;
-
-        let contact_point_a = b1 + (normal_toward_b * depth);
-
-        let contact_point_pair = ContactPointPair {
-            contact_point_a,
-            contact_point_b,
-            normal_toward_a,
-            depth,
-        };
-
-        vec![contact_point_pair]
-    } else {
-        let edge_a: Segment<_> = (a1, a2).into();
-        let edge_b: Segment<_> = (b1, b2).into();
-
-        v_clip(edge_a, edge_b, normal, center_point_a, center_point_b)
     }
 }
 
@@ -808,17 +962,6 @@ fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Poin
     contact_points
 }
 
-fn compute_cross_point_with_segment(segment: Segment<f32>, start_point: &Point, normal: Vector) {
-    // take start_point as C , take start point in segment as A, take end point in segment as B
-    let c_a: Vector = (start_point, segment.start_point()).into();
-
-    let c_b: Vector = (start_point, segment.end_point()).into();
-
-    if (c_a * normal).is_sign_negative() || (c_b * normal).is_sign_negative() {
-        unreachable!();
-    }
-}
-
 // fn sat_collision_detective<T>(a: &T::Element, b: &T::Element) -> Option<Vector>
 // where
 //     T: ElementCollection,
@@ -903,7 +1046,7 @@ mod tests {
                 x: 50.0,
                 y: -9.469273,
             },
-            vector: (0.0, 79.46927).into(),
+            value: (0.0, 79.46927).into(),
         };
         let end_different_point = MinkowskiDifferencePoint {
             start_point_from_a: Point { x: 50.0, y: -30.0 },
@@ -911,7 +1054,7 @@ mod tests {
                 x: 50.0,
                 y: -9.469273,
             },
-            vector: (0.0, -20.530727).into(),
+            value: (0.0, -20.530727).into(),
         };
 
         let edge: MinkowskiEdge = (start_different_point, end_different_point).into();

@@ -112,6 +112,18 @@ where
     }
 }
 
+impl<T> Add<&Vector<T>> for &Point<T>
+where
+    T: Clone + Copy + Add<Output = T>,
+{
+    type Output = Point<T>;
+    fn add(self, rhs: &Vector<T>) -> Self::Output {
+        let new_x = self.x + rhs.x;
+        let new_y = self.y + rhs.y;
+        (new_x, new_y).into()
+    }
+}
+
 impl<T> Add<Vector<T>> for Point<T>
 where
     T: Clone + Copy + Add<Output = T>,
@@ -162,6 +174,30 @@ where
 {
     type Output = Self;
     fn sub(self, rhs: Vector<T>) -> Self::Output {
+        let new_x = self.x - rhs.x;
+        let new_y = self.y - rhs.y;
+        (new_x, new_y).into()
+    }
+}
+
+impl<T> Sub<Point<T>> for Point<T>
+where
+    T: Clone + Copy + Sub<Output = T>,
+{
+    type Output = Vector<T>;
+    fn sub(self, rhs: Point<T>) -> Self::Output {
+        let new_x = self.x - rhs.x;
+        let new_y = self.y - rhs.y;
+        (new_x, new_y).into()
+    }
+}
+
+impl<T> Sub<&Point<T>> for Point<T>
+where
+    T: Clone + Copy + Sub<Output = T>,
+{
+    type Output = Vector<T>;
+    fn sub(self, rhs: &Point<T>) -> Self::Output {
         let new_x = self.x - rhs.x;
         let new_y = self.y - rhs.y;
         (new_x, new_y).into()

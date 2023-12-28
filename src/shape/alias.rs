@@ -1,5 +1,5 @@
-use super::ShapeTraitUnion;
 use crate::{
+    element::ShapeTraitUnion,
     math::point::Point,
     shape::{
         circle::Circle,

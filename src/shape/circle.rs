@@ -1,16 +1,17 @@
-use super::{CenterPoint, EdgeIterable, GeometryTransform};
+use super::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint};
 use crate::{
-    algo::collision::{Collider, Projector},
-    element::ComputeMomentOfInertia,
-    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
+    collision::{Collider, Projector},
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, TAU},
     meta::Mass,
+    shape::utils::rotate_point,
 };
 
 #[derive(Clone, Debug)]
 pub struct Circle {
-    center: Point,
+    center_point: Point,
     r: f32,
-    deg: f32,
+    rad: f32,
 }
 
 impl<P: Into<Point>> From<(P, f32)> for Circle {
@@ -24,9 +25,9 @@ impl Circle {
     #[inline]
     pub fn new(center_point: impl Into<Point>, radius: f32) -> Self {
         Self {
-            center: center_point.into(),
+            center_point: center_point.into(),
             r: radius,
-            deg: 0.,
+            rad: 0.,
         }
     }
 
@@ -37,12 +38,12 @@ impl Circle {
 
     #[inline]
     pub fn get_center_point(&self) -> Point {
-        self.center
+        self.center_point
     }
 
     #[inline]
     pub fn translate(&mut self, vector: &Vector) {
-        self.center += vector;
+        self.center_point += vector;
     }
 }
 
@@ -71,28 +72,47 @@ impl Projector for Circle {
 
 impl CenterPoint for Circle {
     fn center_point(&self) -> Point {
-        self.center
+        self.center_point
+    }
+}
+
+impl NearestPoint for Circle {
+    // TODO maybe return None;
+    // FIXME use direction
+    fn nearest_point(&self, reference_point: &Point, _: &Vector) -> Point {
+        let vector = *reference_point - self.center_point;
+        let vector = vector.normalize();
+        let vector = vector * self.radius();
+        self.center_point + vector
     }
 }
 
 impl GeometryTransform for Circle {
     fn translate(&mut self, vector: &Vector) {
-        self.center += vector
+        self.center_point += vector
     }
 
-    fn rotate(&mut self, &origin: &Point, deg: f32) {
-        use std::f32::consts::TAU;
-
-        if origin != self.center {
-            let center_vector: Vector = (origin, self.center).into();
-            let new_center = origin + center_vector.affine_transformation_rotate(deg);
-            self.center = new_center;
+    fn rotate(&mut self, &origin_point: &Point, rad: f32) {
+        if origin_point != self.center_point {
+            let center_vector: Vector = (origin_point, self.center_point).into();
+            let new_center = origin_point + center_vector.affine_transformation_rotate(rad);
+            self.center_point = new_center;
         }
 
-        self.deg += deg;
-        if self.deg > TAU {
-            self.deg %= TAU
+        self.rad += rad;
+        if self.rad > TAU() {
+            self.rad %= TAU()
         }
+
+        if origin_point != self.center_point {
+            self.center_point = rotate_point(&self.center_point, &origin_point, rad);
+        }
+    }
+
+    fn scale(&mut self, from: &Point, to: &Point) {
+        let resize_vector: Vector = (from, to).into();
+        // TODO resize to ellipse
+        self.r += resize_vector.abs();
     }
 }
 
@@ -133,6 +153,12 @@ impl ComputeMomentOfInertia for Circle {
 }
 
 impl Collider for Circle {}
+
+impl SelfClone for Circle {
+    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
+        self.clone().into()
+    }
+}
 
 #[cfg(test)]
 mod tests {

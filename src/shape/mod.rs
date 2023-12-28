@@ -1,5 +1,6 @@
 use crate::math::{edge::Edge, point::Point, vector::Vector};
 
+pub mod alias;
 pub mod circle;
 pub mod concave;
 pub mod convex;
@@ -10,7 +11,9 @@ pub mod utils;
 pub trait GeometryTransform {
     fn translate(&mut self, vector: &Vector);
 
-    fn rotate(&mut self, origin_point: &Point, deg: f32);
+    fn rotate(&mut self, origin_point: &Point, rad: f32);
+
+    fn scale(&mut self, from: &Point, to: &Point);
 }
 
 pub trait EdgeIterable {
@@ -19,4 +22,8 @@ pub trait EdgeIterable {
 
 pub trait CenterPoint {
     fn center_point(&self) -> Point;
+}
+
+pub trait NearestPoint {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point;
 }

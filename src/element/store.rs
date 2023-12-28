@@ -1,4 +1,4 @@
-use crate::algo::{collision::CollisionalCollection, sort::SortableCollection};
+use crate::{algo::sort::SortableCollection, collision::CollisionalCollection};
 
 use super::{Element, ID};
 use std::{
@@ -66,7 +66,8 @@ impl ElementStore {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Element> {
         self.elements.iter_mut().map(|v| {
-            let element = &v.element as *const _ as *mut _;
+            let element = &v.element as *const _ as *const ();
+            let element = element as *mut Element;
             unsafe { &mut *element }
         })
     }
@@ -79,13 +80,26 @@ impl ElementStore {
         };
         let element = Rc::new(element);
         self.elements.push(element.clone());
+        self.region_sort_result.push(id);
         self.map.insert(id, element);
         self.is_sorted = false;
     }
 
-    pub fn remove(&mut self, id: ID) {
-        // TODO
-        todo!()
+    pub fn has_element(&self, id: ID) -> bool {
+        self.map.contains_key(&id)
+    }
+
+    pub fn remove_element(&mut self, id: ID) {
+        self.elements.retain(|v| v.element.id != id);
+        self.map.remove(&id);
+        self.is_sorted = false;
+    }
+
+    pub fn clear(&mut self) {
+        self.elements.clear();
+        self.region_sort_result.clear();
+        self.map.clear();
+        self.is_sorted = false;
     }
 
     pub fn get_element_by_id(&self, id: ID) -> Option<&Element> {
@@ -94,7 +108,8 @@ impl ElementStore {
 
     pub fn get_mut_element_by_id(&mut self, id: ID) -> Option<&mut Element> {
         let value = self.map.get_mut(&id)?;
-        let result = &value.element as *const _ as *mut Element;
+        let result = &value.element as *const _ as *const ();
+        let result = result as *mut Element;
         unsafe { &mut *result }.into()
     }
 

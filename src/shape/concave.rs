@@ -1,16 +1,16 @@
 use crate::{
-    algo::collision::{Collider, Projector, SubCollider},
-    element::ComputeMomentOfInertia,
+    collision::{Collider, Projector, SubCollider},
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
 };
 
 use super::{
     convex::ConvexPolygon,
     utils::{
-        projection_polygon_on_vector, rotate_polygon, split_concave_polygon_to_convex_polygons,
-        translate_polygon, VertexesToEdgeIter,
+        find_nearest_point, projection_polygon_on_vector, rotate_point, rotate_polygon,
+        split_concave_polygon_to_convex_polygons, translate_polygon, VertexesToEdgeIter,
     },
-    CenterPoint, EdgeIterable, GeometryTransform,
+    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
 
 #[derive(Clone)]
@@ -22,8 +22,8 @@ pub struct ConcavePolygon {
 }
 
 impl ConcavePolygon {
-    pub fn new(vertexes: &[Point]) -> Self {
-        let origin_vertexes = vertexes.to_owned();
+    pub fn new(vertexes: impl Into<Vec<Point>>) -> Self {
+        let origin_vertexes: Vec<Point> = vertexes.into();
         let sub_convex_polygons: Vec<_> =
             split_concave_polygon_to_convex_polygons(&origin_vertexes)
                 .into_iter()
@@ -65,12 +65,24 @@ impl GeometryTransform for ConcavePolygon {
         self.center_point += vector;
     }
 
-    fn rotate(&mut self, origin_point: &Point, deg: f32) {
-        // TODO update center point ?
+    fn rotate(&mut self, origin_point: &Point, rad: f32) {
         self.sub_convex_polygons
             .iter_mut()
-            .for_each(|convex_polygon| convex_polygon.rotate(origin_point, deg));
-        rotate_polygon(*origin_point, self.origin_vertexes.iter_mut(), deg);
+            .for_each(|convex_polygon| convex_polygon.rotate(origin_point, rad));
+
+        rotate_polygon(*origin_point, self.origin_vertexes.iter_mut(), rad);
+
+        if origin_point != &self.center_point {
+            self.center_point = rotate_point(&self.center_point, origin_point, rad);
+        }
+    }
+
+    fn scale(&mut self, from: &Point, to: &Point) {
+        self.sub_convex_polygons
+            .iter_mut()
+            .for_each(|convex_polygon| {
+                convex_polygon.scale_with_center_point(&self.center_point, from, to)
+            });
     }
 }
 
@@ -102,6 +114,12 @@ impl EdgeIterable for ConcavePolygon {
     }
 }
 
+impl NearestPoint for ConcavePolygon {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        find_nearest_point(self, reference_point, direction)
+    }
+}
+
 impl ComputeMomentOfInertia for ConcavePolygon {
     fn compute_moment_of_inertia(&self, m: crate::meta::Mass) -> f32 {
         let area_inv = self.area.recip();
@@ -112,5 +130,11 @@ impl ComputeMomentOfInertia for ConcavePolygon {
                 let rate = convex_area * area_inv;
                 acc + convex_polygon.compute_moment_of_inertia(m * rate) * rate
             })
+    }
+}
+
+impl SelfClone for ConcavePolygon {
+    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
+        self.clone().into()
     }
 }

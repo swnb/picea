@@ -1,4 +1,3 @@
-pub mod collision;
 pub mod force;
 
 use std::ops::Deref;
@@ -9,7 +8,7 @@ use self::force::{Force, ForceGroup};
 
 pub type Mass = f32;
 
-pub type Angular = f32;
+pub type Angle = f32;
 
 pub type Speed = Vector;
 
@@ -20,15 +19,16 @@ pub struct Meta {
     stashed_velocity: Speed,
     mass: ValueWithInv<Mass>,
     moment_of_inertia: ValueWithInv<Mass>,
-    pre_angular_velocity: FloatNum,
-    stashed_angular_velocity: FloatNum,
-    angular: FloatNum,
+    pre_angle_velocity: FloatNum,
+    stashed_angle_velocity: FloatNum,
+    angle: FloatNum,
     is_fixed: bool,
     // TODO 移除 collision
     is_collision: bool,
     is_transparent: bool,
     // if element is is_sleeping , skip constraint or collision
     is_sleeping: bool,
+    is_ignore_gravity: bool,
     motionless_frame_counter: u8,
 }
 
@@ -117,22 +117,26 @@ impl Meta {
         self
     }
 
-    pub fn angular_velocity(&self) -> f32 {
-        self.stashed_angular_velocity
+    pub fn angle_velocity(&self) -> f32 {
+        self.stashed_angle_velocity
     }
 
-    pub fn set_angular_velocity(&mut self, mut reducer: impl FnMut(f32) -> f32) -> &mut Self {
-        self.stashed_angular_velocity = reducer(self.stashed_angular_velocity);
+    pub fn set_angle_velocity(&mut self, mut reducer: impl FnMut(f32) -> f32) -> &mut Self {
+        self.stashed_angle_velocity = reducer(self.stashed_angle_velocity);
         self
     }
 
-    pub fn angular(&self) -> f32 {
-        self.angular
+    pub fn angle(&self) -> f32 {
+        self.angle
     }
 
-    pub fn set_angular(&mut self, mut reducer: impl FnMut(f32) -> f32) -> &mut Self {
-        self.angular = reducer(self.angular);
+    pub fn set_angle(&mut self, mut reducer: impl FnMut(f32) -> f32) -> &mut Self {
+        self.angle = reducer(self.angle);
         self
+    }
+
+    pub fn motion(&self) -> Vector {
+        self.velocity() * self.mass()
     }
 
     // TODO remove this because of fixed
@@ -173,7 +177,7 @@ impl Meta {
         self.is_transparent
     }
 
-    pub fn mark_transparent(&mut self, is_transparent: bool) -> &mut Self {
+    pub fn mark_is_transparent(&mut self, is_transparent: bool) -> &mut Self {
         self.is_transparent = is_transparent;
         self
     }
@@ -193,7 +197,7 @@ impl Meta {
     pub fn mark_is_sleeping(&mut self, is_sleeping: bool) {
         if is_sleeping {
             self.set_velocity(|_| (0., 0.).into());
-            self.set_angular_velocity(|_| 0.);
+            self.set_angle_velocity(|_| 0.);
         }
         self.is_sleeping = is_sleeping;
     }
@@ -202,7 +206,8 @@ impl Meta {
         self.is_sleeping
     }
 
-    pub fn apply_impulse(&mut self, lambda: FloatNum, normal: Vector, r: Vector) {
+    // r is vector from shape center_point to contact_point
+    pub fn apply_impulse(&mut self, impulse: Vector, r: Vector) {
         // can't apply impulse to element when element fixed
         if self.is_fixed() {
             return;
@@ -210,13 +215,13 @@ impl Meta {
 
         let inv_mass = self.inv_mass();
 
-        self.set_velocity(|pre_velocity| pre_velocity + normal * lambda * inv_mass);
+        self.set_velocity(|pre_velocity| pre_velocity + impulse * inv_mass);
 
         let inv_moment_of_inertia = self.inv_moment_of_inertia();
 
-        self.set_angular_velocity(|pre_angular_velocity| {
+        self.set_angle_velocity(|pre_angle_velocity| {
             // TODO (r ^ (normal * lambda))
-            pre_angular_velocity + (r ^ normal) * lambda * inv_moment_of_inertia
+            pre_angle_velocity + (r ^ impulse) * inv_moment_of_inertia
         });
     }
 
@@ -224,10 +229,14 @@ impl Meta {
         let velocity = self.velocity();
         let velocity_square = velocity * velocity;
 
-        let angular_velocity = self.angular_velocity();
-        let angular_velocity_square = angular_velocity * angular_velocity;
+        let angle_velocity = self.angle_velocity();
+        let angle_velocity_square = angle_velocity * angle_velocity;
 
-        0.5 * (self.mass() * velocity_square + self.moment_of_inertia() * angular_velocity_square)
+        0.5 * (self.mass() * velocity_square + self.moment_of_inertia() * angle_velocity_square)
+    }
+
+    pub fn is_ignore_gravity(&self) -> bool {
+        self.is_ignore_gravity
     }
 }
 
@@ -239,7 +248,7 @@ pub struct MetaBuilder {
 impl From<MetaBuilder> for Meta {
     fn from(mut builder: MetaBuilder) -> Self {
         builder.meta.pre_velocity = builder.meta.stashed_velocity;
-        builder.meta.pre_angular_velocity = builder.meta.stashed_angular_velocity;
+        builder.meta.pre_angle_velocity = builder.meta.stashed_angle_velocity;
         builder.meta
     }
 }
@@ -256,14 +265,15 @@ impl MetaBuilder {
                 pre_velocity: (0., 0.).into(),
                 stashed_velocity: (0., 0.).into(),
                 mass: mass.into(),
-                angular: 0.,
-                pre_angular_velocity: 0.,
-                stashed_angular_velocity: 0.,
+                angle: 0.,
+                pre_angle_velocity: 0.,
+                stashed_angle_velocity: 0.,
                 moment_of_inertia: (0.).into(),
                 is_fixed: false,
                 is_collision: false,
                 is_transparent: false,
                 is_sleeping: false,
+                is_ignore_gravity: false,
                 motionless_frame_counter: 0,
             },
         }
@@ -286,13 +296,13 @@ impl MetaBuilder {
         self
     }
 
-    pub fn angular_velocity(mut self, av: f32) -> Self {
-        self.meta.stashed_angular_velocity = av;
+    pub fn angle_velocity(mut self, av: f32) -> Self {
+        self.meta.stashed_angle_velocity = av;
         self
     }
 
-    pub fn angular(mut self, angular: f32) -> Self {
-        self.meta.angular = angular;
+    pub fn angle(mut self, angle: f32) -> Self {
+        self.meta.angle = angle;
         self
     }
 
@@ -303,6 +313,11 @@ impl MetaBuilder {
 
     pub fn is_transparent(mut self, is_transparent: bool) -> Self {
         self.meta.is_transparent = is_transparent;
+        self
+    }
+
+    pub fn is_ignore_gravity(mut self, is_ignore_gravity: bool) -> Self {
+        self.meta.is_ignore_gravity = is_ignore_gravity;
         self
     }
 }

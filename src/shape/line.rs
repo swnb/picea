@@ -1,21 +1,31 @@
 use crate::{
-    algo::collision::{Collider, Projector},
-    element::ComputeMomentOfInertia,
+    collision::{Collider, Projector},
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{edge::Edge, point::Point, segment::Segment, vector::Vector},
     meta::Mass,
 };
 
-use super::{CenterPoint, EdgeIterable, GeometryTransform};
+use super::{
+    utils::{find_nearest_point, resize_by_vector, rotate_point},
+    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
+};
 
 #[derive(Clone)]
 pub struct Line {
     segment: Segment,
+    center_point: Point,
 }
 
 impl From<(Point, Point)> for Line {
     fn from(value: (Point, Point)) -> Self {
+        let segment: Segment = value.into();
+        let center_point = (segment.start_point().to_vector() * 0.5
+            + segment.end_point().to_vector() * 0.5)
+            .to_point();
+
         Self {
-            segment: value.into(),
+            segment,
+            center_point,
         }
     }
 }
@@ -44,7 +54,19 @@ impl Line {
 
 impl CenterPoint for Line {
     fn center_point(&self) -> Point {
-        (self.start_point().to_vector() * 0.5 + self.end_point().to_vector() * 0.5).to_point()
+        self.center_point
+    }
+}
+
+impl NearestPoint for Line {
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        if reference_point == self.start_point() {
+            return *self.end_point();
+        } else if reference_point == self.end_point() {
+            return *self.start_point();
+        }
+
+        find_nearest_point(self, reference_point, direction)
     }
 }
 
@@ -71,16 +93,31 @@ impl GeometryTransform for Line {
     fn translate(&mut self, vector: &Vector) {
         *self.start_point_mut() += vector;
         *self.end_point_mut() += vector;
+        self.center_point += vector;
     }
 
-    fn rotate(&mut self, origin_point: &Point, deg: f32) {
+    fn rotate(&mut self, origin_point: &Point, rad: f32) {
         let update_point = |point: &mut Point| {
             let mut tmp_vector: Vector = (*origin_point, *point).into();
-            tmp_vector.affine_transformation_rotate_self(deg);
+            tmp_vector.affine_transformation_rotate_self(rad);
             *point = *origin_point + tmp_vector;
         };
         update_point(self.start_point_mut());
         update_point(self.end_point_mut());
+
+        if origin_point != &self.center_point {
+            self.center_point = rotate_point(&self.center_point, origin_point, rad);
+        }
+    }
+
+    fn scale(&mut self, from: &Point, to: &Point) {
+        let (start_point, end_point) = self.segment.ends_mut();
+        resize_by_vector(
+            [start_point, end_point].into_iter(),
+            &self.center_point,
+            from,
+            to,
+        )
     }
 }
 
@@ -107,5 +144,11 @@ impl ComputeMomentOfInertia for Line {
         let l = l.x().powf(2.) + l.y().powf(2.);
 
         m * 12f32.recip() * l
+    }
+}
+
+impl SelfClone for Line {
+    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
+        self.clone().into()
     }
 }

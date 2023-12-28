@@ -1,15 +1,15 @@
 use super::{
     utils::{
         compute_area_of_triangle, compute_moment_of_inertia_of_triangle,
-        compute_polygon_approximate_center_point, projection_polygon_on_vector, rotate_polygon,
-        translate_polygon,
+        compute_polygon_approximate_center_point, find_nearest_point, projection_polygon_on_vector,
+        resize_by_vector, rotate_point, rotate_polygon, translate_polygon,
     },
-    CenterPoint, EdgeIterable, GeometryTransform,
+    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
 };
 use crate::{
-    algo::collision::{Collider, Projector},
-    element::ComputeMomentOfInertia,
-    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, FloatNum},
+    collision::{Collider, Projector},
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, FloatNum, PI, TAU},
     meta::Mass,
 };
 use std::{mem::MaybeUninit, slice};
@@ -42,6 +42,12 @@ macro_rules! impl_shape_for_common_polygon {
             self.get_center_point()
         }
     };
+    (@nearest_point,@inner_impl) => {
+        #[inline]
+        fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+            find_nearest_point(self, reference_point, direction)
+        }
+    };
     (@transform,@inner_impl) => {
         #[inline]
         fn translate(&mut self, vector: &Vector) {
@@ -50,8 +56,17 @@ macro_rules! impl_shape_for_common_polygon {
         }
 
         #[inline]
-        fn rotate(&mut self, &origin_point: &Point, deg: f32) {
-            rotate_polygon(origin_point, self.point_iter_mut(), deg);
+        fn rotate(&mut self, &origin_point: &Point, rad: f32) {
+            rotate_polygon(origin_point, self.point_iter_mut(), rad);
+
+            if origin_point != self.center_point() {
+                *self.center_point_mut() = rotate_point(&self.center_point(), &origin_point, rad);
+            }
+        }
+
+        fn scale(&mut self, from:&Point,to:&Point) {
+            let center_point = self.center_point();
+            resize_by_vector(self.point_iter_mut(), &center_point, from,to);
         }
     };
     (@edge_iter,@inner_impl) => {
@@ -90,12 +105,20 @@ macro_rules! impl_shape_for_common_polygon {
             point_iter.fold((f32::MAX, f32::MIN), reducer)
         }
     };
+    (@self_clone,@inner_impl) => {
+        fn self_clone(&self) -> Box<dyn ShapeTraitUnion>{
+            self.clone().into()
+        }
+    };
     ($struct_name:ident) => {
         impl GeometryTransform for $struct_name {
             impl_shape_for_common_polygon!(@transform, @inner_impl);
         }
         impl CenterPoint for $struct_name {
             impl_shape_for_common_polygon!(@center_point,@inner_impl);
+        }
+        impl NearestPoint for $struct_name {
+            impl_shape_for_common_polygon!(@nearest_point,@inner_impl);
         }
         impl EdgeIterable for $struct_name {
             impl_shape_for_common_polygon!(@edge_iter,@inner_impl);
@@ -104,10 +127,16 @@ macro_rules! impl_shape_for_common_polygon {
             impl_shape_for_common_polygon!(@projector,@inner_impl);
         }
         impl Collider for $struct_name {}
+        impl SelfClone for $struct_name {
+            impl_shape_for_common_polygon!(@self_clone,@inner_impl);
+        }
     };
     (@const,$struct_name:ident) => {
         impl<const N:usize> GeometryTransform for $struct_name<N> {
             impl_shape_for_common_polygon!(@transform,@inner_impl);
+        }
+        impl<const N:usize> NearestPoint for $struct_name<N> {
+            impl_shape_for_common_polygon!(@nearest_point,@inner_impl);
         }
         impl<const N:usize> CenterPoint for $struct_name<N> {
             impl_shape_for_common_polygon!(@center_point,@inner_impl);
@@ -119,6 +148,9 @@ macro_rules! impl_shape_for_common_polygon {
             impl_shape_for_common_polygon!(@projector,@inner_impl);
         }
         impl<const N:usize> Collider for $struct_name<N> {}
+        impl<const N:usize> SelfClone for $struct_name<N> {
+            impl_shape_for_common_polygon!(@self_clone,@inner_impl);
+        }
     };
 }
 
@@ -240,7 +272,7 @@ pub struct ConstRegularPolygon<const N: usize> {
 impl<const N: usize> ConstRegularPolygon<N> {
     const EDGE_COUNT: usize = N;
 
-    const EDGE_ANGLE: f32 = std::f32::consts::TAU / (N as f32);
+    const EDGE_ANGLE: FloatNum = TAU() / (N as FloatNum);
 
     const IS_EVENT: bool = Self::EDGE_COUNT & 1 == 0;
 
@@ -284,18 +316,17 @@ impl<const N: usize> ConstRegularPolygon<N> {
 impl_common_polygon!(@const,ConstRegularPolygon, inner);
 
 impl<const N: usize> ComputeMomentOfInertia for ConstRegularPolygon<N> {
-    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
-        use std::f32::consts::PI;
-
+    fn compute_moment_of_inertia(&self, m: Mass) -> FloatNum {
         let radius = self.radius;
 
         0.5 * m
             * radius.powf(2.)
-            * (1. - (2. / 3. * (PI * (Self::EDGE_COUNT as f32).recip()).sin().powf(2.)))
+            * (1. - (2. / 3. * (PI() * (Self::EDGE_COUNT as f32).recip()).sin().powf(2.)))
     }
 }
 
 // common shape  Rectangle
+#[derive(Clone)]
 pub struct Rect {
     width: f32,
     height: f32,
@@ -336,6 +367,7 @@ impl ComputeMomentOfInertia for Rect {
 impl_common_polygon!(Rect, inner);
 
 // common shape triangle
+#[derive(Clone)]
 pub struct Triangle {
     inner: ConstPolygon<3>,
 }
@@ -358,6 +390,7 @@ impl ComputeMomentOfInertia for Triangle {
     }
 }
 
+#[derive(Clone)]
 pub struct RegularTriangle {
     inner: ConstRegularPolygon<3>,
 }
@@ -389,6 +422,7 @@ impl ComputeMomentOfInertia for RegularTriangle {
     }
 }
 
+#[derive(Clone)]
 pub struct Square {
     inner_rect: Rect,
 }
@@ -410,6 +444,7 @@ impl ComputeMomentOfInertia for Square {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct NormalPolygon {
     vertexes: Vec<Point>,
     center_point: Point,
@@ -457,6 +492,7 @@ impl CommonPolygon for NormalPolygon {
     }
 }
 
+#[derive(Clone)]
 pub struct RegularPolygon {
     inner_polygon: NormalPolygon,
     edge_count: usize,
@@ -466,11 +502,9 @@ pub struct RegularPolygon {
 
 impl RegularPolygon {
     pub fn new(center_point: impl Into<Point>, edge_count: usize, radius: f32) -> Self {
-        use std::f32::consts::TAU;
-
         let mut vertexes: Vec<Point> = Vec::with_capacity(edge_count);
 
-        let edge_angle = TAU * (edge_count as f32).recip();
+        let edge_angle = TAU() * (edge_count as f32).recip();
 
         let mut point: Vector<_> = (0., radius).into();
         vertexes.push(point.to_point());
@@ -521,13 +555,11 @@ impl RegularPolygon {
 impl_common_polygon!(RegularPolygon, inner_polygon);
 
 impl ComputeMomentOfInertia for RegularPolygon {
-    fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
-        use std::f32::consts::PI;
-
+    fn compute_moment_of_inertia(&self, m: Mass) -> FloatNum {
         let radius = self.radius;
 
         let edge_count = self.inner_polygon.edge_count() as f32;
 
-        0.5 * m * radius.powf(2.) * (1. - (2. / 3. * (PI * edge_count.recip()).sin().powf(2.)))
+        0.5 * m * radius.powf(2.) * (1. - (2. / 3. * (PI() * edge_count.recip()).sin().powf(2.)))
     }
 }

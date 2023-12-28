@@ -8,3 +8,11 @@ pub mod vector;
 pub(crate) mod num;
 // TODO rename
 pub type FloatNum = f32;
+
+pub const fn PI() -> FloatNum {
+    std::f32::consts::PI
+}
+
+pub const fn TAU() -> FloatNum {
+    std::f32::consts::TAU
+}

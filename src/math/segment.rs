@@ -44,6 +44,14 @@ impl<T: Clone + Copy> Segment<T> {
     pub fn flip_mut(&mut self) {
         mem::swap(&mut self.end_point, &mut self.start_point);
     }
+
+    pub fn ends(&self) -> (&Point<T>, &Point<T>) {
+        (&self.start_point, &self.end_point)
+    }
+
+    pub fn ends_mut(&mut self) -> (&mut Point<T>, &mut Point<T>) {
+        (&mut self.start_point, &mut self.end_point)
+    }
 }
 
 impl<T: Clone + Copy> Segment<T>
