@@ -446,9 +446,6 @@ impl Scene {
                     ) {
                         let a = collider_a;
                         let b = collider_b;
-                        // TODO remove mark_collision
-                        // a.meta_mut().mark_collision(true);
-                        // b.meta_mut().mark_collision(true);
 
                         contact_pairs.into_iter().for_each(|contact_pair| {
                             self.contact_constraints.push(ContactConstraint::new(
@@ -457,19 +454,6 @@ impl Scene {
                                 contact_pair,
                             ));
                         });
-
-                        // let contact_constraints = contact_pairs
-                        //     .into_iter()
-                        //     .map(|contact_point_pair| (contact_point_pair, a, b).into())
-                        //     .collect();
-
-                        // let contact_manifold = Manifold {
-                        //     collision_element_id_pair: (a.id(), b.id()),
-                        //     reusable: false,
-                        //     contact_constraints,
-                        // };
-
-                        // self.manifold_table.push(contact_manifold);
                     }
                 },
             )

@@ -80,6 +80,7 @@ impl ElementStore {
         };
         let element = Rc::new(element);
         self.elements.push(element.clone());
+        self.region_sort_result.push(id);
         self.map.insert(id, element);
         self.is_sorted = false;
     }
