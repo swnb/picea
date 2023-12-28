@@ -55,7 +55,7 @@ fn init(scene: &mut Scene) {
 
     let concave_polygon = ConcavePolygon::new(&Vec::from(vertexes)[..]);
 
-    let element = ElementBuilder::new(concave_polygon, MetaBuilder::new(200.).is_fixed(true));
+    let element = ElementBuilder::new(concave_polygon, MetaBuilder::new(200.).is_fixed(true), ());
 
     scene.push_element(element);
 
@@ -75,7 +75,7 @@ fn init(scene: &mut Scene) {
                 Box::new(RegularPolygon::new((x, y), edge as usize, 2.))
             };
 
-            scene.push_element(ElementBuilder::new(shape, MetaBuilder::new(10.)));
+            scene.push_element(ElementBuilder::new(shape, MetaBuilder::new(10.), ()));
         }
     }
 }

@@ -20,6 +20,7 @@ fn init(scene: &mut Scene) {
     scene.push_element(ElementBuilder::new(
         ground_bottom,
         MetaBuilder::new(1.).is_fixed(true),
+        (),
     ));
 
     let vertexes = [
@@ -42,7 +43,7 @@ fn init(scene: &mut Scene) {
 
     let concave_polygon = ConcavePolygon::new(&Vec::from(vertexes)[..]);
 
-    let element = ElementBuilder::new(concave_polygon, MetaBuilder::new(100.));
+    let element = ElementBuilder::new(concave_polygon, MetaBuilder::new(100.), ());
 
     scene.push_element(element);
 
@@ -54,6 +55,7 @@ fn init(scene: &mut Scene) {
                     2.,
                 ),
                 MetaBuilder::new(10.),
+                (),
             ));
         }
     }

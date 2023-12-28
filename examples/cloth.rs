@@ -26,7 +26,7 @@ fn init_elements(scene: &mut Scene) {
                 (start_x + row as f32 * GAP, start_y + col as f32 * GAP),
                 0.3,
             );
-            let element = ElementBuilder::new(shape, MetaBuilder::new(1.));
+            let element = ElementBuilder::new(shape, MetaBuilder::new(1.), ());
             map[row][col] = scene.push_element(element);
         }
     });
@@ -96,11 +96,13 @@ fn init_elements(scene: &mut Scene) {
         MetaBuilder::new(100.)
             .velocity((0., -30.))
             .is_ignore_gravity(true),
+        (),
     ));
 
     scene.push_element(ElementBuilder::new(
         Line::new((10., 100.), (100., 100.)),
         MetaBuilder::new(100.).is_fixed(true),
+        (),
     ));
 }
 

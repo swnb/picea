@@ -18,9 +18,10 @@ use crate::{
 pub(crate) type ID = u32;
 
 // TODO refactor element builder
-pub struct ElementBuilder {
+pub struct ElementBuilder<T: Clone = ()> {
     shape: Box<dyn ShapeTraitUnion>,
     meta: Meta,
+    addition_data: T,
 }
 
 pub trait ComputeMomentOfInertia {
@@ -56,11 +57,19 @@ impl<T> ShapeTraitUnion for T where
 {
 }
 
-impl ElementBuilder {
-    pub fn new(shape: impl Into<Box<dyn ShapeTraitUnion>>, meta: impl Into<Meta>) -> Self {
+impl<T: Clone> ElementBuilder<T> {
+    pub fn new(
+        shape: impl Into<Box<dyn ShapeTraitUnion>>,
+        meta: impl Into<Meta>,
+        addition_data: T,
+    ) -> Self {
         let shape = shape.into();
         let meta = meta.into();
-        Self { shape, meta }
+        Self {
+            shape,
+            meta,
+            addition_data,
+        }
     }
 
     pub fn shape(mut self, shape: impl Into<Box<dyn ShapeTraitUnion>>) -> Self {
@@ -72,16 +81,22 @@ impl ElementBuilder {
         self.meta = meta;
         self
     }
+
+    pub fn addition_data(mut self, addition_data: T) -> Self {
+        self.addition_data = addition_data;
+        self
+    }
 }
 
-pub struct Element {
+pub struct Element<Data: Clone = ()> {
     id: ID,
     meta: Meta,
     shape: Box<dyn ShapeTraitUnion>,
     bind_points: BTreeMap<u32, Point>, // move with element
+    data: Data,
 }
 
-impl Clone for Element {
+impl<T: Clone> Clone for Element<T> {
     fn clone(&self) -> Self {
         // clone element will return element with id unset
         Self {
@@ -89,11 +104,12 @@ impl Clone for Element {
             meta: self.meta.clone(),
             shape: self.shape.self_clone(),
             bind_points: Default::default(),
+            data: self.data.clone(),
         }
     }
 }
 
-impl Element {
+impl<T: Clone> Element<T> {
     #[inline]
     pub fn id(&self) -> ID {
         self.id
@@ -104,7 +120,11 @@ impl Element {
     }
 
     #[inline]
-    pub fn new(mut shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>) -> Self {
+    pub fn new(
+        mut shape: Box<dyn ShapeTraitUnion>,
+        meta: impl Into<Meta>,
+        addition_data: T,
+    ) -> Self {
         let mut meta = meta.into();
 
         shape.rotate(&shape.center_point(), meta.angle());
@@ -121,6 +141,7 @@ impl Element {
             shape,
             meta,
             bind_points: Default::default(),
+            data: addition_data,
         }
     }
 
@@ -203,9 +224,9 @@ impl Element {
     }
 }
 
-impl From<ElementBuilder> for Element {
-    fn from(builder: ElementBuilder) -> Self {
-        Self::new(builder.shape, builder.meta)
+impl<T: Clone> From<ElementBuilder<T>> for Element<T> {
+    fn from(builder: ElementBuilder<T>) -> Self {
+        Self::new(builder.shape, builder.meta, builder.addition_data)
     }
 }
 

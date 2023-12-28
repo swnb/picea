@@ -26,7 +26,7 @@ fn init_elements(scene: &mut Scene) {
         if i == 0 {
             meta_builder = meta_builder.velocity((-30., 0.));
         }
-        let element_id = scene.push_element(ElementBuilder::new(shape.clone(), meta_builder));
+        let element_id = scene.push_element(ElementBuilder::new(shape.clone(), meta_builder, ()));
         element_ids.push(element_id);
         shape.translate(&(20., 0.).into());
     }
