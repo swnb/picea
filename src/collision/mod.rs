@@ -244,32 +244,6 @@ fn sweep_and_prune_collision_detection<T, Z>(
             }
         }
     }
-
-    // for i in 1..elements.len() {
-    //     let cur = &elements[i];
-    //     let (min_x, _) = cur.projection_on_axis(axis);
-    //     for j in (0..i).rev() {
-    //         let is_collision_on_x = elements[j].projection_on_axis(axis).1 >= min_x;
-
-    //         if is_collision_on_x {
-    //             let (a_min_y, a_max_y) = elements[i].projection_on_axis(!axis);
-    //             let (b_min_y, b_max_y) = elements[j].projection_on_axis(!axis);
-
-    //             if !(a_max_y < b_min_y || b_max_y < a_min_y) {
-    //                 // detective precise collision
-    //                 let a: *const _ = &elements[i];
-    //                 let b: *const _ = &elements[j];
-    //                 unsafe {
-    //                     handler(&*a, &*b);
-    //                 };
-    //             }
-    //         } else {
-    //             // no element is collision
-    //             // FIXME
-    //             // break;
-    //         }
-    //     }
-    // }
 }
 
 // TODO object is too large , we need shrink this struct in the future， rm start_point and end_point
