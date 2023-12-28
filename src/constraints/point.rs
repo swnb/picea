@@ -4,7 +4,7 @@ use crate::{
     scene::context::ConstraintParameters,
 };
 
-use super::{compute_soft_constraints_params, ConstraintObject};
+use super::{compute_soft_constraints_params, ConstraintObject, JoinConstraintConfig};
 
 pub struct PointConstraint<Obj: ConstraintObject = Element> {
     id: u32,
@@ -15,11 +15,11 @@ pub struct PointConstraint<Obj: ConstraintObject = Element> {
     // force_soft_factor: FloatNum,
     // position_fix_factor: FloatNum,
     // distance must large than zero
-    distance: FloatNum,
     position_bias: FloatNum,
     soft_part: FloatNum,
     mass_effective: FloatNum,
     obj: *mut Obj,
+    config: JoinConstraintConfig,
 }
 
 impl<Obj: ConstraintObject> PointConstraint<Obj> {
@@ -28,9 +28,12 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
         obj_id: ID,
         fixed_point: Point,
         move_point: Point,
-        distance: FloatNum,
+        config: JoinConstraintConfig,
     ) -> Self {
-        assert!(distance >= 0., "distance must large than or equal to zero");
+        assert!(
+            config.distance >= 0.,
+            "distance must large than or equal to zero"
+        );
 
         Self {
             id,
@@ -41,8 +44,8 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
             position_bias: 0.,
             soft_part: 0.,
             mass_effective: 0.,
-            distance,
             obj: std::ptr::null_mut(),
+            config,
         }
     }
 
@@ -73,8 +76,6 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
     pub(crate) unsafe fn reset_params(
         &mut self,
         move_point: Point,
-        damping_ratio: FloatNum,
-        frequency: FloatNum,
         obj: *mut Obj,
         delta_time: FloatNum,
     ) {
@@ -86,14 +87,19 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
         let inv_mass = meta.inv_mass();
         let inv_moment_of_inertia = meta.inv_moment_of_inertia();
 
-        let (force_soft_factor, position_fix_factor) =
-            compute_soft_constraints_params(mass, damping_ratio, frequency, delta_time);
+        let (force_soft_factor, position_fix_factor) = compute_soft_constraints_params(
+            mass,
+            self.config.damping_ratio,
+            self.config.frequency,
+            delta_time,
+        );
 
         let strength_length = self.stretch_length();
         let n = -strength_length.normalize();
 
-        let position_bias =
-            position_fix_factor * (strength_length.abs() - self.distance) * delta_time.recip();
+        let position_bias = position_fix_factor
+            * (strength_length.abs() - self.config.distance)
+            * delta_time.recip();
 
         let soft_part = force_soft_factor * delta_time.recip();
 

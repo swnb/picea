@@ -4,7 +4,7 @@ use crate::{
     scene::context::ConstraintParameters,
 };
 
-use super::{compute_soft_constraints_params, ConstraintObject};
+use super::{compute_soft_constraints_params, ConstraintObject, JoinConstraintConfig};
 
 pub struct JoinConstraint<Obj: ConstraintObject = Element> {
     id: u32,
@@ -18,7 +18,7 @@ pub struct JoinConstraint<Obj: ConstraintObject = Element> {
     // force_soft_factor: FloatNum,
     // position_fix_factor: FloatNum,
     // distance must large than or equal to zero
-    distance: FloatNum,
+    config: JoinConstraintConfig,
     position_bias: FloatNum,
     soft_part: FloatNum,
     inv_mass_effective: FloatNum,
@@ -29,9 +29,12 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
         id: u32,
         (obj_a_id, obj_b_id): (ID, ID),
         (move_point_with_a, move_point_with_b): (Point, Point),
-        distance: FloatNum,
+        config: JoinConstraintConfig,
     ) -> Self {
-        assert!(distance >= 0., "distance must large than or equal to zero");
+        assert!(
+            config.distance >= 0.,
+            "distance must large than or equal to zero"
+        );
 
         Self {
             id,
@@ -44,7 +47,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
             total_lambda: 0.,
             // force_soft_factor: 0.,
             // position_fix_factor: 0.,
-            distance,
+            config,
             position_bias: 0.,
             soft_part: 0.,
             inv_mass_effective: 0.,
@@ -69,11 +72,8 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
 
     pub(crate) unsafe fn reset_params(
         &mut self,
-        parameters: &ConstraintParameters,
         (obj_a, obj_b): (*mut Obj, *mut Obj),
         (move_point_with_a, move_point_with_b): (Point, Point),
-        damping_ratio: FloatNum,
-        frequency: FloatNum,
         delta_time: FloatNum,
     ) {
         self.move_point_with_a = move_point_with_a;
@@ -93,8 +93,12 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
         let inv_i_b = meta_b.inv_moment_of_inertia();
         let mass = meta_a.mass() + meta_b.mass();
 
-        let (force_soft_factor, position_fix_factor) =
-            compute_soft_constraints_params(mass, damping_ratio, frequency, delta_time);
+        let (force_soft_factor, position_fix_factor) = compute_soft_constraints_params(
+            mass,
+            self.config.damping_ratio,
+            self.config.frequency,
+            delta_time,
+        );
 
         let r_a: Vector = (obj_a.center_point(), move_point_with_a).into();
 
@@ -107,7 +111,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
         let inv_mass_effective =
             inv_mass_a + inv_mass_b + inv_i_a * (r_a ^ n).powf(2.) + inv_i_b * (r_b ^ n).powf(2.);
 
-        let position_fix = (distance.abs() - self.distance).max(0.);
+        let position_fix = (distance.abs() - self.config.distance).max(0.);
 
         let position_bias = position_fix_factor * position_fix * inv_delta_time;
 

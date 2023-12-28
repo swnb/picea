@@ -1,3 +1,5 @@
+use derive_builder::Builder;
+
 use crate::{
     math::{point::Point, vector::Vector, FloatNum},
     meta::Meta,
@@ -6,6 +8,41 @@ use crate::{
 pub mod contact;
 pub mod join;
 pub mod point;
+
+#[derive(Builder, Clone)]
+#[builder(pattern = "immutable")]
+pub struct JoinConstraintConfig {
+    #[builder(default = "0.")]
+    pub(crate) distance: FloatNum,
+    #[builder(default = "1.")]
+    pub(crate) damping_ratio: FloatNum,
+    #[builder(default = "crate::math::PI()")]
+    pub(crate) frequency: FloatNum,
+}
+
+impl Default for JoinConstraintConfig {
+    fn default() -> Self {
+        Self {
+            distance: 0.,
+            damping_ratio: 1.,
+            frequency: crate::math::PI(),
+        }
+    }
+}
+
+impl JoinConstraintConfig {
+    pub fn distance(&self) -> FloatNum {
+        self.distance
+    }
+
+    pub fn damping_ratio(&self) -> FloatNum {
+        self.damping_ratio
+    }
+
+    pub fn frequency(&self) -> FloatNum {
+        self.frequency
+    }
+}
 
 pub fn compute_mass_effective<Obj: ConstraintObject>(
     &normal: &Vector,

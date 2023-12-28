@@ -9,7 +9,10 @@ use crate::{
         accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
         rough_collision_detection,
     },
-    constraints::{contact::ContactConstraint, join::JoinConstraint, point::PointConstraint},
+    constraints::{
+        contact::ContactConstraint, join::JoinConstraint, point::PointConstraint,
+        JoinConstraintConfig,
+    },
     element::{store::ElementStore, Element},
     math::{point::Point, vector::Vector, FloatNum},
     scene::hooks::CallbackHook,
@@ -266,9 +269,14 @@ impl Scene {
         element_id: ID,
         element_point: impl Into<Point>,
         fixed_point: impl Into<Point>,
-        distance: FloatNum,
+        config: impl Into<JoinConstraintConfig>,
     ) -> Option<u32> {
-        assert!(distance >= 0., "distance must large than or equal to zero");
+        let config: JoinConstraintConfig = config.into();
+
+        assert!(
+            config.distance >= 0.,
+            "distance must large than or equal to zero"
+        );
 
         let id = self.constraints_id_dispatcher.gen_id();
 
@@ -280,7 +288,7 @@ impl Scene {
         element.create_bind_point(id, element_point);
 
         let point_constraint =
-            PointConstraint::<Element>::new(id, element_id, fixed_point, element_point, distance);
+            PointConstraint::<Element>::new(id, element_id, fixed_point, element_point, config);
 
         self.point_constraints.insert(id, point_constraint);
 
@@ -314,9 +322,14 @@ impl Scene {
         element_a_point: impl Into<Point>,
         element_b_id: ID,
         element_b_point: impl Into<Point>,
-        distance: FloatNum,
+        config: impl Into<JoinConstraintConfig>,
     ) -> Option<u32> {
-        assert!(distance >= 0., "distance must large than or equal to zero");
+        let config: JoinConstraintConfig = config.into();
+
+        assert!(
+            config.distance >= 0.,
+            "distance must large than or equal to zero"
+        );
 
         let id = self.constraints_id_dispatcher.gen_id();
         if element_a_id == element_b_id {
@@ -339,7 +352,7 @@ impl Scene {
             id,
             (element_a_id, element_b_id),
             (element_a_point, element_b_point),
-            distance,
+            config,
         );
 
         self.join_constraints.insert(id, join_constraint);
@@ -493,7 +506,7 @@ impl Scene {
             };
             let move_point = *move_point;
             let obj = element as *mut _;
-            point_constraint.reset_params(move_point, 1.0, 10., obj, delta_time);
+            point_constraint.reset_params(move_point, obj, delta_time);
         }
 
         legacy_constraint_ids.iter().for_each(|id| {
@@ -523,11 +536,8 @@ impl Scene {
             let obj_b = element_b as *mut _;
 
             join_constraint.reset_params(
-                &self.context.constraint_parameters,
                 (obj_a, obj_b),
                 (*move_point_a, *move_point_b),
-                2.0,
-                5.4,
                 delta_time,
             );
         }
