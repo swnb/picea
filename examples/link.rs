@@ -1,6 +1,8 @@
 use common::ConfigBuilder;
 use picea::{
+    constraints::{JoinConstraintConfig, JoinConstraintConfigBuilder},
     element::ElementBuilder,
+    math::PI,
     meta::MetaBuilder,
     scene::Scene,
     shape::{polygon::Square, GeometryTransform},
@@ -30,7 +32,13 @@ fn init_elements(scene: &mut Scene) {
     let mut y = start_y + 10f32;
 
     for i in 0..(BOX_COUNT - 1) {
-        scene.create_join_constraint(element_ids[i], (x, y), element_ids[i + 1], (x + 10., y), 0.);
+        scene.create_join_constraint(
+            element_ids[i],
+            (x, y),
+            element_ids[i + 1],
+            (x + 10., y),
+            JoinConstraintConfig::default(),
+        );
         x += 20.;
         if i % 2 == 0 {
             y -= 10.;
@@ -39,7 +47,12 @@ fn init_elements(scene: &mut Scene) {
         }
     }
 
-    scene.create_point_constraint(element_ids[0], (start_x, start_y), (start_x, start_y), 0.);
+    scene.create_point_constraint(
+        element_ids[0],
+        (start_x, start_y),
+        (start_x, start_y),
+        JoinConstraintConfig::default(),
+    );
 }
 
 fn update(scene: &mut Scene, _selected_element_id: Option<u32>) {

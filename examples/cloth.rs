@@ -1,10 +1,12 @@
 use common::ConfigBuilder;
 
 use picea::{
-    element::{self, ElementBuilder},
+    constraints::{JoinConstraintConfig, JoinConstraintConfigBuilder},
+    element::ElementBuilder,
+    math::PI,
     meta::MetaBuilder,
     scene::Scene,
-    shape::{circle::Circle, line::Line, polygon::Square, GeometryTransform},
+    shape::{circle::Circle, line::Line},
 };
 
 #[path = "../examples_common.rs"]
@@ -18,7 +20,7 @@ fn init_elements(scene: &mut Scene) {
 
     const GAP: f32 = 5.;
 
-    for row in 0..map.len() {
+    (0..map.len()).for_each(|row| {
         for col in 0..map[row].len() {
             let shape = Circle::new(
                 (start_x + row as f32 * GAP, start_y + col as f32 * GAP),
@@ -27,68 +29,67 @@ fn init_elements(scene: &mut Scene) {
             let element = ElementBuilder::new(shape, MetaBuilder::new(1.));
             map[row][col] = scene.push_element(element);
         }
-    }
+    });
 
     (0..map.len()).for_each(|row| {
         let center_point = scene
             .get_element(map[row][0])
             .map(|element| element.center_point());
         if let Some(center_point) = center_point {
-            scene.create_point_constraint(map[row][0], center_point, center_point, 0.);
+            scene.create_point_constraint(
+                map[row][0],
+                center_point,
+                center_point,
+                JoinConstraintConfigBuilder::default()
+                    .damping_ratio(0.5)
+                    .frequency(PI())
+                    .distance(GAP)
+                    .build()
+                    .unwrap(),
+            );
         }
     });
 
-    for row in 0..map.len() {
+    let mut create_join_constraint =
+        |(row_a, col_a): (usize, usize), (row_b, col_b): (usize, usize)| {
+            let element_a_id = map[row_a][col_a];
+            let element_b_id = map[row_b][col_b];
+            let center_point = scene
+                .get_element(element_a_id)
+                .map(|element| element.center_point())
+                .zip(
+                    scene
+                        .get_element(element_b_id)
+                        .map(|element| element.center_point()),
+                );
+
+            if let Some((center_point_a, center_point_b)) = center_point {
+                scene.create_join_constraint(
+                    element_a_id,
+                    center_point_a,
+                    element_b_id,
+                    center_point_b,
+                    JoinConstraintConfigBuilder::default()
+                        .damping_ratio(0.5)
+                        .frequency(PI())
+                        .distance(GAP)
+                        .build()
+                        .unwrap(),
+                );
+            }
+        };
+
+    (0..(map.len() - 1)).for_each(|row| {
         for col in 0..map[row].len() {
-            let element = scene.get_element(map[row][col]).unwrap();
-            let element_id = element.id();
-            let element_center_point = element.center_point();
-
-            if row != 0 {
-                let left_element = scene.get_element(map[row - 1][col]).unwrap();
-                scene.create_join_constraint(
-                    element_id,
-                    element_center_point,
-                    left_element.id(),
-                    left_element.center_point(),
-                    GAP,
-                );
-            }
-
-            if col != 0 {
-                let top_element = scene.get_element(map[row][col - 1]).unwrap();
-                scene.create_join_constraint(
-                    element_id,
-                    element_center_point,
-                    top_element.id(),
-                    top_element.center_point(),
-                    GAP,
-                );
-            }
-
-            if col != map[row].len() - 1 {
-                let bottom_element = scene.get_element(map[row][col + 1]).unwrap();
-                scene.create_join_constraint(
-                    element_id,
-                    element_center_point,
-                    bottom_element.id(),
-                    bottom_element.center_point(),
-                    GAP,
-                );
-            }
-
-            if row != map.len() - 1 {
-                let right_element = scene.get_element(map[row + 1][col]).unwrap();
-                scene.create_join_constraint(
-                    element_id,
-                    element_center_point,
-                    right_element.id(),
-                    right_element.center_point(),
-                    GAP,
-                );
-            }
+            create_join_constraint((row, col), (row + 1, col));
         }
-    }
+    });
+
+    (0..(map.len())).for_each(|row| {
+        for col in 0..(map[row].len() - 1) {
+            create_join_constraint((row, col), (row, col + 1));
+        }
+    });
 
     scene.push_element(ElementBuilder::new(
         Circle::new((60., 60.), 10.),

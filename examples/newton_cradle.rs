@@ -1,6 +1,10 @@
 use common::ConfigBuilder;
 use picea::{
-    element::ElementBuilder, math::vector::Vector, meta::MetaBuilder, scene::Scene,
+    constraints::{join::JoinConstraint, JoinConstraintConfig},
+    element::ElementBuilder,
+    math::vector::Vector,
+    meta::MetaBuilder,
+    scene::Scene,
     shape::circle::Circle,
 };
 
@@ -36,7 +40,12 @@ fn init_elements(scene: &mut Scene) {
         .into_iter()
         .for_each(|(element_id, element_center_point)| {
             let p = element_center_point + Vector::from((0., -40.));
-            scene.create_point_constraint(element_id, element_center_point, p, 40.);
+            scene.create_point_constraint(
+                element_id,
+                element_center_point,
+                p,
+                JoinConstraintConfig::default(),
+            );
         });
 }
 

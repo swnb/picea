@@ -1,7 +1,8 @@
 use derive_builder::Builder;
+use picea::constraints::JoinConstraintConfig;
 use picea::math::edge::Edge;
 use picea::math::point::Point;
-use picea::math::FloatNum;
+use picea::math::{FloatNum, PI};
 use picea::scene::Scene;
 use picea::shape::utils::is_point_inside_shape;
 use speedy2d::color::Color;
@@ -84,7 +85,7 @@ impl Handler {
                     element_id,
                     current_mouse_pos,
                     current_mouse_pos,
-                    0.,
+                    JoinConstraintConfig::default(),
                 )
             });
 
