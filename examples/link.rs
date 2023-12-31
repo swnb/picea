@@ -23,7 +23,7 @@ fn init_elements(scene: &mut Scene) {
 
     for _ in 0..BOX_COUNT {
         let element_id =
-            scene.push_element(ElementBuilder::new(shape.clone(), MetaBuilder::new(1.)));
+            scene.push_element(ElementBuilder::new(shape.clone(), MetaBuilder::new(1.), ()));
         element_ids.push(element_id);
         shape.translate(&(20., 0.).into());
     }

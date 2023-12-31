@@ -10,6 +10,7 @@ fn init(scene: &mut Scene) {
     scene.push_element(ElementBuilder::new(
         ground_bottom,
         MetaBuilder::new(1.).is_fixed(true),
+        (),
     ));
 
     const MAX_LEVEL: usize = 11;
@@ -23,6 +24,7 @@ fn init(scene: &mut Scene) {
                     5.,
                 ),
                 MetaBuilder::new(10.),
+                (),
             );
             scene.push_element(element);
         }

@@ -249,7 +249,7 @@ impl WebScene {
 
                 let meta_builder: MetaBuilder = meta_data.into();
 
-                let element: ElementBuilder = ElementBuilder::new(shape, meta_builder);
+                let element: ElementBuilder = ElementBuilder::new(shape, meta_builder, ());
 
                 self.scene.push_element(element)
             })
@@ -469,7 +469,7 @@ impl WebScene {
 
         let meta_builder: MetaBuilder = meta_data.into();
 
-        let element = ElementBuilder::new(shape, meta_builder);
+        let element = ElementBuilder::new(shape, meta_builder, ());
 
         self.scene.push_element(element)
     }

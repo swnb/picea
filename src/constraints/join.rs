@@ -1,12 +1,12 @@
 use crate::{
-    element::{Element, ID},
+    element::ID,
     math::{point::Point, vector::Vector, FloatNum},
     scene::context::ConstraintParameters,
 };
 
 use super::{compute_soft_constraints_params, ConstraintObject, JoinConstraintConfig};
 
-pub struct JoinConstraint<Obj: ConstraintObject = Element> {
+pub struct JoinConstraint<Obj: ConstraintObject> {
     id: u32,
     obj_a_id: ID,
     obj_b_id: ID,

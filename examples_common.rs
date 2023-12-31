@@ -29,12 +29,17 @@ pub struct Config {
     enable_mouse_constraint: bool,
 }
 
-type UpdateFn = dyn FnMut(&mut Scene, Option<u32>);
+type UpdateFn<T> = dyn FnMut(&mut Scene<T>, Option<u32>);
 
-struct Handler {
-    scene: Scene,
-    init: Box<dyn FnMut(&mut Scene)>,
-    update: Box<UpdateFn>,
+type InitFn<T> = dyn FnMut(&mut Scene<T>);
+
+struct Handler<T>
+where
+    T: Clone + Default,
+{
+    scene: Scene<T>,
+    init: Box<InitFn<T>>,
+    update: Box<UpdateFn<T>>,
     is_paused: bool,
     is_mouse_down: bool,
     current_mouse_pos: Option<Point>,
@@ -71,7 +76,10 @@ impl<'a> DrawHelper<'a> {
     }
 }
 
-impl Handler {
+impl<T> Handler<T>
+where
+    T: Default + Clone,
+{
     fn solve_mouse_constraint(&mut self) {
         if !self.config.enable_mouse_constraint {
             return;
@@ -100,7 +108,10 @@ impl Handler {
     }
 }
 
-impl WindowHandler for Handler {
+impl<T> WindowHandler for Handler<T>
+where
+    T: Default + Clone,
+{
     fn on_start(
         &mut self,
         helper: &mut WindowHelper<()>,

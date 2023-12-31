@@ -22,10 +22,13 @@ pub struct CollisionStatusViewer {
 }
 
 impl CollisionStatusViewer {
-    pub fn on_update(&mut self, scene: &mut Scene) {
+    pub fn on_update<T>(&mut self, scene: &mut Scene<T>)
+    where
+        T: Clone + Default,
+    {
         self.minkowski_simplexes.clear();
         self.collision_infos.clear();
-        let elements: Vec<&Element> = scene.elements_iter().collect();
+        let elements: Vec<&Element<_>> = scene.elements_iter().collect();
         for i in 0..elements.len() {
             for j in (i + 1)..elements.len() {
                 let a = elements[i];

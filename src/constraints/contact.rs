@@ -1,6 +1,6 @@
 use crate::{
     collision::ContactPointPair,
-    element::{Element, ID},
+    element::ID,
     math::{num::limit_at_range, vector::Vector, FloatNum},
     scene::context::ConstraintParameters,
 };
@@ -9,7 +9,7 @@ use super::{compute_mass_effective, ConstraintObject};
 
 // TODO if two element is still collide in current frame, we can reuse this
 // contact info , is two element is not collide anymore , we don't need this frame
-pub struct ContactConstraint<Obj: ConstraintObject = Element> {
+pub struct ContactConstraint<Obj: ConstraintObject> {
     contact_point_pair: ContactPointPair,
     total_friction_lambda: FloatNum,
     total_lambda: FloatNum,
