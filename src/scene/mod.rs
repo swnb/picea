@@ -21,17 +21,20 @@ use crate::{
 use self::context::Context;
 
 #[derive(Default)]
-pub struct Scene {
-    element_store: ElementStore,
+pub struct Scene<Data = ()>
+where
+    Data: Clone + Default,
+{
+    element_store: ElementStore<Data>,
     id_dispatcher: IDDispatcher,
     total_skip_durations: FloatNum,
     context: Context,
     frame_count: u128,
     callback_hook: hooks::CallbackHook,
     constraints_id_dispatcher: IDDispatcher,
-    contact_constraints: Vec<ContactConstraint>,
-    point_constraints: BTreeMap<u32, PointConstraint>,
-    join_constraints: BTreeMap<u32, JoinConstraint>,
+    contact_constraints: Vec<ContactConstraint<Element<Data>>>,
+    point_constraints: BTreeMap<u32, PointConstraint<Element<Data>>>,
+    join_constraints: BTreeMap<u32, JoinConstraint<Element<Data>>>,
 }
 
 type ID = u32;
@@ -64,7 +67,7 @@ impl IDDispatcher {
     }
 }
 
-impl Scene {
+impl<T: Clone + Default> Scene<T> {
     #[inline]
     pub fn new() -> Self {
         Scene {
@@ -82,8 +85,8 @@ impl Scene {
     }
 
     #[inline]
-    pub fn push_element(&mut self, element: impl Into<Element>) -> u32 {
-        let mut element: Element = element.into();
+    pub fn push_element(&mut self, element: impl Into<Element<T>>) -> u32 {
+        let mut element: Element<T> = element.into();
         let element_id = self.id_dispatcher.gen_id();
         element.inject_id(element_id);
 
@@ -194,22 +197,22 @@ impl Scene {
     }
 
     #[inline]
-    pub fn elements_iter(&self) -> impl Iterator<Item = &Element> {
+    pub fn elements_iter(&self) -> impl Iterator<Item = &Element<T>> {
         self.element_store.iter()
     }
 
     #[inline]
-    pub fn elements_iter_mut(&mut self) -> impl Iterator<Item = &mut Element> {
+    pub fn elements_iter_mut(&mut self) -> impl Iterator<Item = &mut Element<T>> {
         self.element_store.iter_mut()
     }
 
     #[inline]
-    pub fn get_element(&self, id: ID) -> Option<&Element> {
+    pub fn get_element(&self, id: ID) -> Option<&Element<T>> {
         self.element_store.get_element_by_id(id)
     }
 
     #[inline]
-    pub fn get_element_mut(&mut self, id: ID) -> Option<&mut Element> {
+    pub fn get_element_mut(&mut self, id: ID) -> Option<&mut Element<T>> {
         self.element_store.get_mut_element_by_id(id)
     }
 
@@ -288,26 +291,29 @@ impl Scene {
         element.create_bind_point(id, element_point);
 
         let point_constraint =
-            PointConstraint::<Element>::new(id, element_id, fixed_point, element_point, config);
+            PointConstraint::new(id, element_id, fixed_point, element_point, config);
 
         self.point_constraints.insert(id, point_constraint);
 
         id.into()
     }
 
-    pub fn point_constraints(&self) -> impl Iterator<Item = &PointConstraint> {
+    pub fn point_constraints(&self) -> impl Iterator<Item = &PointConstraint<Element<T>>> {
         self.point_constraints.values()
     }
 
-    pub fn get_point_constraint(&self, id: u32) -> Option<&PointConstraint> {
+    pub fn get_point_constraint(&self, id: u32) -> Option<&PointConstraint<Element<T>>> {
         self.point_constraints.get(&id)
     }
 
-    pub fn get_point_constraint_mut(&mut self, id: u32) -> Option<&mut PointConstraint> {
+    pub fn get_point_constraint_mut(
+        &mut self,
+        id: u32,
+    ) -> Option<&mut PointConstraint<Element<T>>> {
         self.point_constraints.get_mut(&id)
     }
 
-    pub fn remove_point_constraint(&mut self, id: u32) -> Option<PointConstraint> {
+    pub fn remove_point_constraint(&mut self, id: u32) -> Option<PointConstraint<Element<T>>> {
         self.point_constraints.remove(&id).map(|point_constraint| {
             if let Some(element) = self.get_element_mut(point_constraint.obj_id()) {
                 element.remove_bind_point(point_constraint.id())
@@ -360,19 +366,19 @@ impl Scene {
         id.into()
     }
 
-    pub fn join_constraints(&self) -> impl Iterator<Item = &JoinConstraint> {
+    pub fn join_constraints(&self) -> impl Iterator<Item = &JoinConstraint<Element<T>>> {
         self.join_constraints.values()
     }
 
-    pub fn get_join_constraint(&self, id: u32) -> Option<&JoinConstraint> {
+    pub fn get_join_constraint(&self, id: u32) -> Option<&JoinConstraint<Element<T>>> {
         self.join_constraints.get(&id)
     }
 
-    pub fn get_join_constraint_mut(&mut self, id: u32) -> Option<&mut JoinConstraint> {
+    pub fn get_join_constraint_mut(&mut self, id: u32) -> Option<&mut JoinConstraint<Element<T>>> {
         self.join_constraints.get_mut(&id)
     }
 
-    pub fn remove_join_constraint(&mut self, id: u32) -> Option<JoinConstraint> {
+    pub fn remove_join_constraint(&mut self, id: u32) -> Option<JoinConstraint<Element<T>>> {
         self.join_constraints
             .remove(&id)
             .map(|join_constraint| unsafe {
@@ -462,7 +468,7 @@ impl Scene {
 
     unsafe fn reset_constraints_params(&mut self, delta_time: FloatNum) {
         let mut legacy_constraint_ids = vec![];
-        let self_ptr = self as *mut Scene;
+        let self_ptr = self as *mut Scene<_>;
 
         for contact_constraint in (*self_ptr).contact_constraints.iter_mut() {
             let Some(element_pair) =
@@ -574,14 +580,14 @@ impl Scene {
         &self,
         element_a_id: ID,
         element_b_id: ID,
-    ) -> Option<(*const Element, *const Element)> {
+    ) -> Option<(*const Element<T>, *const Element<T>)> {
         if element_a_id == element_b_id {
             return None;
         }
 
-        let element_a = self.element_store.get_element_by_id(element_a_id)? as *const Element;
+        let element_a = self.element_store.get_element_by_id(element_a_id)? as *const Element<_>;
 
-        let element_b = self.element_store.get_element_by_id(element_b_id)? as *const Element;
+        let element_b = self.element_store.get_element_by_id(element_b_id)? as *const Element<_>;
 
         (element_a, element_b).into()
     }
@@ -589,22 +595,23 @@ impl Scene {
     unsafe fn query_element_pair_mut(
         &mut self,
         (element_a_id, element_b_id): (ID, ID),
-    ) -> Option<(*mut Element, *mut Element)> {
+    ) -> Option<(*mut Element<T>, *mut Element<T>)> {
         if element_a_id == element_b_id {
             return None;
         }
 
-        let element_a = self.get_element_mut(element_a_id)? as *mut Element;
+        let element_a = self.get_element_mut(element_a_id)? as *mut Element<_>;
 
-        let element_b = self.get_element_mut(element_b_id)? as *mut Element;
+        let element_b = self.get_element_mut(element_b_id)? as *mut Element<_>;
 
         (element_a, element_b).into()
     }
 }
 
-impl<T> Shl<T> for &mut Scene
+impl<T, Z> Shl<T> for &mut Scene<Z>
 where
-    T: Into<Element>,
+    Z: Clone + Default,
+    T: Into<Element<Z>>,
 {
     type Output = ID;
     fn shl(self, rhs: T) -> Self::Output {

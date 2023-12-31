@@ -8,33 +8,34 @@ use std::{
     rc::Rc,
 };
 
-struct StoredElement<E = Element> {
+struct StoredElement<D: Clone> {
+    // TODO
     is_deleted: bool,
-    element: E,
+    element: Element<D>,
 }
 
 /**
  * ElementStore store all element with sort result cache
  */
 #[derive(Default)]
-pub struct ElementStore {
-    elements: Vec<Rc<StoredElement>>,     // origin element order
-    region_sort_result: Vec<ID>,          // "sweep_and_prune_collision_detection" sort cache
-    map: BTreeMap<ID, Rc<StoredElement>>, // indexMap find origin element index by element id
+pub struct ElementStore<T: Clone> {
+    elements: Vec<Rc<StoredElement<T>>>,     // origin element order
+    region_sort_result: Vec<ID>,             // "sweep_and_prune_collision_detection" sort cache
+    map: BTreeMap<ID, Rc<StoredElement<T>>>, // indexMap find origin element index by element id
     // TODO remove this field
     is_sorted: bool, // use quick sort algo , otherwise use select sort
 }
 
-impl Index<usize> for ElementStore {
-    type Output = Element;
+impl<T: Clone> Index<usize> for ElementStore<T> {
+    type Output = Element<T>;
     fn index(&self, index: usize) -> &Self::Output {
         let id = self.region_sort_result[index];
         self.get_element_by_id(id).unwrap()
     }
 }
 
-impl SortableCollection for ElementStore {
-    type Item = Element;
+impl<T: Clone> SortableCollection for ElementStore<T> {
+    type Item = Element<T>;
 
     fn len(&self) -> usize {
         self.elements.len()
@@ -45,7 +46,7 @@ impl SortableCollection for ElementStore {
     }
 }
 
-impl ElementStore {
+impl<T: Clone> ElementStore<T> {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             elements: Vec::with_capacity(capacity),
@@ -60,19 +61,19 @@ impl ElementStore {
         self.elements.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Element> {
+    pub fn iter(&self) -> impl Iterator<Item = &Element<T>> {
         self.elements.iter().map(|v| &v.element)
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Element> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Element<T>> {
         self.elements.iter_mut().map(|v| {
             let element = &v.element as *const _ as *const ();
-            let element = element as *mut Element;
+            let element = element as *mut Element<T>;
             unsafe { &mut *element }
         })
     }
 
-    pub fn push(&mut self, element: Element) {
+    pub fn push(&mut self, element: Element<T>) {
         let id = element.id;
         let element = StoredElement {
             is_deleted: false,
@@ -101,20 +102,20 @@ impl ElementStore {
         self.is_sorted = false;
     }
 
-    pub fn get_element_by_id(&self, id: ID) -> Option<&Element> {
+    pub fn get_element_by_id(&self, id: ID) -> Option<&Element<T>> {
         self.map.get(&id).map(|v| &v.element)
     }
 
-    pub fn get_mut_element_by_id(&mut self, id: ID) -> Option<&mut Element> {
+    pub fn get_mut_element_by_id(&mut self, id: ID) -> Option<&mut Element<T>> {
         let value = self.map.get_mut(&id)?;
         let result = &value.element as *const _ as *const ();
-        let result = result as *mut Element;
+        let result = result as *mut Element<T>;
         unsafe { &mut *result }.into()
     }
 
     pub fn sort<F>(&mut self, compare: F)
     where
-        F: Fn(&Element, &Element) -> Ordering,
+        F: Fn(&Element<T>, &Element<T>) -> Ordering,
     {
         if self.is_sorted {
             self.insertion_sort(compare);
@@ -132,8 +133,8 @@ impl ElementStore {
     }
 }
 
-impl Index<usize> for &mut ElementStore {
-    type Output = Element;
+impl<T: Clone> Index<usize> for &mut ElementStore<T> {
+    type Output = Element<T>;
 
     fn index(&self, index: usize) -> &Self::Output {
         let id = self.region_sort_result[index];
@@ -141,20 +142,20 @@ impl Index<usize> for &mut ElementStore {
     }
 }
 
-impl IndexMut<usize> for &mut ElementStore {
+impl<T: Clone> IndexMut<usize> for &mut ElementStore<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let id = self.region_sort_result[index];
         self.get_mut_element_by_id(id).unwrap()
     }
 }
 
-impl CollisionalCollection for &mut ElementStore {
-    type Collider = Element;
+impl<T: Clone> CollisionalCollection for &mut ElementStore<T> {
+    type Collider = Element<T>;
     fn len(&self) -> usize {
         self.region_sort_result.len()
     }
 
-    fn sort(&mut self, compare: impl Fn(&Element, &Element) -> Ordering) {
+    fn sort(&mut self, compare: impl Fn(&Element<T>, &Element<T>) -> Ordering) {
         ElementStore::sort(self, compare)
     }
 }

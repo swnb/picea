@@ -6,7 +6,7 @@ use crate::{
 
 use super::{compute_soft_constraints_params, ConstraintObject, JoinConstraintConfig};
 
-pub struct PointConstraint<Obj: ConstraintObject = Element> {
+pub struct PointConstraint<Obj: ConstraintObject> {
     id: u32,
     obj_id: ID,
     fixed_point: Point,

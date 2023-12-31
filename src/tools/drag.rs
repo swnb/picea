@@ -12,14 +12,20 @@ pub struct Draggable {
 }
 
 impl Draggable {
-    pub fn on_mouse_down(&mut self, scene: &mut Scene) {
+    pub fn on_mouse_down<T>(&mut self, scene: &mut Scene<T>)
+    where
+        T: Default + Clone,
+    {
         self.is_mouse_down = true;
         for element in scene.elements_iter_mut() {
             element.meta_mut().mark_is_transparent(true);
         }
     }
 
-    pub fn on_mouse_move(&mut self, scene: &mut Scene, x: f32, y: f32) {
+    pub fn on_mouse_move<T>(&mut self, scene: &mut Scene<T>, x: f32, y: f32)
+    where
+        T: Default + Clone,
+    {
         if !self.is_mouse_down {
             return;
         }
@@ -39,7 +45,10 @@ impl Draggable {
         }
     }
 
-    fn on_fist_time_select(&mut self, scene: &mut Scene, x: f32, y: f32) {
+    fn on_fist_time_select<T>(&mut self, scene: &mut Scene<T>, x: f32, y: f32)
+    where
+        T: Default + Clone,
+    {
         for element in scene.elements_iter() {
             let edge_iter = &mut element.shape().edge_iter();
             if is_point_inside_shape((x, y), edge_iter) {

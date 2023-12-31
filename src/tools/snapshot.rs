@@ -1,6 +1,6 @@
 use crate::{element::Element, math::edge::Edge, shape::utils::check_is_concave};
 
-pub fn create_element_construct_code_snapshot(element: &Element) -> String {
+pub fn create_element_construct_code_snapshot<T: Clone>(element: &Element<T>) -> String {
     let points: Vec<_> = element
         .shape()
         .edge_iter()
