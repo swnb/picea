@@ -22,7 +22,7 @@ pub struct CollisionStatusViewer {
 }
 
 impl CollisionStatusViewer {
-    pub fn on_update<T>(&mut self, scene: &mut Scene<T>)
+    pub fn on_update<T>(&mut self, scene: &Scene<T>)
     where
         T: Clone + Default,
     {

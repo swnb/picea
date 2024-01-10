@@ -1,5 +1,11 @@
 use common::ConfigBuilder;
-use picea::{element::ElementBuilder, meta::MetaBuilder, scene::Scene, shape::line::Line};
+use picea::{
+    element::ElementBuilder,
+    math::FloatNum,
+    meta::MetaBuilder,
+    scene::Scene,
+    shape::{circle::Circle, line::Line},
+};
 
 #[path = "../examples_common.rs"]
 mod common;
@@ -15,21 +21,17 @@ fn init(scene: &mut Scene) {
         (),
     ));
 
-    const MAX_LEVEL: usize = 11;
-    for level in 0..MAX_LEVEL {
-        let max_col = level;
-        for col in 0..max_col {
-            let element = ElementBuilder::new(
-                (
-                    4,
-                    (30. + (col as f32 * 20.), (level as f32 * 10.) - 10.),
-                    5.,
-                ),
-                MetaBuilder::new(10.),
-                (),
-            );
-            scene.push_element(element);
-        }
+    let mut start_x = 30.;
+    let start_y = 10.;
+
+    const BALL_COUNT: usize = 1;
+    const BALL_SIZE: FloatNum = 10.;
+    const BALL_GAP: FloatNum = 20.;
+
+    for _ in 0..BALL_COUNT {
+        let ball = Circle::new((start_x, start_y), BALL_SIZE);
+        scene.push_element(ElementBuilder::new(ball, MetaBuilder::new(1.), ()));
+        start_x += BALL_GAP;
     }
 }
 

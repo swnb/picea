@@ -1,8 +1,8 @@
 use common::ConfigBuilder;
 use picea::{
-    constraints::{join::JoinConstraint, JoinConstraintConfig},
+    constraints::JoinConstraintConfigBuilder,
     element::ElementBuilder,
-    math::vector::Vector,
+    math::{vector::Vector, FloatNum},
     meta::MetaBuilder,
     scene::Scene,
     shape::circle::Circle,
@@ -12,14 +12,26 @@ use picea::{
 mod common;
 
 fn init_elements(scene: &mut Scene) {
+    scene
+        .context_mut()
+        .constraint_parameters
+        .skip_friction_constraints = true;
+
+    scene.context_mut().constraint_parameters.max_allow_permeate = 0.001;
+    scene.context_mut().constraint_parameters.factor_elastic = 0.5;
+
+    scene.set_gravity(|_| (0., 10.).into());
+
     let start_x = 45.;
     let start_y = 60.;
 
-    let mut shape = Circle::new((start_x, start_y), 10.);
+    const SIZE: FloatNum = 10.;
+
+    let mut shape = Circle::new((start_x, start_y), SIZE);
 
     let mut element_ids = vec![];
 
-    const BOX_COUNT: usize = 6;
+    const BOX_COUNT: usize = 2;
 
     for i in 0..BOX_COUNT {
         let mut meta_builder = MetaBuilder::new(1.);
@@ -28,7 +40,7 @@ fn init_elements(scene: &mut Scene) {
         }
         let element_id = scene.push_element(ElementBuilder::new(shape.clone(), meta_builder, ()));
         element_ids.push(element_id);
-        shape.translate(&(20., 0.).into());
+        shape.translate(&(SIZE * 2., 0.).into());
     }
 
     let elements: Vec<_> = scene
@@ -44,7 +56,11 @@ fn init_elements(scene: &mut Scene) {
                 element_id,
                 element_center_point,
                 p,
-                JoinConstraintConfig::default(),
+                JoinConstraintConfigBuilder::default()
+                    .distance(40.)
+                    .hard(true)
+                    .build()
+                    .unwrap(),
             );
         });
 }
@@ -60,5 +76,6 @@ fn main() {
         .draw_join_constraints(true)
         .draw_point_constraints(true)
         .enable_mouse_constraint(true);
+
     common::run_window("point constraint - link", config, init_elements, update)
 }

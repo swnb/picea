@@ -1,10 +1,11 @@
 use derive_builder::Builder;
-use picea::constraints::JoinConstraintConfig;
+use picea::constraints::JoinConstraintConfigBuilder;
 use picea::math::edge::Edge;
 use picea::math::point::Point;
 use picea::math::{FloatNum, PI};
 use picea::scene::Scene;
 use picea::shape::utils::is_point_inside_shape;
+use picea::tools::collision_view::CollisionStatusViewer;
 use speedy2d::color::Color;
 use speedy2d::dimen::Vector2;
 use speedy2d::window::{VirtualKeyCode, WindowHandler, WindowHelper};
@@ -27,6 +28,8 @@ pub struct Config {
     draw_point_constraints: bool,
     #[builder(default = "false")]
     enable_mouse_constraint: bool,
+    #[builder(default = "false")]
+    draw_contact_point_pair: bool,
 }
 
 type UpdateFn<T> = dyn FnMut(&mut Scene<T>, Option<u32>);
@@ -46,6 +49,7 @@ where
     selected_element_id: Option<u32>,
     mouse_constraint_id: Option<u32>,
     config: Config,
+    contact_viewer: CollisionStatusViewer,
 }
 
 fn into_vector2(p: Point) -> Vector2<FloatNum> {
@@ -93,7 +97,12 @@ where
                     element_id,
                     current_mouse_pos,
                     current_mouse_pos,
-                    JoinConstraintConfig::default(),
+                    JoinConstraintConfigBuilder::default()
+                        .frequency(1.0)
+                        .damping_ratio(1.0)
+                        .hard(false)
+                        .build()
+                        .unwrap(),
                 )
             });
 
@@ -195,6 +204,8 @@ where
             (self.update)(&mut self.scene, self.selected_element_id);
         }
 
+        // self.contact_viewer.on_update(&self.scene);
+
         graphics.clear_screen(Color::from_gray(0.8));
 
         let mut draw_helper = DrawHelper {
@@ -253,6 +264,16 @@ where
             });
         }
 
+        if self.config.draw_contact_point_pair {
+            self.contact_viewer
+                .get_collision_infos()
+                .iter()
+                .for_each(|contact_info| {
+                    draw_helper.draw_circle(contact_info.point_a(), 0.3, Color::MAGENTA);
+                    draw_helper.draw_circle(contact_info.point_b(), 0.3, Color::MAGENTA);
+                });
+        }
+
         helper.request_redraw();
     }
 }
@@ -279,6 +300,7 @@ pub fn run_window(
         selected_element_id: None,
         mouse_constraint_id: None,
         current_mouse_pos: None,
+        contact_viewer: CollisionStatusViewer::default(),
         config,
     });
 }
