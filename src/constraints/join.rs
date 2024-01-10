@@ -4,7 +4,10 @@ use crate::{
     scene::context::ConstraintParameters,
 };
 
-use super::{compute_soft_constraints_params, ConstraintObject, JoinConstraintConfig};
+use super::{
+    compute_inv_mass_effective, compute_soft_constraints_params, ConstraintObject,
+    JoinConstraintConfig,
+};
 
 pub struct JoinConstraint<Obj: ConstraintObject> {
     id: u32,
@@ -87,18 +90,18 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
 
         let meta_a = obj_a.meta();
         let meta_b = obj_b.meta();
-        let inv_mass_a = meta_a.inv_mass();
-        let inv_mass_b = meta_b.inv_mass();
-        let inv_i_a = meta_a.inv_moment_of_inertia();
-        let inv_i_b = meta_b.inv_moment_of_inertia();
         let mass = meta_a.mass() + meta_b.mass();
 
-        let (force_soft_factor, position_fix_factor) = compute_soft_constraints_params(
-            mass,
-            self.config.damping_ratio,
-            self.config.frequency,
-            delta_time,
-        );
+        let (force_soft_factor, position_fix_factor) = if self.config.hard {
+            (0., 1.)
+        } else {
+            compute_soft_constraints_params(
+                mass,
+                self.config.damping_ratio,
+                self.config.frequency,
+                delta_time,
+            )
+        };
 
         let r_a: Vector = (obj_a.center_point(), move_point_with_a).into();
 
@@ -108,8 +111,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
 
         let n = -distance.normalize();
 
-        let inv_mass_effective =
-            inv_mass_a + inv_mass_b + inv_i_a * (r_a ^ n).powf(2.) + inv_i_b * (r_b ^ n).powf(2.);
+        let inv_mass_effective = compute_inv_mass_effective(&n, (obj_a, obj_b), r_a, r_b);
 
         let position_fix = (distance.abs() - self.config.distance).max(0.);
 

@@ -87,12 +87,16 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
         let inv_mass = meta.inv_mass();
         let inv_moment_of_inertia = meta.inv_moment_of_inertia();
 
-        let (force_soft_factor, position_fix_factor) = compute_soft_constraints_params(
-            mass,
-            self.config.damping_ratio,
-            self.config.frequency,
-            delta_time,
-        );
+        let (force_soft_factor, position_fix_factor) = if self.config.hard {
+            (0., 1.)
+        } else {
+            compute_soft_constraints_params(
+                mass,
+                self.config.damping_ratio,
+                self.config.frequency,
+                delta_time,
+            )
+        };
 
         let strength_length = self.stretch_length();
         let n = -strength_length.normalize();

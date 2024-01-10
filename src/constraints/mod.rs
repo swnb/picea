@@ -1,7 +1,7 @@
 use derive_builder::Builder;
 
 use crate::{
-    math::{point::Point, vector::Vector, FloatNum},
+    math::{point::Point, vector::Vector, FloatNum, TAU},
     meta::Meta,
 };
 
@@ -16,8 +16,10 @@ pub struct JoinConstraintConfig {
     pub(crate) distance: FloatNum,
     #[builder(default = "1.")]
     pub(crate) damping_ratio: FloatNum,
-    #[builder(default = "crate::math::PI()")]
+    #[builder(default = "0.5")]
     pub(crate) frequency: FloatNum,
+    #[builder(default = "false")]
+    pub(crate) hard: bool,
 }
 
 impl Default for JoinConstraintConfig {
@@ -25,7 +27,8 @@ impl Default for JoinConstraintConfig {
         Self {
             distance: 0.,
             damping_ratio: 1.,
-            frequency: crate::math::PI(),
+            frequency: 0.5,
+            hard: false,
         }
     }
 }
@@ -44,32 +47,28 @@ impl JoinConstraintConfig {
     }
 }
 
-pub fn compute_mass_effective<Obj: ConstraintObject>(
+pub fn compute_inv_mass_effective<Obj: ConstraintObject>(
     &normal: &Vector,
-    object_a: &Obj,
-    object_b: &Obj,
+    object_pair: (&Obj, &Obj),
     r_a: Vector,
     r_b: Vector,
 ) -> FloatNum {
-    let inv_moment_of_inertia_a = object_a.meta().inv_moment_of_inertia();
-    let inv_moment_of_inertia_b = object_b.meta().inv_moment_of_inertia();
+    let (obj_a, obj_b) = object_pair;
+    let meta_a = obj_a.meta();
+    let meta_b = obj_b.meta();
 
-    let inv_mass_a = object_a.meta().inv_mass();
-    let inv_mass_b = object_b.meta().inv_mass();
+    let inv_moment_of_inertia_a = meta_a.inv_moment_of_inertia();
+    let inv_moment_of_inertia_b = meta_b.inv_moment_of_inertia();
 
-    // compute and mass_eff and lambda_n
-    let equation_part1 = inv_mass_a;
-    let equation_part2 = inv_mass_b;
-    let equation_part3 = (r_a ^ normal).powf(2.) * inv_moment_of_inertia_a;
-    let equation_part4: f32 = (r_b ^ normal).powf(2.) * inv_moment_of_inertia_b;
+    let inv_mass_a = meta_a.inv_mass();
+    let inv_mass_b = meta_b.inv_mass();
 
-    let inv_mass_effective = equation_part1 + equation_part2 + equation_part3 + equation_part4;
+    let inv_mass_effective = inv_mass_a
+        + inv_mass_b
+        + (r_a ^ normal).powf(2.) * inv_moment_of_inertia_a
+        + (r_b ^ normal).powf(2.) * inv_moment_of_inertia_b;
 
-    if inv_mass_effective == 0. {
-        0.
-    } else {
-        inv_mass_effective.recip()
-    }
+    inv_mass_effective
 }
 
 pub fn compute_soft_constraints_params(
@@ -78,7 +77,7 @@ pub fn compute_soft_constraints_params(
     frequency: FloatNum,
     delta_time: FloatNum,
 ) -> (FloatNum, FloatNum) {
-    let spring_constant = mass * frequency.powf(2.);
+    let spring_constant = mass * (TAU() * frequency).powf(2.);
     let damping_coefficient = 2. * mass * damping_ratio * frequency;
 
     let tmp1 = delta_time * spring_constant; // h * k
