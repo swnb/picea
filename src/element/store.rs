@@ -2,6 +2,7 @@ use crate::{algo::sort::SortableCollection, collision::CollisionalCollection};
 
 use super::{Element, ID};
 use std::{
+    cell::UnsafeCell,
     cmp::Ordering,
     collections::BTreeMap,
     ops::{Index, IndexMut},
@@ -11,7 +12,17 @@ use std::{
 struct StoredElement<D: Clone> {
     // TODO
     is_deleted: bool,
-    element: Element<D>,
+    element: UnsafeCell<Element<D>>,
+}
+
+impl<D: Clone> StoredElement<D> {
+    fn element(&self) -> &Element<D> {
+        unsafe { &*self.element.get() }
+    }
+
+    fn element_mut(&self) -> *mut Element<D> {
+        self.element.get()
+    }
 }
 
 /**
@@ -62,22 +73,20 @@ impl<T: Clone> ElementStore<T> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Element<T>> {
-        self.elements.iter().map(|v| &v.element)
+        self.elements.iter().map(|v| v.element())
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Element<T>> {
-        self.elements.iter_mut().map(|v| {
-            let element = &v.element as *const _ as *const ();
-            let element = element as *mut Element<T>;
-            unsafe { &mut *element }
-        })
+        self.elements
+            .iter_mut()
+            .map(|v| unsafe { &mut *v.element_mut() })
     }
 
     pub fn push(&mut self, element: Element<T>) {
         let id = element.id;
         let element = StoredElement {
             is_deleted: false,
-            element,
+            element: UnsafeCell::new(element),
         };
         let element = Rc::new(element);
         self.elements.push(element.clone());
@@ -91,7 +100,7 @@ impl<T: Clone> ElementStore<T> {
     }
 
     pub fn remove_element(&mut self, id: ID) {
-        self.elements.retain(|v| v.element.id != id);
+        self.elements.retain(|v| v.element().id != id);
         self.map.remove(&id);
         self.is_sorted = false;
     }
@@ -104,14 +113,12 @@ impl<T: Clone> ElementStore<T> {
     }
 
     pub fn get_element_by_id(&self, id: ID) -> Option<&Element<T>> {
-        self.map.get(&id).map(|v| &v.element)
+        self.map.get(&id).map(|v| v.element())
     }
 
     pub fn get_mut_element_by_id(&mut self, id: ID) -> Option<&mut Element<T>> {
         let value = self.map.get_mut(&id)?;
-        let result = &value.element as *const _ as *const ();
-        let result = result as *mut Element<T>;
-        unsafe { &mut *result }.into()
+        (unsafe { &mut *value.element_mut() }).into()
     }
 
     pub fn sort<F>(&mut self, compare: F)
@@ -124,7 +131,7 @@ impl<T: Clone> ElementStore<T> {
             // TODO opt
             self.region_sort_result.truncate(0);
             for v in &self.elements {
-                let id = v.element.id;
+                let id = v.element().id;
                 self.region_sort_result.push(id);
             }
             self.quick_sort(compare);
