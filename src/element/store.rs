@@ -1,4 +1,10 @@
-use crate::{algo::sort::SortableCollection, collision::CollisionalCollection};
+use crate::{
+    algo::sort::SortableCollection,
+    collision::{
+        accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
+        rough_collision_detection, CollisionalCollection, ContactPointPair,
+    },
+};
 
 use super::{Element, ID};
 use std::{
@@ -28,7 +34,7 @@ impl<D: Clone> StoredElement<D> {
 /**
  * ElementStore store all element with sort result cache
  */
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ElementStore<T: Clone> {
     elements: Vec<Rc<StoredElement<T>>>,     // origin element order
     region_sort_result: Vec<ID>,             // "sweep_and_prune_collision_detection" sort cache
@@ -138,6 +144,48 @@ impl<T: Clone> ElementStore<T> {
             // turn off quick sort
             self.is_sorted = true;
         }
+    }
+
+    pub fn detective_collision(
+        &mut self,
+        mut handler: impl FnMut(&Element<T>, &Element<T>, Vec<ContactPointPair>),
+    ) {
+        rough_collision_detection(self, |element_a, element_b| {
+            let should_skip = {
+                let meta_a = element_a.meta();
+                let meta_b = element_b.meta();
+
+                let is_both_sleeping = meta_a.is_sleeping() && meta_b.is_sleeping();
+
+                is_both_sleeping || meta_a.is_transparent() || meta_b.is_transparent()
+            };
+
+            if should_skip {
+                return;
+            }
+
+            let (collider_a, collider_b) = if element_a.id() > element_b.id() {
+                (element_b, element_a)
+            } else {
+                (element_a, element_b)
+            };
+
+            prepare_accurate_collision_detection(
+                collider_a,
+                collider_b,
+                |sub_collider_a, sub_collider_b| {
+                    if let Some(contact_pairs) = accurate_collision_detection_for_sub_collider(
+                        sub_collider_a,
+                        sub_collider_b,
+                    ) {
+                        let a = collider_a;
+                        let b = collider_b;
+
+                        handler(a, b, contact_pairs);
+                    }
+                },
+            )
+        });
     }
 }
 

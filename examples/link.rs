@@ -11,7 +11,7 @@ use picea::{
 #[path = "../examples_common.rs"]
 mod common;
 
-fn init_elements(scene: &mut Scene) {
+fn init_elements(scene: &mut Scene, _: &mut common::Handler<()>) {
     let start_x = 60.;
     let start_y = 20.;
 
@@ -55,7 +55,7 @@ fn init_elements(scene: &mut Scene) {
     );
 }
 
-fn update(scene: &mut Scene, _selected_element_id: Option<u32>) {
+fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut common::Handler<()>) {
     let duration = std::time::Duration::from_secs(10);
     scene.update_elements_by_duration(duration.as_secs_f32());
 }

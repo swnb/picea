@@ -191,9 +191,9 @@ pub fn accurate_collision_detection_for_sub_collider(
         return None;
     }
 
-    let minkowski_edge = epa_compute_collision_edge(simplex, compute_support_point);
+    let minkowski_edge: MinkowskiEdge = epa_compute_collision_edge(simplex, compute_support_point);
 
-    let contact_infos: Vec<ContactPointPair> = minkowski_edge.get_contact_info(a, b, true);
+    let contact_infos: Vec<ContactPointPair> = minkowski_edge.get_contact_info(a, b);
 
     contact_infos.into()
 }
@@ -534,8 +534,11 @@ impl MinkowskiEdge {
         &self,
         sub_collider_a: &dyn SubCollider,
         sub_collider_b: &dyn SubCollider,
-        gen_more_contact_points_with_nearest_point: bool,
     ) -> Vec<ContactPointPair> {
+        let gen_more_contact_points_with_nearest_point = sub_collider_a
+            .support_find_nearest_point()
+            && sub_collider_b.support_find_nearest_point();
+
         if gen_more_contact_points_with_nearest_point {
             return self.get_contact_info_with_nearest_point(sub_collider_a, sub_collider_b);
         }
@@ -623,10 +626,35 @@ impl MinkowskiEdge {
 
             vec![contact_point_pair]
         } else {
-            let edge_a: Segment<_> = (a1, a2).into();
-            let edge_b: Segment<_> = (b1, b2).into();
+            // pick one rand
 
-            v_clip(edge_a, edge_b, normal, center_point_a, center_point_b)
+            let contact_point_b = b1;
+
+            let tmp_vector: Vector<_> = (contact_point_b, center_point_b).into();
+            // TODO 判断或许有误
+            let normal_toward_b = if (tmp_vector * normal).is_sign_negative() {
+                -normal
+            } else {
+                normal
+            };
+
+            let normal_toward_a = -normal_toward_b;
+
+            let contact_point_a = b1 + (normal_toward_b * depth);
+
+            let contact_point_pair = ContactPointPair {
+                contact_point_a,
+                contact_point_b,
+                normal_toward_a,
+                depth,
+            };
+
+            vec![contact_point_pair]
+
+            // let edge_a: Segment<_> = (a1, a2).into();
+            // let edge_b: Segment<_> = (b1, b2).into();
+
+            // v_clip(edge_a, edge_b, normal, center_point_a, center_point_b)
         }
     }
 
@@ -775,27 +803,54 @@ where
  * depth is how deep the collision happen
  */
 pub struct ContactPointPair {
-    pub(crate) contact_point_a: Point,
-    pub(crate) contact_point_b: Point,
-    pub(crate) normal_toward_a: Vector,
-    pub(crate) depth: f32,
+    contact_point_a: Point,
+    contact_point_b: Point,
+    normal_toward_a: Vector,
+    depth: f32,
 }
 
 impl ContactPointPair {
-    pub fn point_a(&self) -> Point {
-        self.contact_point_a
+    pub(crate) fn new(point_a: Point, point_b: Point, normal: Vector, depth: FloatNum) -> Self {
+        ContactPointPair {
+            contact_point_a: point_a,
+            contact_point_b: point_b,
+            normal_toward_a: normal,
+            depth,
+        }
+    }
+}
+
+impl ContactPointPair {
+    pub fn point_a(&self) -> &Point {
+        &self.contact_point_a
     }
 
-    pub fn point_b(&self) -> Point {
-        self.contact_point_b
+    pub fn point_b(&self) -> &Point {
+        &self.contact_point_b
+    }
+
+    pub fn point_a_mut(&mut self) -> &mut Point {
+        &mut self.contact_point_a
+    }
+
+    pub fn point_b_mut(&mut self) -> &mut Point {
+        &mut self.contact_point_b
     }
 
     pub fn normal_toward_a(&self) -> Vector {
         self.normal_toward_a
     }
 
+    pub fn set_normal_toward_a(&mut self, normal: Vector) {
+        self.normal_toward_a = normal;
+    }
+
     pub fn depth(&self) -> FloatNum {
         self.depth
+    }
+
+    pub fn set_depth(&mut self, depth: FloatNum) {
+        self.depth = depth;
     }
 }
 

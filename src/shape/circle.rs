@@ -77,7 +77,10 @@ impl CenterPoint for Circle {
 }
 
 impl NearestPoint for Circle {
-    // TODO maybe return None;
+    fn support_find_nearest_point(&self) -> bool {
+        false
+    }
+
     // FIXME use direction
     fn nearest_point(&self, reference_point: &Point, _: &Vector) -> Point {
         let vector = *reference_point - self.center_point;

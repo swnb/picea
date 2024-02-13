@@ -1,10 +1,10 @@
-use common::ConfigBuilder;
+use common::{ConfigBuilder, Handler};
 use picea::{element::ElementBuilder, meta::MetaBuilder, scene::Scene, shape::circle::Circle};
 
 #[path = "../examples_common.rs"]
 mod common;
 
-fn init_elements(scene: &mut Scene) {
+fn init_elements(scene: &mut Scene, _: &mut Handler<()>) {
     scene
         .context_mut()
         .constraint_parameters
@@ -28,6 +28,8 @@ fn init_elements(scene: &mut Scene) {
         let mut meta_builder = MetaBuilder::new(1.);
         if i == 0 {
             meta_builder = meta_builder.velocity((10., 0.));
+        } else {
+            meta_builder = meta_builder.velocity((2., 0.));
         }
         let element_id = scene.push_element(ElementBuilder::new(shape.clone(), meta_builder, ()));
         element_ids.push(element_id);
@@ -35,7 +37,7 @@ fn init_elements(scene: &mut Scene) {
     }
 }
 
-fn update(scene: &mut Scene, _selected_element_id: Option<u32>) {
+fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut Handler<()>) {
     let duration = std::time::Duration::from_secs(10);
     scene.update_elements_by_duration(duration.as_secs_f32());
 }
@@ -46,7 +48,8 @@ fn main() {
         .draw_join_constraints(true)
         .draw_point_constraints(true)
         .enable_mouse_constraint(true)
-        .draw_contact_point_pair(true);
+        .draw_contact_point_pair(true)
+        .draw_velocity(true);
 
     common::run_window("point constraint - link", config, init_elements, update)
 }

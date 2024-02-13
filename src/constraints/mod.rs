@@ -1,6 +1,7 @@
 use derive_builder::Builder;
 
 use crate::{
+    element::ID,
     math::{point::Point, vector::Vector, FloatNum, TAU},
     meta::Meta,
 };
@@ -90,6 +91,11 @@ pub fn compute_soft_constraints_params(
 }
 
 pub trait ConstraintObject {
+    // this method doesn't need to impl, it is for debug only
+    fn id(&self) -> ID {
+        0
+    }
+
     fn center_point(&self) -> Point;
 
     fn meta(&self) -> &Meta;
@@ -97,6 +103,8 @@ pub trait ConstraintObject {
     fn meta_mut(&mut self) -> &mut Meta;
 
     fn compute_point_velocity(&self, contact_point: &Point) -> Vector;
+
+    fn apply_position_fix(&mut self, fix: Vector, r: Vector);
 }
 
 /**

@@ -1,11 +1,11 @@
 use crate::{
     collision::ContactPointPair,
     element::ID,
-    math::{num::limit_at_range, vector::Vector, FloatNum},
+    math::{num::limit_at_range, vector::Vector, FloatNum, TAU},
     scene::context::ConstraintParameters,
 };
 
-use super::{compute_mass_effective, ConstraintObject};
+use super::{compute_inv_mass_effective, ConstraintObject};
 
 // TODO if two element is still collide in current frame, we can reuse this
 // contact info , is two element is not collide anymore , we don't need this frame
@@ -23,7 +23,11 @@ pub struct ContactConstraint<Obj: ConstraintObject> {
     obj_id_b: ID,
     obj_a: *mut Obj,
     obj_b: *mut Obj,
+    max_allow_restrict_impulse: FloatNum,
     inv_delta_time: FloatNum,
+    is_active: bool,
+    friction: FloatNum,
+    factor_restitution: FloatNum,
 }
 
 impl<Obj: ConstraintObject> ContactConstraint<Obj> {
@@ -41,20 +45,57 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             obj_a: std::ptr::null_mut(),
             obj_b: std::ptr::null_mut(),
             inv_delta_time: 0.,
+            max_allow_restrict_impulse: 0.,
+            is_active: true,
+            friction: 0.,
+            factor_restitution: 0.,
         }
+    }
+
+    pub fn contact_point_pair(&self) -> &ContactPointPair {
+        &self.contact_point_pair
+    }
+
+    pub fn update_contact_point_pair(&mut self, contact_point_pair: ContactPointPair) {
+        self.contact_point_pair = contact_point_pair
+    }
+
+    pub fn set_active(&mut self, is_active: bool) {
+        self.is_active = is_active
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.is_active
     }
 
     pub fn obj_id_pair(&self) -> (ID, ID) {
         (self.obj_id_a, self.obj_id_b)
     }
 
-    pub(crate) fn reset_total_lambda(&mut self) {
-        self.total_friction_lambda = 0.;
-        self.total_friction_lambda = 0.;
+    pub unsafe fn object_a_mut(&mut self) -> &mut Obj {
+        &mut *self.obj_a
+    }
+
+    pub unsafe fn object_b_mut(&mut self) -> &mut Obj {
+        &mut *self.obj_b
+    }
+
+    pub unsafe fn object_a(&self) -> &Obj {
+        &*self.obj_a
+    }
+
+    pub unsafe fn object_b(&self) -> &Obj {
+        &*self.obj_b
     }
 
     // restrict total lambda must big than zero
-    pub(crate) fn restrict_lambda(&mut self, lambda: FloatNum) -> FloatNum {
+    pub(crate) fn restrict_contact_lambda(&mut self, lambda: FloatNum) -> FloatNum {
+        // if speed is very large , than sequence impulse is bad when resolve large speed
+        if lambda > self.max_allow_restrict_impulse {
+            self.total_lambda = 0.;
+            return lambda;
+        }
+
         let previous_total_lambda = self.total_lambda;
         self.total_lambda = (self.total_lambda + lambda).max(0.);
         self.total_lambda - previous_total_lambda
@@ -62,30 +103,46 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
 
     pub(crate) unsafe fn reset_params(
         &mut self,
-        parameters: &ConstraintParameters,
         (obj_a, obj_b): (*mut Obj, *mut Obj),
         delta_time: FloatNum,
+        parameters: &ConstraintParameters,
     ) {
         self.obj_a = obj_a;
         self.obj_b = obj_b;
         self.total_friction_lambda = 0.;
+        self.max_allow_restrict_impulse =
+            parameters.max_allow_restrict_force_for_contact_solve * delta_time;
         self.inv_delta_time = delta_time.recip();
 
         let object_a = &mut *self.obj_a;
         let object_b = &mut *self.obj_b;
         let contact_point_pair = &self.contact_point_pair;
 
-        let r_a = (object_a.center_point(), contact_point_pair.contact_point_a).into();
-        let r_b = (object_b.center_point(), contact_point_pair.contact_point_b).into();
+        *object_a.meta_mut().contact_count_mut() += 1;
+        *object_b.meta_mut().contact_count_mut() += 1;
 
-        let normal = contact_point_pair.normal_toward_a;
+        self.friction = (object_a.meta().friction() * object_b.meta().friction()).sqrt();
 
-        let mass_effective = compute_mass_effective(&normal, object_a, object_b, r_a, r_b);
+        self.factor_restitution =
+            (object_a.meta().factor_restitution() * object_b.meta().factor_restitution()).sqrt();
+
+        let contact_point = ((contact_point_pair.point_a().to_vector()
+            + contact_point_pair.point_b().to_vector())
+            * 0.5)
+            .to_point();
+
+        let r_a = (&object_a.center_point(), &contact_point).into();
+        let r_b = (&object_b.center_point(), &contact_point).into();
+
+        let normal = contact_point_pair.normal_toward_a();
+
+        let mass_effective =
+            compute_inv_mass_effective(&normal, (object_a, object_b), r_a, r_b).recip();
 
         let tangent_normal = !normal;
 
         let tangent_mass_effective =
-            compute_mass_effective(&tangent_normal, object_a, object_b, r_a, r_b);
+            compute_inv_mass_effective(&tangent_normal, (object_a, object_b), r_a, r_b).recip();
 
         self.mass_effective = mass_effective;
         self.tangent_mass_effective = tangent_mass_effective;
@@ -93,133 +150,200 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         self.r_b = r_b;
     }
 
-    pub(crate) unsafe fn solve(
+    pub(crate) unsafe fn solve_velocity_constraint(
         &mut self,
         parameters: &ConstraintParameters,
-        delta_time: FloatNum,
-        fix_position: bool,
+        iter_count: u8,
     ) {
-        if fix_position {
-            self.solve_position_constraint(parameters, delta_time);
-        } else {
-            self.solve_velocity_constraint(parameters, 0.);
-        }
-    }
-
-    unsafe fn solve_velocity_constraint(
-        &mut self,
-        parameters: &ConstraintParameters,
-        bias: FloatNum,
-    ) {
-        let obj_a = &mut *self.obj_a;
-        let obj_b = &mut *self.obj_b;
         let contact_info = &mut self.contact_point_pair;
 
-        let normal = contact_info.normal_toward_a;
-        let mass_effective = self.mass_effective;
-        let depth = contact_info.depth;
+        let obj_a = &mut *self.obj_a;
+        let obj_b = &mut *self.obj_b;
+        let jv_a = contact_info.normal_toward_a();
+        let jv_b = -jv_a;
 
-        let sum_velocity_a = obj_a.compute_point_velocity(&contact_info.contact_point_a);
+        let contact_point_a = contact_info.point_a();
+        let contact_point_b = contact_info.point_b();
+        let contact_point_b_ = *contact_info.point_b();
 
-        let sum_velocity_b = obj_b.compute_point_velocity(&contact_info.contact_point_b);
+        let contact_point =
+            ((contact_point_a.to_vector() + contact_point_b.to_vector()) * 0.5).to_point();
 
-        let coefficient = (sum_velocity_a - sum_velocity_b) * -normal * (parameters.factor_elastic);
+        let v_a = obj_a.compute_point_velocity(&contact_point);
+        let v_b = obj_b.compute_point_velocity(&contact_point);
 
-        debug_assert!(depth.is_sign_positive());
+        let jv = v_a * jv_a + v_b * jv_b;
 
-        let jv = sum_velocity_a - sum_velocity_b;
+        let position_bias =
+            (contact_info.depth() - parameters.max_allow_permeate).max(0.) * self.inv_delta_time;
 
-        let jv_b = normal * jv - bias;
-
-        let lambda = (coefficient + bias) * mass_effective;
-
-        {
-            let r_a = self.r_a;
-            let r_b = self.r_b;
-            let n = -contact_info.normal_toward_a;
-
-            let meta_a = obj_a.meta();
-            let meta_b = obj_b.meta();
-            let inv_mass_effective = meta_a.inv_mass()
-                + meta_b.inv_mass()
-                + (r_a ^ n).powf(2.) * meta_a.inv_moment_of_inertia()
-                + (r_b ^ n).powf(2.) * meta_b.inv_moment_of_inertia();
-            let v_a = obj_a.compute_point_velocity(&contact_info.contact_point_a);
-            let v_b = obj_b.compute_point_velocity(&contact_info.contact_point_b);
-            let jv = n * (v_a - v_b);
-            let position_bias =
-                (contact_info.depth - parameters.max_allow_permeate).max(0.) * self.inv_delta_time;
-
-            let lambda = -(jv + position_bias) * inv_mass_effective.recip();
-            let lambda = self.restrict_lambda(-lambda);
-            let impulse = n * -lambda;
-            obj_a.meta_mut().apply_impulse(impulse, self.r_a);
-            obj_b.meta_mut().apply_impulse(-impulse, self.r_b);
+        let bias = if parameters.split_position_fix {
+            0.
+        } else {
+            -position_bias
         };
 
-        let max_friction_lambda = self.total_lambda * parameters.factor_default_friction;
+        let lambda = -((1. + self.factor_restitution) * jv + (bias * 0.3)) * self.mass_effective;
+        let lambda = self.restrict_contact_lambda(lambda);
 
-        // obj_a.meta_mut().apply_impulse(impulse, self.r_a);
+        // let contact_count_a = obj_a.meta().contact_count();
+        // let contact_count_b = obj_b.meta().contact_count();
 
-        // obj_b.meta_mut().apply_impulse(-impulse, self.r_b);
+        obj_a.meta_mut().apply_impulse(jv_a * lambda, self.r_a);
 
-        if !parameters.skip_friction_constraints {
-            // TODO factor_friction use two element's factor_friction
-            self.solve_friction_constraint(max_friction_lambda);
+        obj_b.meta_mut().apply_impulse(jv_b * lambda, self.r_b);
+
+        // {
+
+        let v_b = obj_b.compute_point_velocity(&contact_point_b_);
+
+        // }
+
+        if iter_count >= 10 && !parameters.skip_friction_constraints {
+            self.solve_friction_constraint(lambda + position_bias);
         }
     }
 
     // TODO add static friction , make object static
-    unsafe fn solve_friction_constraint(&mut self, max_friction_lambda: FloatNum) {
+    pub(crate) unsafe fn solve_friction_constraint(&mut self, max_friction_lambda: FloatNum) {
         let obj_a = &mut *self.obj_a;
         let obj_b = &mut *self.obj_b;
         let contact_info = &mut self.contact_point_pair;
 
         let mass_effective = self.tangent_mass_effective;
 
-        let sum_velocity_a = obj_a.compute_point_velocity(&contact_info.contact_point_a);
+        let contact_point_a = contact_info.point_a();
+        let contact_point_b = contact_info.point_b();
 
-        let sum_velocity_b = obj_b.compute_point_velocity(&contact_info.contact_point_b);
+        let contact_point =
+            ((contact_point_a.to_vector() + contact_point_b.to_vector()) * 0.5).to_point();
 
-        let tangent_normal = !contact_info.normal_toward_a;
+        let sum_velocity_a = obj_a.compute_point_velocity(&contact_point);
 
-        let friction_lambda = (sum_velocity_a - sum_velocity_b) * tangent_normal * mass_effective;
+        let sum_velocity_b = obj_b.compute_point_velocity(&contact_point);
 
-        let previous_total_friction_lambda = self.total_friction_lambda;
+        let tangent_normal = !contact_info.normal_toward_a();
+
+        let mut friction_lambda =
+            (sum_velocity_a - sum_velocity_b) * tangent_normal * mass_effective * self.friction;
+
+        // if friction_lambda > (2.0 * self.inv_delta_time.recip()) {
+        //     self.total_friction_lambda = 0.;
+        // } else {
+        let previous_total_friction_lambda: f32 = self.total_friction_lambda;
         self.total_friction_lambda += friction_lambda;
         self.total_friction_lambda = limit_at_range(
             self.total_friction_lambda,
             -(max_friction_lambda.abs())..=(max_friction_lambda.abs()),
         );
-        let friction_lambda = self.total_friction_lambda - previous_total_friction_lambda;
+        friction_lambda = self.total_friction_lambda - previous_total_friction_lambda;
+        // }
 
-        let friction_impulse: Vector = tangent_normal * friction_lambda;
+        let friction_impulse = tangent_normal * friction_lambda;
 
         obj_a.meta_mut().apply_impulse(-friction_impulse, self.r_a);
 
         obj_b.meta_mut().apply_impulse(friction_impulse, self.r_b);
     }
 
-    unsafe fn solve_position_constraint(
+    pub(crate) unsafe fn prepare_solve_position_constraint(&self) -> ContactPointPair {
+        let delta_angle_a = self.object_a().meta().get_delta_angle();
+
+        let delta_angle_b = self.object_b().meta().get_delta_angle();
+
+        let pre_position_a = self.object_a().meta().pre_position();
+        let position_a = self.object_a().meta().position();
+
+        let pre_position_b = self.object_b().meta().pre_position();
+        let position_b = self.object_b().meta().position();
+
+        let contact_info = &self.contact_point_pair;
+
+        let point_a = contact_info.point_a();
+        let point_b = contact_info.point_b();
+
+        let mut r_a: Vector = (pre_position_a, point_a).into();
+        r_a.affine_transformation_rotate_self(delta_angle_a);
+        let point_a = position_a + &r_a;
+
+        let mut r_b: Vector = (pre_position_b, point_b).into();
+        r_b.affine_transformation_rotate_self(delta_angle_b);
+        let point_b = position_b + &r_b;
+
+        let normal: Vector = (point_a, point_b).into();
+
+        let normal_toward_a = if normal * (*position_a - *position_b) < 0. {
+            -normal
+        } else {
+            normal
+        };
+
+        ContactPointPair::new(
+            point_a,
+            point_b,
+            normal_toward_a.normalize(),
+            (*position_a - *position_b).abs(),
+        )
+    }
+
+    pub(crate) unsafe fn solve_position_constraint(
         &mut self,
         parameters: &ConstraintParameters,
-        delta_time: FloatNum,
+        index: usize,
     ) {
-        let contact_info = &mut self.contact_point_pair;
+        let delta_angle_a = self.object_a().meta().get_delta_angle();
+        let delta_position_a = self.object_a().meta().get_delta_position();
+        let delta_angle_b = self.object_b().meta().get_delta_angle();
+        let delta_position_b = self.object_b().meta().get_delta_position();
 
-        // let permeate = (contact_info.depth - constraint_parameters.max_allow_permeate).max(0.);
+        let normal_toward_a = self.contact_point_pair.normal_toward_a();
 
-        // let bias = constraint_parameters.factor_position_bias * permeate * delta_time.recip();
+        let contact_point_pair = self.prepare_solve_position_constraint();
 
-        // REVIEW
-        let mut permeate = contact_info.depth - parameters.max_allow_permeate;
+        // let n = contact_point_pair.normal_toward_a();
+        let n = normal_toward_a;
 
-        if !parameters.allow_permeate_negative {
-            permeate = permeate.max(0.)
-        }
+        let obj_a = &mut *self.obj_a;
+        let obj_b = &mut *self.obj_b;
+        let obj_a_meta = obj_a.meta();
+        let obj_b_meta = obj_b.meta();
 
-        let bias = permeate * delta_time.recip();
+        let r_a = self.r_a.affine_transformation_rotate(delta_angle_a);
+        let r_b = self.r_b.affine_transformation_rotate(delta_angle_b);
 
-        self.solve_velocity_constraint(parameters, bias);
+        let inv_mass_effective = obj_a_meta.inv_mass()
+            + obj_a_meta.inv_mass()
+            + obj_a_meta.inv_moment_of_inertia() * (r_a ^ n).powf(2.)
+            + obj_b_meta.inv_moment_of_inertia() * (r_b ^ n).powf(2.);
+
+        let contact_count_a = obj_a_meta.contact_count();
+        let contact_count_b = obj_b_meta.contact_count();
+
+        let permeate: FloatNum =
+            n * (*contact_point_pair.point_b() - *contact_point_pair.point_a());
+
+        let mut depth_fix = permeate - parameters.max_allow_permeate;
+
+        // FIXME impossible
+        // debug_assert!(depth_fix.is_sign_positive());
+        // if depth_fix < 0. {
+        //     return;
+        // }
+
+        // if obj_a_meta.is_fixed() || obj_b_meta.is_fixed() {
+        //     depth_fix *= 2.;
+        // }
+
+        const POSITION_DAMPEN: FloatNum = 0.1;
+
+        depth_fix *= POSITION_DAMPEN;
+
+        let c = n * depth_fix;
+
+        let f = c * inv_mass_effective.recip();
+
+        obj_a.apply_position_fix(f * (contact_count_a as FloatNum).recip(), r_a);
+
+        obj_b.apply_position_fix(-f * (contact_count_b as FloatNum).recip(), r_b);
     }
 }

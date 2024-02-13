@@ -12,14 +12,14 @@ use picea::{
 #[path = "../examples_common.rs"]
 mod common;
 
-fn init(scene: &mut Scene) {
-    let ground_bottom: Line = Line::new((10., 90.), (110., 90.));
+fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
+    let ground_bottom: Line = Line::new((10., 90.), (210., 90.));
 
     scene.context_mut().constraint_parameters.max_allow_permeate = 0.01;
 
     scene.push_element(ElementBuilder::new(
         ground_bottom,
-        MetaBuilder::new(1.).is_fixed(true),
+        MetaBuilder::new(10.).is_fixed(true),
         (),
     ));
 
@@ -43,7 +43,7 @@ fn init(scene: &mut Scene) {
 
     let concave_polygon = ConcavePolygon::new(&Vec::from(vertexes)[..]);
 
-    let element = ElementBuilder::new(concave_polygon, MetaBuilder::new(100.), ());
+    let element = ElementBuilder::new(concave_polygon, MetaBuilder::new(10.), ());
 
     scene.push_element(element);
 
@@ -61,12 +61,14 @@ fn init(scene: &mut Scene) {
     }
 }
 
-fn update(scene: &mut Scene, _selected_element_id: Option<u32>) {
+fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut common::Handler<()>) {
     let duration = std::time::Duration::from_secs(10);
     scene.update_elements_by_duration(duration.as_secs_f32());
 }
 
 fn main() {
-    let config = ConfigBuilder::default().draw_center_point(false);
+    let config = ConfigBuilder::default()
+        .draw_center_point(false)
+        .draw_contact_point_pair(true);
     common::run_window("concave", config, init, update)
 }

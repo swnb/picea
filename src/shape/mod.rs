@@ -25,5 +25,15 @@ pub trait CenterPoint {
 }
 
 pub trait NearestPoint {
+    fn support_find_nearest_point(&self) -> bool {
+        true
+    }
+
     fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point;
+}
+
+pub trait MeasureContactPoint {
+    fn measure(&self, contact_points: Vec<Point>) -> Vec<Point> {
+        contact_points
+    }
 }

@@ -2,7 +2,7 @@ pub mod force;
 
 use std::ops::Deref;
 
-use crate::math::{vector::Vector, FloatNum};
+use crate::math::{point::Point, vector::Vector, FloatNum};
 
 use self::force::{Force, ForceGroup};
 
@@ -21,7 +21,10 @@ pub struct Meta {
     moment_of_inertia: ValueWithInv<Mass>,
     pre_angle_velocity: FloatNum,
     stashed_angle_velocity: FloatNum,
+    pre_angle: FloatNum,
     angle: FloatNum,
+    pre_position: Point,
+    position: Point,
     is_fixed: bool,
     // TODO 移除 collision
     is_collision: bool,
@@ -30,6 +33,9 @@ pub struct Meta {
     is_sleeping: bool,
     is_ignore_gravity: bool,
     motionless_frame_counter: u8,
+    contact_count: u16,
+    friction: FloatNum,
+    factor_restitution: FloatNum,
 }
 
 struct ValueWithInv<T> {
@@ -135,6 +141,36 @@ impl Meta {
         self
     }
 
+    pub fn pre_position(&self) -> &Point {
+        &self.pre_position
+    }
+
+    pub fn position(&self) -> &Point {
+        &self.position
+    }
+
+    pub fn set_position(&mut self, mut reducer: impl FnMut(&Point) -> Point) {
+        self.position = reducer(&self.position);
+    }
+
+    pub fn sync_position(&mut self) -> &mut Self {
+        self.pre_position = self.position;
+        self
+    }
+
+    pub fn sync_angle(&mut self) -> &mut Self {
+        self.pre_angle = self.angle;
+        self
+    }
+
+    pub fn get_delta_position(&self) -> Vector {
+        self.position - self.pre_position
+    }
+
+    pub fn get_delta_angle(&self) -> FloatNum {
+        self.angle - self.pre_angle
+    }
+
     pub fn motion(&self) -> Vector {
         self.velocity() * self.mass()
     }
@@ -220,9 +256,28 @@ impl Meta {
         let inv_moment_of_inertia = self.inv_moment_of_inertia();
 
         self.set_angle_velocity(|pre_angle_velocity| {
-            // TODO (r ^ (normal * lambda))
             pre_angle_velocity + (r ^ impulse) * inv_moment_of_inertia
         });
+    }
+
+    // apply position fix for obj , sum total position fix
+    // in order to separate object from contact
+    pub(crate) fn add_position_fix(&mut self, fix: Vector, r: Vector) {
+        if self.is_fixed() {
+            return;
+        }
+
+        let rotate_fix = (r ^ fix) * self.inv_moment_of_inertia();
+
+        self.set_angle(|pre| pre + rotate_fix);
+
+        let inv_mass = self.inv_mass();
+
+        self.set_position(|pre| pre + &(fix * inv_mass));
+    }
+
+    pub fn friction(&self) -> FloatNum {
+        self.friction
     }
 
     pub fn compute_kinetic_energy(&self) -> f32 {
@@ -237,6 +292,22 @@ impl Meta {
 
     pub fn is_ignore_gravity(&self) -> bool {
         self.is_ignore_gravity
+    }
+
+    pub fn factor_restitution(&self) -> FloatNum {
+        self.factor_restitution
+    }
+
+    pub fn factor_restitution_mut(&mut self) -> &mut FloatNum {
+        &mut self.factor_restitution
+    }
+
+    pub(crate) fn contact_count(&self) -> u16 {
+        self.contact_count
+    }
+
+    pub(crate) fn contact_count_mut(&mut self) -> &mut u16 {
+        &mut self.contact_count
     }
 }
 
@@ -266,6 +337,9 @@ impl MetaBuilder {
                 stashed_velocity: (0., 0.).into(),
                 mass: mass.into(),
                 angle: 0.,
+                pre_angle: 0.,
+                pre_position: Default::default(),
+                position: Default::default(),
                 pre_angle_velocity: 0.,
                 stashed_angle_velocity: 0.,
                 moment_of_inertia: (0.).into(),
@@ -275,6 +349,9 @@ impl MetaBuilder {
                 is_sleeping: false,
                 is_ignore_gravity: false,
                 motionless_frame_counter: 0,
+                contact_count: 0,
+                friction: 0.2,
+                factor_restitution: 1.,
             },
         }
     }
@@ -318,6 +395,16 @@ impl MetaBuilder {
 
     pub fn is_ignore_gravity(mut self, is_ignore_gravity: bool) -> Self {
         self.meta.is_ignore_gravity = is_ignore_gravity;
+        self
+    }
+
+    pub fn friction(mut self, friction: FloatNum) -> Self {
+        self.meta.friction = friction;
+        self
+    }
+
+    pub fn factor_restitution(mut self, factor_restitution: FloatNum) -> Self {
+        self.meta.factor_restitution = factor_restitution;
         self
     }
 }

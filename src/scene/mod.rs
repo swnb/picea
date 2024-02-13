@@ -7,7 +7,6 @@ use std::{collections::BTreeMap, ops::Shl};
 use crate::{
     collision::{
         accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
-        rough_collision_detection,
     },
     constraints::{
         contact::ContactConstraint, join::JoinConstraint, point::PointConstraint,
@@ -25,16 +24,19 @@ pub struct Scene<Data = ()>
 where
     Data: Clone + Default,
 {
-    element_store: ElementStore<Data>,
+    pub(crate) element_store: ElementStore<Data>,
     id_dispatcher: IDDispatcher,
+    total_duration: FloatNum,
     total_skip_durations: FloatNum,
-    context: Context,
+    pub(crate) context: Context,
     frame_count: u128,
     callback_hook: hooks::CallbackHook,
     constraints_id_dispatcher: IDDispatcher,
-    contact_constraints: Vec<ContactConstraint<Element<Data>>>,
+    pub(crate) previous_contact_constraints: Vec<ContactConstraint<Element<Data>>>,
+    pub(crate) contact_constraints: Vec<ContactConstraint<Element<Data>>>,
     point_constraints: BTreeMap<u32, PointConstraint<Element<Data>>>,
     join_constraints: BTreeMap<u32, JoinConstraint<Element<Data>>>,
+    pub data: Data,
 }
 
 type ID = u32;
@@ -87,8 +89,13 @@ impl<T: Clone + Default> Scene<T> {
     #[inline]
     pub fn push_element(&mut self, element: impl Into<Element<T>>) -> u32 {
         let mut element: Element<T> = element.into();
+
         let element_id = self.id_dispatcher.gen_id();
         element.inject_id(element_id);
+
+        let center_point = element.shape().center_point();
+
+        element.meta_mut().set_position(|_| center_point);
 
         self.element_store.push(element);
         element_id
@@ -111,6 +118,10 @@ impl<T: Clone + Default> Scene<T> {
         self.element_store.size()
     }
 
+    pub fn total_duration(&self) -> FloatNum {
+        self.total_duration
+    }
+
     pub fn update_elements_by_duration(&mut self, delta_time: f32) {
         self.frame_count += 1;
 
@@ -119,6 +130,10 @@ impl<T: Clone + Default> Scene<T> {
             max_enter_sleep_motion,
             ..
         } = self.context;
+
+        self.elements_iter_mut().for_each(|element| {
+            element.meta_mut().sync_position().sync_angle();
+        });
 
         if self.context.enable_sleep_mode {
             self.elements_iter_mut().for_each(|element| {
@@ -158,29 +173,106 @@ impl<T: Clone + Default> Scene<T> {
 
         let delta_time: FloatNum = 1. / 61.;
 
+        self.total_duration += delta_time;
+
         self.integrate_velocity(delta_time);
 
-        self.contact_constraints.truncate(0);
+        self.previous_contact_constraints = std::mem::take(&mut self.contact_constraints);
 
-        self.detective_collision();
+        self.element_store
+            .detective_collision(|a, b, mut contact_pairs| {
+                if a.id() == 2 {
+                    dbg!(&contact_pairs);
+                } else if b.id() == 2 {
+                    dbg!(&contact_pairs);
+                }
 
-        // self.constraints(delta_time);
+                contact_pairs
+                    .into_iter()
+                    // .rev()
+                    // TODO opt
+                    .for_each(|pair| {
+                        if let Some(previous_contact) =
+                            self.contact_constraints.iter_mut().find(|constraint| {
+                                // // 上一次用过的
+                                // !constraint.is_active()
+                                //     && constraint.obj_id_pair() == (a.id(), b.id())
+                                //     && constraint.contact_point_pair() == &pair
+                                false
+                            })
+                        {
+                            previous_contact.update_contact_point_pair(pair);
+                            previous_contact.set_active(true);
+                        } else {
+                            self.contact_constraints.push(ContactConstraint::new(
+                                a.id(),
+                                b.id(),
+                                pair,
+                            ));
+                        }
+                    });
+            });
 
         unsafe {
             self.reset_constraints_params(delta_time);
         }
 
-        for _ in 0..9 {
+        const MAX_CONSTRAINTS_TIMES: u8 = 20;
+
+        dbg!(self
+            .get_element(2)
+            .map(|element| { element.meta().angle() }));
+
+        dbg!(self
+            .get_element(3)
+            .map(|element| { element.meta().angle() }));
+
+        for iter_count in 0..MAX_CONSTRAINTS_TIMES {
             self.solve_point_constraints();
 
             self.solve_join_constraints();
 
-            self.solve_contact_constraints(delta_time, false);
+            self.solve_contact_constraints(iter_count);
         }
 
-        self.solve_contact_constraints(delta_time, true);
-
         self.integrate_position(delta_time);
+
+        dbg!(self
+            .get_element(2)
+            .map(|element| { element.meta().angle() }));
+
+        dbg!(self
+            .get_element(3)
+            .map(|element| { element.meta().angle() }));
+
+        dbg!("---------");
+
+        if self.context.constraint_parameters.split_position_fix {
+            for _ in 0..10 {
+                self.solve_position_fix();
+            }
+        }
+
+        dbg!(self
+            .get_element(2)
+            .map(|element| { element.meta().angle() }));
+
+        dbg!(self
+            .get_element(3)
+            .map(|element| { element.meta().angle() }));
+
+        self.contact_constraints
+            .iter_mut()
+            .for_each(|constraint| constraint.set_active(false));
+
+        if !self.contact_constraints.is_empty() {
+            // panic!("");
+        }
+
+        unsafe {
+            // TODO update params
+            self.reset_constraints_params(delta_time);
+        }
 
         // self.solve_air_friction();
     }
@@ -238,6 +330,7 @@ impl<T: Clone + Default> Scene<T> {
         self.frame_count = 0;
     }
 
+    // TODO  use exist collision manifold
     pub fn is_element_collide(&self, element_a_id: ID, element_b_id: ID) -> bool {
         let collider_a = self.element_store.get_element_by_id(element_a_id);
         let collider_b = self.element_store.get_element_by_id(element_b_id);
@@ -343,16 +436,13 @@ impl<T: Clone + Default> Scene<T> {
             panic!("can't be the same id");
         }
 
-        let (element_a, element_b) =
-            unsafe { self.query_element_pair_mut((element_a_id, element_b_id))? };
+        let (element_a, element_b) = self.query_element_pair_mut((element_a_id, element_b_id))?;
 
         let element_a_point = element_a_point.into();
         let element_b_point = element_b_point.into();
 
-        unsafe {
-            (*element_a).create_bind_point(id, element_a_point);
-            (*element_b).create_bind_point(id, element_b_point);
-        }
+        element_a.create_bind_point(id, element_a_point);
+        element_b.create_bind_point(id, element_b_point);
 
         let join_constraint = JoinConstraint::new(
             id,
@@ -379,16 +469,24 @@ impl<T: Clone + Default> Scene<T> {
     }
 
     pub fn remove_join_constraint(&mut self, id: u32) -> Option<JoinConstraint<Element<T>>> {
-        self.join_constraints
-            .remove(&id)
-            .map(|join_constraint| unsafe {
-                if let Some((element_a, element_b)) =
-                    self.query_element_pair_mut(join_constraint.obj_id_pair())
-                {
-                    (*element_a).remove_bind_point(join_constraint.id());
-                    (*element_b).remove_bind_point(join_constraint.id());
-                }
-                join_constraint
+        self.join_constraints.remove(&id).map(|join_constraint| {
+            if let Some((element_a, element_b)) =
+                self.query_element_pair_mut(join_constraint.obj_id_pair())
+            {
+                element_a.remove_bind_point(join_constraint.id());
+                element_b.remove_bind_point(join_constraint.id());
+            }
+            join_constraint
+        })
+    }
+
+    // clear velocity for  all element , just set zero to velocity
+    pub fn silent(&mut self) {
+        self.elements_iter_mut()
+            .map(|element| element.meta_mut())
+            .for_each(|meta| {
+                meta.set_angle_velocity(|_| 0.);
+                meta.set_velocity(|_| Default::default());
             })
     }
 
@@ -421,67 +519,29 @@ impl<T: Clone + Default> Scene<T> {
         });
     }
 
-    fn detective_collision(&mut self) {
-        rough_collision_detection(&mut self.element_store, |element_a, element_b| {
-            let should_skip = {
-                let meta_a = element_a.meta();
-                let meta_b = element_b.meta();
-
-                let is_both_sleeping = meta_a.is_sleeping() && meta_b.is_sleeping();
-
-                is_both_sleeping || meta_a.is_transparent() || meta_b.is_transparent()
-            };
-
-            if should_skip {
-                return;
-            }
-
-            let (collider_a, collider_b) = if element_a.id() > element_b.id() {
-                (element_b, element_a)
-            } else {
-                (element_a, element_b)
-            };
-
-            prepare_accurate_collision_detection(
-                collider_a,
-                collider_b,
-                |sub_collider_a, sub_collider_b| {
-                    if let Some(contact_pairs) = accurate_collision_detection_for_sub_collider(
-                        sub_collider_a,
-                        sub_collider_b,
-                    ) {
-                        let a = collider_a;
-                        let b = collider_b;
-
-                        contact_pairs.into_iter().for_each(|contact_pair| {
-                            self.contact_constraints.push(ContactConstraint::new(
-                                a.id(),
-                                b.id(),
-                                contact_pair,
-                            ));
-                        });
-                    }
-                },
-            )
-        });
-    }
-
     unsafe fn reset_constraints_params(&mut self, delta_time: FloatNum) {
         let mut legacy_constraint_ids = vec![];
         let self_ptr = self as *mut Scene<_>;
 
+        self.elements_iter_mut().for_each(|element| {
+            *element.meta_mut().contact_count_mut() = 0;
+        });
+
         for contact_constraint in (*self_ptr).contact_constraints.iter_mut() {
-            let Some(element_pair) =
+            let Some((element_a, element_b)) =
                 (*self_ptr).query_element_pair_mut(contact_constraint.obj_id_pair())
             else {
                 // legacy_constraint_ids.push(contact_constraint.id());
                 continue;
             };
 
+            let obj_a = element_a as *mut _;
+            let obj_b = element_b as *mut _;
+
             contact_constraint.reset_params(
-                &self.context.constraint_parameters,
-                element_pair,
+                (obj_a, obj_b),
                 delta_time,
+                &self.context.constraint_parameters,
             )
         }
 
@@ -490,10 +550,12 @@ impl<T: Clone + Default> Scene<T> {
                 legacy_constraint_ids.push(point_constraint.id());
                 continue;
             };
+
             let Some(move_point) = element.get_bind_point(point_constraint.id()) else {
                 legacy_constraint_ids.push(point_constraint.id());
                 continue;
             };
+
             let move_point = *move_point;
             let obj = element as *mut _;
             point_constraint.reset_params(move_point, obj, delta_time);
@@ -513,6 +575,9 @@ impl<T: Clone + Default> Scene<T> {
                 continue;
             };
 
+            let obj_a = element_a as *mut _;
+            let obj_b = element_b as *mut _;
+
             let Some(move_point_a) = (*element_a).get_bind_point(join_constraint.id()) else {
                 legacy_constraint_ids.push(join_constraint.id());
                 continue;
@@ -521,9 +586,6 @@ impl<T: Clone + Default> Scene<T> {
                 legacy_constraint_ids.push(join_constraint.id());
                 continue;
             };
-
-            let obj_a = element_a as *mut _;
-            let obj_b = element_b as *mut _;
 
             join_constraint.reset_params(
                 (obj_a, obj_b),
@@ -551,15 +613,25 @@ impl<T: Clone + Default> Scene<T> {
             })
     }
 
-    fn solve_contact_constraints(&mut self, delta_time: FloatNum, fix_position: bool) {
+    fn solve_contact_constraints(&mut self, iter_count: u8) {
         self.contact_constraints
             .iter_mut()
+            .filter(|constraint| constraint.is_active())
             .for_each(|contact_constraint| unsafe {
-                contact_constraint.solve(
-                    &self.context.constraint_parameters,
-                    delta_time,
-                    fix_position,
-                );
+                contact_constraint
+                    .solve_velocity_constraint(&self.context.constraint_parameters, iter_count);
+            })
+    }
+
+    // separate contact object by change their position directly;
+    fn solve_position_fix(&mut self) {
+        self.contact_constraints
+            .iter_mut()
+            .filter(|constraint| constraint.is_active())
+            .enumerate()
+            .for_each(|(index, contact_constraint)| unsafe {
+                contact_constraint
+                    .solve_position_constraint(&self.context.constraint_parameters, index);
             })
     }
 
@@ -580,22 +652,22 @@ impl<T: Clone + Default> Scene<T> {
         &self,
         element_a_id: ID,
         element_b_id: ID,
-    ) -> Option<(*const Element<T>, *const Element<T>)> {
+    ) -> Option<(&Element<T>, &Element<T>)> {
         if element_a_id == element_b_id {
             return None;
         }
 
-        let element_a = self.element_store.get_element_by_id(element_a_id)? as *const Element<_>;
+        let element_a = self.element_store.get_element_by_id(element_a_id)?;
 
-        let element_b = self.element_store.get_element_by_id(element_b_id)? as *const Element<_>;
+        let element_b = self.element_store.get_element_by_id(element_b_id)?;
 
         (element_a, element_b).into()
     }
 
-    unsafe fn query_element_pair_mut(
+    fn query_element_pair_mut(
         &mut self,
         (element_a_id, element_b_id): (ID, ID),
-    ) -> Option<(*mut Element<T>, *mut Element<T>)> {
+    ) -> Option<(&mut Element<T>, &mut Element<T>)> {
         if element_a_id == element_b_id {
             return None;
         }
@@ -603,8 +675,7 @@ impl<T: Clone + Default> Scene<T> {
         let element_a = self.get_element_mut(element_a_id)? as *mut Element<_>;
 
         let element_b = self.get_element_mut(element_b_id)? as *mut Element<_>;
-
-        (element_a, element_b).into()
+        unsafe { (&mut *element_a, &mut *element_b).into() }
     }
 }
 

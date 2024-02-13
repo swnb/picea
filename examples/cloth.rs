@@ -1,7 +1,10 @@
-use common::ConfigBuilder;
+#[path = "../examples_common.rs"]
+mod common;
+
+use common::{ConfigBuilder, Handler};
 
 use picea::{
-    constraints::{JoinConstraintConfig, JoinConstraintConfigBuilder},
+    constraints::JoinConstraintConfigBuilder,
     element::ElementBuilder,
     math::PI,
     meta::MetaBuilder,
@@ -9,10 +12,7 @@ use picea::{
     shape::{circle::Circle, line::Line},
 };
 
-#[path = "../examples_common.rs"]
-mod common;
-
-fn init_elements(scene: &mut Scene) {
+fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     let start_x = 10.;
     let start_y = 10.;
 
@@ -106,7 +106,7 @@ fn init_elements(scene: &mut Scene) {
     ));
 }
 
-fn update(scene: &mut Scene, _selected_element_id: Option<u32>) {
+fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut Handler<()>) {
     let duration = std::time::Duration::from_secs(10);
     scene.update_elements_by_duration(duration.as_secs_f32());
 }
@@ -117,5 +117,5 @@ fn main() {
         .draw_join_constraints(true)
         .draw_point_constraints(true)
         .enable_mouse_constraint(true);
-    common::run_window("point constraint - link", config, init_elements, update)
+    common::run_window("point constraint - link", config, init, update)
 }

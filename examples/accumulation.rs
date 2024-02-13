@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 #[path = "../examples_common.rs"]
 mod common;
 
-fn init(scene: &mut Scene) {
+fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     let top = 10;
     let down = 85;
 
@@ -80,7 +80,7 @@ fn init(scene: &mut Scene) {
     }
 }
 
-fn update(scene: &mut Scene, _selected_element_id: Option<u32>) {
+fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut common::Handler<()>) {
     let duration = std::time::Duration::from_secs(10);
     scene.update_elements_by_duration(duration.as_secs_f32());
 }

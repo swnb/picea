@@ -1,14 +1,21 @@
+use std::collections::BTreeMap;
+use std::fs;
+use std::ops::{Deref, DerefMut};
+use std::time::{self, UNIX_EPOCH};
+
 use derive_builder::Builder;
 use picea::constraints::JoinConstraintConfigBuilder;
 use picea::math::edge::Edge;
 use picea::math::point::Point;
-use picea::math::{FloatNum, PI};
+use picea::math::vector::Vector;
+use picea::math::FloatNum;
 use picea::scene::Scene;
-use picea::shape::utils::is_point_inside_shape;
+use picea::shape::utils::{is_point_inside_shape, rotate_point};
 use picea::tools::collision_view::CollisionStatusViewer;
+use serde::Serialize;
 use speedy2d::color::Color;
 use speedy2d::dimen::Vector2;
-use speedy2d::window::{VirtualKeyCode, WindowHandler, WindowHelper};
+use speedy2d::window::{MouseScrollDistance, VirtualKeyCode, WindowHandler, WindowHelper};
 use speedy2d::Graphics2D;
 
 #[derive(Builder)]
@@ -30,13 +37,39 @@ pub struct Config {
     enable_mouse_constraint: bool,
     #[builder(default = "false")]
     draw_contact_point_pair: bool,
+    #[builder(default = "false")]
+    frame_by_frame: bool,
 }
 
-type UpdateFn<T> = dyn FnMut(&mut Scene<T>, Option<u32>);
+type UpdateFn<T> = dyn FnMut(&mut Scene<T>, Option<u32>, &mut Handler<T>);
 
-type InitFn<T> = dyn FnMut(&mut Scene<T>);
+type InitFn<T> = dyn FnMut(&mut Scene<T>, &mut Handler<T>);
 
-struct Handler<T>
+type GetRecordFn<T, D> = dyn Fn(&Scene<T>) -> D;
+
+#[derive(Serialize)]
+struct Record<T> {
+    value: T,
+    timestamp: u128,
+}
+
+#[derive(Serialize, Default)]
+struct Records(BTreeMap<String, Vec<Record<FloatNum>>>);
+
+impl Deref for Records {
+    type Target = BTreeMap<String, Vec<Record<FloatNum>>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Records {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub struct Handler<T = ()>
 where
     T: Clone + Default,
 {
@@ -50,6 +83,9 @@ where
     mouse_constraint_id: Option<u32>,
     config: Config,
     contact_viewer: CollisionStatusViewer,
+    render_offset: Vector,
+    record_handler: Vec<(String, Box<GetRecordFn<T, FloatNum>>)>,
+    records: Records,
 }
 
 fn into_vector2(p: Point) -> Vector2<FloatNum> {
@@ -59,21 +95,22 @@ fn into_vector2(p: Point) -> Vector2<FloatNum> {
 struct DrawHelper<'a> {
     graphics: &'a mut Graphics2D,
     scale: FloatNum,
+    render_offset: Vector,
 }
 
 impl<'a> DrawHelper<'a> {
-    fn draw_line(&mut self, start_point: Point, end_point: Point, color: Color) {
+    fn draw_line(&mut self, start_point: &Point, end_point: &Point, color: Color) {
         self.graphics.draw_line(
-            into_vector2((start_point.to_vector() * self.scale).to_point()),
-            into_vector2((end_point.to_vector() * self.scale).to_point()),
+            into_vector2(((start_point.to_vector() + self.render_offset) * self.scale).to_point()),
+            into_vector2(((end_point.to_vector() + self.render_offset) * self.scale).to_point()),
             3.0,
             color,
         )
     }
 
-    fn draw_circle(&mut self, center_point: Point, radius: FloatNum, color: Color) {
+    fn draw_circle(&mut self, center_point: &Point, radius: FloatNum, color: Color) {
         self.graphics.draw_circle(
-            into_vector2((center_point.to_vector() * self.scale).to_point()),
+            into_vector2(((center_point.to_vector() + self.render_offset) * self.scale).to_point()),
             radius * self.scale,
             color,
         );
@@ -115,6 +152,11 @@ where
             };
         }
     }
+
+    pub fn set_record_handler(&mut self, record_handler: (String, Box<GetRecordFn<T, FloatNum>>)) {
+        self.records.insert(record_handler.0.clone(), vec![]);
+        self.record_handler.push(record_handler);
+    }
 }
 
 impl<T> WindowHandler for Handler<T>
@@ -126,7 +168,11 @@ where
         helper: &mut WindowHelper<()>,
         info: speedy2d::window::WindowStartupInfo,
     ) {
-        (self.init)(&mut self.scene);
+        let self_ptr = self as *mut _;
+
+        unsafe {
+            (self.init)(&mut self.scene, &mut *self_ptr);
+        }
     }
 
     fn on_key_down(
@@ -135,14 +181,28 @@ where
         virtual_key_code: Option<speedy2d::window::VirtualKeyCode>,
         scancode: speedy2d::window::KeyScancode,
     ) {
+        let self_ptr = self as *mut _;
+
         if let Some(key) = virtual_key_code {
             match key {
                 VirtualKeyCode::R => {
                     self.scene.clear();
-                    (self.init)(&mut self.scene);
+                    unsafe {
+                        (self.init)(&mut self.scene, &mut *self_ptr);
+                    }
                 }
                 VirtualKeyCode::Space => {
                     self.is_paused = !self.is_paused;
+                }
+                VirtualKeyCode::F => {
+                    self.config.frame_by_frame = !self.config.frame_by_frame;
+                }
+                VirtualKeyCode::S => {
+                    fs::write("recors.json", serde_json::to_string(&self.records).unwrap())
+                        .unwrap();
+                }
+                VirtualKeyCode::C => {
+                    self.scene.silent();
                 }
                 _ => {}
             }
@@ -170,29 +230,50 @@ where
             .map(|constraint_id| self.scene.remove_point_constraint(constraint_id));
     }
 
+    fn on_mouse_wheel_scroll(
+        &mut self,
+        helper: &mut WindowHelper<()>,
+        distance: speedy2d::window::MouseScrollDistance,
+    ) {
+        if let MouseScrollDistance::Pixels { y, .. } = distance {
+            self.config.scale += y as FloatNum * 0.1;
+        }
+    }
+
     fn on_mouse_move(&mut self, helper: &mut WindowHelper<()>, position: speedy2d::dimen::Vec2) {
         if !self.is_mouse_down {
             return;
         }
 
-        let current_mouse_pos = Point::new(
+        let new_mouse_pos = Point::new(
             position.x / self.config.scale,
             position.y / self.config.scale,
         );
 
-        if self.current_mouse_pos.is_none() {
+        if let Some(current_mouse_pos) = self.current_mouse_pos {
+            if self.selected_element_id.is_none() {
+                self.render_offset += new_mouse_pos - current_mouse_pos;
+            }
+        } else {
             let element_id = self
                 .scene
                 .elements_iter()
                 .find(|element| {
-                    is_point_inside_shape(current_mouse_pos, &mut element.shape().edge_iter())
+                    is_point_inside_shape(
+                        new_mouse_pos - self.render_offset,
+                        &mut element.shape().edge_iter(),
+                    )
                 })
                 .map(|element| element.id());
 
             self.selected_element_id = element_id;
+
+            if let Some(element_id) = element_id {
+                println!("selected id {}", element_id);
+            }
         }
 
-        self.current_mouse_pos = Some(current_mouse_pos);
+        self.current_mouse_pos = Some(new_mouse_pos);
 
         self.solve_mouse_constraint()
     }
@@ -200,30 +281,69 @@ where
     fn on_user_event(&mut self, helper: &mut WindowHelper<()>, user_event: ()) {}
 
     fn on_draw(&mut self, helper: &mut WindowHelper, graphics: &mut Graphics2D) {
+        let self_ptr = self as *mut _;
+
         if !self.is_paused {
-            (self.update)(&mut self.scene, self.selected_element_id);
+            unsafe {
+                (self.update)(&mut self.scene, self.selected_element_id, &mut *self_ptr);
+            }
+
+            let timestamp = time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+
+            self.record_handler
+                .iter()
+                .for_each(|(name, get_record_data)| {
+                    let value = get_record_data(&self.scene);
+                    if let Some(record) = self.records.get_mut(name) {
+                        record.push(Record { value, timestamp });
+                    }
+                });
         }
 
-        // self.contact_viewer.on_update(&self.scene);
+        if self.config.frame_by_frame {
+            self.is_paused = true;
+        }
+
+        self.contact_viewer.on_update(&self.scene);
 
         graphics.clear_screen(Color::from_gray(0.8));
 
         let mut draw_helper = DrawHelper {
             graphics,
             scale: self.config.scale,
+            render_offset: self.render_offset,
         };
+
+        for i in 0..100 {
+            draw_helper.draw_line(
+                &((i as f32) * 10., 0.).into(),
+                &((i as f32) * 10., 1000.).into(),
+                Color::RED,
+            )
+        }
+
+        for i in 0..100 {
+            draw_helper.draw_line(
+                &(0., ((i as f32) * 10.)).into(),
+                &(1000., (i as f32) * 10.).into(),
+                Color::RED,
+            )
+        }
 
         self.scene.elements_iter().for_each(|element| {
             element.shape().edge_iter().for_each(|edge| match edge {
                 Edge::Line {
                     start_point,
                     end_point,
-                } => draw_helper.draw_line(*start_point, *end_point, Color::WHITE),
+                } => draw_helper.draw_line(start_point, end_point, Color::WHITE),
                 Edge::Circle {
                     center_point,
                     radius,
                 } => {
-                    draw_helper.draw_circle(center_point, radius, Color::WHITE);
+                    draw_helper.draw_circle(&center_point, radius, Color::WHITE);
                 }
                 _ => unimplemented!(),
             });
@@ -231,24 +351,51 @@ where
 
         if self.config.draw_center_point {
             self.scene.elements_iter().for_each(|element| {
-                draw_helper.draw_circle(element.center_point(), 1., Color::BLUE)
+                draw_helper.draw_circle(&element.center_point(), 1., Color::BLUE)
             });
         }
+
+        self.scene.elements_iter().for_each(|element| {
+            let angle = element.meta().angle();
+            for edge in element.shape().edge_iter() {
+                match edge {
+                    Edge::Arc {
+                        start_point,
+                        support_point,
+                        end_point,
+                    } => {}
+                    Edge::Circle {
+                        center_point,
+                        radius,
+                    } => {
+                        let p: Point = (0., -1.).into();
+                        let p = (p.to_vector() * radius).to_point();
+                        let p = rotate_point(&p, &(0., 0.).into(), angle).to_vector();
+                        draw_helper.draw_line(&center_point, &(center_point + p), Color::BLUE)
+                    }
+                    Edge::Line {
+                        start_point,
+                        end_point,
+                    } => {}
+                }
+            }
+        });
+
         // draw velocity
         if self.config.draw_velocity {
             self.scene.elements_iter().for_each(|element| {
                 draw_helper.draw_line(
-                    element.center_point(),
-                    element.center_point() + element.meta().velocity() * 3.,
-                    Color::YELLOW,
+                    &element.center_point(),
+                    &(element.center_point() + element.meta().velocity() * 100.),
+                    Color::RED,
                 );
             });
         }
 
         if self.config.draw_point_constraints {
             self.scene.point_constraints().for_each(|point_constraint| {
-                let move_point = *point_constraint.move_point();
-                let fixed_point = *point_constraint.fixed_point();
+                let move_point = point_constraint.move_point();
+                let fixed_point = point_constraint.fixed_point();
                 draw_helper.draw_line(move_point, fixed_point, Color::RED);
                 draw_helper.draw_circle(move_point, 0.5, Color::RED);
                 draw_helper.draw_circle(fixed_point, 0.5, Color::RED);
@@ -257,7 +404,7 @@ where
 
         if self.config.draw_join_constraints {
             self.scene.join_constraints().for_each(|join_constraint| {
-                let (&move_point1, &move_point2) = join_constraint.move_point_pair();
+                let (move_point1, move_point2) = join_constraint.move_point_pair();
                 draw_helper.draw_line(move_point1, move_point2, Color::RED);
                 draw_helper.draw_circle(move_point1, 0.5, Color::RED);
                 draw_helper.draw_circle(move_point2, 0.5, Color::RED);
@@ -270,7 +417,17 @@ where
                 .iter()
                 .for_each(|contact_info| {
                     draw_helper.draw_circle(contact_info.point_a(), 0.3, Color::MAGENTA);
+                    draw_helper.draw_line(
+                        contact_info.point_a(),
+                        &(contact_info.point_a() + &(contact_info.normal_toward_a() * 2.)),
+                        Color::BLACK,
+                    );
                     draw_helper.draw_circle(contact_info.point_b(), 0.3, Color::MAGENTA);
+                    draw_helper.draw_line(
+                        contact_info.point_b(),
+                        &(contact_info.point_b() + &(contact_info.normal_toward_a() * -2.)),
+                        Color::BLACK,
+                    );
                 });
         }
 
@@ -278,12 +435,12 @@ where
     }
 }
 
-pub fn run_window(
+pub fn run_window<T: Default + Clone + 'static>(
     title: &str,
     config: ConfigBuilder,
-    init: impl FnMut(&mut Scene) + 'static,
+    init: impl FnMut(&mut Scene<T>, &mut Handler<T>) + 'static,
     // update receive mut scene reference, second argument is mouse selected element id
-    update: impl FnMut(&mut Scene, Option<u32>) + 'static,
+    update: impl FnMut(&mut Scene<T>, Option<u32>, &mut Handler<T>) + 'static,
 ) {
     use speedy2d::Window;
 
@@ -302,5 +459,8 @@ pub fn run_window(
         current_mouse_pos: None,
         contact_viewer: CollisionStatusViewer::default(),
         config,
+        render_offset: Default::default(),
+        records: Default::default(),
+        record_handler: vec![],
     });
 }

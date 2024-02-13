@@ -9,7 +9,7 @@ use crate::{
         axis::AxisDirection,
         point::Point,
         vector::{Vector, Vector3},
-        FloatNum,
+        FloatNum, TAU,
     },
     meta::{Mass, Meta},
     shape::{utils::rotate_point, CenterPoint, EdgeIterable, GeometryTransform, NearestPoint},
@@ -152,6 +152,8 @@ impl<T: Clone> Element<T> {
     pub fn translate(&mut self, vector: &Vector) {
         self.shape.translate(vector);
 
+        self.meta_mut().set_position(|pre| pre + vector);
+
         self.bind_points
             .values_mut()
             .for_each(|point| *point += vector)
@@ -185,6 +187,7 @@ impl<T: Clone> Element<T> {
         &*self.shape
     }
 
+    // simple integrate position by velocity and angle_velocity;
     pub fn integrate_position(&mut self, delta_time: FloatNum) -> Option<(Vector, FloatNum)> {
         if self.meta().is_fixed() {
             return None;
@@ -219,6 +222,10 @@ impl<T: Clone> From<ElementBuilder<T>> for Element<T> {
 }
 
 impl<T: Clone> ConstraintObject for Element<T> {
+    fn id(&self) -> ID {
+        self.id
+    }
+
     fn center_point(&self) -> Point {
         self.shape.center_point()
     }
@@ -247,6 +254,30 @@ impl<T: Clone> ConstraintObject for Element<T> {
 
         v
     }
+
+    // apply position fix for obj , sum total position fix
+    // in order to separate object from contact
+    fn apply_position_fix(&mut self, fix: Vector, r: Vector) {
+        if self.meta().is_fixed() {
+            return;
+        }
+
+        let inv_mass = self.meta().inv_mass();
+
+        let mut translate_fix = fix * inv_mass;
+        // translate_fix.set_x(|_| 0.);
+
+        self.translate(&translate_fix);
+
+        let rad = (r ^ fix) * self.meta().inv_moment_of_inertia();
+
+        // if self.id == 2 {
+        //     dbg!(rad);
+        //     dbg!(fix * inv_mass);
+        // }
+
+        self.rotate(-rad);
+    }
 }
 
 impl<T: Clone> CenterPoint for Element<T> {
@@ -256,6 +287,10 @@ impl<T: Clone> CenterPoint for Element<T> {
 }
 
 impl<T: Clone> NearestPoint for Element<T> {
+    fn support_find_nearest_point(&self) -> bool {
+        self.shape().support_find_nearest_point()
+    }
+
     fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
         self.shape.nearest_point(reference_point, direction)
     }
