@@ -14,6 +14,12 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     scene.context_mut().constraint_parameters.max_allow_permeate = 0.7;
     scene.context_mut().constraint_parameters.split_position_fix = true;
+
+    scene
+        .context_mut()
+        .constraint_parameters
+        .skip_friction_constraints = false;
+
     // scene
     //     .context_mut()
     //     .constraint_parameters
@@ -23,7 +29,10 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     scene.push_element(ElementBuilder::new(
         ground_bottom,
-        MetaBuilder::new(100.).is_fixed(true).friction(0.8),
+        MetaBuilder::new(1.)
+            .is_fixed(true)
+            .friction(1.8)
+            .factor_restitution(2.0),
         (),
     ));
 
@@ -34,7 +43,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     let mut start_x = 100.;
 
     for level in 0..MAX_LEVEL {
-        let mut meta = MetaBuilder::new(10.).friction(1.0).factor_restitution(1.);
+        let mut meta = MetaBuilder::new(0.8).friction(1.).factor_restitution(1.0);
         if level == (MAX_LEVEL - 1) {
             meta = meta.is_fixed(true);
         }
@@ -48,9 +57,18 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     }
 }
 
-fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut common::Handler<()>) {
+fn update(scene: &mut Scene, _selected_element_id: Option<u32>, handler: &mut common::Handler<()>) {
     let duration = std::time::Duration::from_secs(10);
-    scene.update_elements_by_duration(duration.as_secs_f32());
+    dbg!(handler.is_debug);
+    if !handler.is_debug {
+        scene.update_elements_by_duration(duration.as_secs_f32());
+        return;
+    }
+    scene.update_elements_by_duration_tick(duration.as_secs_f32(), handler.iter_count);
+    handler.iter_count += 1;
+    if handler.iter_count == 21 {
+        handler.iter_count = 0;
+    }
 }
 
 fn main() {

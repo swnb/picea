@@ -48,8 +48,9 @@ fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut common::
 fn main() {
     common::run_window(
         "stack",
-        ConfigBuilder::default().draw_velocity(true),
-        // .draw_contact_point_pair(true),
+        ConfigBuilder::default()
+            .draw_velocity(true)
+            .draw_contact_point_pair(true),
         init,
         update,
     );

@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::time::{self, UNIX_EPOCH};
 
 use derive_builder::Builder;
-use picea::constraints::JoinConstraintConfigBuilder;
+use picea::constraints::{ConstraintObject, JoinConstraintConfigBuilder};
 use picea::math::edge::Edge;
 use picea::math::point::Point;
 use picea::math::vector::Vector;
@@ -12,6 +12,7 @@ use picea::math::FloatNum;
 use picea::scene::Scene;
 use picea::shape::utils::{is_point_inside_shape, rotate_point};
 use picea::tools::collision_view::CollisionStatusViewer;
+use picea::tools::snapshot;
 use serde::Serialize;
 use speedy2d::color::Color;
 use speedy2d::dimen::Vector2;
@@ -86,6 +87,8 @@ where
     render_offset: Vector,
     record_handler: Vec<(String, Box<GetRecordFn<T, FloatNum>>)>,
     records: Records,
+    pub is_debug: bool,
+    pub iter_count: usize,
 }
 
 fn into_vector2(p: Point) -> Vector2<FloatNum> {
@@ -198,11 +201,62 @@ where
                     self.config.frame_by_frame = !self.config.frame_by_frame;
                 }
                 VirtualKeyCode::S => {
-                    fs::write("recors.json", serde_json::to_string(&self.records).unwrap())
-                        .unwrap();
+                    if let Some(code) = self
+                        .scene
+                        .get_element(5)
+                        .map(|element| snapshot::create_element_construct_code_snapshot(element))
+                    {
+                        println!("{}", code);
+                    }
+
+                    if let Some(element) = self.scene.get_element(5) {
+                        let mut shape = element.origin_shape().self_clone();
+                        let center_point = shape.center_point();
+                        let points = shape
+                            .edge_iter()
+                            .map(|edge| match edge {
+                                Edge::Line { start_point, .. } => start_point,
+                                _ => unreachable!(),
+                            })
+                            .collect::<Vec<_>>();
+                        let angle = element.meta().angle();
+                        let position_translate = element.meta().position_translate();
+
+                        dbg!(points, center_point, angle, position_translate);
+
+                        shape.rotate(&shape.center_point(), -angle);
+
+                        shape.translate(position_translate);
+
+                        let points = shape
+                            .edge_iter()
+                            .map(|edge| match edge {
+                                Edge::Line { start_point, .. } => start_point,
+                                _ => unreachable!(),
+                            })
+                            .collect::<Vec<_>>();
+                        dbg!(points);
+                    }
+                    // fs::write("recors.json", serde_json::to_string(&self.records).unwrap())
+                    //     .unwrap();
                 }
                 VirtualKeyCode::C => {
                     self.scene.silent();
+                }
+                VirtualKeyCode::D => {
+                    self.is_debug = !self.is_debug;
+                    self.iter_count = 0;
+                }
+
+                VirtualKeyCode::E => {
+                    self.scene
+                        .context_mut()
+                        .constraint_parameters
+                        .skip_friction_constraints = !self
+                        .scene
+                        .context_mut()
+                        .constraint_parameters
+                        .skip_friction_constraints
                 }
                 _ => {}
             }
@@ -321,7 +375,7 @@ where
             draw_helper.draw_line(
                 &((i as f32) * 10., 0.).into(),
                 &((i as f32) * 10., 1000.).into(),
-                Color::RED,
+                Color::GRAY,
             )
         }
 
@@ -329,7 +383,7 @@ where
             draw_helper.draw_line(
                 &(0., ((i as f32) * 10.)).into(),
                 &(1000., (i as f32) * 10.).into(),
-                Color::RED,
+                Color::GRAY,
             )
         }
 
@@ -390,6 +444,15 @@ where
                     Color::RED,
                 );
             });
+
+            self.scene.elements_iter().for_each(|element| {
+                draw_helper.draw_line(
+                    &element.center_point(),
+                    &(element.center_point()
+                        + Vector::from((element.meta().angle_velocity() * 10000., 0.))),
+                    Color::BLACK,
+                );
+            });
         }
 
         if self.config.draw_point_constraints {
@@ -416,18 +479,40 @@ where
                 .get_collision_infos()
                 .iter()
                 .for_each(|contact_info| {
-                    draw_helper.draw_circle(contact_info.point_a(), 0.3, Color::MAGENTA);
-                    draw_helper.draw_line(
-                        contact_info.point_a(),
-                        &(contact_info.point_a() + &(contact_info.normal_toward_a() * 2.)),
-                        Color::BLACK,
-                    );
-                    draw_helper.draw_circle(contact_info.point_b(), 0.3, Color::MAGENTA);
-                    draw_helper.draw_line(
-                        contact_info.point_b(),
-                        &(contact_info.point_b() + &(contact_info.normal_toward_a() * -2.)),
-                        Color::BLACK,
-                    );
+                    let (object_id_a, object_id_b) = contact_info.object_id_pair();
+
+                    // draw_helper.draw_circle(contact_info.point_a(), 0.3, Color::MAGENTA);
+                    // draw_helper.draw_line(
+                    //     contact_info.point_a(),
+                    //     &(contact_info.point_a() + &(contact_info.normal_toward_a() * 2.)),
+                    //     Color::BLACK,
+                    // );
+
+                    if let Some(element) = self.scene.get_element(object_id_a) {
+                        let v = element.compute_point_velocity(contact_info.point_a());
+
+                        draw_helper.draw_line(
+                            contact_info.point_a(),
+                            &(contact_info.point_a() + &(v * 100.)),
+                            Color::RED,
+                        );
+                    };
+
+                    // draw_helper.draw_circle(contact_info.point_b(), 0.3, Color::MAGENTA);
+                    // draw_helper.draw_line(
+                    //     contact_info.point_b(),
+                    //     &(contact_info.point_b() + &(contact_info.normal_toward_a() * -2.)),
+                    //     Color::BLACK,
+                    // );
+
+                    if let Some(element) = self.scene.get_element(object_id_b) {
+                        let v = element.compute_point_velocity(contact_info.point_b());
+                        draw_helper.draw_line(
+                            contact_info.point_b(),
+                            &(contact_info.point_b() + &(v * 100.)),
+                            Color::BLUE,
+                        );
+                    };
                 });
         }
 
@@ -462,5 +547,7 @@ pub fn run_window<T: Default + Clone + 'static>(
         render_offset: Default::default(),
         records: Default::default(),
         record_handler: vec![],
+        is_debug: false,
+        iter_count: 0,
     });
 }
