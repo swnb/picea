@@ -7,6 +7,7 @@ use crate::{
 };
 
 pub mod contact;
+pub mod contact_manifold;
 pub mod join;
 pub mod point;
 
