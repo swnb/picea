@@ -25,6 +25,7 @@ pub struct Meta {
     angle: FloatNum,
     pre_position: Point,
     position: Point,
+    position_translate: Vector,
     is_fixed: bool,
     // TODO 移除 collision
     is_collision: bool,
@@ -149,8 +150,17 @@ impl Meta {
         &self.position
     }
 
-    pub fn set_position(&mut self, mut reducer: impl FnMut(&Point) -> Point) {
-        self.position = reducer(&self.position);
+    pub fn init_position(&mut self, position: Point) {
+        self.position = position;
+    }
+
+    pub fn translate_position(&mut self, translate: &Vector) {
+        self.position += translate;
+        self.position_translate += translate;
+    }
+
+    pub fn position_translate(&self) -> &Vector {
+        &self.position_translate
     }
 
     pub fn sync_position(&mut self) -> &mut Self {
@@ -273,7 +283,7 @@ impl Meta {
 
         let inv_mass = self.inv_mass();
 
-        self.set_position(|pre| pre + &(fix * inv_mass));
+        self.translate_position(&(fix * inv_mass));
     }
 
     pub fn friction(&self) -> FloatNum {
@@ -340,6 +350,7 @@ impl MetaBuilder {
                 pre_angle: 0.,
                 pre_position: Default::default(),
                 position: Default::default(),
+                position_translate: Default::default(),
                 pre_angle_velocity: 0.,
                 stashed_angle_velocity: 0.,
                 moment_of_inertia: (0.).into(),
