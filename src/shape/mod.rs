@@ -1,4 +1,4 @@
-use crate::math::{edge::Edge, point::Point, vector::Vector};
+use crate::math::{edge::Edge, point::Point, vector::Vector, FloatNum};
 
 pub mod alias;
 pub mod circle;
@@ -14,6 +14,25 @@ pub trait GeometryTransform {
     fn rotate(&mut self, origin_point: &Point, rad: f32);
 
     fn scale(&mut self, from: &Point, to: &Point);
+}
+
+pub struct Transform<'a> {
+    vector: &'a Vector,
+    rad: FloatNum,
+}
+
+impl<'a> Transform<'a> {
+    pub fn is_zero(&self) -> bool {
+        self.vector.is_zero() && self.rad == 0.
+    }
+}
+
+pub trait GeometryTransformFromOrigin {
+    fn transform_from_origin<'a>(&mut self, transform: Transform<'a>);
+
+    // fn translate_from_origin(&mut self, vector: &Vector);
+
+    // fn rotate_from_origin(&mut self, rad: FloatNum);
 }
 
 pub trait EdgeIterable {

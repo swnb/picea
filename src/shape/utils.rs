@@ -178,6 +178,13 @@ pub fn indicate_increase_by_endpoint(
     start_vector_size < end_vector_size
 }
 
+pub fn map_vertexes_to_offset_from_center<'a>(
+    vertexes: impl Iterator<Item = &'a Point> + 'a,
+    center_point: &'a Point,
+) -> impl Iterator<Item = Vector> + 'a {
+    vertexes.map(move |vertex| (center_point, vertex).into())
+}
+
 struct VertexesHelper<'a>(&'a [Point]);
 
 impl<'a> Deref for VertexesHelper<'a> {

@@ -1,4 +1,6 @@
-use super::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint};
+use super::{
+    CenterPoint, EdgeIterable, GeometryTransform, GeometryTransformFromOrigin, NearestPoint,
+};
 use crate::{
     collision::{Collider, Projector},
     element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
@@ -11,7 +13,6 @@ use crate::{
 pub struct Circle {
     center_point: Point,
     r: f32,
-    rad: f32,
 }
 
 impl<P: Into<Point>> From<(P, f32)> for Circle {
@@ -27,7 +28,6 @@ impl Circle {
         Self {
             center_point: center_point.into(),
             r: radius,
-            rad: 0.,
         }
     }
 
@@ -90,34 +90,40 @@ impl NearestPoint for Circle {
     }
 }
 
-impl GeometryTransform for Circle {
-    fn translate(&mut self, vector: &Vector) {
-        self.center_point += vector
-    }
-
-    fn rotate(&mut self, &origin_point: &Point, rad: f32) {
-        if origin_point != self.center_point {
-            let center_vector: Vector = (origin_point, self.center_point).into();
-            let new_center = origin_point + center_vector.affine_transformation_rotate(rad);
-            self.center_point = new_center;
-        }
-
-        self.rad += rad;
-        if self.rad > TAU() {
-            self.rad %= TAU()
-        }
-
-        if origin_point != self.center_point {
-            self.center_point = rotate_point(&self.center_point, &origin_point, rad);
-        }
-    }
-
-    fn scale(&mut self, from: &Point, to: &Point) {
-        let resize_vector: Vector = (from, to).into();
-        // TODO resize to ellipse
-        self.r += resize_vector.abs();
+impl GeometryTransformFromOrigin for Circle {
+    fn transform_from_origin<'a>(&mut self, transform: super::Transform<'a>) {
+        self.center_point += transform.vector;
     }
 }
+
+// impl GeometryTransform for Circle {
+//     fn translate(&mut self, vector: &Vector) {
+//         self.center_point += vector
+//     }
+
+//     fn rotate(&mut self, &origin_point: &Point, rad: f32) {
+//         if origin_point != self.center_point {
+//             let center_vector: Vector = (origin_point, self.center_point).into();
+//             let new_center = origin_point + center_vector.affine_transformation_rotate(rad);
+//             self.center_point = new_center;
+//         }
+
+//         self.rad += rad;
+//         if self.rad > TAU() {
+//             self.rad %= TAU()
+//         }
+
+//         if origin_point != self.center_point {
+//             self.center_point = rotate_point(&self.center_point, &origin_point, rad);
+//         }
+//     }
+
+//     fn scale(&mut self, from: &Point, to: &Point) {
+//         let resize_vector: Vector = (from, to).into();
+//         // TODO resize to ellipse
+//         self.r += resize_vector.abs();
+//     }
+// }
 
 impl EdgeIterable for Circle {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {

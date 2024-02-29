@@ -7,7 +7,7 @@ use crate::{
 
 use super::{
     utils::{find_nearest_point, resize_by_vector, rotate_point},
-    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
+    CenterPoint, EdgeIterable, GeometryTransform, GeometryTransformFromOrigin, NearestPoint,
 };
 
 #[derive(Clone)]
@@ -88,6 +88,10 @@ impl EdgeIterable for Line {
 }
 
 impl Collider for Line {}
+
+impl GeometryTransformFromOrigin for Line {
+    fn transform_from_origin<'a>(&mut self, transform: super::Transform<'a>) {}
+}
 
 impl GeometryTransform for Line {
     fn translate(&mut self, vector: &Vector) {
