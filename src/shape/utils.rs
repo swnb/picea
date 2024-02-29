@@ -701,6 +701,9 @@ mod test {
 }
 
 mod tests {
+    use crate::math::{point::Point, vector::Vector, FloatNum};
+
+    use super::rotate_polygon;
 
     #[test]
     fn test_split_concave_polygon() {
@@ -790,5 +793,30 @@ mod tests {
         ];
 
         super::split_concave_polygon_to_convex_polygons(&vertexes);
+    }
+
+    #[test]
+    fn rotate_test() {
+        let mut current_position: Vec<Point> = vec![
+            (95.673, 130.119).into(),
+            (104.680, 130.146).into(),
+            (105.934, 140.100).into(),
+            (96.927, 140.073).into(),
+        ];
+        let position_translate = Vector::<FloatNum>::new(1.3052475, 39.899548);
+
+        current_position.iter_mut().for_each(|position| {
+            *position -= position_translate;
+        });
+
+        let mut points = [
+            Point { x: 95.0, y: 90.0 },
+            Point { x: 104.0, y: 90.0 },
+            Point { x: 104.0, y: 100.0 },
+            Point { x: 95.0, y: 100.0 },
+        ];
+        rotate_polygon(Point { x: 99.5, y: 95.0 }, points.iter_mut(), 0.10710551);
+        dbg!(points);
+        dbg!(current_position);
     }
 }
