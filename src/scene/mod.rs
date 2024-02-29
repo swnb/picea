@@ -2,15 +2,15 @@ pub(crate) mod context;
 pub mod errors;
 pub(crate) mod hooks;
 
-use std::{collections::BTreeMap, ops::Shl};
+use std::{collections::BTreeMap, ops::Shl, time::SystemTime};
 
 use crate::{
     collision::{
         accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
     },
     constraints::{
-        contact::ContactConstraint, join::JoinConstraint, point::PointConstraint,
-        JoinConstraintConfig,
+        contact::ContactConstraint, contact_manifold::ContactConstraintManifold,
+        join::JoinConstraint, point::PointConstraint, JoinConstraintConfig,
     },
     element::{store::ElementStore, Element},
     math::{point::Point, vector::Vector, FloatNum},
@@ -33,10 +33,13 @@ where
     callback_hook: hooks::CallbackHook,
     constraints_id_dispatcher: IDDispatcher,
     pub(crate) previous_contact_constraints: Vec<ContactConstraint<Element<Data>>>,
-    pub(crate) contact_constraints: Vec<ContactConstraint<Element<Data>>>,
+    pub(crate) contact_constraints_manifold: ContactConstraintManifold<Element<Data>>,
+    // pub(crate) contact_constraints: Vec<ContactConstraint<Element<Data>>>,
     point_constraints: BTreeMap<u32, PointConstraint<Element<Data>>>,
     join_constraints: BTreeMap<u32, JoinConstraint<Element<Data>>>,
     pub data: Data,
+    pub is_debug_constraint: bool,
+    pub debug_step_count: u8,
 }
 
 type ID = u32;
@@ -95,7 +98,7 @@ impl<T: Clone + Default> Scene<T> {
 
         let center_point = element.shape().center_point();
 
-        element.meta_mut().set_position(|_| center_point);
+        element.meta_mut().init_position(center_point);
 
         self.element_store.push(element);
         element_id
@@ -135,26 +138,26 @@ impl<T: Clone + Default> Scene<T> {
             element.meta_mut().sync_position().sync_angle();
         });
 
-        if self.context.enable_sleep_mode {
-            self.elements_iter_mut().for_each(|element| {
-                let v = element.meta().velocity();
+        // if self.context.enable_sleep_mode {
+        //     self.elements_iter_mut().for_each(|element| {
+        //         let v = element.meta().velocity();
 
-                let a_v = element.meta().angle_velocity();
+        //         let a_v = element.meta().angle_velocity();
 
-                // TODO better performance for abs
-                let motion = v.abs().powf(2.) + a_v.powf(2.);
+        //         // TODO better performance for abs
+        //         let motion = v.abs().powf(2.) + a_v.powf(2.);
 
-                if motion < max_enter_sleep_motion {
-                    element.meta_mut().mark_motionless();
-                    if element.meta().motionless_frame_counter() > max_enter_sleep_frame {
-                        element.meta_mut().reset_motionless_frame_counter();
-                        element.meta_mut().mark_is_sleeping(true);
-                    }
-                } else {
-                    element.meta_mut().mark_is_sleeping(false);
-                }
-            });
-        }
+        //         if motion < max_enter_sleep_motion {
+        //             element.meta_mut().mark_motionless();
+        //             if element.meta().motionless_frame_counter() > max_enter_sleep_frame {
+        //                 element.meta_mut().reset_motionless_frame_counter();
+        //                 element.meta_mut().mark_is_sleeping(true);
+        //             }
+        //         } else {
+        //             element.meta_mut().mark_is_sleeping(false);
+        //         }
+        //     });
+        // }
 
         // TODO 120 fps
         // max frame rate is 60
@@ -177,55 +180,48 @@ impl<T: Clone + Default> Scene<T> {
 
         self.integrate_velocity(delta_time);
 
-        self.previous_contact_constraints = std::mem::take(&mut self.contact_constraints);
+        self.elements_iter_mut().for_each(|element| {
+            element.refresh_shape();
+        });
+
+        let self_ptr = self as *mut Self;
+
+        // warm start
+        self.contact_constraints_manifold
+            .values()
+            .for_each(|manifold| unsafe {
+                let iter = manifold.contact_pair_constraint_infos_iter();
+                for info in iter {
+                    let total_lambda = info.normal_toward_a() * info.total_lambda()
+                        - !info.normal_toward_a() * info.total_friction_lambda();
+                    if let Some((element_a, element_b)) =
+                        (*self_ptr).query_element_pair_mut(manifold.obj_id_pair())
+                    {
+                        element_a
+                            .meta_mut()
+                            .apply_impulse(total_lambda, *info.r_a());
+                        element_b
+                            .meta_mut()
+                            .apply_impulse(-total_lambda, *info.r_b());
+                    }
+                }
+            });
+
+        self.contact_constraints_manifold.clear();
 
         self.element_store
-            .detective_collision(|a, b, mut contact_pairs| {
-                if a.id() == 2 {
-                    dbg!(&contact_pairs);
-                } else if b.id() == 2 {
-                    dbg!(&contact_pairs);
-                }
+            .detective_collision(|a, b, contact_pairs| {
+                let contact_constraint = ContactConstraint::new(a.id(), b.id(), contact_pairs);
 
-                contact_pairs
-                    .into_iter()
-                    // .rev()
-                    // TODO opt
-                    .for_each(|pair| {
-                        if let Some(previous_contact) =
-                            self.contact_constraints.iter_mut().find(|constraint| {
-                                // // 上一次用过的
-                                // !constraint.is_active()
-                                //     && constraint.obj_id_pair() == (a.id(), b.id())
-                                //     && constraint.contact_point_pair() == &pair
-                                false
-                            })
-                        {
-                            previous_contact.update_contact_point_pair(pair);
-                            previous_contact.set_active(true);
-                        } else {
-                            self.contact_constraints.push(ContactConstraint::new(
-                                a.id(),
-                                b.id(),
-                                pair,
-                            ));
-                        }
-                    });
+                self.contact_constraints_manifold
+                    .insert((a.id(), b.id()), contact_constraint);
             });
 
         unsafe {
             self.reset_constraints_params(delta_time);
         }
 
-        const MAX_CONSTRAINTS_TIMES: u8 = 20;
-
-        dbg!(self
-            .get_element(2)
-            .map(|element| { element.meta().angle() }));
-
-        dbg!(self
-            .get_element(3)
-            .map(|element| { element.meta().angle() }));
+        const MAX_CONSTRAINTS_TIMES: u8 = 21;
 
         for iter_count in 0..MAX_CONSTRAINTS_TIMES {
             self.solve_point_constraints();
@@ -237,15 +233,8 @@ impl<T: Clone + Default> Scene<T> {
 
         self.integrate_position(delta_time);
 
-        dbg!(self
-            .get_element(2)
-            .map(|element| { element.meta().angle() }));
-
-        dbg!(self
-            .get_element(3)
-            .map(|element| { element.meta().angle() }));
-
-        dbg!("---------");
+        self.elements_iter_mut()
+            .for_each(|element| element.refresh_shape());
 
         if self.context.constraint_parameters.split_position_fix {
             for _ in 0..10 {
@@ -253,28 +242,10 @@ impl<T: Clone + Default> Scene<T> {
             }
         }
 
-        dbg!(self
-            .get_element(2)
-            .map(|element| { element.meta().angle() }));
-
-        dbg!(self
-            .get_element(3)
-            .map(|element| { element.meta().angle() }));
-
-        self.contact_constraints
-            .iter_mut()
-            .for_each(|constraint| constraint.set_active(false));
-
-        if !self.contact_constraints.is_empty() {
-            // panic!("");
-        }
-
         unsafe {
             // TODO update params
             self.reset_constraints_params(delta_time);
         }
-
-        // self.solve_air_friction();
     }
 
     pub fn register_element_position_update_callback<F>(&mut self, callback: F) -> u32
@@ -324,7 +295,7 @@ impl<T: Clone + Default> Scene<T> {
         self.element_store.clear();
         self.id_dispatcher.reset();
         self.constraints_id_dispatcher.reset();
-        self.contact_constraints.clear();
+        self.contact_constraints_manifold.clear();
         self.point_constraints.clear();
         self.join_constraints.clear();
         self.frame_count = 0;
@@ -527,7 +498,7 @@ impl<T: Clone + Default> Scene<T> {
             *element.meta_mut().contact_count_mut() = 0;
         });
 
-        for contact_constraint in (*self_ptr).contact_constraints.iter_mut() {
+        for contact_constraint in (*self_ptr).contact_constraints_manifold.values_mut() {
             let Some((element_a, element_b)) =
                 (*self_ptr).query_element_pair_mut(contact_constraint.obj_id_pair())
             else {
@@ -614,9 +585,9 @@ impl<T: Clone + Default> Scene<T> {
     }
 
     fn solve_contact_constraints(&mut self, iter_count: u8) {
-        self.contact_constraints
-            .iter_mut()
-            .filter(|constraint| constraint.is_active())
+        self.contact_constraints_manifold
+            .values_mut()
+            // .filter(|constraint| constraint.is_active())
             .for_each(|contact_constraint| unsafe {
                 contact_constraint
                     .solve_velocity_constraint(&self.context.constraint_parameters, iter_count);
@@ -625,9 +596,9 @@ impl<T: Clone + Default> Scene<T> {
 
     // separate contact object by change their position directly;
     fn solve_position_fix(&mut self) {
-        self.contact_constraints
-            .iter_mut()
-            .filter(|constraint| constraint.is_active())
+        self.contact_constraints_manifold
+            .values_mut()
+            // .filter(|constraint| constraint.is_active())
             .enumerate()
             .for_each(|(index, contact_constraint)| unsafe {
                 contact_constraint
