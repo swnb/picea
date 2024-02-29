@@ -44,6 +44,7 @@ pub struct ContactPointPairConstraintInfo {
     total_lambda: FloatNum,
     real_total_friction_lambda: FloatNum,
     total_friction_lambda: FloatNum,
+    velocity_bias: FloatNum,
 }
 
 impl ContactPointPairConstraintInfo {
@@ -330,19 +331,14 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         self.contact_point_pair_constraint_infos
             .iter_mut()
             .for_each(|contact_point_pair_constraint_info| {
-                let r_a = (
-                    &object_a.center_point(),
-                    contact_point_pair_constraint_info.point(),
-                )
-                    .into();
+                let contact_point = &contact_point_pair_constraint_info.point().clone();
 
-                let r_b = (
-                    &object_b.center_point(),
-                    contact_point_pair_constraint_info.point(),
-                )
-                    .into();
+                let r_a = (&object_a.center_point(), contact_point).into();
+
+                let r_b = (&object_b.center_point(), contact_point).into();
 
                 contact_point_pair_constraint_info.r_a = r_a;
+
                 contact_point_pair_constraint_info.r_b = r_b;
 
                 let normal = contact_point_pair_constraint_info.normal_toward_a();
@@ -358,6 +354,18 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
 
                 contact_point_pair_constraint_info.mass_effective = mass_effective;
                 contact_point_pair_constraint_info.tangent_mass_effective = tangent_mass_effective;
+
+                let vn = normal
+                    * (object_a.compute_point_velocity(contact_point)
+                        - object_b.compute_point_velocity(contact_point));
+
+                let mut velocity_bias = 0.;
+
+                if vn < -1. {
+                    velocity_bias = -vn * self.factor_restitution;
+                }
+
+                contact_point_pair_constraint_info.velocity_bias = velocity_bias;
             });
     }
 
@@ -375,8 +383,6 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 let jv_a = contact_info.normal_toward_a();
                 let jv_b = -jv_a;
 
-                let contact_point_b_ = *contact_info.point_b();
-
                 let v_a = obj_a.compute_point_velocity(contact_info.point());
                 let v_b = obj_b.compute_point_velocity(contact_info.point());
 
@@ -391,12 +397,9 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                     -position_bias
                 };
 
-                let lambda = -((1. + self.factor_restitution) * jv + (bias * 0.3))
-                    * contact_info.mass_effective;
-                let lambda = contact_info.restrict_contact_lambda(lambda);
+                let lambda = -(jv * (1. + self.factor_restitution)) * contact_info.mass_effective;
 
-                // let contact_count_a = obj_a.meta().contact_count();
-                // let contact_count_b = obj_b.meta().contact_count();
+                let lambda = contact_info.restrict_contact_lambda(lambda);
 
                 contact_info.real_total_lambda += lambda;
 
@@ -406,12 +409,6 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 obj_b
                     .meta_mut()
                     .apply_impulse(jv_b * lambda, contact_info.r_b);
-
-                // {
-
-                let v_b = obj_b.compute_point_velocity(&contact_point_b_);
-
-                // }
             });
 
         if iter_count >= 5 && !parameters.skip_friction_constraints {
@@ -429,15 +426,11 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             .for_each(|contact_info| {
                 let mass_effective = contact_info.tangent_mass_effective;
 
-                let contact_point_a = contact_info.point_a();
-                let contact_point_b = contact_info.point_b();
+                let contact_point = contact_info.point();
 
-                let contact_point =
-                    ((contact_point_a.to_vector() + contact_point_b.to_vector()) * 0.5).to_point();
+                let sum_velocity_a = obj_a.compute_point_velocity(contact_point);
 
-                let sum_velocity_a = obj_a.compute_point_velocity(&contact_point);
-
-                let sum_velocity_b = obj_b.compute_point_velocity(&contact_point);
+                let sum_velocity_b = obj_b.compute_point_velocity(contact_point);
 
                 let tangent_normal = !contact_info.normal_toward_a();
 

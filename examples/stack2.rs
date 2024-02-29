@@ -59,16 +59,14 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
 fn update(scene: &mut Scene, _selected_element_id: Option<u32>, handler: &mut common::Handler<()>) {
     let duration = std::time::Duration::from_secs(10);
-    dbg!(handler.is_debug);
-    if !handler.is_debug {
-        scene.update_elements_by_duration(duration.as_secs_f32());
-        return;
-    }
-    scene.update_elements_by_duration_tick(duration.as_secs_f32(), handler.iter_count);
-    handler.iter_count += 1;
-    if handler.iter_count == 21 {
-        handler.iter_count = 0;
-    }
+
+    scene.update_elements_by_duration(duration.as_secs_f32());
+
+    // scene.update_elements_by_duration_tick(duration.as_secs_f32(), handler.iter_count);
+    // handler.iter_count += 1;
+    // if handler.iter_count == 21 {
+    //     handler.iter_count = 0;
+    // }
 }
 
 fn main() {
