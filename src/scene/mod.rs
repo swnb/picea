@@ -184,44 +184,17 @@ impl<T: Clone + Default> Scene<T> {
             element.refresh_shape();
         });
 
-        let self_ptr = self as *mut Self;
-
-        // warm start
-        self.contact_constraints_manifold
-            .values()
-            .for_each(|manifold| unsafe {
-                let iter = manifold.contact_pair_constraint_infos_iter();
-                for info in iter {
-                    let total_lambda = info.normal_toward_a() * info.total_lambda()
-                        - !info.normal_toward_a() * info.total_friction_lambda();
-                    if let Some((element_a, element_b)) =
-                        (*self_ptr).query_element_pair_mut(manifold.obj_id_pair())
-                    {
-                        element_a
-                            .meta_mut()
-                            .apply_impulse(total_lambda, *info.r_a());
-                        element_b
-                            .meta_mut()
-                            .apply_impulse(-total_lambda, *info.r_b());
-                    }
-                }
-            });
-
-        self.contact_constraints_manifold.clear();
-
-        self.element_store
-            .detective_collision(|a, b, contact_pairs| {
-                let contact_constraint = ContactConstraint::new(a.id(), b.id(), contact_pairs);
-
-                self.contact_constraints_manifold
-                    .insert((a.id(), b.id()), contact_constraint);
-            });
+        // warm start and mark all manifold inactive
+        self.warm_start();
+        // gen collision manifold this step
+        self.collision_detective();
 
         unsafe {
+            // reuse contact manifold , reset params and set object pointer
             self.reset_constraints_params(delta_time);
         }
 
-        const MAX_CONSTRAINTS_TIMES: u8 = 21;
+        const MAX_CONSTRAINTS_TIMES: u8 = 10;
 
         for iter_count in 0..MAX_CONSTRAINTS_TIMES {
             self.solve_point_constraints();
@@ -236,10 +209,10 @@ impl<T: Clone + Default> Scene<T> {
         self.elements_iter_mut()
             .for_each(|element| element.refresh_shape());
 
-        if self.context.constraint_parameters.split_position_fix {
-            for _ in 0..10 {
-                self.solve_position_fix();
-            }
+        const MAX_FIX_POSITION_ITER_TIMES: u8 = 10;
+
+        for _ in 0..MAX_FIX_POSITION_ITER_TIMES {
+            self.solve_position_fix();
         }
 
         unsafe {
@@ -302,7 +275,29 @@ impl<T: Clone + Default> Scene<T> {
     }
 
     // TODO  use exist collision manifold
-    pub fn is_element_collide(&self, element_a_id: ID, element_b_id: ID) -> bool {
+    pub fn is_element_collide(
+        &self,
+        element_a_id: ID,
+        element_b_id: ID,
+        query_from_manifold: bool,
+    ) -> bool {
+        if element_a_id == element_b_id {
+            return false;
+        }
+
+        if query_from_manifold {
+            let id_pair = if element_a_id > element_b_id {
+                (element_b_id, element_a_id)
+            } else {
+                (element_a_id, element_b_id)
+            };
+
+            return self
+                .contact_constraints_manifold
+                .get(&id_pair)
+                .map_or(false, |v| v.is_active());
+        }
+
         let collider_a = self.element_store.get_element_by_id(element_a_id);
         let collider_b = self.element_store.get_element_by_id(element_b_id);
         if let (Some(collider_a), Some(collider_b)) = (collider_a, collider_b) {
@@ -461,6 +456,39 @@ impl<T: Clone + Default> Scene<T> {
             })
     }
 
+    fn self_ptr(&mut self) -> *mut Self {
+        self as *mut Self
+    }
+
+    // warm start and mark all manifold active false
+    fn warm_start(&mut self) {
+        let self_ptr = self.self_ptr();
+
+        // warm start
+        self.contact_constraints_manifold
+            .values_mut()
+            .filter(|v| v.is_active())
+            .for_each(|manifold| unsafe {
+                let iter = manifold.contact_pair_constraint_infos_iter();
+                for info in iter {
+                    let total_lambda = (info.normal_toward_a() * info.total_lambda())
+                         +(-!info.normal_toward_a() * info.total_friction_lambda());
+                    if let Some((element_a, element_b)) =
+                        (*self_ptr).query_element_pair_mut(manifold.obj_id_pair())
+                    {
+                        element_a
+                            .meta_mut()
+                            .apply_impulse(total_lambda, *info.r_a());
+                        element_b
+                            .meta_mut()
+                            .apply_impulse(-total_lambda, *info.r_b());
+                    }
+                }
+
+                manifold.set_is_active(false);
+            });
+    }
+
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
         let gravity = self.context.default_gravity;
         let enable_gravity = self.context.enable_gravity;
@@ -475,6 +503,24 @@ impl<T: Clone + Default> Scene<T> {
                     a += gravity;
                 }
                 element.meta_mut().set_velocity(|pre| pre + a * delta_time);
+            });
+    }
+
+    fn collision_detective(&mut self) {
+        self.element_store
+            .detective_collision(|a, b, contact_pairs| {
+                let manifold_key = (a.id(), b.id());
+
+                if let Some(manifold) = self.contact_constraints_manifold.get_mut(&manifold_key) {
+                    // for performance; reuse exist manifold
+                    manifold.replace_contact_point_pairs(contact_pairs);
+                    manifold.set_is_active(true)
+                } else {
+                    let contact_constraint = ContactConstraint::new(a.id(), b.id(), contact_pairs);
+
+                    self.contact_constraints_manifold
+                        .insert(manifold_key, contact_constraint);
+                }
             });
     }
 
@@ -587,7 +633,7 @@ impl<T: Clone + Default> Scene<T> {
     fn solve_contact_constraints(&mut self, iter_count: u8) {
         self.contact_constraints_manifold
             .values_mut()
-            // .filter(|constraint| constraint.is_active())
+            .filter(|constraint| constraint.is_active())
             .for_each(|contact_constraint| unsafe {
                 contact_constraint
                     .solve_velocity_constraint(&self.context.constraint_parameters, iter_count);
@@ -598,7 +644,7 @@ impl<T: Clone + Default> Scene<T> {
     fn solve_position_fix(&mut self) {
         self.contact_constraints_manifold
             .values_mut()
-            // .filter(|constraint| constraint.is_active())
+            .filter(|constraint| constraint.is_active())
             .enumerate()
             .for_each(|(index, contact_constraint)| unsafe {
                 contact_constraint

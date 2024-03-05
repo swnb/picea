@@ -6,6 +6,7 @@ use crate::{
     meta::{Meta, MetaBuilder},
     scene::Scene,
     shape::{
+        circle::Circle,
         concave::ConcavePolygon,
         line::Line,
         polygon::{Rect, RegularPolygon},
@@ -36,10 +37,52 @@ pub struct WebScene {
 }
 
 #[wasm_bindgen]
+pub enum ElementShapeEnum {
+    Circle,
+    Polygon,
+}
+
+#[wasm_bindgen]
+#[derive(Default, Deserialize, Serialize)]
+pub struct PolygonElementShape {
+    id: ID,
+    shape_type: String, // always polygon
+    vertexes: Vec<Tuple2>,
+}
+
+#[wasm_bindgen]
+#[derive(Default, Deserialize, Serialize)]
+pub struct CircleElementShape {
+    id: ID,
+    shape_type: String, // always circle
+    radius: FloatNum,
+    center_point: Tuple2,
+}
+
+#[wasm_bindgen]
+impl CircleElementShape {
+    pub fn id(&self) -> ID {
+        self.id
+    }
+
+    pub fn shape_type(&self) -> String {
+        self.shape_type.to_owned()
+    }
+
+    pub fn radius(&self) -> FloatNum {
+        self.radius
+    }
+
+    pub fn center_point(&self) -> JsValue {
+        JsValue::from(self.center_point)
+    }
+}
+
+#[wasm_bindgen]
 pub struct WebPicea;
 
 #[wasm_bindgen]
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
 struct Tuple2 {
     pub x: FloatNum,
     pub y: FloatNum,
@@ -115,7 +158,7 @@ type Point = {x:number,y:number};
 type MetaData = {mass:number,isFixed:boolean,isTransparent:boolean,angle:number};
 type MetaDataConfig = Partial<MetaData>;
 interface WebScene {
-    forEachElement(callback: (points:{x:number,y:number}[],id :number) => void): void;
+    forEachElementShape(callback: (points:{x:number,y:number}[],id :number) => void): void;
     registerElementPositionUpdateCallback(callback: (id:number,translate:{x:number,y:number},rotation:number) => void): number;
 }
 "#;
@@ -180,6 +223,19 @@ impl WebScene {
         meta_data: Option<WebMetaDataConfig>,
     ) -> u32 {
         let shape = Rect::new(top_left_x, top_right_y, width, height);
+
+        self.create_element(shape, meta_data)
+    }
+
+    #[wasm_bindgen(js_name = "createCircle")]
+    pub fn create_circle(
+        &mut self,
+        center_point_x: FloatNum,
+        center_point_y: FloatNum,
+        radius: FloatNum,
+        meta_data: Option<WebMetaDataConfig>,
+    ) -> u32 {
+        let shape = Circle::new((center_point_x, center_point_y), radius);
 
         self.create_element(shape, meta_data)
     }
@@ -408,40 +464,56 @@ impl WebScene {
             .map(|point: Tuple2| serde_wasm_bindgen::to_value(&point).unwrap().into())
     }
 
-    #[wasm_bindgen(skip_typescript, js_name = "forEachElement")]
-    pub fn for_each_element(&self, callback: Function) {
+    #[wasm_bindgen(skip_typescript, js_name = "forEachElementShape")]
+    pub fn for_each_element_shape(&self, callback: Function) {
         let this = JsValue::null();
 
         self.scene.elements_iter().for_each(|element| {
             let id = element.id();
-            let result = js_sys::Array::new();
-            element.shape().edge_iter().for_each(|edge| match edge {
-                Edge::Arc {
-                    start_point,
-                    support_point,
-                    end_point,
-                } => {
-                    todo!()
-                }
-                Edge::Circle {
-                    center_point,
-                    radius,
-                } => {
-                    todo!()
-                }
-                Edge::Line {
-                    start_point,
-                    end_point,
-                } => {
-                    let point: Tuple2 = (*start_point).into();
-                    let value = serde_wasm_bindgen::to_value(&point).unwrap();
-                    result.push(&value);
-                }
-            });
+            let mut result = Vec::new();
 
-            callback
-                .call2(&this, &JsValue::from(id), &JsValue::from(result))
-                .unwrap();
+            for edge in element.shape().edge_iter() {
+                match edge {
+                    Edge::Arc {
+                        start_point,
+                        support_point,
+                        end_point,
+                    } => {
+                        todo!()
+                    }
+                    Edge::Circle {
+                        center_point,
+                        radius,
+                    } => {
+                        let value = serde_wasm_bindgen::to_value(&CircleElementShape {
+                            id,
+                            center_point: Tuple2 {
+                                x: center_point.x,
+                                y: center_point.y,
+                            },
+                            shape_type: "circle".into(),
+                            radius,
+                        })
+                        .unwrap();
+
+                        callback.call1(&this, &value).unwrap();
+                        return;
+                    }
+                    Edge::Line { start_point, .. } => {
+                        let point: Tuple2 = (*start_point).into();
+                        result.push(point);
+                    }
+                }
+            }
+
+            let element_shape = serde_wasm_bindgen::to_value(&PolygonElementShape {
+                id,
+                shape_type: "polygon".into(),
+                vertexes: result,
+            })
+            .unwrap();
+
+            callback.call1(&this, &element_shape).unwrap();
         });
     }
 
@@ -455,8 +527,17 @@ impl WebScene {
     }
 
     #[wasm_bindgen(js_name = "isElementCollide")]
-    pub fn is_element_collide(&self, element_a_id: ID, element_b_id: ID) -> bool {
-        self.scene.is_element_collide(element_a_id, element_b_id)
+    pub fn is_element_collide(
+        &self,
+        element_a_id: ID,
+        element_b_id: ID,
+        query_from_manifold: Option<bool>,
+    ) -> bool {
+        self.scene.is_element_collide(
+            element_a_id,
+            element_b_id,
+            query_from_manifold.unwrap_or(true),
+        )
     }
 
     fn create_element(
@@ -520,7 +601,7 @@ pub fn is_point_valid_add_into_polygon(point: WebPoint, vertexes: Vec<WebPoint>)
     true
 }
 
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "createScene")]
 pub fn create_scene() -> WebScene {
     WebScene {
         scene: Scene::new(),

@@ -14,14 +14,12 @@ use super::{compute_inv_mass_effective, ConstraintObject};
 // contact info , is two element is not collide anymore , we don't need this frame
 pub struct ContactConstraint<Obj: ConstraintObject> {
     contact_point_pair_constraint_infos: Vec<ContactPointPairConstraintInfo>,
-    total_lambda: Vector,
-    total_friction_lambda: Vector,
     // two collide obj
     obj_id_a: ID,
     obj_id_b: ID,
     obj_a: *mut Obj,
     obj_b: *mut Obj,
-    max_allow_restrict_impulse: FloatNum,
+    // max_allow_restrict_impulse: FloatNum,
     inv_delta_time: FloatNum,
     is_active: bool,
     factor_friction: FloatNum,
@@ -182,22 +180,21 @@ impl Deref for ContactPointPairConstraintInfo {
 
 impl<Obj: ConstraintObject> ContactConstraint<Obj> {
     pub fn new(obj_id_a: ID, obj_id_b: ID, contact_point_pairs: Vec<ContactPointPair>) -> Self {
+        let contact_point_pair_constraint_infos = contact_point_pairs
+            .into_iter()
+            .map(|v| ContactPointPairConstraintInfo {
+                concat_point_pair: v,
+                ..Default::default()
+            })
+            .collect();
+
         Self {
-            contact_point_pair_constraint_infos: contact_point_pairs
-                .into_iter()
-                .map(|v| ContactPointPairConstraintInfo {
-                    concat_point_pair: v,
-                    ..Default::default()
-                })
-                .collect(),
-            total_friction_lambda: Default::default(),
-            total_lambda: Default::default(),
+            contact_point_pair_constraint_infos,
             obj_id_a,
             obj_id_b,
             obj_a: std::ptr::null_mut(),
             obj_b: std::ptr::null_mut(),
             inv_delta_time: 0.,
-            max_allow_restrict_impulse: 0.,
             is_active: true,
             factor_friction: 0.,
             factor_restitution: 0.,
@@ -208,7 +205,17 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         }
     }
 
-    pub fn set_active(&mut self, is_active: bool) {
+    pub fn replace_contact_point_pairs(&mut self, contact_point_pairs: Vec<ContactPointPair>) {
+        self.contact_point_pair_constraint_infos = contact_point_pairs
+            .into_iter()
+            .map(|v| ContactPointPairConstraintInfo {
+                concat_point_pair: v,
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    pub fn set_is_active(&mut self, is_active: bool) {
         self.is_active = is_active
     }
 
