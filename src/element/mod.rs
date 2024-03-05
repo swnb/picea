@@ -18,9 +18,10 @@ use crate::{
 pub(crate) type ID = u32;
 
 // TODO refactor element builder
-pub struct ElementBuilder {
+pub struct ElementBuilder<T: Clone = ()> {
     shape: Box<dyn ShapeTraitUnion>,
     meta: Meta,
+    data: T,
 }
 
 pub trait ComputeMomentOfInertia {
@@ -56,11 +57,11 @@ impl<T> ShapeTraitUnion for T where
 {
 }
 
-impl ElementBuilder {
-    pub fn new(shape: impl Into<Box<dyn ShapeTraitUnion>>, meta: impl Into<Meta>) -> Self {
+impl<T: Clone> ElementBuilder<T> {
+    pub fn new(shape: impl Into<Box<dyn ShapeTraitUnion>>, meta: impl Into<Meta>, data: T) -> Self {
         let shape = shape.into();
         let meta = meta.into();
-        Self { shape, meta }
+        Self { shape, meta, data }
     }
 
     pub fn shape(mut self, shape: impl Into<Box<dyn ShapeTraitUnion>>) -> Self {
@@ -72,28 +73,37 @@ impl ElementBuilder {
         self.meta = meta;
         self
     }
+
+    pub fn addition_data(mut self, data: T) -> Self {
+        self.data = data;
+        self
+    }
 }
 
-pub struct Element {
+pub struct Element<Data: Clone> {
     id: ID,
     meta: Meta,
+    origin_shape: Box<dyn ShapeTraitUnion>,
     shape: Box<dyn ShapeTraitUnion>,
     bind_points: BTreeMap<u32, Point>, // move with element
+    data: Data,
 }
 
-impl Clone for Element {
+impl<T: Clone> Clone for Element<T> {
     fn clone(&self) -> Self {
         // clone element will return element with id unset
         Self {
             id: 0,
             meta: self.meta.clone(),
+            origin_shape: self.origin_shape.self_clone(),
             shape: self.shape.self_clone(),
             bind_points: Default::default(),
+            data: self.data.clone(),
         }
     }
 }
 
-impl Element {
+impl<T: Clone> Element<T> {
     #[inline]
     pub fn id(&self) -> ID {
         self.id
@@ -104,10 +114,12 @@ impl Element {
     }
 
     #[inline]
-    pub fn new(mut shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>) -> Self {
+    pub fn new(mut shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>, data: T) -> Self {
         let mut meta = meta.into();
 
-        shape.rotate(&shape.center_point(), meta.angle());
+        let origin_shape = shape.self_clone();
+
+        shape.rotate(&shape.center_point(), -meta.angle());
 
         // FIXME update moment_of_inertia when meta update
         let moment_of_inertia = shape.compute_moment_of_inertia(meta.mass());
@@ -119,9 +131,22 @@ impl Element {
         Self {
             id,
             shape,
+            origin_shape,
             meta,
             bind_points: Default::default(),
+            data,
         }
+    }
+
+    pub(crate) fn refresh_shape(&mut self) {
+        let mut origin_shape = self.origin_shape.self_clone();
+        origin_shape.rotate(&origin_shape.center_point(), -self.meta().angle());
+        origin_shape.translate(self.meta().position_translate());
+        self.shape = origin_shape;
+    }
+
+    pub fn origin_shape(&self) -> &dyn ShapeTraitUnion {
+        self.origin_shape.as_ref()
     }
 
     #[inline]
@@ -142,6 +167,8 @@ impl Element {
     #[inline]
     pub fn translate(&mut self, vector: &Vector) {
         self.shape.translate(vector);
+
+        self.meta_mut().translate_position(vector);
 
         self.bind_points
             .values_mut()
@@ -176,6 +203,7 @@ impl Element {
         &*self.shape
     }
 
+    // simple integrate position by velocity and angle_velocity;
     pub fn integrate_position(&mut self, delta_time: FloatNum) -> Option<(Vector, FloatNum)> {
         if self.meta().is_fixed() {
             return None;
@@ -184,6 +212,7 @@ impl Element {
         let angle = self.meta().angle_velocity() * delta_time;
 
         self.translate(&path);
+
         // NOTE this is important, all rotate is reverse
         self.rotate(-angle);
 
@@ -203,13 +232,17 @@ impl Element {
     }
 }
 
-impl From<ElementBuilder> for Element {
-    fn from(builder: ElementBuilder) -> Self {
-        Self::new(builder.shape, builder.meta)
+impl<T: Clone> From<ElementBuilder<T>> for Element<T> {
+    fn from(builder: ElementBuilder<T>) -> Self {
+        Self::new(builder.shape, builder.meta, builder.data)
     }
 }
 
-impl ConstraintObject for Element {
+impl<T: Clone> ConstraintObject for Element<T> {
+    fn id(&self) -> ID {
+        self.id
+    }
+
     fn center_point(&self) -> Point {
         self.shape.center_point()
     }
@@ -235,24 +268,53 @@ impl ConstraintObject for Element {
         let w: Vector3 = (0., 0., angle_velocity).into();
         let mut v: Vector = (w ^ r.into()).into();
         v += meta.velocity();
-
         v
+    }
+
+    // apply position fix for obj , sum total position fix
+    // in order to separate object from contact
+    fn apply_position_fix(&mut self, fix: Vector, r: Vector) {
+        if self.meta().is_fixed() {
+            return;
+        }
+
+        let inv_mass = self.meta().inv_mass();
+
+        let mut translate_fix = fix * inv_mass;
+        // translate_fix.set_x(|_| 0.);
+
+        self.translate(&translate_fix);
+
+        let rad = (r ^ fix) * self.meta().inv_moment_of_inertia();
+
+        // if self.id == 2 {
+        //     dbg!(rad);
+        //     dbg!(fix * inv_mass);
+        // }
+
+        self.rotate(-rad);
+
+        self.refresh_shape();
     }
 }
 
-impl CenterPoint for Element {
+impl<T: Clone> CenterPoint for Element<T> {
     fn center_point(&self) -> Point {
         self.shape().center_point()
     }
 }
 
-impl NearestPoint for Element {
+impl<T: Clone> NearestPoint for Element<T> {
+    fn support_find_nearest_point(&self) -> bool {
+        self.shape().support_find_nearest_point()
+    }
+
     fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
         self.shape.nearest_point(reference_point, direction)
     }
 }
 
-impl Projector for Element {
+impl<T: Clone> Projector for Element<T> {
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
         self.shape().projection_on_axis(axis)
     }
@@ -262,7 +324,7 @@ impl Projector for Element {
     }
 }
 
-impl Collider for Element {
+impl<T: Clone> Collider for Element<T> {
     fn sub_colliders(&self) -> Option<Box<dyn Iterator<Item = &dyn SubCollider> + '_>> {
         self.shape().sub_colliders()
     }

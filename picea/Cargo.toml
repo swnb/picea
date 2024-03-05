@@ -1,0 +1,19 @@
+[package]
+name = "picea"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "picea"
+path = "src/lib.rs"
+
+
+[dependencies]
+derive_builder = "0.20.0"
+
+[dev-dependencies]
+rand = "0.8.5"
+serde_json = "1.0.113"
+speedy2d = "2.0.0"
+serde = { version = "1.0.158", features = ["derive"] }
