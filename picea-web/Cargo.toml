@@ -1,0 +1,28 @@
+[package]
+name = "picea-web"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# [features]
+# default = ["wasm-web"]
+# wasm-web = [
+#   "dep:console_error_panic_hook",
+#   "dep:js-sys",
+#   'dep:serde',
+#   "dep:serde-wasm-bindgen",
+#   "dep:wasm-bindgen",
+# ]
+
+[dependencies]
+picea = { path = "../picea" }
+console_error_panic_hook = { version = "0.1.7" }
+derive_builder = "0.20.0"
+js-sys = { version = "0.3.61" }
+serde = { version = "1.0.158", features = ["derive"] }
+serde-wasm-bindgen = { version = "0.6.5" }
+wasm-bindgen = { version = "0.2.84" }

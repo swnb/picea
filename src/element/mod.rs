@@ -83,6 +83,7 @@ impl<T: Clone> ElementBuilder<T> {
 pub struct Element<Data: Clone> {
     id: ID,
     meta: Meta,
+    origin_shape: Box<dyn ShapeTraitUnion>,
     shape: Box<dyn ShapeTraitUnion>,
     bind_points: BTreeMap<u32, Point>, // move with element
     data: Data,
@@ -94,6 +95,7 @@ impl<T: Clone> Clone for Element<T> {
         Self {
             id: 0,
             meta: self.meta.clone(),
+            origin_shape: self.origin_shape.self_clone(),
             shape: self.shape.self_clone(),
             bind_points: Default::default(),
             data: self.data.clone(),
@@ -115,7 +117,9 @@ impl<T: Clone> Element<T> {
     pub fn new(mut shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>, data: T) -> Self {
         let mut meta = meta.into();
 
-        shape.rotate(&shape.center_point(), meta.angle());
+        let origin_shape = shape.self_clone();
+
+        shape.rotate(&shape.center_point(), -meta.angle());
 
         // FIXME update moment_of_inertia when meta update
         let moment_of_inertia = shape.compute_moment_of_inertia(meta.mass());
@@ -127,10 +131,22 @@ impl<T: Clone> Element<T> {
         Self {
             id,
             shape,
+            origin_shape,
             meta,
             bind_points: Default::default(),
             data,
         }
+    }
+
+    pub(crate) fn refresh_shape(&mut self) {
+        let mut origin_shape = self.origin_shape.self_clone();
+        origin_shape.rotate(&origin_shape.center_point(), -self.meta().angle());
+        origin_shape.translate(self.meta().position_translate());
+        self.shape = origin_shape;
+    }
+
+    pub fn origin_shape(&self) -> &dyn ShapeTraitUnion {
+        self.origin_shape.as_ref()
     }
 
     #[inline]
@@ -151,6 +167,8 @@ impl<T: Clone> Element<T> {
     #[inline]
     pub fn translate(&mut self, vector: &Vector) {
         self.shape.translate(vector);
+
+        self.meta_mut().translate_position(vector);
 
         self.bind_points
             .values_mut()
@@ -185,6 +203,7 @@ impl<T: Clone> Element<T> {
         &*self.shape
     }
 
+    // simple integrate position by velocity and angle_velocity;
     pub fn integrate_position(&mut self, delta_time: FloatNum) -> Option<(Vector, FloatNum)> {
         if self.meta().is_fixed() {
             return None;
@@ -193,6 +212,7 @@ impl<T: Clone> Element<T> {
         let angle = self.meta().angle_velocity() * delta_time;
 
         self.translate(&path);
+
         // NOTE this is important, all rotate is reverse
         self.rotate(-angle);
 
@@ -219,6 +239,10 @@ impl<T: Clone> From<ElementBuilder<T>> for Element<T> {
 }
 
 impl<T: Clone> ConstraintObject for Element<T> {
+    fn id(&self) -> ID {
+        self.id
+    }
+
     fn center_point(&self) -> Point {
         self.shape.center_point()
     }
@@ -244,8 +268,33 @@ impl<T: Clone> ConstraintObject for Element<T> {
         let w: Vector3 = (0., 0., angle_velocity).into();
         let mut v: Vector = (w ^ r.into()).into();
         v += meta.velocity();
-
         v
+    }
+
+    // apply position fix for obj , sum total position fix
+    // in order to separate object from contact
+    fn apply_position_fix(&mut self, fix: Vector, r: Vector) {
+        if self.meta().is_fixed() {
+            return;
+        }
+
+        let inv_mass = self.meta().inv_mass();
+
+        let mut translate_fix = fix * inv_mass;
+        // translate_fix.set_x(|_| 0.);
+
+        self.translate(&translate_fix);
+
+        let rad = (r ^ fix) * self.meta().inv_moment_of_inertia();
+
+        // if self.id == 2 {
+        //     dbg!(rad);
+        //     dbg!(fix * inv_mass);
+        // }
+
+        self.rotate(-rad);
+
+        self.refresh_shape();
     }
 }
 
@@ -256,6 +305,10 @@ impl<T: Clone> CenterPoint for Element<T> {
 }
 
 impl<T: Clone> NearestPoint for Element<T> {
+    fn support_find_nearest_point(&self) -> bool {
+        self.shape().support_find_nearest_point()
+    }
+
     fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
         self.shape.nearest_point(reference_point, direction)
     }
