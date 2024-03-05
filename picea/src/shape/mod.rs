@@ -1,0 +1,39 @@
+use crate::math::{edge::Edge, point::Point, vector::Vector};
+
+pub mod alias;
+pub mod circle;
+pub mod concave;
+pub mod convex;
+pub mod line;
+pub mod polygon;
+pub mod utils;
+
+pub trait GeometryTransform {
+    fn translate(&mut self, vector: &Vector);
+
+    fn rotate(&mut self, origin_point: &Point, rad: f32);
+
+    fn scale(&mut self, from: &Point, to: &Point);
+}
+
+pub trait EdgeIterable {
+    fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_>;
+}
+
+pub trait CenterPoint {
+    fn center_point(&self) -> Point;
+}
+
+pub trait NearestPoint {
+    fn support_find_nearest_point(&self) -> bool {
+        true
+    }
+
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point;
+}
+
+pub trait MeasureContactPoint {
+    fn measure(&self, contact_points: Vec<Point>) -> Vec<Point> {
+        contact_points
+    }
+}
