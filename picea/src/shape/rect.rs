@@ -4,7 +4,7 @@ use macro_support::{Deref, Shape};
 
 use crate::{element::ComputeMomentOfInertia, impl_shape_traits_use_deref, meta::Mass, prelude::*};
 
-use super::{polygon::ConstPolygon, utils::VertexesIter};
+use super::polygon::ConstPolygon;
 
 // common shape  Rectangle
 #[derive(Clone, Debug, Shape, Deref)]

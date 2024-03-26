@@ -18,6 +18,6 @@ pub mod prelude {
 
     pub use super::shape::{
         CenterPoint, Circle, ConcavePolygon, ConstRegularPolygon, ConvexPolygon,
-        GeometryTransformer, Line, Rect, RegularPolygon, Triangle,
+        GeometryTransformer, Line, Rect, RegularPolygon, Square, Triangle,
     };
 }

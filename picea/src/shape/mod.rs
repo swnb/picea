@@ -111,4 +111,5 @@ pub use line::Line;
 pub use polygon::ConstRegularPolygon;
 pub use polygon::RegularPolygon;
 pub use rect::Rect;
+pub use square::Square;
 pub use triangle::Triangle;

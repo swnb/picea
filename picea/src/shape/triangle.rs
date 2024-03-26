@@ -6,7 +6,7 @@ use crate::{element::ComputeMomentOfInertia, impl_shape_traits_use_deref, meta::
 
 use super::{
     polygon::ConstPolygon,
-    utils::{compute_area_of_triangle, compute_moment_of_inertia_of_triangle, VertexesIter},
+    utils::{compute_area_of_triangle, compute_moment_of_inertia_of_triangle},
 };
 
 // common shape triangle

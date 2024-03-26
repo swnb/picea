@@ -772,7 +772,7 @@ where
 #[macro_export]
 macro_rules! impl_shape_traits_use_deref {
     ($struct_name:ty, $($variants:tt)*) => {
-        impl<$($variants)*> VertexesIter for $struct_name {
+        impl<$($variants)*> $crate::shape::utils::VertexesIter for $struct_name {
             fn vertexes_iter(&self) -> impl Iterator<Item = &Point> {
                 self.deref().vertexes_iter()
             }
