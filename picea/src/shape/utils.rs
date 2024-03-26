@@ -1,13 +1,15 @@
 use std::{borrow::Cow, ops::Deref};
 
 use crate::{
+    collision::Projector,
     math::{
-        edge::Edge, num::is_same_sign, point::Point, segment::Segment, vector::Vector, FloatNum,
+        axis::AxisDirection, edge::Edge, num::is_same_sign, point::Point, segment::Segment,
+        vector::Vector, FloatNum,
     },
     meta::Mass,
 };
 
-use super::EdgeIterable;
+use super::{CenterPoint, EdgeIterable, NearestPoint};
 
 /**
  * useful tool for polygon to transform
@@ -663,13 +665,6 @@ pub fn is_point_inside_shape(
     cross_count % 2 != 0
 }
 
-pub fn is_point_inside_shape_debug<'a>(
-    point: Point,
-    edge_iter: &'a mut dyn Iterator<Item = Edge<'_>>,
-) -> Vec<Edge<'a>> {
-    vec![]
-}
-
 mod test {
 
     #[test]
@@ -698,6 +693,105 @@ mod test {
             p2 + offset_vector
         ));
     }
+}
+
+pub trait VertexesIter {
+    fn vertexes_iter(&self) -> impl Iterator<Item = &Point>;
+
+    fn vertexes_iter_mut(&mut self) -> impl Iterator<Item = &mut Point>;
+}
+
+impl<T> EdgeIterable for T
+where
+    T: VertexesIter,
+{
+    fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
+        // TODO move to normal loop, performance issue
+        let iter = self
+            .vertexes_iter()
+            .zip(
+                self.vertexes_iter()
+                    .skip(1)
+                    .chain(self.vertexes_iter().take(1)),
+            )
+            .map(|v| v.into());
+        Box::new(iter)
+    }
+}
+
+impl<T> Projector for T
+where
+    T: VertexesIter,
+{
+    fn projection_on_vector(&self, &vector: &Vector) -> (Point, Point) {
+        projection_polygon_on_vector(self.vertexes_iter(), vector)
+    }
+
+    #[inline]
+    fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
+        use AxisDirection::*;
+        let point_iter = self.vertexes_iter();
+        type Reducer<T> = fn((T, T), &Point<T>) -> (T, T);
+        let reducer: Reducer<f32> = match axis {
+            X => |mut pre, v| {
+                pre.0 = v.x().min(pre.0);
+                pre.1 = v.x().max(pre.1);
+                pre
+            },
+            Y => |mut pre, v| {
+                pre.0 = v.y().min(pre.0);
+                pre.1 = v.y().max(pre.1);
+                pre
+            },
+        };
+        point_iter.fold((f32::MAX, f32::MIN), reducer)
+    }
+}
+
+pub trait CenterPointHelper: CenterPoint {
+    fn center_point(&self) -> Point {
+        CenterPoint::center_point(self)
+    }
+
+    fn center_point_mut(&mut self) -> &mut Point;
+}
+
+impl<T> NearestPoint for T
+where
+    T: VertexesIter,
+{
+    fn support_find_nearest_point(&self) -> bool {
+        true
+    }
+
+    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
+        find_nearest_point(self, reference_point, direction)
+    }
+}
+
+#[macro_export]
+macro_rules! impl_shape_traits_use_deref {
+    ($struct_name:ty, $($variants:tt)*) => {
+        impl<$($variants)*> VertexesIter for $struct_name {
+            fn vertexes_iter(&self) -> impl Iterator<Item = &Point> {
+                self.deref().vertexes_iter()
+            }
+
+            fn vertexes_iter_mut(&mut self) -> impl Iterator<Item = &mut Point> {
+                self.deref_mut().vertexes_iter_mut()
+            }
+        }
+
+        impl<$($variants)*> $crate::shape::GeometryTransformer for $struct_name {
+            fn apply_transform(&mut self) {
+                self.deref_mut().apply_transform()
+            }
+
+            fn transform_mut(&mut self) -> &mut $crate::shape::Transform {
+                self.deref_mut().transform_mut()
+            }
+        }
+    };
 }
 
 mod tests {

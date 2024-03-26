@@ -1,34 +1,36 @@
 use crate::{
     collision::{Collider, Projector, SubCollider},
-    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
+    element::{ComputeMomentOfInertia, SelfClone},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
 };
 
 use super::{
     convex::ConvexPolygon,
     utils::{
-        find_nearest_point, projection_polygon_on_vector, rotate_point, rotate_polygon,
-        split_concave_polygon_to_convex_polygons, translate_polygon, VertexesToEdgeIter,
+        find_nearest_point, projection_polygon_on_vector, rotate_polygon,
+        split_concave_polygon_to_convex_polygons, VertexesToEdgeIter,
     },
-    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
+    CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform,
 };
 
 #[derive(Clone)]
 pub struct ConcavePolygon {
     origin_vertexes: Vec<Point>,
+    vertexes: Vec<Point>,
     sub_convex_polygons: Vec<ConvexPolygon>,
+    origin_center_point: Point,
     center_point: Point,
     area: FloatNum,
+    transform: Transform,
 }
 
 impl ConcavePolygon {
     pub fn new(vertexes: impl Into<Vec<Point>>) -> Self {
-        let origin_vertexes: Vec<Point> = vertexes.into();
-        let sub_convex_polygons: Vec<_> =
-            split_concave_polygon_to_convex_polygons(&origin_vertexes)
-                .into_iter()
-                .map(ConvexPolygon::new)
-                .collect();
+        let vertexes: Vec<Point> = vertexes.into();
+        let sub_convex_polygons: Vec<_> = split_concave_polygon_to_convex_polygons(&vertexes)
+            .into_iter()
+            .map(ConvexPolygon::new)
+            .collect();
 
         let total_area = sub_convex_polygons
             .iter()
@@ -44,45 +46,45 @@ impl ConcavePolygon {
             .to_point();
 
         Self {
-            origin_vertexes,
+            origin_vertexes: vertexes.clone(),
+            vertexes,
             sub_convex_polygons,
+            origin_center_point: center_point,
             center_point,
             area: total_area,
+            transform: Default::default(),
         }
     }
 
-    pub fn to_convex_polygons(self) -> impl Iterator<Item = ConvexPolygon> {
+    pub fn to_convex_polygons(mut self) -> impl Iterator<Item = ConvexPolygon> {
+        self.apply_transform();
         self.sub_convex_polygons.into_iter()
     }
 }
 
-impl GeometryTransform for ConcavePolygon {
-    fn translate(&mut self, vector: &Vector) {
-        self.sub_convex_polygons
-            .iter_mut()
-            .for_each(|convex_polygon| convex_polygon.translate(vector));
-        translate_polygon(self.origin_vertexes.iter_mut(), vector);
-        self.center_point += vector;
+impl GeometryTransformer for ConcavePolygon {
+    fn transform_mut(&mut self) -> &mut Transform {
+        &mut self.transform
     }
 
-    fn rotate(&mut self, origin_point: &Point, rad: f32) {
-        self.sub_convex_polygons
-            .iter_mut()
-            .for_each(|convex_polygon| convex_polygon.rotate(origin_point, rad));
-
-        rotate_polygon(*origin_point, self.origin_vertexes.iter_mut(), rad);
-
-        if origin_point != &self.center_point {
-            self.center_point = rotate_point(&self.center_point, origin_point, rad);
+    fn apply_transform(&mut self) {
+        for (i, p) in self.origin_vertexes.iter().enumerate() {
+            self.vertexes[i] = p + &self.transform.translation;
         }
-    }
 
-    fn scale(&mut self, from: &Point, to: &Point) {
-        self.sub_convex_polygons
-            .iter_mut()
-            .for_each(|convex_polygon| {
-                convex_polygon.scale_with_center_point(&self.center_point, from, to)
-            });
+        self.center_point = self.origin_center_point + self.transform.translation;
+
+        rotate_polygon(
+            self.center_point,
+            self.vertexes.iter_mut(),
+            self.transform.rotation,
+        );
+
+        // TODO cache this method
+        self.sub_convex_polygons = split_concave_polygon_to_convex_polygons(&self.vertexes)
+            .into_iter()
+            .map(ConvexPolygon::new)
+            .collect();
     }
 }
 
@@ -94,7 +96,7 @@ impl CenterPoint for ConcavePolygon {
 
 impl Projector for ConcavePolygon {
     fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
-        projection_polygon_on_vector(self.origin_vertexes.iter(), *vector)
+        projection_polygon_on_vector(self.vertexes.iter(), *vector)
     }
 }
 
@@ -108,9 +110,15 @@ impl Collider for ConcavePolygon {
     }
 }
 
+impl SelfClone for ConcavePolygon {
+    fn self_clone(&self) -> Box<dyn crate::prelude::ShapeTraitUnion> {
+        self.clone().into()
+    }
+}
+
 impl EdgeIterable for ConcavePolygon {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
-        Box::new(VertexesToEdgeIter::new(&self.origin_vertexes))
+        Box::new(VertexesToEdgeIter::new(&self.vertexes))
     }
 }
 
@@ -130,11 +138,5 @@ impl ComputeMomentOfInertia for ConcavePolygon {
                 let rate = convex_area * area_inv;
                 acc + convex_polygon.compute_moment_of_inertia(m * rate) * rate
             })
-    }
-}
-
-impl SelfClone for ConcavePolygon {
-    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
-        self.clone().into()
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    element::{Element, ID},
+    element::ID,
     math::{point::Point, vector::Vector, FloatNum},
     scene::context::ConstraintParameters,
 };

@@ -12,7 +12,7 @@ use crate::{
         FloatNum,
     },
     meta::{Mass, Meta},
-    shape::{utils::rotate_point, CenterPoint, EdgeIterable, GeometryTransform, NearestPoint},
+    shape::{utils::rotate_point, CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint},
 };
 
 pub type ID = u32;
@@ -34,7 +34,7 @@ pub trait SelfClone {
 
 // TODO rename
 pub trait ShapeTraitUnion:
-    GeometryTransform
+    GeometryTransformer
     + CenterPoint
     + NearestPoint
     + EdgeIterable
@@ -46,7 +46,7 @@ pub trait ShapeTraitUnion:
 }
 
 impl<T> ShapeTraitUnion for T where
-    T: GeometryTransform
+    T: GeometryTransformer
         + CenterPoint
         + EdgeIterable
         + ComputeMomentOfInertia
@@ -83,7 +83,6 @@ impl<T: Clone> ElementBuilder<T> {
 pub struct Element<Data: Clone> {
     id: ID,
     meta: Meta,
-    origin_shape: Box<dyn ShapeTraitUnion>,
     shape: Box<dyn ShapeTraitUnion>,
     bind_points: BTreeMap<u32, Point>, // move with element
     data: Data,
@@ -95,7 +94,6 @@ impl<T: Clone> Clone for Element<T> {
         Self {
             id: 0,
             meta: self.meta.clone(),
-            origin_shape: self.origin_shape.self_clone(),
             shape: self.shape.self_clone(),
             bind_points: Default::default(),
             data: self.data.clone(),
@@ -117,9 +115,7 @@ impl<T: Clone> Element<T> {
     pub fn new(mut shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>, data: T) -> Self {
         let mut meta = meta.into();
 
-        let origin_shape = shape.self_clone();
-
-        shape.rotate(&shape.center_point(), -meta.angle());
+        shape.transform_mut().set_rotation(|pre| pre - meta.angle());
 
         // FIXME update moment_of_inertia when meta update
         let moment_of_inertia = shape.compute_moment_of_inertia(meta.mass());
@@ -131,7 +127,6 @@ impl<T: Clone> Element<T> {
         Self {
             id,
             shape,
-            origin_shape,
             meta,
             bind_points: Default::default(),
             data,
@@ -139,14 +134,7 @@ impl<T: Clone> Element<T> {
     }
 
     pub(crate) fn refresh_shape(&mut self) {
-        let mut origin_shape = self.origin_shape.self_clone();
-        origin_shape.rotate(&origin_shape.center_point(), -self.meta().angle());
-        origin_shape.translate(self.meta().position_translate());
-        self.shape = origin_shape;
-    }
-
-    pub fn origin_shape(&self) -> &dyn ShapeTraitUnion {
-        self.origin_shape.as_ref()
+        self.shape.apply_transform();
     }
 
     #[inline]
@@ -166,7 +154,9 @@ impl<T: Clone> Element<T> {
 
     #[inline]
     pub fn translate(&mut self, vector: &Vector) {
-        self.shape.translate(vector);
+        self.shape
+            .transform_mut()
+            .set_translation(|pre| pre + vector);
 
         self.meta_mut().translate_position(vector);
 
@@ -179,17 +169,13 @@ impl<T: Clone> Element<T> {
     pub fn rotate(&mut self, rad: f32) {
         let center_point = &self.center_point();
 
-        self.shape.rotate(center_point, rad);
+        self.shape.transform_mut().set_rotation(|pre| pre + rad);
 
         self.bind_points.values_mut().for_each(|point| {
             *point = rotate_point(point, center_point, rad);
         });
 
         self.meta_mut().set_angle(|pre| pre - rad);
-    }
-
-    pub fn scale(&mut self, from: &Point, to: &Point) {
-        self.shape.scale(from, to);
     }
 
     #[inline]
@@ -280,7 +266,7 @@ impl<T: Clone> ConstraintObject for Element<T> {
 
         let inv_mass = self.meta().inv_mass();
 
-        let mut translate_fix = fix * inv_mass;
+        let translate_fix = fix * inv_mass;
         // translate_fix.set_x(|_| 0.);
 
         self.translate(&translate_fix);

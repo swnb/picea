@@ -1,31 +1,30 @@
-use super::{CenterPoint, EdgeIterable, GeometryTransform, NearestPoint};
+use macro_support::Shape;
+
+use super::{CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform};
 use crate::{
-    collision::{Collider, Projector},
-    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
-    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector, TAU},
+    collision::Projector,
+    element::ComputeMomentOfInertia,
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
     meta::Mass,
-    shape::utils::rotate_point,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Shape)]
 pub struct Circle {
+    origin_center_point: Point,
+    transform: Transform,
     center_point: Point,
     r: f32,
     rad: f32,
 }
 
-impl<P: Into<Point>> From<(P, f32)> for Circle {
-    fn from((p, radius): (P, f32)) -> Self {
-        let center_point = p.into();
-        Self::new(center_point, radius)
-    }
-}
-
 impl Circle {
     #[inline]
     pub fn new(center_point: impl Into<Point>, radius: f32) -> Self {
+        let center_point = center_point.into();
         Self {
-            center_point: center_point.into(),
+            origin_center_point: center_point,
+            transform: Default::default(),
+            center_point,
             r: radius,
             rad: 0.,
         }
@@ -35,15 +34,16 @@ impl Circle {
     pub fn radius(&self) -> f32 {
         self.r
     }
+}
 
-    #[inline]
-    pub fn get_center_point(&self) -> Point {
-        self.center_point
+impl GeometryTransformer for Circle {
+    fn transform_mut(&mut self) -> &mut Transform {
+        &mut self.transform
     }
 
-    #[inline]
-    pub fn translate(&mut self, vector: &Vector) {
-        self.center_point += vector;
+    fn apply_transform(&mut self) {
+        self.center_point = self.origin_center_point + self.transform.translation;
+        self.transform.is_changed = false;
     }
 }
 
@@ -90,35 +90,6 @@ impl NearestPoint for Circle {
     }
 }
 
-impl GeometryTransform for Circle {
-    fn translate(&mut self, vector: &Vector) {
-        self.center_point += vector
-    }
-
-    fn rotate(&mut self, &origin_point: &Point, rad: f32) {
-        if origin_point != self.center_point {
-            let center_vector: Vector = (origin_point, self.center_point).into();
-            let new_center = origin_point + center_vector.affine_transformation_rotate(rad);
-            self.center_point = new_center;
-        }
-
-        self.rad += rad;
-        if self.rad > TAU() {
-            self.rad %= TAU()
-        }
-
-        if origin_point != self.center_point {
-            self.center_point = rotate_point(&self.center_point, &origin_point, rad);
-        }
-    }
-
-    fn scale(&mut self, from: &Point, to: &Point) {
-        let resize_vector: Vector = (from, to).into();
-        // TODO resize to ellipse
-        self.r += resize_vector.abs();
-    }
-}
-
 impl EdgeIterable for Circle {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
         struct EdgeIter<'a> {
@@ -152,14 +123,6 @@ impl ComputeMomentOfInertia for Circle {
     // compute moment of inertia;
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
         m * self.radius().powf(2.) * 0.5
-    }
-}
-
-impl Collider for Circle {}
-
-impl SelfClone for Circle {
-    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
-        self.clone().into()
     }
 }
 

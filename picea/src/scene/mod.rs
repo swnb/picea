@@ -2,7 +2,7 @@ pub(crate) mod context;
 pub mod errors;
 pub(crate) mod hooks;
 
-use std::{collections::BTreeMap, ops::Shl, time::SystemTime};
+use std::{collections::BTreeMap, ops::Shl};
 
 use crate::{
     collision::{
@@ -472,7 +472,7 @@ impl<T: Clone + Default> Scene<T> {
                 let iter = manifold.contact_pair_constraint_infos_iter();
                 for info in iter {
                     let total_lambda = (info.normal_toward_a() * info.total_lambda())
-                         +(-!info.normal_toward_a() * info.total_friction_lambda());
+                        + (-!info.normal_toward_a() * info.total_friction_lambda());
                     if let Some((element_a, element_b)) =
                         (*self_ptr).query_element_pair_mut(manifold.obj_id_pair())
                     {

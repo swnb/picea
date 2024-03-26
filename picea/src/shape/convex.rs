@@ -1,6 +1,8 @@
+use macro_support::Shape;
+
 use crate::{
-    collision::{Collider, Projector},
-    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
+    collision::Projector,
+    element::ComputeMomentOfInertia,
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::Mass,
     shape::utils::rotate_polygon,
@@ -10,16 +12,19 @@ use super::{
     utils::{
         compute_area_of_convex, compute_area_of_triangle, compute_convex_center_point,
         compute_moment_of_inertia_of_triangle, find_nearest_point, projection_polygon_on_vector,
-        resize_by_vector, rotate_point, split_convex_polygon_to_triangles, VertexesToEdgeIter,
+        resize_by_vector, split_convex_polygon_to_triangles, VertexesToEdgeIter,
     },
-    CenterPoint, EdgeIterable, GeometryTransform, NearestPoint,
+    CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Shape)]
 pub struct ConvexPolygon {
+    origin_vertexes: Vec<Point>,
     vertexes: Vec<Point>,
+    origin_center_point: Point,
     center_point: Point,
     area: FloatNum,
+    transform: Transform,
 }
 
 impl ConvexPolygon {
@@ -29,9 +34,12 @@ impl ConvexPolygon {
         let area = compute_area_of_convex(&vertexes);
 
         Self {
+            origin_vertexes: vertexes.clone(),
             vertexes,
+            origin_center_point: center_point,
             center_point,
             area,
+            transform: Default::default(),
         }
     }
 
@@ -44,30 +52,28 @@ impl ConvexPolygon {
     }
 }
 
-impl CenterPoint for ConvexPolygon {
-    fn center_point(&self) -> Point {
-        self.center_point
+impl GeometryTransformer for ConvexPolygon {
+    fn transform_mut(&mut self) -> &mut Transform {
+        &mut self.transform
+    }
+
+    fn apply_transform(&mut self) {
+        for (i, p) in self.origin_vertexes.iter().enumerate() {
+            self.vertexes[i] = p + &self.transform.translation;
+        }
+        self.center_point = self.origin_center_point + self.transform.translation;
+
+        rotate_polygon(
+            self.center_point,
+            self.vertexes.iter_mut(),
+            self.transform.rotation,
+        );
     }
 }
 
-impl GeometryTransform for ConvexPolygon {
-    fn translate(&mut self, vector: &Vector) {
-        for point in self.vertexes.iter_mut() {
-            *point += vector;
-        }
-        self.center_point += vector;
-    }
-
-    fn rotate(&mut self, origin_point: &Point, rad: f32) {
-        rotate_polygon(*origin_point, self.vertexes.iter_mut(), rad);
-
-        if origin_point != &self.center_point {
-            self.center_point = rotate_point(&self.center_point, origin_point, rad);
-        }
-    }
-
-    fn scale(&mut self, from: &Point, to: &Point) {
-        self.scale_with_center_point(&self.center_point.clone(), from, to)
+impl CenterPoint for ConvexPolygon {
+    fn center_point(&self) -> Point {
+        self.center_point
     }
 }
 
@@ -89,8 +95,6 @@ impl Projector for ConvexPolygon {
     }
 }
 
-impl Collider for ConvexPolygon {}
-
 impl ComputeMomentOfInertia for ConvexPolygon {
     // split into multi triangles ,compute each triangle's moment_of_inertia , sum them all
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
@@ -104,11 +108,5 @@ impl ComputeMomentOfInertia for ConvexPolygon {
             let mass = m * compute_area_of_triangle(&triangle) * total_area_inv;
             compute_moment_of_inertia_of_triangle(&triangle, mass) + acc
         })
-    }
-}
-
-impl SelfClone for ConvexPolygon {
-    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
-        self.clone().into()
     }
 }

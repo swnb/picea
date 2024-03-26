@@ -1,6 +1,6 @@
 use std::{
     mem,
-    ops::{Neg, Sub},
+    ops::{Add, Neg, Sub},
 };
 
 use super::{point::Point, vector::Vector, FloatNum};
@@ -69,5 +69,15 @@ impl<T: Clone + Copy> From<(Point<T>, Point<T>)> for Segment<T> {
             start_point,
             end_point,
         }
+    }
+}
+
+impl<T> Add<&Vector<T>> for &Segment<T>
+where
+    T: Add<Output = T> + Clone + Copy,
+{
+    type Output = Segment<T>;
+    fn add(self, rhs: &Vector<T>) -> Self::Output {
+        Segment::new(self.start_point + rhs, self.end_point + rhs)
     }
 }

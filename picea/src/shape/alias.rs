@@ -1,15 +1,19 @@
 use crate::{
     element::ShapeTraitUnion,
     math::point::Point,
-    shape::{
-        circle::Circle,
-        polygon::{Rect, RegularPolygon, Square},
-    },
+    shape::{circle::Circle, polygon::RegularPolygon, rect::Rect},
 };
 
 impl<T: ShapeTraitUnion + 'static> From<T> for Box<dyn ShapeTraitUnion> {
     fn from(value: T) -> Self {
         Box::new(value)
+    }
+}
+
+impl<P: Into<Point>> From<(P, f32)> for Circle {
+    fn from((p, radius): (P, f32)) -> Self {
+        let center_point = p.into();
+        Self::new(center_point, radius)
     }
 }
 
@@ -21,11 +25,11 @@ impl From<(f32, f32, f32, f32)> for Box<dyn ShapeTraitUnion> {
 }
 
 // create square
-impl From<(f32, f32, f32)> for Box<dyn ShapeTraitUnion> {
-    fn from((x, y, size): (f32, f32, f32)) -> Self {
-        Square::new(x, y, size).into()
-    }
-}
+// impl From<(f32, f32, f32)> for Box<dyn ShapeTraitUnion> {
+//     fn from((x, y, size): (f32, f32, f32)) -> Self {
+//         Square::new(x, y, size).into()
+//     }
+// }
 
 // create circle
 impl<C> From<(C, f32)> for Box<dyn ShapeTraitUnion>
