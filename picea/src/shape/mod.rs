@@ -13,6 +13,7 @@ pub mod convex;
 pub mod line;
 pub mod polygon;
 pub mod rect;
+pub mod square;
 pub mod triangle;
 pub mod utils;
 

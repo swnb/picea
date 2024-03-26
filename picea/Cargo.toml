@@ -11,6 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 derive_builder = "0.20.0"
+macro-support = { path = "../crates/macro-support" }
 
 [dev-dependencies]
 rand = "0.8.5"

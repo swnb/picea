@@ -1,16 +1,17 @@
 use std::ops::{Deref, DerefMut};
 
-use macro_support::Shape;
+use macro_support::{Deref, Shape};
 
 use crate::{element::ComputeMomentOfInertia, impl_shape_traits_use_deref, meta::Mass, prelude::*};
 
 use super::{polygon::ConstPolygon, utils::VertexesIter};
 
 // common shape  Rectangle
-#[derive(Clone, Shape)]
+#[derive(Clone, Debug, Shape, Deref)]
 pub struct Rect {
     width: f32,
     height: f32,
+    #[deref]
     inner: ConstPolygon<4>,
 }
 
@@ -36,20 +37,6 @@ impl Rect {
 
     pub fn height(&self) -> f32 {
         self.height
-    }
-}
-
-impl Deref for Rect {
-    type Target = ConstPolygon<4>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for Rect {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
     }
 }
 

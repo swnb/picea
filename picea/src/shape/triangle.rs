@@ -1,5 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
+use macro_support::Deref;
+
 use crate::{element::ComputeMomentOfInertia, impl_shape_traits_use_deref, meta::Mass, prelude::*};
 
 use super::{
@@ -8,22 +10,10 @@ use super::{
 };
 
 // common shape triangle
-#[derive(Clone)]
+#[derive(Clone, Deref)]
 pub struct Triangle {
+    #[deref]
     inner: ConstPolygon<3>,
-}
-
-impl Deref for Triangle {
-    type Target = ConstPolygon<3>;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for Triangle {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
 }
 
 impl_shape_traits_use_deref!(Triangle,);

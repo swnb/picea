@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use macro_support::Shape;
+use macro_support::{Deref, Shape};
 
 use crate::{
     collision::Collider,
@@ -212,8 +212,9 @@ impl<const N: usize> SelfClone for ConstRegularPolygon<N> {
 
 impl_shape_traits_use_deref!(ConstRegularPolygon<N>,  const N:usize);
 
-#[derive(Clone, Shape)]
+#[derive(Clone, Shape, Deref)]
 pub struct RegularPolygon {
+    #[deref]
     inner_polygon: NormalPolygon,
     edge_count: usize,
     edge_angle: f32,
@@ -269,19 +270,6 @@ impl RegularPolygon {
     #[inline]
     pub fn edge_angle(&self) -> f32 {
         self.edge_angle
-    }
-}
-
-impl Deref for RegularPolygon {
-    type Target = NormalPolygon;
-    fn deref(&self) -> &Self::Target {
-        &self.inner_polygon
-    }
-}
-
-impl DerefMut for RegularPolygon {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner_polygon
     }
 }
 
