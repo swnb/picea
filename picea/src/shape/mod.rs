@@ -102,3 +102,12 @@ pub trait MeasureContactPoint {
         contact_points
     }
 }
+
+pub use circle::Circle;
+pub use concave::ConcavePolygon;
+pub use convex::ConvexPolygon;
+pub use line::Line;
+pub use polygon::ConstRegularPolygon;
+pub use polygon::RegularPolygon;
+pub use rect::Rect;
+pub use triangle::Triangle;
