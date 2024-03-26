@@ -279,8 +279,6 @@ impl<T: Clone> ConstraintObject for Element<T> {
         // }
 
         self.rotate(-rad);
-
-        self.refresh_shape();
     }
 }
 

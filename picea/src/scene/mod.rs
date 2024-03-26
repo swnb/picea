@@ -206,9 +206,6 @@ impl<T: Clone + Default> Scene<T> {
 
         self.integrate_position(delta_time);
 
-        self.elements_iter_mut()
-            .for_each(|element| element.refresh_shape());
-
         const MAX_FIX_POSITION_ITER_TIMES: u8 = 10;
 
         for _ in 0..MAX_FIX_POSITION_ITER_TIMES {

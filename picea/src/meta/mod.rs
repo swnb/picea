@@ -270,22 +270,6 @@ impl Meta {
         });
     }
 
-    // apply position fix for obj , sum total position fix
-    // in order to separate object from contact
-    pub(crate) fn add_position_fix(&mut self, fix: Vector, r: Vector) {
-        if self.is_fixed() {
-            return;
-        }
-
-        let rotate_fix = (r ^ fix) * self.inv_moment_of_inertia();
-
-        self.set_angle(|pre| pre + rotate_fix);
-
-        let inv_mass = self.inv_mass();
-
-        self.translate_position(&(fix * inv_mass));
-    }
-
     pub fn friction(&self) -> FloatNum {
         self.friction
     }
