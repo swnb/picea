@@ -1,5 +1,7 @@
 use std::ops::Deref;
 
+use macro_tools::Deref;
+
 use crate::{
     collision::ContactPointPair,
     element::ID,
@@ -20,23 +22,16 @@ pub struct CollisionStatusViewer {
     collision_infos: Vec<ContactInfos>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deref)]
 pub struct ContactInfos {
     object_id_pair: (ID, ID),
+    #[deref]
     contact_point_pair: ContactPointPair,
 }
 
 impl ContactInfos {
     pub fn object_id_pair(&self) -> (ID, ID) {
         self.object_id_pair
-    }
-}
-
-impl Deref for ContactInfos {
-    type Target = ContactPointPair;
-
-    fn deref(&self) -> &Self::Target {
-        &self.contact_point_pair
     }
 }
 

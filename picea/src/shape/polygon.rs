@@ -16,9 +16,9 @@ use crate::{
 use super::{
     utils::{
         compute_polygon_approximate_center_point, rotate_polygon, translate_polygon,
-        CenterPointHelper, VertexesIter,
+        CenterPointHelper, VertexesIter, VertexesToEdgeIter,
     },
-    CenterPoint, GeometryTransformer, Transform,
+    CenterPoint, Edge, EdgeIterable, GeometryTransformer, Transform,
 };
 
 macro_rules! impl_shape_trait_for {
@@ -42,6 +42,12 @@ macro_rules! impl_shape_trait_for {
 
             fn vertexes_iter_mut(&mut self) -> impl Iterator<Item = &mut Point> {
                 self.vertexes.iter_mut()
+            }
+        }
+
+        impl<$($variants)*> EdgeIterable for $struct_name {
+            fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
+                Box::new(VertexesToEdgeIter::new(&self.vertexes))
             }
         }
 

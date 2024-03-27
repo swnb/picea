@@ -19,9 +19,3 @@ impl<Obj: ConstraintObject> Default for ContactConstraintManifold<Obj> {
         }
     }
 }
-
-impl<Obj: ConstraintObject> ContactConstraintManifold<Obj> {
-    pub fn insert(&mut self, id_pair: (ID, ID), constraints: ContactConstraint<Obj>) {
-        self.map.insert(id_pair, constraints);
-    }
-}

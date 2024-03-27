@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["picea", "picea-web"]
+members = ["crates/macro-tools", "picea", "picea-web", "crates/*"]
+
+[patch.crates-io]
+wasm-bindgen = { git = 'https://github.com/swnb/wasm-bindgen.git' }

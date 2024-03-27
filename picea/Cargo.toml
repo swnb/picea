@@ -17,4 +17,3 @@ rand = "0.8.5"
 serde_json = "1.0.113"
 speedy2d = "2.0.0"
 serde = { version = "1.0.158", features = ["derive"] }
-derive_builder = "0.20.0"

@@ -1,3 +1,5 @@
+use macro_tools::Fields;
+
 use crate::{
     element::ID,
     math::{point::Point, vector::Vector, FloatNum},
@@ -6,11 +8,17 @@ use crate::{
 
 use super::{compute_soft_constraints_params, ConstraintObject, JoinConstraintConfig};
 
+#[derive(Fields)]
 pub struct PointConstraint<Obj: ConstraintObject> {
+    #[field(r)]
     id: u32,
+    #[field(r)]
     obj_id: ID,
+    #[field(r, w)]
     fixed_point: Point,
+    #[field(r)]
     move_point: Point, // bind with element
+    #[field(r)]
     total_lambda: FloatNum,
     // force_soft_factor: FloatNum,
     // position_fix_factor: FloatNum,
@@ -49,28 +57,8 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
         }
     }
 
-    pub fn id(&self) -> u32 {
-        self.id
-    }
-
-    pub fn obj_id(&self) -> ID {
-        self.obj_id
-    }
-
     pub fn stretch_length(&self) -> Vector {
         (self.move_point, self.fixed_point).into()
-    }
-
-    pub fn move_point(&self) -> &Point {
-        &self.move_point
-    }
-
-    pub fn fixed_point(&self) -> &Point {
-        &self.fixed_point
-    }
-
-    pub fn fixed_point_mut(&mut self) -> &mut Point {
-        &mut self.fixed_point
     }
 
     pub(crate) unsafe fn reset_params(

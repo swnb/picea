@@ -3,6 +3,7 @@ use macro_tools::Shape;
 use crate::{
     collision::Projector,
     element::ComputeMomentOfInertia,
+    impl_shape_traits_use_deref,
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
     meta::Mass,
     shape::utils::rotate_polygon,
@@ -12,7 +13,7 @@ use super::{
     utils::{
         compute_area_of_convex, compute_area_of_triangle, compute_convex_center_point,
         compute_moment_of_inertia_of_triangle, find_nearest_point, projection_polygon_on_vector,
-        resize_by_vector, split_convex_polygon_to_triangles, VertexesToEdgeIter,
+        resize_by_vector, split_convex_polygon_to_triangles, VertexesIter, VertexesToEdgeIter,
     },
     CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform,
 };
@@ -52,6 +53,16 @@ impl ConvexPolygon {
     }
 }
 
+impl VertexesIter for ConvexPolygon {
+    fn vertexes_iter(&self) -> impl Iterator<Item = &Point> {
+        self.vertexes.iter()
+    }
+
+    fn vertexes_iter_mut(&mut self) -> impl Iterator<Item = &mut Point> {
+        self.vertexes.iter_mut()
+    }
+}
+
 impl GeometryTransformer for ConvexPolygon {
     fn transform_mut(&mut self) -> &mut Transform {
         &mut self.transform
@@ -80,18 +91,6 @@ impl CenterPoint for ConvexPolygon {
 impl EdgeIterable for ConvexPolygon {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
         Box::new(VertexesToEdgeIter::new(&self.vertexes))
-    }
-}
-
-impl NearestPoint for ConvexPolygon {
-    fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
-        find_nearest_point(self, reference_point, direction)
-    }
-}
-
-impl Projector for ConvexPolygon {
-    fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
-        projection_polygon_on_vector(self.vertexes.iter(), *vector)
     }
 }
 

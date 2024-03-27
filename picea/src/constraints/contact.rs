@@ -1,5 +1,7 @@
 use std::ops::Deref;
 
+use macro_tools::{Deref, Fields};
+
 use crate::{
     collision::ContactPointPair,
     element::ID,
@@ -12,6 +14,7 @@ use super::{compute_inv_mass_effective, ConstraintObject};
 
 // TODO if two element is still collide in current frame, we can reuse this
 // contact info , is two element is not collide anymore , we don't need this frame
+#[derive(Fields)]
 pub struct ContactConstraint<Obj: ConstraintObject> {
     contact_point_pair_constraint_infos: Vec<ContactPointPairConstraintInfo>,
     // two collide obj
@@ -21,6 +24,7 @@ pub struct ContactConstraint<Obj: ConstraintObject> {
     obj_b: *mut Obj,
     // max_allow_restrict_impulse: FloatNum,
     inv_delta_time: FloatNum,
+    #[field(r, w, use_set)]
     is_active: bool,
     factor_friction: FloatNum,
     factor_restitution: FloatNum,
@@ -30,17 +34,24 @@ pub struct ContactConstraint<Obj: ConstraintObject> {
     angle_velocity_b: FloatNum,
 }
 
-#[derive(Default)]
+#[derive(Default, Deref, Fields)]
 pub struct ContactPointPairConstraintInfo {
+    #[deref]
     concat_point_pair: ContactPointPair,
+    #[field(r)]
     r_a: Vector,
+    #[field(r)]
     r_b: Vector,
     mass_effective: FloatNum,
     tangent_mass_effective: FloatNum,
     max_allow_restrict_impulse: FloatNum,
+    #[field(r)]
     real_total_lambda: FloatNum,
+    #[field(r)]
     total_lambda: FloatNum,
+    #[field(r)]
     real_total_friction_lambda: FloatNum,
+    #[field(r)]
     total_friction_lambda: FloatNum,
     velocity_bias: FloatNum,
 }
@@ -144,38 +155,6 @@ impl ContactPointPairConstraintInfo {
             + (self.r_b ^ (!self.normal_toward_a() * self.real_total_friction_lambda)))
             * object_b_meta.inv_moment_of_inertia()
     }
-
-    pub fn real_total_lambda(&self) -> FloatNum {
-        self.real_total_lambda
-    }
-
-    pub fn real_total_friction_lambda(&self) -> FloatNum {
-        self.real_total_friction_lambda
-    }
-
-    pub fn r_a(&self) -> &Vector {
-        &self.r_a
-    }
-
-    pub fn r_b(&self) -> &Vector {
-        &self.r_b
-    }
-
-    pub fn total_lambda(&self) -> FloatNum {
-        self.total_lambda
-    }
-
-    pub fn total_friction_lambda(&self) -> FloatNum {
-        self.total_friction_lambda
-    }
-}
-
-impl Deref for ContactPointPairConstraintInfo {
-    type Target = ContactPointPair;
-
-    fn deref(&self) -> &Self::Target {
-        &self.concat_point_pair
-    }
 }
 
 impl<Obj: ConstraintObject> ContactConstraint<Obj> {
@@ -213,14 +192,6 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 ..Default::default()
             })
             .collect()
-    }
-
-    pub fn set_is_active(&mut self, is_active: bool) {
-        self.is_active = is_active
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.is_active
     }
 
     pub fn obj_id_pair(&self) -> (ID, ID) {

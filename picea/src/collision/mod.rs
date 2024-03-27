@@ -1,3 +1,5 @@
+use macro_tools::Deref;
+
 use crate::{
     math::{
         axis::AxisDirection,
@@ -248,19 +250,12 @@ fn sweep_and_prune_collision_detection<T, Z>(
 
 // TODO object is too large , we need shrink this struct in the future， rm start_point and end_point
 // gjk 两个多边形形成的差集, 衍生的点
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deref)]
 pub(crate) struct MinkowskiDifferencePoint {
     pub(crate) start_point_from_a: Point,
     pub(crate) end_point_from_b: Point,
+    #[deref]
     pub(crate) value: Vector,
-}
-
-impl Deref for MinkowskiDifferencePoint {
-    type Target = Vector;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
 }
 
 impl Display for MinkowskiDifferencePoint {
@@ -699,16 +694,10 @@ impl MinkowskiEdge {
     }
 }
 
+#[derive(Deref)]
 struct Minkowski {
+    #[deref]
     edges: Vec<MinkowskiEdge>,
-}
-
-impl Deref for Minkowski {
-    type Target = Vec<MinkowskiEdge>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.edges
-    }
 }
 
 impl Minkowski {

@@ -520,7 +520,7 @@ impl<T: Clone + Default> Scene<T> {
                 if let Some(manifold) = self.contact_constraints_manifold.get_mut(&manifold_key) {
                     // for performance; reuse exist manifold
                     manifold.replace_contact_point_pairs(contact_pairs);
-                    manifold.set_is_active(true)
+                    manifold.set_is_active(true);
                 } else {
                     let contact_constraint = ContactConstraint::new(a.id(), b.id(), contact_pairs);
 

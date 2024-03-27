@@ -701,24 +701,6 @@ pub trait VertexesIter {
     fn vertexes_iter_mut(&mut self) -> impl Iterator<Item = &mut Point>;
 }
 
-impl<T> EdgeIterable for T
-where
-    T: VertexesIter,
-{
-    fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
-        // TODO move to normal loop, performance issue
-        let iter = self
-            .vertexes_iter()
-            .zip(
-                self.vertexes_iter()
-                    .skip(1)
-                    .chain(self.vertexes_iter().take(1)),
-            )
-            .map(|v| v.into());
-        Box::new(iter)
-    }
-}
-
 impl<T> Projector for T
 where
     T: VertexesIter,
@@ -758,7 +740,7 @@ pub trait CenterPointHelper: CenterPoint {
 
 impl<T> NearestPoint for T
 where
-    T: VertexesIter,
+    T: VertexesIter + EdgeIterable,
 {
     fn support_find_nearest_point(&self) -> bool {
         true
@@ -789,6 +771,12 @@ macro_rules! impl_shape_traits_use_deref {
 
             fn transform_mut(&mut self) -> &mut $crate::shape::Transform {
                 self.deref_mut().transform_mut()
+            }
+        }
+
+        impl<$($variants)*> $crate::shape::EdgeIterable for $struct_name {
+            fn edge_iter(&self) -> Box<dyn Iterator<Item = $crate::shape::Edge<'_>> + '_> {
+                self.deref().edge_iter()
             }
         }
     };

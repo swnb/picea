@@ -1,4 +1,4 @@
-use macro_tools::Shape;
+use macro_tools::{Fields, Shape};
 
 use super::{CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform};
 use crate::{
@@ -8,12 +8,13 @@ use crate::{
     meta::Mass,
 };
 
-#[derive(Clone, Debug, Shape)]
+#[derive(Clone, Debug, Shape, Fields)]
 pub struct Circle {
     origin_center_point: Point,
     transform: Transform,
     center_point: Point,
-    r: f32,
+    #[field(r)]
+    radius: f32,
     rad: f32,
 }
 
@@ -25,14 +26,9 @@ impl Circle {
             origin_center_point: center_point,
             transform: Default::default(),
             center_point,
-            r: radius,
+            radius,
             rad: 0.,
         }
-    }
-
-    #[inline]
-    pub fn radius(&self) -> f32 {
-        self.r
     }
 }
 
