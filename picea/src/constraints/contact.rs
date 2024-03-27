@@ -285,11 +285,11 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
     }
 
     pub fn delta_velocity_for_a(&self) -> Vector {
-        unsafe { self.object_a().meta().velocity() - self.velocity_a }
+        unsafe { *self.object_a().meta().velocity() - self.velocity_a }
     }
 
     pub fn delta_velocity_for_b(&self) -> Vector {
-        unsafe { self.object_b().meta().velocity() - self.velocity_b }
+        unsafe { *self.object_b().meta().velocity() - self.velocity_b }
     }
 
     pub fn delta_angle_velocity_for_a(&self) -> FloatNum {
@@ -325,12 +325,13 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         *object_a.meta_mut().contact_count_mut() += contact_point_pairs.len() as u16;
         *object_b.meta_mut().contact_count_mut() += contact_point_pairs.len() as u16;
 
-        self.velocity_a = object_a.meta().velocity();
-        self.velocity_b = object_b.meta().velocity();
+        self.velocity_a = *object_a.meta().velocity();
+        self.velocity_b = *object_b.meta().velocity();
         self.angle_velocity_a = object_a.meta().angle_velocity();
         self.angle_velocity_b = object_b.meta().angle_velocity();
 
-        self.factor_friction = (object_a.meta().friction() * object_b.meta().friction()).sqrt();
+        self.factor_friction =
+            (object_a.meta().factor_friction() * object_b.meta().factor_friction()).sqrt();
 
         self.factor_restitution =
             (object_a.meta().factor_restitution() * object_b.meta().factor_restitution()).sqrt();

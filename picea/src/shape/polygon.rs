@@ -3,11 +3,10 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use macro_support::{Deref, Shape};
+use macro_tools::{Deref, Shape};
 
 use crate::{
-    collision::Collider,
-    element::{ComputeMomentOfInertia, SelfClone},
+    element::ComputeMomentOfInertia,
     impl_shape_traits_use_deref,
     math::{PI, TAU},
     meta::Mass,
@@ -130,9 +129,10 @@ impl NormalPolygon {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deref, Shape)]
 pub struct ConstRegularPolygon<const N: usize> {
     radius: f32,
+    #[deref]
     inner: ConstPolygon<N>,
 }
 
@@ -180,19 +180,6 @@ impl<const N: usize> ConstRegularPolygon<N> {
     }
 }
 
-impl<const N: usize> Deref for ConstRegularPolygon<N> {
-    type Target = ConstPolygon<N>;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<const N: usize> DerefMut for ConstRegularPolygon<N> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
 impl<const N: usize> ComputeMomentOfInertia for ConstRegularPolygon<N> {
     fn compute_moment_of_inertia(&self, m: Mass) -> FloatNum {
         let radius = self.radius;
@@ -200,13 +187,6 @@ impl<const N: usize> ComputeMomentOfInertia for ConstRegularPolygon<N> {
         0.5 * m
             * radius.powf(2.)
             * (1. - (2. / 3. * (PI() * (Self::EDGE_COUNT as f32).recip()).sin().powf(2.)))
-    }
-}
-
-impl<const N: usize> Collider for ConstRegularPolygon<N> {}
-impl<const N: usize> SelfClone for ConstRegularPolygon<N> {
-    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
-        self.clone().into()
     }
 }
 

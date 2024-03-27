@@ -1,4 +1,4 @@
-use derive_builder::Builder;
+use macro_tools::{Builder, Fields};
 
 use crate::{
     element::ID,
@@ -11,42 +11,17 @@ pub mod contact_manifold;
 pub mod join;
 pub mod point;
 
-#[derive(Builder, Clone)]
-#[builder(pattern = "immutable")]
+#[derive(Clone, Builder, Fields)]
+#[field(r, w)]
 pub struct JoinConstraintConfig {
-    #[builder(default = "0.")]
-    pub(crate) distance: FloatNum,
-    #[builder(default = "1.")]
-    pub(crate) damping_ratio: FloatNum,
-    #[builder(default = "0.5")]
-    pub(crate) frequency: FloatNum,
-    #[builder(default = "false")]
-    pub(crate) hard: bool,
-}
-
-impl Default for JoinConstraintConfig {
-    fn default() -> Self {
-        Self {
-            distance: 0.,
-            damping_ratio: 1.,
-            frequency: 0.5,
-            hard: false,
-        }
-    }
-}
-
-impl JoinConstraintConfig {
-    pub fn distance(&self) -> FloatNum {
-        self.distance
-    }
-
-    pub fn damping_ratio(&self) -> FloatNum {
-        self.damping_ratio
-    }
-
-    pub fn frequency(&self) -> FloatNum {
-        self.frequency
-    }
+    #[default = 0.]
+    distance: FloatNum,
+    #[default = 1.]
+    damping_ratio: FloatNum,
+    #[default = 0.5]
+    frequency: FloatNum,
+    #[default = false]
+    hard: bool,
 }
 
 pub fn compute_inv_mass_effective<Obj: ConstraintObject>(

@@ -1,4 +1,4 @@
-use macro_support::Shape;
+use macro_tools::Shape;
 
 use super::{CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform};
 use crate::{

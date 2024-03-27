@@ -2,9 +2,9 @@ use std::{cell::RefCell, sync::atomic::AtomicBool};
 
 use crate::math::{vector::Vector, FloatNum};
 
-struct InnerGlobalContext {
+pub(crate) struct InnerGlobalContext {
     // indicate whether to update shape immediately or not
-    merge_shape_transform: AtomicBool,
+    pub(crate) merge_shape_transform: AtomicBool,
 }
 
 pub(crate) struct GlobalContext {
@@ -25,6 +25,10 @@ pub fn global_context() -> GlobalContext {
                 .load(std::sync::atomic::Ordering::Relaxed),
         }
     }
+}
+
+pub(crate) fn global_context_mut() -> &'static mut InnerGlobalContext {
+    unsafe { INNER_GLOBAL_CONTEXT.get_mut() }
 }
 
 #[derive(Debug)]

@@ -1,13 +1,14 @@
-use std::{
-    collections::BTreeMap,
-    ops::{Deref, DerefMut},
-};
+use std::collections::BTreeMap;
+
+use macro_tools::Deref;
 
 use crate::element::ID;
 
 use super::{contact::ContactConstraint, ConstraintObject};
 
+#[derive(Deref)]
 pub struct ContactConstraintManifold<Obj: ConstraintObject> {
+    #[deref]
     map: BTreeMap<(ID, ID), ContactConstraint<Obj>>,
 }
 
@@ -16,20 +17,6 @@ impl<Obj: ConstraintObject> Default for ContactConstraintManifold<Obj> {
         Self {
             map: Default::default(),
         }
-    }
-}
-
-impl<Obj: ConstraintObject> Deref for ContactConstraintManifold<Obj> {
-    type Target = BTreeMap<(ID, ID), ContactConstraint<Obj>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.map
-    }
-}
-
-impl<Obj: ConstraintObject> DerefMut for ContactConstraintManifold<Obj> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.map
     }
 }
 

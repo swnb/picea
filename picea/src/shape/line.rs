@@ -1,4 +1,4 @@
-use macro_support::Shape;
+use macro_tools::Shape;
 
 use crate::{
     collision::Projector,

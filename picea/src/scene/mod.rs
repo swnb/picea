@@ -2,7 +2,7 @@ pub(crate) mod context;
 pub mod errors;
 pub(crate) mod hooks;
 
-use std::{collections::BTreeMap, ops::Shl};
+use std::{collections::BTreeMap, ops::Shl, sync::atomic::Ordering};
 
 use crate::{
     collision::{
@@ -14,7 +14,7 @@ use crate::{
     },
     element::{store::ElementStore, Element},
     math::{point::Point, vector::Vector, FloatNum},
-    scene::hooks::CallbackHook,
+    scene::{context::global_context_mut, hooks::CallbackHook},
 };
 
 use self::context::Context;
@@ -32,9 +32,7 @@ where
     frame_count: u128,
     callback_hook: hooks::CallbackHook,
     constraints_id_dispatcher: IDDispatcher,
-    pub(crate) previous_contact_constraints: Vec<ContactConstraint<Element<Data>>>,
     pub(crate) contact_constraints_manifold: ContactConstraintManifold<Element<Data>>,
-    // pub(crate) contact_constraints: Vec<ContactConstraint<Element<Data>>>,
     point_constraints: BTreeMap<u32, PointConstraint<Element<Data>>>,
     join_constraints: BTreeMap<u32, JoinConstraint<Element<Data>>>,
     pub data: Data,
@@ -126,6 +124,10 @@ impl<T: Clone + Default> Scene<T> {
     }
 
     pub fn update_elements_by_duration(&mut self, delta_time: f32) {
+        global_context_mut()
+            .merge_shape_transform
+            .store(true, Ordering::Relaxed);
+
         self.frame_count += 1;
 
         let Context {
@@ -216,6 +218,10 @@ impl<T: Clone + Default> Scene<T> {
             // TODO update params
             self.reset_constraints_params(delta_time);
         }
+
+        global_context_mut()
+            .merge_shape_transform
+            .store(false, Ordering::Relaxed);
     }
 
     pub fn register_element_position_update_callback<F>(&mut self, callback: F) -> u32
@@ -297,24 +303,28 @@ impl<T: Clone + Default> Scene<T> {
 
         let collider_a = self.element_store.get_element_by_id(element_a_id);
         let collider_b = self.element_store.get_element_by_id(element_b_id);
-        if let (Some(collider_a), Some(collider_b)) = (collider_a, collider_b) {
-            let mut is_collide = false;
-            prepare_accurate_collision_detection(
-                collider_a,
-                collider_b,
-                |sub_collider_a, sub_collider_b| {
-                    if let Some(contact_constraints) = accurate_collision_detection_for_sub_collider(
-                        sub_collider_a,
-                        sub_collider_b,
-                    ) {
-                        is_collide = !contact_constraints.is_empty()
-                    }
-                },
-            );
-            is_collide
-        } else {
-            false
-        }
+
+        collider_a
+            .zip(collider_b)
+            .map(|(collider_a, collider_b)| {
+                let mut is_collide = false;
+                prepare_accurate_collision_detection(
+                    collider_a,
+                    collider_b,
+                    |sub_collider_a, sub_collider_b| {
+                        if let Some(contact_constraints) =
+                            accurate_collision_detection_for_sub_collider(
+                                sub_collider_a,
+                                sub_collider_b,
+                            )
+                        {
+                            is_collide = !contact_constraints.is_empty()
+                        }
+                    },
+                );
+                is_collide
+            })
+            .unwrap_or(false)
     }
 
     pub fn set_gravity(&mut self, reducer: impl Fn(&Vector) -> Vector) {
@@ -333,7 +343,7 @@ impl<T: Clone + Default> Scene<T> {
         let config: JoinConstraintConfig = config.into();
 
         assert!(
-            config.distance >= 0.,
+            config.distance() >= 0.,
             "distance must large than or equal to zero"
         );
 
@@ -389,7 +399,7 @@ impl<T: Clone + Default> Scene<T> {
         let config: JoinConstraintConfig = config.into();
 
         assert!(
-            config.distance >= 0.,
+            config.distance() >= 0.,
             "distance must large than or equal to zero"
         );
 
@@ -494,12 +504,11 @@ impl<T: Clone + Default> Scene<T> {
             .filter(|element| !element.meta().is_sleeping())
             .filter(|element| !element.meta().is_ignore_gravity())
             .for_each(|element| {
-                let force = element.meta().force_group().sum_force();
-                let mut a = force * element.meta().inv_mass();
                 if enable_gravity {
-                    a += gravity;
+                    element
+                        .meta_mut()
+                        .set_velocity(|pre| pre + gravity * delta_time);
                 }
-                element.meta_mut().set_velocity(|pre| pre + a * delta_time);
             });
     }
 

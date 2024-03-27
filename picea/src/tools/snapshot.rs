@@ -36,14 +36,14 @@ pub fn create_element_construct_code_snapshot<T: Clone>(element: &Element<T>) ->
 
     let mut forces = String::new();
 
-    element.meta().force_group().iter().for_each(|(name, f)| {
-        forces.push_str(&format!(
-            r#".force("{}", ({:.3}, {:.3}))"#,
-            name,
-            f.get_vector().x(),
-            f.get_vector().y()
-        ))
-    });
+    // element.meta().force_group().iter().for_each(|(name, f)| {
+    //     forces.push_str(&format!(
+    //         r#".force("{}", ({:.3}, {:.3}))"#,
+    //         name,
+    //         f.get_vector().x(),
+    //         f.get_vector().y()
+    //     ))
+    // });
 
     let is_transparent = element.meta().is_transparent();
 

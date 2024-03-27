@@ -113,7 +113,7 @@ impl<T: Clone> Element<T> {
 
     #[inline]
     pub fn new(mut shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>, data: T) -> Self {
-        let mut meta = meta.into();
+        let mut meta: Meta = meta.into();
 
         shape.transform_mut().set_rotation(|pre| pre - meta.angle());
 
@@ -194,7 +194,7 @@ impl<T: Clone> Element<T> {
         if self.meta().is_fixed() {
             return None;
         }
-        let path = self.meta().velocity() * delta_time;
+        let path = *self.meta().velocity() * delta_time;
         let angle = self.meta().angle_velocity() * delta_time;
 
         self.translate(&path);
