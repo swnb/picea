@@ -94,10 +94,6 @@ impl<T: Clone + Default> Scene<T> {
         let element_id = self.id_dispatcher.gen_id();
         element.inject_id(element_id);
 
-        let center_point = element.shape().center_point();
-
-        element.meta_mut().init_position(center_point);
-
         self.element_store.push(element);
         element_id
     }
@@ -135,10 +131,6 @@ impl<T: Clone + Default> Scene<T> {
             max_enter_sleep_motion,
             ..
         } = self.context;
-
-        self.elements_iter_mut().for_each(|element| {
-            element.meta_mut().sync_position().sync_angle();
-        });
 
         // if self.context.enable_sleep_mode {
         //     self.elements_iter_mut().for_each(|element| {
@@ -182,18 +174,15 @@ impl<T: Clone + Default> Scene<T> {
 
         self.integrate_velocity(delta_time);
 
-        self.elements_iter_mut().for_each(|element| {
-            element.refresh_shape();
-        });
-
         // warm start and mark all manifold inactive
         self.warm_start();
+
         // gen collision manifold this step
         self.collision_detective();
 
         unsafe {
             // reuse contact manifold , reset params and set object pointer
-            self.reset_constraints_params(delta_time);
+            self.pre_solve_constraints(delta_time);
         }
 
         const MAX_CONSTRAINTS_TIMES: u8 = 10;
@@ -214,9 +203,13 @@ impl<T: Clone + Default> Scene<T> {
             self.solve_position_fix();
         }
 
+        self.elements_iter_mut().for_each(|element| {
+            element.apply_transform();
+        });
+
         unsafe {
-            // TODO update params
-            self.reset_constraints_params(delta_time);
+            // TODO update move point use something else logic
+            self.pre_solve_constraints(delta_time);
         }
 
         global_context_mut()
@@ -542,7 +535,7 @@ impl<T: Clone + Default> Scene<T> {
         });
     }
 
-    unsafe fn reset_constraints_params(&mut self, delta_time: FloatNum) {
+    unsafe fn pre_solve_constraints(&mut self, delta_time: FloatNum) {
         let mut legacy_constraint_ids = vec![];
         let self_ptr = self as *mut Scene<_>;
 
@@ -561,7 +554,7 @@ impl<T: Clone + Default> Scene<T> {
             let obj_a = element_a as *mut _;
             let obj_b = element_b as *mut _;
 
-            contact_constraint.reset_params(
+            contact_constraint.pre_solve(
                 (obj_a, obj_b),
                 delta_time,
                 &self.context.constraint_parameters,
@@ -579,7 +572,6 @@ impl<T: Clone + Default> Scene<T> {
                 continue;
             };
 
-            let move_point = *move_point;
             let obj = element as *mut _;
             point_constraint.reset_params(move_point, obj, delta_time);
         }
@@ -605,21 +597,24 @@ impl<T: Clone + Default> Scene<T> {
                 legacy_constraint_ids.push(join_constraint.id());
                 continue;
             };
+
             let Some(move_point_b) = (*element_b).get_bind_point(join_constraint.id()) else {
                 legacy_constraint_ids.push(join_constraint.id());
                 continue;
             };
 
-            join_constraint.reset_params(
-                (obj_a, obj_b),
-                (*move_point_a, *move_point_b),
-                delta_time,
-            );
+            join_constraint.reset_params((obj_a, obj_b), (move_point_a, move_point_b), delta_time);
         }
 
         legacy_constraint_ids.iter().for_each(|id| {
             self.join_constraints.remove(id);
         });
+    }
+
+    unsafe fn post_solve_constraints(&mut self) {
+        self.contact_constraints_manifold
+            .values_mut()
+            .for_each(|constraint| {});
     }
 
     fn solve_point_constraints(&mut self) {

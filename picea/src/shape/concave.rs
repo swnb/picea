@@ -21,7 +21,6 @@ pub struct ConcavePolygon {
     origin_center_point: Point,
     center_point: Point,
     area: FloatNum,
-    transform: Transform,
 }
 
 impl ConcavePolygon {
@@ -52,32 +51,26 @@ impl ConcavePolygon {
             origin_center_point: center_point,
             center_point,
             area: total_area,
-            transform: Default::default(),
         }
     }
 
-    pub fn to_convex_polygons(mut self) -> impl Iterator<Item = ConvexPolygon> {
-        self.apply_transform();
+    pub fn to_convex_polygons(self) -> impl Iterator<Item = ConvexPolygon> {
         self.sub_convex_polygons.into_iter()
     }
 }
 
 impl GeometryTransformer for ConcavePolygon {
-    fn transform_mut(&mut self) -> &mut Transform {
-        &mut self.transform
-    }
-
-    fn apply_transform(&mut self) {
+    fn sync_transform(&mut self, transform: &Transform) {
         for (i, p) in self.origin_vertexes.iter().enumerate() {
-            self.vertexes[i] = p + &self.transform.translation;
+            self.vertexes[i] = p + transform.translation();
         }
 
-        self.center_point = self.origin_center_point + self.transform.translation;
+        self.center_point = self.origin_center_point + transform.translation();
 
         rotate_polygon(
             self.center_point,
             self.vertexes.iter_mut(),
-            self.transform.rotation,
+            transform.rotation(),
         );
 
         // TODO cache this method

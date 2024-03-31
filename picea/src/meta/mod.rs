@@ -2,13 +2,47 @@ pub mod force;
 
 use macro_tools::{Builder, Deref, Fields};
 
-use crate::math::{point::Point, vector::Vector, FloatNum};
+use crate::math::{vector::Vector, FloatNum};
 
 pub type Mass = f32;
 
 pub type Angle = f32;
 
 pub type Speed = Vector;
+
+#[derive(Default, Clone, Fields, Debug)]
+#[field(r, w)]
+pub struct Transform {
+    translation: Vector,
+    rotation: FloatNum,
+}
+
+impl std::ops::AddAssign<&Transform> for Transform {
+    fn add_assign(&mut self, rhs: &Self) {
+        self.translation += rhs.translation;
+        self.rotation += rhs.rotation;
+    }
+}
+
+impl From<(Vector, FloatNum)> for Transform {
+    fn from((translation, rotation): (Vector, FloatNum)) -> Self {
+        Self {
+            translation,
+            rotation,
+        }
+    }
+}
+
+impl Transform {
+    pub fn split(&self) -> (Vector, FloatNum) {
+        (self.translation, self.rotation)
+    }
+
+    pub fn reset(&mut self) {
+        self.translation = Default::default();
+        self.rotation = 0.;
+    }
+}
 
 #[derive(Clone, Fields, Builder)]
 #[field(r)]
@@ -21,20 +55,17 @@ pub struct Meta {
     moment_of_inertia: ValueWithInv,
     #[field(r, w, reducer)]
     angle_velocity: FloatNum,
-    #[shared(skip)]
-    pre_angle: FloatNum,
-    #[field(r, w, reducer)]
-    angle: FloatNum,
-    #[builder(skip)]
-    pre_position: Point,
-    #[builder(skip)]
-    position: Point,
-    #[shared(skip)]
-    position_translate: Vector,
+
+    #[field(r, w, vis(pub(crate)))]
+    delta_transform: Transform,
+    #[field(r, w, vis(pub(crate)))]
+    total_transform: Transform,
 
     #[field(r, w)]
+    #[default = 0.2]
     factor_friction: FloatNum,
     #[field(r, w)]
+    #[default = 1.0]
     factor_restitution: FloatNum,
 
     #[field(r, w)]
@@ -85,35 +116,9 @@ impl Meta {
         self
     }
 
-    pub fn init_position(&mut self, position: Point) {
-        self.position = position;
-    }
-
-    pub fn translate_position(&mut self, translate: &Vector) {
-        self.position += translate;
-        self.position_translate += translate;
-    }
-
-    pub fn position_translate(&self) -> &Vector {
-        &self.position_translate
-    }
-
-    pub fn sync_position(&mut self) -> &mut Self {
-        self.pre_position = self.position;
-        self
-    }
-
-    pub fn sync_angle(&mut self) -> &mut Self {
-        self.pre_angle = self.angle;
-        self
-    }
-
-    pub fn get_delta_position(&self) -> Vector {
-        self.position - self.pre_position
-    }
-
-    pub fn get_delta_angle(&self) -> FloatNum {
-        self.angle - self.pre_angle
+    pub(crate) fn sync_transform(&mut self) {
+        self.total_transform += &self.delta_transform;
+        self.delta_transform.reset();
     }
 
     pub fn motion(&self) -> Vector {

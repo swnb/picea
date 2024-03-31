@@ -2,8 +2,7 @@ use std::ops::Deref;
 
 use crate::{
     math::{edge::Edge, point::Point, vector::Vector},
-    prelude::FloatNum,
-    scene::context::global_context,
+    meta::Transform,
 };
 
 pub mod alias;
@@ -17,59 +16,8 @@ pub mod square;
 pub mod triangle;
 pub mod utils;
 
-#[derive(Clone, Default, Debug)]
-pub struct Transform {
-    rotation: FloatNum,
-    translation: Vector,
-    pub(crate) is_changed: bool,
-}
-
-impl Transform {
-    pub fn rotation(&self) -> FloatNum {
-        self.rotation
-    }
-
-    pub fn set_rotation(&mut self, reducer: impl FnOnce(FloatNum) -> FloatNum) {
-        let rotation = reducer(self.rotation);
-        if rotation != self.rotation {
-            self.rotation = rotation;
-            self.is_changed = true;
-        }
-    }
-
-    pub fn translation(&self) -> &Vector {
-        &self.translation
-    }
-
-    pub fn set_translation(&mut self, reducer: impl Fn(Vector) -> Vector) {
-        self.translation = reducer(self.translation);
-        self.is_changed = true;
-    }
-}
-
 pub trait GeometryTransformer {
-    // write transform, won't update shape directly
-    fn translate(&mut self, translation: &Vector) {
-        self.transform_mut()
-            .set_translation(|pre| pre + translation);
-        self.merge_transform();
-    }
-
-    fn rotation(&mut self, rad: FloatNum) {
-        self.transform_mut().set_rotation(|pre| pre + rad);
-        self.merge_transform();
-    }
-
-    fn transform_mut(&mut self) -> &mut Transform;
-
-    // update shape use current transform information
-    fn apply_transform(&mut self);
-
-    fn merge_transform(&mut self) {
-        if !global_context().merge_shape_transform {
-            self.apply_transform();
-        }
-    }
+    fn sync_transform(&mut self, transform: &Transform);
 }
 
 pub trait EdgeIterable {

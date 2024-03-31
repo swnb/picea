@@ -1,10 +1,8 @@
 use macro_tools::Shape;
 
 use crate::{
-    collision::Projector,
     element::ComputeMomentOfInertia,
-    impl_shape_traits_use_deref,
-    math::{edge::Edge, point::Point, vector::Vector, FloatNum},
+    math::{edge::Edge, point::Point, FloatNum},
     meta::Mass,
     shape::utils::rotate_polygon,
 };
@@ -12,10 +10,10 @@ use crate::{
 use super::{
     utils::{
         compute_area_of_convex, compute_area_of_triangle, compute_convex_center_point,
-        compute_moment_of_inertia_of_triangle, find_nearest_point, projection_polygon_on_vector,
-        resize_by_vector, split_convex_polygon_to_triangles, VertexesIter, VertexesToEdgeIter,
+        compute_moment_of_inertia_of_triangle, resize_by_vector, split_convex_polygon_to_triangles,
+        VertexesIter, VertexesToEdgeIter,
     },
-    CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform,
+    CenterPoint, EdgeIterable, GeometryTransformer, Transform,
 };
 
 #[derive(Clone, Shape)]
@@ -25,7 +23,6 @@ pub struct ConvexPolygon {
     origin_center_point: Point,
     center_point: Point,
     area: FloatNum,
-    transform: Transform,
 }
 
 impl ConvexPolygon {
@@ -40,7 +37,6 @@ impl ConvexPolygon {
             origin_center_point: center_point,
             center_point,
             area,
-            transform: Default::default(),
         }
     }
 
@@ -64,20 +60,16 @@ impl VertexesIter for ConvexPolygon {
 }
 
 impl GeometryTransformer for ConvexPolygon {
-    fn transform_mut(&mut self) -> &mut Transform {
-        &mut self.transform
-    }
-
-    fn apply_transform(&mut self) {
+    fn sync_transform(&mut self, transform: &Transform) {
         for (i, p) in self.origin_vertexes.iter().enumerate() {
-            self.vertexes[i] = p + &self.transform.translation;
+            self.vertexes[i] = p + transform.translation();
         }
-        self.center_point = self.origin_center_point + self.transform.translation;
+        self.center_point = self.origin_center_point + transform.translation();
 
         rotate_polygon(
             self.center_point,
             self.vertexes.iter_mut(),
-            self.transform.rotation,
+            transform.rotation(),
         );
     }
 }

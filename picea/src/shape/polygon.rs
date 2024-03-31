@@ -52,13 +52,8 @@ macro_rules! impl_shape_trait_for {
         }
 
         impl<$($variants)*> GeometryTransformer for $struct_name {
-            fn transform_mut(&mut self) -> &mut Transform {
-                &mut self.transform
-            }
-
-            fn apply_transform(&mut self) {
-                let translation = &self.transform.translation;
-
+            fn sync_transform(&mut self,transform: &crate::meta::Transform) {
+                let translation = transform.translation();
 
                 for (i, p) in self.origin_vertexes.iter().enumerate() {
                     self.vertexes[i] = p + translation;
@@ -66,7 +61,7 @@ macro_rules! impl_shape_trait_for {
                 self.center_point = self.origin_center_point + translation;
 
 
-                let rotation = self.transform.rotation;
+                let rotation = transform.rotation();
 
                 rotate_polygon(self.center_point, self.vertexes_iter_mut(), rotation)
             }
@@ -80,7 +75,6 @@ pub struct ConstPolygon<const N: usize> {
     vertexes: [Point; N],
     origin_center_point: Point,
     center_point: Point,
-    transform: Transform,
 }
 
 impl<const N: usize> ConstPolygon<N> {
@@ -96,12 +90,23 @@ impl<const N: usize> ConstPolygon<N> {
             vertexes,
             origin_center_point: center_point,
             center_point,
-            transform: Default::default(),
         }
     }
 
     pub fn vertexes(&self) -> &[Point; N] {
         &self.vertexes
+    }
+
+    pub fn translate(&mut self, translation: &Vector) {
+        self.center_point += translation;
+        self.origin_center_point += translation;
+        translate_polygon(self.origin_vertexes.iter_mut(), translation);
+        translate_polygon(self.vertexes.iter_mut(), translation);
+    }
+
+    pub fn rotate(&mut self, rotation: FloatNum) {
+        rotate_polygon(self.center_point, self.origin_vertexes.iter_mut(), rotation);
+        rotate_polygon(self.center_point, self.vertexes.iter_mut(), rotation);
     }
 }
 
@@ -113,7 +118,6 @@ pub struct NormalPolygon {
     vertexes: Vec<Point>,
     origin_center_point: Point,
     center_point: Point,
-    transform: Transform,
 }
 
 impl_shape_trait_for!(ConstPolygon<N>, const N:usize);
@@ -126,12 +130,23 @@ impl NormalPolygon {
             vertexes,
             origin_center_point: center_point,
             center_point,
-            transform: Default::default(),
         }
     }
 
     pub fn edge_count(&self) -> usize {
         self.vertexes.len()
+    }
+
+    pub fn translation(&mut self, translation: &Vector) {
+        self.center_point += translation;
+        self.origin_center_point += translation;
+        translate_polygon(self.origin_vertexes.iter_mut(), translation);
+        translate_polygon(self.vertexes.iter_mut(), translation);
+    }
+
+    pub fn rotate(&mut self, rotation: FloatNum) {
+        rotate_polygon(self.center_point, self.origin_vertexes.iter_mut(), rotation);
+        rotate_polygon(self.center_point, self.vertexes.iter_mut(), rotation);
     }
 }
 
@@ -172,15 +187,10 @@ impl<const N: usize> ConstRegularPolygon<N> {
         };
 
         if Self::IS_EVENT {
-            rotate_polygon(
-                (0., 0.).into(),
-                this.inner.vertexes_iter_mut(),
-                -Self::HALF_EDGE_ANGLE,
-            );
+            this.inner.rotate(-Self::HALF_EDGE_ANGLE)
         }
 
-        translate_polygon(this.inner.vertexes_iter_mut(), &center);
-        *this.inner.center_point_mut() += &center;
+        this.inner.translate(&center);
 
         this
     }
@@ -231,19 +241,10 @@ impl RegularPolygon {
         };
 
         if edge_count & 1 == 0 {
-            rotate_polygon(
-                (0., 0.).into(),
-                this.inner_polygon.vertexes_iter_mut(),
-                -edge_angle * 0.5,
-            );
+            this.inner_polygon.rotate(-edge_angle * 0.5);
         }
 
-        translate_polygon(
-            this.inner_polygon.vertexes_iter_mut(),
-            &center_point.to_vector(),
-        );
-
-        *this.inner_polygon.center_point_mut() += &center_point.to_vector();
+        this.inner_polygon.translation(&center_point.to_vector());
 
         this
     }

@@ -2,6 +2,8 @@ pub(crate) mod store;
 
 use std::collections::BTreeMap;
 
+use macro_tools::Fields;
+
 use crate::{
     collision::{Collider, Projector, SubCollider},
     constraints::ConstraintObject,
@@ -11,8 +13,8 @@ use crate::{
         vector::{Vector, Vector3},
         FloatNum,
     },
-    meta::{Mass, Meta},
-    shape::{utils::rotate_point, CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint},
+    meta::{Mass, Meta, Transform},
+    shape::{CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint},
 };
 
 pub type ID = u32;
@@ -80,11 +82,15 @@ impl<T: Clone> ElementBuilder<T> {
     }
 }
 
+#[derive(Fields)]
+#[field(r)]
 pub struct Element<Data: Clone> {
     id: ID,
+    #[field(r, w)]
     meta: Meta,
+    #[field(r, w)]
     shape: Box<dyn ShapeTraitUnion>,
-    bind_points: BTreeMap<u32, Point>, // move with element
+    bind_points: BTreeMap<u32, Vector>, // move with element
     data: Data,
 }
 
@@ -102,20 +108,13 @@ impl<T: Clone> Clone for Element<T> {
 }
 
 impl<T: Clone> Element<T> {
-    #[inline]
-    pub fn id(&self) -> ID {
-        self.id
-    }
-
     pub(crate) fn inject_id(&mut self, id: ID) {
         self.id = id
     }
 
     #[inline]
-    pub fn new(mut shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>, data: T) -> Self {
+    pub fn new(shape: Box<dyn ShapeTraitUnion>, meta: impl Into<Meta>, data: T) -> Self {
         let mut meta: Meta = meta.into();
-
-        shape.transform_mut().set_rotation(|pre| pre - meta.angle());
 
         // FIXME update moment_of_inertia when meta update
         let moment_of_inertia = shape.compute_moment_of_inertia(meta.mass());
@@ -133,49 +132,28 @@ impl<T: Clone> Element<T> {
         }
     }
 
-    pub(crate) fn refresh_shape(&mut self) {
-        self.shape.apply_transform();
-    }
-
     #[inline]
     pub fn center_point(&self) -> Point {
         self.shape.center_point()
     }
 
-    #[inline]
-    pub fn meta(&self) -> &Meta {
-        &self.meta
+    pub(crate) fn transform(&mut self, transform: &Transform) {
+        // transform happen when integrate position
+        // no need to update shape
+        // remember to plus delta_transform with shape before the end of each "update"
+        *self.meta_mut().delta_transform_mut() += transform;
     }
 
-    #[inline]
-    pub fn meta_mut(&mut self) -> &mut Meta {
-        &mut self.meta
-    }
+    pub(crate) fn apply_transform(&mut self) {
+        if self.meta().is_fixed() {
+            return;
+        }
 
-    #[inline]
-    pub fn translate(&mut self, vector: &Vector) {
-        self.shape
-            .transform_mut()
-            .set_translation(|pre| pre + vector);
-
-        self.meta_mut().translate_position(vector);
-
-        self.bind_points
-            .values_mut()
-            .for_each(|point| *point += vector)
-    }
-
-    #[inline]
-    pub fn rotate(&mut self, rad: f32) {
-        let center_point = &self.center_point();
-
-        self.shape.transform_mut().set_rotation(|pre| pre + rad);
-
-        self.bind_points.values_mut().for_each(|point| {
-            *point = rotate_point(point, center_point, rad);
-        });
-
-        self.meta_mut().set_angle(|pre| pre - rad);
+        // sync total transform
+        self.meta_mut().sync_transform();
+        let transform = self.meta.total_transform();
+        // refresh shape, shape update here, delta transform reset to zero
+        self.shape.sync_transform(transform);
     }
 
     #[inline]
@@ -185,32 +163,30 @@ impl<T: Clone> Element<T> {
         }
     }
 
-    pub fn shape(&self) -> &dyn ShapeTraitUnion {
-        &*self.shape
-    }
-
     // simple integrate position by velocity and angle_velocity;
     pub fn integrate_position(&mut self, delta_time: FloatNum) -> Option<(Vector, FloatNum)> {
         if self.meta().is_fixed() {
             return None;
         }
         let path = *self.meta().velocity() * delta_time;
-        let angle = self.meta().angle_velocity() * delta_time;
+        let rad = self.meta().angle_velocity() * delta_time;
 
-        self.translate(&path);
+        self.transform(&(path, -rad).into());
 
-        // NOTE this is important, all rotate is reverse
-        self.rotate(-angle);
-
-        (path, angle).into()
+        (path, rad).into()
     }
 
     pub(crate) fn create_bind_point(&mut self, id: u32, point: Point) {
-        self.bind_points.insert(id, point);
+        let reference_vector = (self.shape.center_point(), point).into();
+
+        self.bind_points.insert(id, reference_vector);
     }
 
-    pub(crate) fn get_bind_point(&self, id: u32) -> Option<&Point> {
-        self.bind_points.get(&id)
+    pub(crate) fn get_bind_point(&self, id: u32) -> Option<Point> {
+        self.bind_points.get(&id).map(|reference| {
+            self.shape().center_point()
+                + reference.affine_transformation_rotate(-self.meta().total_transform().rotation())
+        })
     }
 
     pub(crate) fn remove_bind_point(&mut self, id: u32) {
@@ -248,7 +224,7 @@ impl<T: Clone> ConstraintObject for Element<T> {
             return (0., 0.).into();
         }
 
-        let center_point = self.center_point();
+        let center_point = ConstraintObject::center_point(self);
         let r: Vector = (center_point, *point).into();
         let angle_velocity = meta.angle_velocity();
         let w: Vector3 = (0., 0., angle_velocity).into();
@@ -267,18 +243,12 @@ impl<T: Clone> ConstraintObject for Element<T> {
         let inv_mass = self.meta().inv_mass();
 
         let translate_fix = fix * inv_mass;
-        // translate_fix.set_x(|_| 0.);
 
-        self.translate(&translate_fix);
+        *self.meta_mut().delta_transform_mut().translation_mut() += &translate_fix;
 
         let rad = (r ^ fix) * self.meta().inv_moment_of_inertia();
 
-        // if self.id == 2 {
-        //     dbg!(rad);
-        //     dbg!(fix * inv_mass);
-        // }
-
-        self.rotate(-rad);
+        *self.meta_mut().delta_transform_mut().rotation_mut() += -rad;
     }
 }
 
@@ -294,7 +264,7 @@ impl<T: Clone> NearestPoint for Element<T> {
     }
 
     fn nearest_point(&self, reference_point: &Point, direction: &Vector) -> Point {
-        self.shape.nearest_point(reference_point, direction)
+        self.shape().nearest_point(reference_point, direction)
     }
 }
 

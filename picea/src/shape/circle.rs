@@ -1,45 +1,41 @@
+use crate::{math::axis::AxisDirection, prelude::*, shape::Transform};
 use macro_tools::{Fields, Shape};
-
-use super::{CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform};
-use crate::{
-    collision::Projector,
-    element::ComputeMomentOfInertia,
-    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
-    meta::Mass,
-};
 
 #[derive(Clone, Debug, Shape, Fields)]
 pub struct Circle {
     origin_center_point: Point,
-    transform: Transform,
     center_point: Point,
     #[field(r)]
     radius: f32,
     rad: f32,
 }
 
+impl CenterPoint for Circle {
+    fn center_point(&self) -> Point {
+        self.center_point
+    }
+}
+
 impl Circle {
-    #[inline]
     pub fn new(center_point: impl Into<Point>, radius: f32) -> Self {
         let center_point = center_point.into();
         Self {
             origin_center_point: center_point,
-            transform: Default::default(),
             center_point,
             radius,
             rad: 0.,
         }
     }
+
+    pub fn translate(&mut self, translation: &Vector) {
+        self.origin_center_point += translation;
+        self.center_point += translation;
+    }
 }
 
 impl GeometryTransformer for Circle {
-    fn transform_mut(&mut self) -> &mut Transform {
-        &mut self.transform
-    }
-
-    fn apply_transform(&mut self) {
-        self.center_point = self.origin_center_point + self.transform.translation;
-        self.transform.is_changed = false;
+    fn sync_transform(&mut self, transform: &Transform) {
+        self.center_point = self.origin_center_point + transform.translation();
     }
 }
 
@@ -63,12 +59,6 @@ impl Projector for Circle {
             X => (center_x - radius, center_x + radius),
             Y => (center_y - radius, center_y + radius),
         }
-    }
-}
-
-impl CenterPoint for Circle {
-    fn center_point(&self) -> Point {
-        self.center_point
     }
 }
 
@@ -119,32 +109,5 @@ impl ComputeMomentOfInertia for Circle {
     // compute moment of inertia;
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
         m * self.radius().powf(2.) * 0.5
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let circle_shape = Circle::new((0., 0.), 25.);
-
-        let p = circle_shape.projection_on_vector(&(1., 0.).into());
-        dbg!(p);
-        let p = circle_shape.projection_on_vector(&(1., 1.).into());
-        dbg!(p);
-        let p = circle_shape.projection_on_vector(&(0., 1.).into());
-        dbg!(p);
-        let p = circle_shape.projection_on_vector(&(-1., 1.).into());
-        dbg!(p);
-        let p = circle_shape.projection_on_vector(&(-1., 0.).into());
-        dbg!(p);
-        let p = circle_shape.projection_on_vector(&(-1., -1.).into());
-        dbg!(p);
-        let p = circle_shape.projection_on_vector(&(0., -1.).into());
-        dbg!(p);
-        let p = circle_shape.projection_on_vector(&(1., -1.).into());
-        dbg!(p);
     }
 }

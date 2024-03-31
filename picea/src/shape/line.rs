@@ -18,7 +18,6 @@ pub struct Line {
     segment: Segment,
     origin_center_point: Point,
     center_point: Point,
-    transform: Transform,
 }
 
 impl From<(Point, Point)> for Line {
@@ -31,9 +30,8 @@ impl From<(Point, Point)> for Line {
         Self {
             origin_segment: segment.clone(),
             segment,
-            origin_center_point: center_point.clone(),
+            origin_center_point: center_point,
             center_point,
-            transform: Default::default(),
         }
     }
 }
@@ -96,19 +94,15 @@ impl EdgeIterable for Line {
 }
 
 impl GeometryTransformer for Line {
-    fn transform_mut(&mut self) -> &mut Transform {
-        &mut self.transform
-    }
-
-    fn apply_transform(&mut self) {
-        let translation = &self.transform.translation;
+    fn sync_transform(&mut self, transform: &Transform) {
+        let translation = transform.translation();
 
         self.segment = &self.origin_segment + translation;
         self.center_point = self.origin_center_point + translation;
 
         let origin_point = self.center_point;
 
-        let rotation = self.transform.rotation;
+        let rotation = transform.rotation();
 
         let rotate_point = |point: &mut Point| {
             let mut tmp_vector: Vector = (origin_point, *point).into();

@@ -765,12 +765,8 @@ macro_rules! impl_shape_traits_use_deref {
         }
 
         impl<$($variants)*> $crate::shape::GeometryTransformer for $struct_name {
-            fn apply_transform(&mut self) {
-                self.deref_mut().apply_transform()
-            }
-
-            fn transform_mut(&mut self) -> &mut $crate::shape::Transform {
-                self.deref_mut().transform_mut()
+            fn sync_transform(&mut self, transform: &$crate::meta::Transform) {
+                self.deref_mut().sync_transform(transform)
             }
         }
 
