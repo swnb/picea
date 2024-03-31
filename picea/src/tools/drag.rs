@@ -41,7 +41,7 @@ impl Draggable {
             .and_then(|id| scene.get_element_mut(id))
         {
             let vector_offset: Vector = (element.center_point(), (x, y).into()).into();
-            element.translate(&vector_offset);
+            element.transform(&(vector_offset, 0.).into());
         }
     }
 

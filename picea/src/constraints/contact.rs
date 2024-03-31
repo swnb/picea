@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use macro_tools::{Deref, Fields};
 
 use crate::{
@@ -7,6 +5,7 @@ use crate::{
     element::ID,
     math::{num::limit_at_range, vector::Vector, FloatNum},
     meta::Meta,
+    prelude::Point,
     scene::context::ConstraintParameters,
 };
 
@@ -90,46 +89,43 @@ impl ContactPointPairConstraintInfo {
         friction_lambda
     }
 
-    pub(crate) unsafe fn prepare_solve_position_constraint(
+    pub(crate) unsafe fn prepare_solve_position_constraint<Obj: ConstraintObject>(
         &self,
-        object_a_meta: &Meta,
-        object_b_meta: &Meta,
-    ) -> ContactPointPair {
-        let delta_angle_a = object_a_meta.get_delta_angle();
+        object_a: &Obj,
+        object_b: &Obj,
+    ) -> (Point, Point, Vector, Vector) {
+        let object_a_meta = object_a.meta();
+        let object_b_meta = object_b.meta();
 
-        let delta_angle_b = object_b_meta.get_delta_angle();
+        let (delta_position_a, delta_angle_a) = object_a_meta.delta_transform().split();
+        let (delta_position_b, delta_angle_b) = object_b_meta.delta_transform().split();
 
-        let pre_position_a = object_a_meta.pre_position();
-        let position_a = object_a_meta.position();
+        // let pre_position_a = object_a_meta.pre_position();
+        let position_a = object_a.center_point() + delta_position_a;
 
-        let pre_position_b = object_b_meta.pre_position();
-        let position_b = object_b_meta.position();
+        // let pre_position_b = object_b_meta.pre_position();
+        let position_b = object_b.center_point() + delta_position_b;
 
-        let point_a = self.point_a();
-        let point_b = self.point_b();
+        // let point_a = self.point_a();
+        // let point_b = self.point_b();
 
-        let mut r_a: Vector = (pre_position_a, point_a).into();
-        r_a.affine_transformation_rotate_self(delta_angle_a);
+        // let mut r_a: Vector = (pre_position_a, point_a).into();
+        let r_a = self.r_a.affine_transformation_rotate(delta_angle_a);
         let point_a = position_a + &r_a;
 
-        let mut r_b: Vector = (pre_position_b, point_b).into();
-        r_b.affine_transformation_rotate_self(delta_angle_b);
+        // let mut r_b: Vector = (pre_position_b, point_b).into();
+        let r_b = self.r_b.affine_transformation_rotate(delta_angle_b);
         let point_b = position_b + &r_b;
 
         let normal: Vector = (point_a, point_b).into();
 
-        let normal_toward_a = if normal * (*position_a - *position_b) < 0. {
+        let normal_toward_a = if normal * (position_a - position_b) < 0. {
             -normal
         } else {
             normal
         };
 
-        ContactPointPair::new(
-            point_a,
-            point_b,
-            normal_toward_a.normalize(),
-            (*position_a - *position_b).abs(),
-        )
+        (point_a, point_b, r_a, r_b)
     }
 
     pub fn delta_velocity_for_a(&self, object_a_meta: &Meta) -> Vector {
@@ -271,7 +267,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         unsafe { self.object_b().meta().angle_velocity() - self.angle_velocity_b }
     }
 
-    pub(crate) unsafe fn reset_params(
+    pub(crate) unsafe fn pre_solve(
         &mut self,
         (obj_a, obj_b): (*mut Obj, *mut Obj),
         delta_time: FloatNum,
@@ -367,14 +363,14 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
 
                 let jv = v_a * jv_a + v_b * jv_b;
 
-                let position_bias = (contact_info.depth() - parameters.max_allow_permeate).max(0.)
-                    * self.inv_delta_time;
+                // let position_bias = (contact_info.depth() - parameters.max_allow_permeate).max(0.)
+                //     * self.inv_delta_time;
 
-                let bias = if parameters.split_position_fix {
-                    0.
-                } else {
-                    -position_bias
-                };
+                // let bias = if parameters.split_position_fix {
+                //     0.
+                // } else {
+                //     -position_bias
+                // };
 
                 let lambda = -(jv * (1. + self.factor_restitution)) * contact_info.mass_effective;
 
@@ -443,28 +439,27 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         index: usize,
     ) {
         self.contact_point_pair_constraint_infos
-            .iter_mut()
+            .iter()
             .for_each(|contact_info| {
                 let obj_a = &mut *self.obj_a;
                 let obj_b = &mut *self.obj_b;
+
+                let (point_a, point_b, r_a, r_b) =
+                    contact_info.prepare_solve_position_constraint(obj_a, obj_b);
+
                 let obj_a_meta = obj_a.meta();
                 let obj_b_meta = obj_b.meta();
 
-                let delta_angle_a = obj_a_meta.get_delta_angle();
-                let delta_position_a = obj_a_meta.get_delta_position();
-                let delta_angle_b = obj_b_meta.get_delta_angle();
-                let delta_position_b = obj_b_meta.get_delta_position();
+                // let delta_angle_a = obj_a_meta.delta_angle();
+                // let delta_position_a = obj_a_meta.delta_position();
+                // let delta_angle_b = obj_b_meta.delta_angle();
+                // let delta_position_b = obj_b_meta.delta_position();
 
-                let normal_toward_a = contact_info.normal_toward_a();
-
-                let contact_point_pair =
-                    contact_info.prepare_solve_position_constraint(obj_a_meta, obj_b_meta);
+                // REVIEW
+                let n = contact_info.normal_toward_a();
 
                 // let n = contact_point_pair.normal_toward_a();
-                let n = normal_toward_a;
-
-                let r_a = contact_info.r_a.affine_transformation_rotate(delta_angle_a);
-                let r_b = contact_info.r_b.affine_transformation_rotate(delta_angle_b);
+                // let n = normal_toward_a;
 
                 let inv_mass_effective = obj_a_meta.inv_mass()
                     + obj_a_meta.inv_mass()
@@ -474,8 +469,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 let contact_count_a = obj_a_meta.contact_count();
                 let contact_count_b = obj_b_meta.contact_count();
 
-                let permeate: FloatNum =
-                    n * (*contact_point_pair.point_b() - *contact_point_pair.point_a());
+                let permeate: FloatNum = n * (point_b - point_a);
 
                 let mut depth_fix = permeate;
 
