@@ -5,7 +5,7 @@ use macro_tools::{Fields, Shape};
 pub struct Circle {
     origin_center_point: Point,
     center_point: Point,
-    #[field(r)]
+    #[r]
     radius: f32,
     rad: f32,
 }

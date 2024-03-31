@@ -10,15 +10,16 @@ use super::{compute_soft_constraints_params, ConstraintObject, JoinConstraintCon
 
 #[derive(Fields)]
 pub struct PointConstraint<Obj: ConstraintObject> {
-    #[field(r)]
+    #[r]
     id: u32,
-    #[field(r)]
+    #[r]
     obj_id: ID,
-    #[field(r, w)]
+    #[r]
+    #[w]
     fixed_point: Point,
-    #[field(r)]
+    #[r]
     move_point: Point, // bind with element
-    #[field(r)]
+    #[r]
     total_lambda: FloatNum,
     // force_soft_factor: FloatNum,
     // position_fix_factor: FloatNum,
@@ -27,7 +28,7 @@ pub struct PointConstraint<Obj: ConstraintObject> {
     soft_part: FloatNum,
     mass_effective: FloatNum,
     obj: *mut Obj,
-    #[field(r)]
+    #[r]
     config: JoinConstraintConfig,
 }
 

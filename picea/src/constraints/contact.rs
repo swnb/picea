@@ -23,7 +23,8 @@ pub struct ContactConstraint<Obj: ConstraintObject> {
     obj_b: *mut Obj,
     // max_allow_restrict_impulse: FloatNum,
     inv_delta_time: FloatNum,
-    #[field(r, w, use_set)]
+    #[r]
+    #[w(set)]
     is_active: bool,
     factor_friction: FloatNum,
     factor_restitution: FloatNum,
@@ -37,20 +38,20 @@ pub struct ContactConstraint<Obj: ConstraintObject> {
 pub struct ContactPointPairConstraintInfo {
     #[deref]
     concat_point_pair: ContactPointPair,
-    #[field(r)]
+    #[r]
     r_a: Vector,
-    #[field(r)]
+    #[r]
     r_b: Vector,
     mass_effective: FloatNum,
     tangent_mass_effective: FloatNum,
     max_allow_restrict_impulse: FloatNum,
-    #[field(r)]
+    #[r]
     real_total_lambda: FloatNum,
-    #[field(r)]
+    #[r]
     total_lambda: FloatNum,
-    #[field(r)]
+    #[r]
     real_total_friction_lambda: FloatNum,
-    #[field(r)]
+    #[r]
     total_friction_lambda: FloatNum,
     velocity_bias: FloatNum,
 }

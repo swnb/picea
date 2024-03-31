@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
-    parse_macro_input, punctuated::Punctuated, spanned::Spanned, Data, DeriveInput, Ident, LitStr,
-    Meta, Visibility,
+    parenthesized, parse_macro_input, punctuated::Punctuated, spanned::Spanned, Attribute, Data,
+    DeriveInput, Ident, LitStr, Meta, Visibility,
 };
 
 #[proc_macro_derive(Shape, attributes(inner))]
@@ -213,54 +213,80 @@ pub fn builder(input: TokenStream) -> TokenStream {
     .into()
 }
 
-#[proc_macro_derive(Fields, attributes(field, shared))]
+#[proc_macro_derive(Fields, attributes(shared, r, w))]
 pub fn fields(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let ident = input.ident;
     let generics = input.generics;
 
-    let vis = input.vis;
+    let input_vis = input.vis;
 
-    let (readonly, writeable, use_set_method, use_reducer, field_vis) =
-        parse_attr_readonly_writeable(&input.attrs).unwrap_or_default();
-
-    let field_vis = field_vis.unwrap_or(vis);
-
-    fn parse_attr_readonly_writeable(
-        attrs: &[syn::Attribute],
-    ) -> Option<(bool, bool, bool, bool, Option<Visibility>)> {
-        let attr = attrs
-            .iter()
-            .find(|attr| attr.path().is_ident("field") || attr.path().is_ident("shared"))?;
-        let mut readonly = false;
-        let mut writeable = false;
-        let mut use_set_method = false;
-        let mut use_reducer = false;
-        let mut vis = None;
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("w") {
-                writeable = true;
-            }
-            if meta.path.is_ident("r") {
-                readonly = true;
-            }
-            if meta.path.is_ident("use_set") {
-                use_set_method = true;
-            }
-            if meta.path.is_ident("reducer") {
-                use_set_method = true;
-                use_reducer = true;
-            }
-            if meta.path.is_ident("vis") {
-                let value = meta.value()?;
-                let value = value.parse::<Visibility>()?;
-                vis = Some(value);
-            }
-            Ok(())
-        });
-
-        Some((readonly, writeable, use_set_method, use_reducer, vis))
+    fn find_attr<'a>(attrs: &'a [syn::Attribute], ident: &str) -> Option<&'a Attribute> {
+        attrs.iter().find(|attr| attr.path().is_ident(ident))
     }
+
+    let should_skip = |attrs: &[syn::Attribute]| -> bool {
+        attrs
+            .iter()
+            .filter(|attr| ["shared", "r", "w"].iter().any(|k| attr.path().is_ident(k)))
+            .any(|attr| {
+                let mut is_skip = false;
+                let _ = attr.parse_nested_meta(|meta| {
+                    is_skip = meta.path.is_ident("skip");
+                    Ok(())
+                });
+                is_skip
+            })
+    };
+
+    let parse_attr_read = |attrs: &[syn::Attribute]| -> Option<Visibility> {
+        find_attr(attrs, "r").map(|attr| {
+            let mut field_vis: Visibility = input_vis.clone();
+            let _ = attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("vis") {
+                    let content;
+                    parenthesized!(content in meta.input);
+                    eprintln!("{}", content.to_string());
+                    let value = content.parse::<Visibility>()?;
+                    field_vis = value;
+                }
+                Ok(())
+            });
+
+            field_vis
+        })
+    };
+
+    let parse_attr_write = |attrs: &[syn::Attribute]| -> Option<(bool, bool, Visibility)> {
+        find_attr(attrs, "w").map(|attr| {
+            let mut field_reducer: bool = false;
+            let mut field_set: bool = false;
+            let mut field_vis: Visibility = input_vis.clone();
+            let _ = attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("reducer") {
+                    field_reducer = true;
+                    field_set = true;
+                }
+                if meta.path.is_ident("set") {
+                    field_set = true;
+                }
+
+                if meta.path.is_ident("vis") {
+                    let content;
+                    parenthesized!(content in meta.input);
+                    eprintln!("{}", content.to_string());
+                    let value = content.parse::<Visibility>()?;
+                    field_vis = value;
+                }
+                Ok(())
+            });
+            (field_reducer, field_set, field_vis)
+        })
+    };
+
+    let global_attr_read = parse_attr_read(&input.attrs);
+
+    let global_attr_write = parse_attr_write(&input.attrs);
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
@@ -270,68 +296,50 @@ pub fn fields(input: TokenStream) -> TokenStream {
             .into();
     };
 
-    let property_method: Vec<_> = data
+    let property_method = data
         .fields
         .iter()
+        .filter(|field| !should_skip(&field.attrs))
         .map(|field| {
-            let mut writeable = writeable;
-            let mut readonly = readonly;
-            let mut use_set_method = use_set_method;
-            let mut use_reducer = use_reducer;
-            let mut vis = field_vis.clone();
-
-            if let Some((
-                current_readonly,
-                current_writeable,
-                current_use_set_method,
-                current_use_reducer,
-                current_vis,
-            )) = parse_attr_readonly_writeable(&field.attrs)
-            {
-                readonly = current_readonly;
-                writeable = current_writeable;
-                use_set_method = current_use_set_method;
-                use_reducer = current_use_reducer;
-                vis = current_vis.unwrap_or(vis);
-            }
-
             let field_ident = field.ident.clone().unwrap();
-            let ty = &field.ty;
+            let ty = field.ty.clone();
 
             let primitive_types = [
                 "bool", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i64", "i128",
-                "f32", "f64", "FloatNum","ID",
+                "f32", "f64", "FloatNum", "ID",
             ];
 
             let should_return_copy_when_read = match &field.ty {
                 syn::Type::Path(path) => {
                     let t = path.into_token_stream().to_string();
-
                     primitive_types
                         .iter()
                         .any(|primitive_type| primitive_type == &t)
                 }
                 _ => false,
             };
+            let read_field_method = parse_attr_read(&field.attrs)
+                .or(global_attr_read.clone())
+                .map(|vis| {
+                    if should_return_copy_when_read {
+                        quote!(
+                            #vis fn #field_ident(&self) -> #ty {
+                                self.#field_ident
+                            }
+                        )
+                    } else {
+                        quote!(
+                            #vis fn #field_ident(&self) -> &#ty {
+                                &self.#field_ident
+                            }
+                        )
+                    }
+                });
 
-            let readonly_field = readonly.then(|| {
-                if should_return_copy_when_read {
-                    quote!(
-                        #vis fn #field_ident(&self) -> #ty {
-                            self.#field_ident
-                        }
-                    )
-                } else {
-                    quote!(
-                        #vis fn #field_ident(&self) -> &#ty {
-                            &self.#field_ident
-                        }
-                    )
-                }
-            });
-
-            let writeable_field = writeable.then(|| {
-                if use_set_method {
+            let write_field_method = parse_attr_write(&field.attrs)
+                .or(global_attr_write.clone())
+                .map(|(use_reducer, use_set_prefix_method, vis)| {
+                    if use_set_prefix_method {
                     let set_field_ident =
                         Ident::new(&format!("set_{}", field_ident), field.ident.span());
                         if use_reducer {
@@ -361,13 +369,13 @@ pub fn fields(input: TokenStream) -> TokenStream {
                 }
             });
 
-            quote!(
-                #readonly_field
 
-                #writeable_field
+            quote!(
+                #read_field_method
+
+                #write_field_method
             )
-        })
-        .collect();
+        });
 
     quote!(
         impl #impl_generics #ident #ty_generics #where_clause {
@@ -561,7 +569,7 @@ pub fn wasm_config(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote!(
         #(#attrs)*
         #[derive(macro_tools::Fields)]
-        #[field(r)]
+        #[r]
         #[derive(Deserialize, Serialize)]
         #vis struct #impl_generics #ident #ty_generics #where_clause {
             #(#fields)*

@@ -9,9 +9,9 @@ use super::polygon::ConstPolygon;
 // common shape  Rectangle
 #[derive(Clone, Debug, Shape, Deref, Fields)]
 pub struct Rect {
-    #[field(r)]
+    #[r]
     width: f32,
-    #[field(r)]
+    #[r]
     height: f32,
     #[deref]
     inner: ConstPolygon<4>,

@@ -11,7 +11,8 @@ pub type Angle = f32;
 pub type Speed = Vector;
 
 #[derive(Default, Clone, Fields, Debug)]
-#[field(r, w)]
+#[r]
+#[w]
 pub struct Transform {
     translation: Vector,
     rotation: FloatNum,
@@ -45,47 +46,48 @@ impl Transform {
 }
 
 #[derive(Clone, Fields, Builder)]
-#[field(r)]
+#[r]
 pub struct Meta {
-    #[field(r, w, reducer)]
+    #[w(reducer)]
     velocity: Speed,
     #[shared(skip)]
     mass: ValueWithInv,
     #[shared(skip)]
     moment_of_inertia: ValueWithInv,
-    #[field(r, w, reducer)]
+    #[w(reducer)]
     angle_velocity: FloatNum,
 
-    #[field(r, w, vis(pub(crate)))]
+    #[w(vis(pub(crate)))]
+    #[r(vis(pub(crate)))]
     delta_transform: Transform,
-    #[field(r, w, vis(pub(crate)))]
+    #[w(vis(pub(crate)))]
     total_transform: Transform,
 
-    #[field(r, w)]
+    #[w]
     #[default = 0.2]
     factor_friction: FloatNum,
-    #[field(r, w)]
+    #[w]
     #[default = 1.0]
     factor_restitution: FloatNum,
 
-    #[field(r, w)]
+    #[w]
     is_fixed: bool,
-    #[field(r, w)]
+    #[w]
     is_transparent: bool,
-    #[field(r, w)]
+    #[w]
     is_ignore_gravity: bool,
     // if element is is_sleeping , skip constraint or collision
     #[builder(skip)]
     is_sleeping: bool,
+    #[w]
     #[builder(skip)]
-    #[field(r, w)]
     contact_count: u16,
     #[shared(skip)]
     motionless_frame_counter: u8,
 }
 
 #[derive(Deref, Clone, Fields, Builder)]
-#[field(r)]
+#[r]
 struct ValueWithInv {
     #[deref]
     #[default = 1.0]

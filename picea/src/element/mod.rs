@@ -83,12 +83,12 @@ impl<T: Clone> ElementBuilder<T> {
 }
 
 #[derive(Fields)]
-#[field(r)]
+#[r]
 pub struct Element<Data: Clone> {
     id: ID,
-    #[field(r, w)]
+    #[w]
     meta: Meta,
-    #[field(r, w)]
+    #[w]
     shape: Box<dyn ShapeTraitUnion>,
     bind_points: BTreeMap<u32, Vector>, // move with element
     data: Data,

@@ -12,7 +12,8 @@ pub mod join;
 pub mod point;
 
 #[derive(Clone, Builder, Fields)]
-#[field(r, w)]
+#[r]
+#[w]
 pub struct JoinConstraintConfig {
     #[default = 0.]
     distance: FloatNum,
