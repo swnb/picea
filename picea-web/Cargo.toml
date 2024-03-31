@@ -8,16 +8,6 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# [features]
-# default = ["wasm-web"]
-# wasm-web = [
-#   "dep:console_error_panic_hook",
-#   "dep:js-sys",
-#   'dep:serde',
-#   "dep:serde-wasm-bindgen",
-#   "dep:wasm-bindgen",
-# ]
-
 [dependencies]
 picea = { path = "../picea" }
 console_error_panic_hook = { version = "0.1.7" }
@@ -26,3 +16,4 @@ js-sys = { version = "0.3.61" }
 serde = { version = "1.0.158", features = ["derive"] }
 serde-wasm-bindgen = { version = "0.6.5" }
 wasm-bindgen = { version = "0.2.84" }
+macro-tools = { path = "../crates/macro-tools" }

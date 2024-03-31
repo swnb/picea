@@ -1,24 +1,29 @@
-extern crate console_error_panic_hook;
-extern crate wasm_bindgen;
 use js_sys::Function;
+
+use picea::math::edge::Edge;
+use picea::prelude::*;
 use picea::{
-    element::{ElementBuilder, ShapeTraitUnion, ID},
-    math::{edge::Edge, point::Point, segment::Segment, vector::Vector, FloatNum},
-    meta::{Meta, MetaBuilder},
     scene::Scene,
     shape::{
         circle::Circle,
         concave::ConcavePolygon,
         line::Line,
-        polygon::{Rect, RegularPolygon},
+        polygon::RegularPolygon,
+        rect::Rect,
         utils::{check_is_segment_cross, is_point_inside_shape},
     },
     tools::snapshot,
 };
-use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::from_value;
+use std::cell::UnsafeCell;
 use std::panic;
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
+
+use crate::common::{
+    JoinConstraintConfig, Meta, OptionalWebJoinConstraintConfig, OptionalWebMeta, PointConstraint,
+    Tuple2, WebMeta, WebPoint, WebVector,
+};
 
 #[wasm_bindgen(js_name = "setPanicConsoleHook")]
 pub fn set_panic_console_hook() {
@@ -33,7 +38,7 @@ extern "C" {
 
 #[wasm_bindgen]
 pub struct WebScene {
-    scene: Scene,
+    scene: Rc<UnsafeCell<Scene>>,
 }
 
 #[wasm_bindgen]
@@ -43,7 +48,7 @@ pub enum ElementShapeEnum {
 }
 
 #[wasm_bindgen]
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Default)]
 pub struct PolygonElementShape {
     id: ID,
     shape_type: String, // always polygon
@@ -51,7 +56,27 @@ pub struct PolygonElementShape {
 }
 
 #[wasm_bindgen]
-#[derive(Default, Deserialize, Serialize)]
+impl PolygonElementShape {
+    #[wasm_bindgen(getter)]
+    pub fn id(&self) -> ID {
+        self.id
+    }
+
+    #[wasm_bindgen(js_name = "shapeType", getter)]
+    pub fn shape_type(&self) -> String {
+        self.shape_type.to_owned()
+    }
+
+    pub fn vertexes(&self) -> Vec<WebPoint> {
+        self.vertexes
+            .iter()
+            .map(|v| JsValue::from(*v).into())
+            .collect()
+    }
+}
+
+#[wasm_bindgen]
+#[derive(Default)]
 pub struct CircleElementShape {
     id: ID,
     shape_type: String, // always circle
@@ -61,10 +86,12 @@ pub struct CircleElementShape {
 
 #[wasm_bindgen]
 impl CircleElementShape {
+    #[wasm_bindgen(getter)]
     pub fn id(&self) -> ID {
         self.id
     }
 
+    #[wasm_bindgen(js_name = "shapeType", getter)]
     pub fn shape_type(&self) -> String {
         self.shape_type.to_owned()
     }
@@ -73,154 +100,41 @@ impl CircleElementShape {
         self.radius
     }
 
+    #[wasm_bindgen(js_name = "centerPoint")]
     pub fn center_point(&self) -> JsValue {
         JsValue::from(self.center_point)
     }
 }
 
-#[wasm_bindgen]
-pub struct WebPicea;
-
-#[wasm_bindgen]
-#[derive(Serialize, Deserialize, Clone, Copy, Default)]
-struct Tuple2 {
-    pub x: FloatNum,
-    pub y: FloatNum,
-}
-
-impl From<Point> for Tuple2 {
-    fn from(value: Point) -> Self {
-        Tuple2 {
-            x: value.x(),
-            y: value.y(),
-        }
-    }
-}
-
-impl From<Tuple2> for Point {
-    fn from(value: Tuple2) -> Self {
-        Self::new(value.x, value.y)
-    }
-}
-
-impl From<Vector> for Tuple2 {
-    fn from(value: Vector) -> Self {
-        Tuple2 {
-            x: value.x(),
-            y: value.y(),
-        }
-    }
-}
-
-impl From<Tuple2> for Vector {
-    fn from(value: Tuple2) -> Vector {
-        (value.x, value.y).into()
-    }
-}
-
-#[derive(Default, Deserialize, Serialize)]
-struct MetaDataConfig {
-    pub mass: Option<FloatNum>,
-    #[serde(rename = "isFixed")]
-    pub is_fixed: Option<bool>,
-    #[serde(rename = "isTransparent")]
-    pub is_transparent: Option<bool>,
-    pub angle: Option<FloatNum>,
-}
-
-impl From<&Meta> for MetaDataConfig {
-    fn from(value: &Meta) -> Self {
-        Self {
-            mass: Some(value.mass()),
-            is_fixed: Some(value.is_fixed()),
-            is_transparent: Some(value.is_transparent()),
-            angle: Some(value.angle()),
-        }
-    }
-}
-
-impl From<MetaDataConfig> for MetaBuilder {
-    fn from(value: MetaDataConfig) -> Self {
-        MetaBuilder::new(value.mass.unwrap_or(1.))
-            .is_fixed(value.is_fixed.unwrap_or(false))
-            .is_transparent(value.is_transparent.unwrap_or(false))
-            .angle(value.angle.unwrap_or(0.))
-    }
-}
-
 #[wasm_bindgen(typescript_custom_section)]
-const TYPESCRIPT_DEFINE: &str = r#"
-type Vector = {x:number,y:number};
-type Point = {x:number,y:number};
-type MetaData = {mass:number,isFixed:boolean,isTransparent:boolean,angle:number};
-type MetaDataConfig = Partial<MetaData>;
-interface WebScene {
-    forEachElementShape(callback: (points:{x:number,y:number}[],id :number) => void): void;
-    registerElementPositionUpdateCallback(callback: (id:number,translate:{x:number,y:number},rotation:number) => void): number;
-}
-"#;
+const _: &str = include_str!("./type.d.ts");
 
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(typescript_type = "Vector")]
-    pub type WebVector;
-    #[wasm_bindgen(typescript_type = "Point")]
-    pub type WebPoint;
-
-    #[wasm_bindgen(typescript_type = "MetaDataConfig")]
-    pub type WebMetaDataConfig;
-
-    #[wasm_bindgen(typescript_type = "MetaData")]
-    pub type WebMetaData;
-}
-
-impl TryInto<Vector> for WebVector {
-    type Error = &'static str;
-
-    fn try_into(self) -> Result<Vector, Self::Error> {
-        let value: JsValue = self.into();
-        let value: Tuple2 = serde_wasm_bindgen::from_value(value)
-            .map_err(|_| "vector should be {x:number,y:number}")?;
-        Ok(value.into())
-    }
-}
-
-impl TryInto<Point> for WebPoint {
-    type Error = &'static str;
-
-    fn try_into(self) -> Result<Point, Self::Error> {
-        let value: JsValue = self.into();
-        let value: Tuple2 = serde_wasm_bindgen::from_value(value)
-            .map_err(|_| "point should be {x:number,y:number}")?;
-        Ok(value.into())
-    }
-}
-
-impl TryInto<MetaDataConfig> for WebMetaDataConfig {
-    type Error = &'static str;
-    fn try_into(self) -> Result<MetaDataConfig, Self::Error> {
-        let value: JsValue = self.into();
-        let value: MetaDataConfig = from_value(value).map_err(|_| {
-            "meta data should be {mass:number,isFixed:boolean,isTransparent:boolean,angle:number}"
-        })?;
-
-        Ok(value)
-    }
-}
+// #[wasm_bindgen]
+// extern "C" {
+//     #[wasm_bindgen(typescript_type = "Vector")]
+//     pub type WebVector;
+//     #[wasm_bindgen(typescript_type = "Point")]
+//     pub type WebPoint;
+// }
 
 #[wasm_bindgen]
 impl WebScene {
+    #[wasm_bindgen(js_name = "setGravity")]
+    pub fn set_gravity(&self, gravity: WebVector) {
+        let gravity = gravity.try_into().unwrap();
+        self.get_scene_mut().set_gravity(move |_| gravity)
+    }
+
     #[wasm_bindgen(js_name = "createRect")]
     pub fn create_rect(
-        &mut self,
+        &self,
         top_left_x: FloatNum,
         top_right_y: FloatNum,
         width: FloatNum,
         height: FloatNum,
-        meta_data: Option<WebMetaDataConfig>,
+        meta_data: Option<OptionalWebMeta>,
     ) -> u32 {
         let shape = Rect::new(top_left_x, top_right_y, width, height);
-
         self.create_element(shape, meta_data)
     }
 
@@ -230,7 +144,7 @@ impl WebScene {
         center_point_x: FloatNum,
         center_point_y: FloatNum,
         radius: FloatNum,
-        meta_data: Option<WebMetaDataConfig>,
+        meta_data: Option<OptionalWebMeta>,
     ) -> u32 {
         let shape = Circle::new((center_point_x, center_point_y), radius);
 
@@ -244,7 +158,7 @@ impl WebScene {
         y: FloatNum,
         edge_count: usize,
         radius: FloatNum,
-        meta_data: Option<WebMetaDataConfig>,
+        meta_data: Option<OptionalWebMeta>,
     ) -> u32 {
         let shape = RegularPolygon::new((x, y), edge_count, radius);
 
@@ -253,9 +167,9 @@ impl WebScene {
 
     #[wasm_bindgen(js_name = "createPolygon")]
     pub fn create_polygon(
-        &mut self,
+        &self,
         vertexes: Vec<WebPoint>,
-        meta_data: Option<WebMetaDataConfig>,
+        meta_data: Option<OptionalWebMeta>,
     ) -> u32 {
         let shape = ConcavePolygon::new(
             vertexes
@@ -272,7 +186,7 @@ impl WebScene {
         &mut self,
         start_point: WebPoint,
         end_point: WebPoint,
-        meta_data: Option<WebMetaDataConfig>,
+        meta_data: Option<OptionalWebMeta>,
     ) -> u32 {
         let start_point: Point = start_point.try_into().unwrap();
         let end_point: Point = end_point.try_into().unwrap();
@@ -282,109 +196,100 @@ impl WebScene {
         self.create_element(shape, meta_data)
     }
 
-    pub fn tick(&mut self, delta_t: f32) {
-        self.scene.update_elements_by_duration(delta_t);
+    pub fn tick(&self, delta_t: f32) {
+        self.get_scene_mut().update_elements_by_duration(delta_t);
     }
 
     #[wasm_bindgen(js_name = "cloneElement")]
-    pub fn clone_element(
-        &mut self,
-        element_id: ID,
-        meta_data: Option<WebMetaDataConfig>,
-    ) -> Option<u32> {
-        self.scene
+    pub fn clone_element(&self, element_id: ID, meta_data: Option<OptionalWebMeta>) -> Option<u32> {
+        self.get_scene_mut()
             .get_element(element_id)
             .map(|element| element.shape())
             .map(|shape| shape.self_clone())
             .map(|shape| {
                 let meta_data = meta_data.into();
-                let meta_data: MetaDataConfig = from_value(meta_data).unwrap_or(Default::default());
+                let meta_data: &Meta = &from_value(meta_data).unwrap_or_default();
 
                 let meta_builder: MetaBuilder = meta_data.into();
 
                 let element: ElementBuilder = ElementBuilder::new(shape, meta_builder, ());
 
-                self.scene.push_element(element)
+                self.get_scene_mut().push_element(element)
             })
     }
 
     #[wasm_bindgen(js_name = "hasElement")]
     pub fn has_element(&self, element_id: ID) -> bool {
-        self.scene.has_element(element_id)
+        self.get_scene_mut().has_element(element_id)
     }
 
     #[wasm_bindgen(js_name = "removeElement")]
-    pub fn remove_element(&mut self, element_id: ID) {
-        self.scene.remove_element(element_id);
+    pub fn remove_element(&self, element_id: ID) {
+        self.get_scene_mut().remove_element(element_id);
     }
 
-    #[wasm_bindgen(js_name = "updateElementPosition")]
-    pub fn update_element_position(
-        &mut self,
-        element_id: ID,
-        translate_vector: WebVector,
-        rotation: FloatNum,
-    ) {
-        if let Some(element) = self.scene.get_element_mut(element_id) {
-            let translate_vector: Vector = translate_vector.try_into().unwrap();
-            element.translate(&translate_vector);
-            element.rotate(rotation)
-        }
-    }
+    // #[wasm_bindgen(js_name = "updateElementPosition")]
+    // pub fn update_element_position(
+    //     &mut self,
+    //     element_id: ID,
+    //     translate_vector: WebVector,
+    //     rotation: FloatNum,
+    // ) {
+    //     if let Some(element) = self.get_scene_mut().get_element_mut(element_id) {
+    //         let translate_vector: Vector = translate_vector.try_into().unwrap();
+    //         element.translate(&translate_vector);
+    //         element.rotate(rotation)
+    //     }
+    // }
 
-    #[wasm_bindgen(js_name = "scaleElementByMovement")]
-    pub fn scale_element_by_movement(&mut self, element_id: ID, from: WebPoint, to: WebPoint) {
-        if let Some(element) = self.scene.get_element_mut(element_id) {
-            let from: Point = from.try_into().unwrap();
-            let to: Point = to.try_into().unwrap();
-            element.scale(&from, &to);
-        }
-    }
+    #[wasm_bindgen(js_name = "updateElementMeta")]
+    pub fn update_element_meta_data(&self, element_id: ID, meta_data: OptionalWebMeta) {
+        if let Some(element) = self.get_scene_mut().get_element_mut(element_id) {
+            let meta_data: Meta = meta_data.try_into().unwrap();
 
-    #[wasm_bindgen(js_name = "updateElementMetaData")]
-    pub fn update_element_meta_data(&mut self, element_id: ID, meta_data: WebMetaDataConfig) {
-        if let Some(element) = self.scene.get_element_mut(element_id) {
-            let meta_data: MetaDataConfig = meta_data.try_into().unwrap();
-
-            if let Some(mass) = meta_data.mass {
-                element.meta_mut().set_mass(|_| mass);
+            if let Some(mass) = meta_data.mass() {
+                element.meta_mut().set_mass(|_| *mass);
             }
 
-            if let Some(is_fixed) = meta_data.is_fixed {
-                element.meta_mut().mark_is_fixed(is_fixed);
+            if let Some(is_fixed) = meta_data.is_fixed() {
+                *element.meta_mut().is_fixed_mut() = *is_fixed;
             }
 
-            if let Some(is_transparent) = meta_data.is_transparent {
-                element.meta_mut().mark_is_transparent(is_transparent);
+            if let Some(is_transparent) = meta_data.is_transparent() {
+                *element.meta_mut().is_transparent_mut() = *is_transparent;
             };
 
-            if let Some(angle) = meta_data.angle {
-                element.meta_mut().set_angle(|_| angle);
+            // if let Some(angle) = meta_data.angle() {
+            //     element.meta_mut().set_angle(|_| *angle);
+            // }
+
+            if let Some(velocity) = meta_data.velocity() {
+                element.meta_mut().set_velocity(|_| (*velocity).into());
             }
         }
     }
 
     #[wasm_bindgen(js_name = "getElementMetaData")]
-    pub fn get_element_meta_data(&self, element_id: ID) -> Option<WebMetaData> {
-        self.scene
+    pub fn get_element_meta_data(&self, element_id: ID) -> Option<WebMeta> {
+        self.get_scene_mut()
             .get_element(element_id)
             .map(|element| element.meta())
             .map(|meta_data| {
-                let meta_data: MetaDataConfig = meta_data.into();
+                let meta_data: Meta = meta_data.into();
                 serde_wasm_bindgen::to_value(&meta_data).unwrap().into()
             })
     }
 
     #[wasm_bindgen(skip_typescript, js_name = "registerElementPositionUpdateCallback")]
-    pub fn register_element_position_update_callback(&mut self, callback: Function) -> u32 {
-        self.scene
+    pub fn register_element_position_update_callback(&self, callback: Function) -> u32 {
+        self.get_scene_mut()
             .register_element_position_update_callback(move |id, translate, rotation| {
                 let this = JsValue::null();
                 callback
                     .call3(
                         &this,
                         &JsValue::from(id),
-                        &JsValue::from(Tuple2::from(translate)),
+                        &JsValue::from(Tuple2::from(&translate)),
                         &JsValue::from_f64(rotation as f64),
                     )
                     .unwrap();
@@ -392,8 +297,8 @@ impl WebScene {
     }
 
     #[wasm_bindgen(js_name = "unregisterElementPositionUpdateCallback")]
-    pub fn unregister_element_position_update_callback(&mut self, callback_id: u32) {
-        self.scene
+    pub fn unregister_element_position_update_callback(&self, callback_id: u32) {
+        self.get_scene_mut()
             .unregister_element_position_update_callback(callback_id)
     }
 
@@ -402,15 +307,15 @@ impl WebScene {
      */
     #[wasm_bindgen(js_name = "getElementRawRustCode")]
     pub fn get_element_raw_rust_code(&self, element_id: ID) -> String {
-        let element = self.scene.get_element(element_id);
+        let element = self.get_scene_mut().get_element(element_id);
         element
             .map(snapshot::create_element_construct_code_snapshot)
-            .unwrap_or(String::new())
+            .unwrap_or_default()
     }
 
     #[wasm_bindgen(js_name = "isPointInsideElement")]
     pub fn is_point_inside_element(&self, x: FloatNum, y: FloatNum, element_id: ID) -> bool {
-        self.scene
+        self.get_scene_mut()
             .get_element(element_id)
             .map(|element| is_point_inside_shape((x, y), &mut element.shape().edge_iter()))
             .unwrap_or(false)
@@ -418,12 +323,15 @@ impl WebScene {
 
     #[wasm_bindgen(js_name = "getElementIds")]
     pub fn element_ids(&self) -> Vec<ID> {
-        self.scene.elements_iter().map(|ele| ele.id()).collect()
+        self.get_scene_mut()
+            .elements_iter()
+            .map(|ele| ele.id())
+            .collect()
     }
 
     #[wasm_bindgen(js_name = "getElementVertexes")]
     pub fn get_element_vertexes(&self, element_id: ID) -> Vec<WebPoint> {
-        self.scene
+        self.get_scene_mut()
             .get_element(element_id)
             .map(|element| {
                 element
@@ -444,28 +352,28 @@ impl WebScene {
                             todo!()
                         }
                         Edge::Line { start_point, .. } => {
-                            JsValue::from(Tuple2::from(*start_point)).into()
+                            JsValue::from(Tuple2::from(start_point)).into()
                         }
                     })
                     .collect::<Vec<WebPoint>>()
             })
-            .unwrap_or(Default::default())
+            .unwrap_or_default()
     }
 
     #[wasm_bindgen(js_name = "getElementCenterPoint")]
     pub fn get_element_center_point(&self, element_id: ID) -> Option<WebPoint> {
-        let element = self.scene.get_element(element_id);
+        let element = self.get_scene_mut().get_element(element_id);
         element
             .map(|element| element.shape().center_point())
-            .map(|point| point.into())
+            .map(|ref point| point.into())
             .map(|point: Tuple2| serde_wasm_bindgen::to_value(&point).unwrap().into())
     }
 
-    #[wasm_bindgen(skip_typescript, js_name = "forEachElementShape")]
-    pub fn for_each_element_shape(&self, callback: Function) {
+    #[wasm_bindgen(skip_typescript, js_name = "forEachElement")]
+    pub fn for_each_element(&self, callback: Function) {
         let this = JsValue::null();
 
-        self.scene.elements_iter().for_each(|element| {
+        self.get_scene_mut().elements_iter().for_each(|element| {
             let id = element.id();
             let mut result = Vec::new();
 
@@ -482,7 +390,7 @@ impl WebScene {
                         center_point,
                         radius,
                     } => {
-                        let value = serde_wasm_bindgen::to_value(&CircleElementShape {
+                        let circle_element_shape = CircleElementShape {
                             id,
                             center_point: Tuple2 {
                                 x: center_point.x(),
@@ -490,37 +398,37 @@ impl WebScene {
                             },
                             shape_type: "circle".into(),
                             radius,
-                        })
-                        .unwrap();
+                        };
 
-                        callback.call1(&this, &value).unwrap();
+                        let value = &JsValue::from(circle_element_shape);
+
+                        callback.call1(&this, value).unwrap();
                         return;
                     }
                     Edge::Line { start_point, .. } => {
-                        let point: Tuple2 = (*start_point).into();
+                        let point: Tuple2 = (start_point).into();
                         result.push(point);
                     }
                 }
             }
 
-            let element_shape = serde_wasm_bindgen::to_value(&PolygonElementShape {
+            let element_shape = JsValue::from(PolygonElementShape {
                 id,
                 shape_type: "polygon".into(),
                 vertexes: result,
-            })
-            .unwrap();
+            });
 
             callback.call1(&this, &element_shape).unwrap();
         });
     }
 
-    pub fn clear(&mut self) {
-        self.scene.clear();
+    pub fn clear(&self) {
+        self.get_scene_mut().clear();
     }
 
     #[wasm_bindgen(getter, js_name = "frameCount")]
     pub fn frame_count(&self) -> u64 {
-        self.scene.frame_count() as u64
+        self.get_scene_mut().frame_count() as u64
     }
 
     #[wasm_bindgen(js_name = "isElementCollide")]
@@ -530,26 +438,66 @@ impl WebScene {
         element_b_id: ID,
         query_from_manifold: Option<bool>,
     ) -> bool {
-        self.scene.is_element_collide(
+        self.get_scene_mut().is_element_collide(
             element_a_id,
             element_b_id,
             query_from_manifold.unwrap_or(true),
         )
     }
 
+    #[wasm_bindgen(js_name = "createPointConstraint")]
+    pub fn create_point_constraint(
+        &self,
+        element_id: ID,
+        element_point: WebPoint,
+        fixed_point: WebPoint,
+        constraint_config: OptionalWebJoinConstraintConfig,
+    ) -> Option<PointConstraint> {
+        let element_point: Point = element_point.try_into().unwrap();
+        let fixed_point: Point = fixed_point.try_into().unwrap();
+
+        let constraint_config: JoinConstraintConfig = constraint_config.try_into().unwrap();
+        let constraint_config_builder: JoinConstraintConfigBuilder = (&constraint_config).into();
+
+        let constraint_config: picea::prelude::JoinConstraintConfig =
+            constraint_config_builder.into();
+
+        self.get_scene_mut()
+            .create_point_constraint(
+                element_id,
+                element_point,
+                fixed_point,
+                constraint_config.clone(),
+            )
+            .map(move |id| PointConstraint::new(id, self.scene.clone()))
+    }
+
+    #[wasm_bindgen(js_name = "pointConstraints")]
+    pub fn point_constraints(&self) -> Vec<PointConstraint> {
+        self.get_scene_mut()
+            .point_constraints()
+            .map(|constraint| PointConstraint::new(constraint.id(), self.scene.clone()))
+            .collect()
+    }
+
     fn create_element(
-        &mut self,
+        &self,
         shape: impl Into<Box<dyn ShapeTraitUnion>>,
-        meta_data: Option<WebMetaDataConfig>,
+        meta_data: Option<OptionalWebMeta>,
     ) -> u32 {
         let meta_data: JsValue = meta_data.into();
-        let meta_data: MetaDataConfig = from_value(meta_data).unwrap_or(Default::default());
+        let meta_data: &Meta = &from_value(meta_data).unwrap_or_default();
 
         let meta_builder: MetaBuilder = meta_data.into();
 
         let element = ElementBuilder::new(shape, meta_builder, ());
 
-        self.scene.push_element(element)
+        self.get_scene_mut().push_element(element)
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn get_scene_mut(&self) -> &mut Scene {
+        unsafe { &mut *self.scene.get() }
     }
 }
 
@@ -601,6 +549,6 @@ pub fn is_point_valid_add_into_polygon(point: WebPoint, vertexes: Vec<WebPoint>)
 #[wasm_bindgen(js_name = "createScene")]
 pub fn create_scene() -> WebScene {
     WebScene {
-        scene: Scene::new(),
+        scene: Rc::new(UnsafeCell::new(Scene::new())),
     }
 }
