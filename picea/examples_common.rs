@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
-use std::fs;
 use std::ops::{Deref, DerefMut};
 use std::time::{self, UNIX_EPOCH};
 
-use derive_builder::Builder;
-use picea::constraints::{ConstraintObject, JoinConstraintConfigBuilder};
+use macro_tools::Builder;
+use picea::constraints::JoinConstraintConfigBuilder;
 use picea::math::edge::Edge;
 use picea::math::point::Point;
 use picea::math::vector::Vector;
@@ -20,25 +19,17 @@ use speedy2d::window::{MouseScrollDistance, VirtualKeyCode, WindowHandler, Windo
 use speedy2d::Graphics2D;
 
 #[derive(Builder)]
-#[builder(pattern = "immutable")]
 pub struct Config {
-    #[builder(default = "10.0")]
+    #[default = 10.0]
     scale: FloatNum,
-    #[builder(default = "false")]
     draw_velocity: bool,
-    #[builder(default = "false")]
     is_default_paused: bool,
-    #[builder(default = "true")]
+    #[default = true]
     draw_center_point: bool,
-    #[builder(default = "false")]
     draw_join_constraints: bool,
-    #[builder(default = "false")]
     draw_point_constraints: bool,
-    #[builder(default = "false")]
     enable_mouse_constraint: bool,
-    #[builder(default = "false")]
     draw_contact_point_pair: bool,
-    #[builder(default = "false")]
     frame_by_frame: bool,
 }
 
@@ -140,9 +131,7 @@ where
                     JoinConstraintConfigBuilder::default()
                         .frequency(1.0)
                         .damping_ratio(1.0)
-                        .hard(false)
-                        .build()
-                        .unwrap(),
+                        .hard(false),
                 )
             });
 
@@ -154,11 +143,6 @@ where
                 *point_constraint.fixed_point_mut() = current_mouse_pos
             };
         }
-    }
-
-    pub fn set_record_handler(&mut self, record_handler: (String, Box<GetRecordFn<T, FloatNum>>)) {
-        self.records.insert(record_handler.0.clone(), vec![]);
-        self.record_handler.push(record_handler);
     }
 }
 
@@ -208,37 +192,6 @@ where
                     {
                         println!("{}", code);
                     }
-
-                    if let Some(element) = self.scene.get_element(5) {
-                        let mut shape = element.origin_shape().self_clone();
-                        let center_point = shape.center_point();
-                        let points = shape
-                            .edge_iter()
-                            .map(|edge| match edge {
-                                Edge::Line { start_point, .. } => start_point,
-                                _ => unreachable!(),
-                            })
-                            .collect::<Vec<_>>();
-                        let angle = element.meta().angle();
-                        let position_translate = element.meta().position_translate();
-
-                        dbg!(points, center_point, angle, position_translate);
-
-                        shape.rotate(&shape.center_point(), -angle);
-
-                        shape.translate(position_translate);
-
-                        let points = shape
-                            .edge_iter()
-                            .map(|edge| match edge {
-                                Edge::Line { start_point, .. } => start_point,
-                                _ => unreachable!(),
-                            })
-                            .collect::<Vec<_>>();
-                        dbg!(points);
-                    }
-                    // fs::write("recors.json", serde_json::to_string(&self.records).unwrap())
-                    //     .unwrap();
                 }
                 VirtualKeyCode::C => {
                     self.scene.silent();
@@ -410,7 +363,7 @@ where
         }
 
         self.scene.elements_iter().for_each(|element| {
-            let angle = element.meta().angle();
+            let angle = element.meta().total_transform().rotation();
             for edge in element.shape().edge_iter() {
                 match edge {
                     Edge::Arc {
@@ -440,7 +393,7 @@ where
             self.scene.elements_iter().for_each(|element| {
                 draw_helper.draw_line(
                     &element.center_point(),
-                    &(element.center_point() + element.meta().velocity() * 100.),
+                    &(element.center_point() + *element.meta().velocity() * 100.),
                     Color::RED,
                 );
             });
@@ -481,38 +434,38 @@ where
                 .for_each(|contact_info| {
                     let (object_id_a, object_id_b) = contact_info.object_id_pair();
 
-                    // draw_helper.draw_circle(contact_info.point_a(), 0.3, Color::MAGENTA);
+                    draw_helper.draw_circle(contact_info.point_a(), 0.3, Color::MAGENTA);
                     // draw_helper.draw_line(
                     //     contact_info.point_a(),
                     //     &(contact_info.point_a() + &(contact_info.normal_toward_a() * 2.)),
                     //     Color::BLACK,
                     // );
 
-                    if let Some(element) = self.scene.get_element(object_id_a) {
-                        let v = element.compute_point_velocity(contact_info.point_a());
+                    // if let Some(element) = self.scene.get_element(object_id_a) {
+                    //     let v = element.compute_point_velocity(contact_info.point_a());
 
-                        draw_helper.draw_line(
-                            contact_info.point_a(),
-                            &(contact_info.point_a() + &(v * 100.)),
-                            Color::RED,
-                        );
-                    };
+                    //     draw_helper.draw_line(
+                    //         contact_info.point_a(),
+                    //         &(contact_info.point_a() + &(v * 100.)),
+                    //         Color::RED,
+                    //     );
+                    // };
 
-                    // draw_helper.draw_circle(contact_info.point_b(), 0.3, Color::MAGENTA);
+                    draw_helper.draw_circle(contact_info.point_b(), 0.3, Color::MAGENTA);
                     // draw_helper.draw_line(
                     //     contact_info.point_b(),
                     //     &(contact_info.point_b() + &(contact_info.normal_toward_a() * -2.)),
                     //     Color::BLACK,
                     // );
 
-                    if let Some(element) = self.scene.get_element(object_id_b) {
-                        let v = element.compute_point_velocity(contact_info.point_b());
-                        draw_helper.draw_line(
-                            contact_info.point_b(),
-                            &(contact_info.point_b() + &(v * 100.)),
-                            Color::BLUE,
-                        );
-                    };
+                    // if let Some(element) = self.scene.get_element(object_id_b) {
+                    //     let v = element.compute_point_velocity(contact_info.point_b());
+                    //     draw_helper.draw_line(
+                    //         contact_info.point_b(),
+                    //         &(contact_info.point_b() + &(v * 100.)),
+                    //         Color::BLUE,
+                    //     );
+                    // };
                 });
         }
 
@@ -531,7 +484,7 @@ pub fn run_window<T: Default + Clone + 'static>(
 
     let window = Window::new_centered(title, (1920, 1080)).unwrap();
 
-    let config = config.build().unwrap();
+    let config: Config = config.into();
 
     window.run_loop(Handler {
         scene: Default::default(),

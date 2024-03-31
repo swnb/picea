@@ -1,4 +1,5 @@
 use common::{ConfigBuilder, Handler};
+use picea::prelude::*;
 use picea::{element::ElementBuilder, meta::MetaBuilder, scene::Scene, shape::circle::Circle};
 
 #[path = "../examples_common.rs"]
@@ -9,6 +10,8 @@ fn init_elements(scene: &mut Scene, _: &mut Handler<()>) {
         .context_mut()
         .constraint_parameters
         .skip_friction_constraints = true;
+
+    scene.context_mut().constraint_parameters.split_position_fix = true;
 
     scene.context_mut().constraint_parameters.max_allow_permeate = 0.1;
 
@@ -25,11 +28,11 @@ fn init_elements(scene: &mut Scene, _: &mut Handler<()>) {
     const BOX_COUNT: usize = 2;
 
     for i in 0..BOX_COUNT {
-        let mut meta_builder = MetaBuilder::new(1.);
+        let mut meta_builder = MetaBuilder::default();
         if i == 0 {
             meta_builder = meta_builder.velocity((10., 0.));
         } else {
-            meta_builder = meta_builder.velocity((2., 0.));
+            meta_builder = meta_builder.velocity((0., 0.));
         }
         let element_id = scene.push_element(ElementBuilder::new(shape.clone(), meta_builder, ()));
         element_ids.push(element_id);

@@ -26,7 +26,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
                 (start_x + row as f32 * GAP, start_y + col as f32 * GAP),
                 0.3,
             );
-            let element = ElementBuilder::new(shape, MetaBuilder::new(1.), ());
+            let element = ElementBuilder::new(shape, MetaBuilder::default(), ());
             map[row][col] = scene.push_element(element);
         }
     });
@@ -43,9 +43,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
                 JoinConstraintConfigBuilder::default()
                     .damping_ratio(0.5)
                     .frequency(PI())
-                    .distance(GAP)
-                    .build()
-                    .unwrap(),
+                    .distance(GAP),
             );
         }
     });
@@ -72,9 +70,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
                     JoinConstraintConfigBuilder::default()
                         .damping_ratio(0.5)
                         .frequency(PI())
-                        .distance(GAP)
-                        .build()
-                        .unwrap(),
+                        .distance(GAP),
                 );
             }
         };
@@ -93,7 +89,8 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     scene.push_element(ElementBuilder::new(
         Circle::new((60., 60.), 10.),
-        MetaBuilder::new(100.)
+        MetaBuilder::new()
+            .mass(100.)
             .velocity((0., -30.))
             .is_ignore_gravity(true),
         (),
@@ -101,7 +98,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     scene.push_element(ElementBuilder::new(
         Line::new((10., 100.), (100., 100.)),
-        MetaBuilder::new(100.).is_fixed(true),
+        MetaBuilder::new().mass(100.).is_fixed(true),
         (),
     ));
 }

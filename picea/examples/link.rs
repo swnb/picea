@@ -1,11 +1,7 @@
 use common::ConfigBuilder;
 use picea::{
-    constraints::{JoinConstraintConfig, JoinConstraintConfigBuilder},
-    element::ElementBuilder,
-    math::PI,
-    meta::MetaBuilder,
-    scene::Scene,
-    shape::{polygon::Square, GeometryTransform},
+    constraints::JoinConstraintConfig, element::ElementBuilder, meta::MetaBuilder, prelude::*,
+    scene::Scene, shape::Square,
 };
 
 #[path = "../examples_common.rs"]
@@ -23,7 +19,7 @@ fn init_elements(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     for _ in 0..BOX_COUNT {
         let element_id =
-            scene.push_element(ElementBuilder::new(shape.clone(), MetaBuilder::new(1.), ()));
+            scene.push_element(ElementBuilder::new(shape.clone(), MetaBuilder::new(), ()));
         element_ids.push(element_id);
         shape.translate(&(20., 0.).into());
     }

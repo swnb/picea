@@ -14,7 +14,10 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     scene.push_element(ElementBuilder::new(
         ground_bottom,
-        MetaBuilder::new(100.).is_fixed(true).friction(0.8),
+        MetaBuilder::new()
+            .mass(100.)
+            .is_fixed(true)
+            .factor_friction(0.8),
         (),
     ));
 
@@ -22,7 +25,10 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     for level in 0..MAX_LEVEL {
         let max_col = level;
         for col in 0..max_col {
-            let mut meta = MetaBuilder::new(10.).friction(1.0).factor_restitution(0.);
+            let mut meta = MetaBuilder::new()
+                .mass(10.)
+                .factor_friction(1.0)
+                .factor_restitution(0.);
             if level == 9 {
                 meta = meta.is_fixed(true);
             }

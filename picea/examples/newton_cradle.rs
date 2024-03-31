@@ -1,21 +1,24 @@
+use std::ops::{Deref, DerefMut};
+
 use common::ConfigBuilder;
 use picea::{
     constraints::JoinConstraintConfigBuilder,
     element::ElementBuilder,
     math::{vector::Vector, FloatNum},
     meta::MetaBuilder,
+    prelude::*,
     scene::Scene,
-    shape::circle::Circle,
+    shape::{circle::Circle, ConstRegularPolygon},
 };
 
 #[path = "../examples_common.rs"]
 mod common;
 
 fn init_elements(scene: &mut Scene, _: &mut common::Handler<()>) {
-    scene
-        .context_mut()
-        .constraint_parameters
-        .skip_friction_constraints = true;
+    // scene
+    //     .context_mut()
+    //     .constraint_parameters
+    //     .skip_friction_constraints = true;
 
     scene.context_mut().constraint_parameters.max_allow_permeate = 0.01;
     scene.context_mut().constraint_parameters.factor_restitution = 1.;
@@ -28,17 +31,18 @@ fn init_elements(scene: &mut Scene, _: &mut common::Handler<()>) {
     const SIZE: FloatNum = 10.;
 
     let mut shape = Circle::new((start_x, start_y), SIZE);
+    // let mut shape = ConstRegularPolygon::<4>::new((start_x, start_y), SIZE);
 
     let mut element_ids = vec![];
 
     const BOX_COUNT: usize = 6;
 
     for i in 0..BOX_COUNT {
-        let mut meta_builder = MetaBuilder::new(1.);
+        let mut meta_builder = MetaBuilder::new();
         if i == 0 {
             meta_builder = meta_builder.angle_velocity(1.);
         } else if i == (BOX_COUNT - 1) {
-            // meta_builder = meta_builder.velocity((10., 0.));
+            meta_builder = meta_builder.velocity((10., 0.));
         }
         let element_id = scene.push_element(ElementBuilder::new(shape.clone(), meta_builder, ()));
         element_ids.push(element_id);
@@ -60,9 +64,7 @@ fn init_elements(scene: &mut Scene, _: &mut common::Handler<()>) {
                 p,
                 JoinConstraintConfigBuilder::default()
                     .distance(40.)
-                    .hard(true)
-                    .build()
-                    .unwrap(),
+                    .hard(true),
             );
         });
 }
@@ -77,9 +79,9 @@ fn main() {
         .draw_center_point(true)
         .draw_join_constraints(true)
         .draw_point_constraints(true)
-        .enable_mouse_constraint(true);
-        // .draw_contact_point_pair(true);
-        // .draw_velocity(true);
+        .enable_mouse_constraint(true)
+        .draw_contact_point_pair(true);
+    // .draw_velocity(true);
 
     common::run_window("point constraint - link", config, init_elements, update)
 }

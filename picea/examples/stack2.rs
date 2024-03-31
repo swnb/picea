@@ -3,7 +3,7 @@ use picea::{
     element::ElementBuilder,
     meta::MetaBuilder,
     scene::Scene,
-    shape::{line::Line, polygon::Rect},
+    shape::{line::Line, rect::Rect},
 };
 
 #[path = "../examples_common.rs"]
@@ -29,9 +29,9 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     scene.push_element(ElementBuilder::new(
         ground_bottom,
-        MetaBuilder::new(1.)
+        MetaBuilder::new()
             .is_fixed(true)
-            .friction(1.8)
+            .factor_friction(1.8)
             .factor_restitution(2.0),
         (),
     ));
@@ -43,7 +43,9 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     let mut start_x = 100.;
 
     for level in 0..MAX_LEVEL {
-        let mut meta = MetaBuilder::new(0.8).friction(1.).factor_restitution(1.0);
+        let mut meta = MetaBuilder::new()
+            .factor_friction(1.)
+            .factor_restitution(1.0);
         if level == (MAX_LEVEL - 1) {
             meta = meta.is_fixed(true);
         }

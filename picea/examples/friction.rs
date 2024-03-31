@@ -18,7 +18,7 @@ fn init(scene: &mut Scene<Data>, handler: &mut common::Handler<Data>) {
 
     scene.push_element(ElementBuilder::new(
         incline,
-        MetaBuilder::new(1.).is_fixed(true).friction(0.1),
+        MetaBuilder::new().is_fixed(true).factor_friction(0.1),
         Default::default(),
     ));
 }
@@ -36,7 +36,9 @@ fn update(
     if scene.total_duration() - previous_created_time > 2. {
         let element = ElementBuilder::new(
             (4, (30., 10.), 5.),
-            MetaBuilder::new(10.).friction((((scene.total_duration()) as FloatNum) / 1.) * 0.001),
+            MetaBuilder::new()
+                .mass(10.)
+                .factor_friction((((scene.total_duration()) as FloatNum) / 1.) * 0.001),
             Default::default(),
         );
 
