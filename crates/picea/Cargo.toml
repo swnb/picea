@@ -10,7 +10,7 @@ path = "src/lib.rs"
 
 
 [dependencies]
-macro-tools = { path = "../crates/macro-tools" }
+macro-tools = { path = "../macro-tools" }
 
 [dev-dependencies]
 rand = "0.8.5"
