@@ -246,7 +246,6 @@ pub fn fields(input: TokenStream) -> TokenStream {
                 if meta.path.is_ident("vis") {
                     let content;
                     parenthesized!(content in meta.input);
-                    eprintln!("{}", content.to_string());
                     let value = content.parse::<Visibility>()?;
                     field_vis = value;
                 }
@@ -274,7 +273,6 @@ pub fn fields(input: TokenStream) -> TokenStream {
                 if meta.path.is_ident("vis") {
                     let content;
                     parenthesized!(content in meta.input);
-                    eprintln!("{}", content.to_string());
                     let value = content.parse::<Visibility>()?;
                     field_vis = value;
                 }
