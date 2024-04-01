@@ -171,7 +171,7 @@ impl<T: Clone> Element<T> {
         let path = *self.meta().velocity() * delta_time;
         let rad = self.meta().angle_velocity() * delta_time;
 
-        self.transform(&(path, -rad).into());
+        self.transform(&(path, rad).into());
 
         (path, rad).into()
     }
