@@ -21,8 +21,8 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
 use crate::common::{
-    JoinConstraintConfig, Meta, OptionalWebJoinConstraintConfig, OptionalWebMeta, PointConstraint,
-    Tuple2, WebMeta, WebPoint, WebVector,
+    JoinConstraint, JoinConstraintConfig, Meta, OptionalWebJoinConstraintConfig, OptionalWebMeta,
+    PointConstraint, Tuple2, WebMeta, WebPoint, WebVector,
 };
 
 #[wasm_bindgen(js_name = "setPanicConsoleHook")]
@@ -196,7 +196,7 @@ impl WebScene {
     }
 
     pub fn tick(&self, delta_t: f32) {
-        self.get_scene_mut().update_elements_by_duration(delta_t);
+        self.get_scene_mut().tick(delta_t);
     }
 
     #[wasm_bindgen(js_name = "cloneElement")]
@@ -247,7 +247,7 @@ impl WebScene {
             let meta_data: Meta = meta_data.try_into().unwrap();
 
             if let Some(mass) = meta_data.mass() {
-                element.meta_mut().set_mass(|_| *mass);
+                element.meta_mut().set_mass(*mass);
             }
 
             if let Some(is_fixed) = meta_data.is_fixed() {
@@ -263,7 +263,7 @@ impl WebScene {
             // }
 
             if let Some(velocity) = meta_data.velocity() {
-                element.meta_mut().set_velocity(|_| (*velocity).into());
+                *element.meta_mut().velocity_mut() = (*velocity).into();
             }
         }
     }
@@ -477,6 +477,43 @@ impl WebScene {
         self.get_scene_mut()
             .point_constraints()
             .map(|constraint| PointConstraint::new(constraint.id(), self.scene.clone()))
+            .collect()
+    }
+
+    #[wasm_bindgen(js_name = "createJoinConstraint")]
+    pub fn create_join_constraint(
+        &self,
+        element_a_id: ID,
+        element_a_point: WebPoint,
+        element_b_id: ID,
+        element_b_point: WebPoint,
+        constraint_config: OptionalWebJoinConstraintConfig,
+    ) -> Option<JoinConstraint> {
+        let element_a_point: Point = element_a_point.try_into().unwrap();
+        let element_b_point: Point = element_b_point.try_into().unwrap();
+
+        let constraint_config: JoinConstraintConfig = constraint_config.try_into().unwrap();
+        let constraint_config_builder: JoinConstraintConfigBuilder = (&constraint_config).into();
+
+        let constraint_config: picea::prelude::JoinConstraintConfig =
+            constraint_config_builder.into();
+
+        self.get_scene_mut()
+            .create_join_constraint(
+                element_a_id,
+                element_a_point,
+                element_b_id,
+                element_b_point,
+                constraint_config.clone(),
+            )
+            .map(move |id| JoinConstraint::new(id, self.scene.clone()))
+    }
+
+    #[wasm_bindgen(js_name = "joinConstraints")]
+    pub fn join_constraints(&self) -> Vec<JoinConstraint> {
+        self.get_scene_mut()
+            .join_constraints()
+            .map(|constraint| JoinConstraint::new(constraint.id(), self.scene.clone()))
             .collect()
     }
 
