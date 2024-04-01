@@ -52,6 +52,7 @@ pub enum ElementShapeEnum {
 pub struct PolygonElementShape {
     id: ID,
     shape_type: String, // always polygon
+    center_point: Tuple2,
     vertexes: Vec<Tuple2>,
 }
 
@@ -65,6 +66,11 @@ impl PolygonElementShape {
     #[wasm_bindgen(js_name = "shapeType", getter)]
     pub fn shape_type(&self) -> String {
         self.shape_type.to_owned()
+    }
+
+    #[wasm_bindgen(js_name = "centerPoint", getter)]
+    pub fn center_point(&self) -> JsValue {
+        self.center_point.into()
     }
 
     pub fn vertexes(&self) -> Vec<WebPoint> {
@@ -96,11 +102,12 @@ impl CircleElementShape {
         self.shape_type.to_owned()
     }
 
+    #[wasm_bindgen(getter)]
     pub fn radius(&self) -> FloatNum {
         self.radius
     }
 
-    #[wasm_bindgen(js_name = "centerPoint")]
+    #[wasm_bindgen(js_name = "centerPoint", getter)]
     pub fn center_point(&self) -> JsValue {
         JsValue::from(self.center_point)
     }
@@ -108,14 +115,6 @@ impl CircleElementShape {
 
 #[wasm_bindgen(typescript_custom_section)]
 const _: &str = include_str!("./type.d.ts");
-
-// #[wasm_bindgen]
-// extern "C" {
-//     #[wasm_bindgen(typescript_type = "Vector")]
-//     pub type WebVector;
-//     #[wasm_bindgen(typescript_type = "Point")]
-//     pub type WebPoint;
-// }
 
 #[wasm_bindgen]
 impl WebScene {
@@ -415,6 +414,7 @@ impl WebScene {
             let element_shape = JsValue::from(PolygonElementShape {
                 id,
                 shape_type: "polygon".into(),
+                center_point: (&element.center_point()).into(),
                 vertexes: result,
             });
 

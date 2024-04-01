@@ -19,11 +19,11 @@ type JoinConstraintConfigPartial = Partial<JoinConstraintConfig>
 
 type Shape = {
   readonly id: number
+  readonly centerPoint: Point
 } & (
   | {
       readonly shapeType: "circle"
-      centerPoint: () => Point
-      radius: () => number
+      radius: number
     }
   | {
       readonly shapeType: "polygon"
