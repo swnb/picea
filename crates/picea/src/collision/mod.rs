@@ -768,7 +768,13 @@ where
 {
     let mut minkowski = Minkowski::new(simplex);
 
-    while minkowski.expand(&compute_support_point).is_ok() {}
+    const MAX_ITER_COUNT: usize = 10;
+    // avoid dead loop
+    let mut current_iter_count = 0;
+
+    while minkowski.expand(&compute_support_point).is_ok() && current_iter_count <= MAX_ITER_COUNT {
+        current_iter_count += 1;
+    }
 
     minkowski.find_min_edge()
 }
