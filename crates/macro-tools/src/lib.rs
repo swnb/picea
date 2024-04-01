@@ -537,13 +537,6 @@ pub fn wasm_config(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
 
-            impl #ident {
-                // heavy copy
-                pub fn transform_to_origin_bind_struct(&self) -> picea::prelude::#target {
-                    let builder: picea::prelude::#builder_ident = self.into();
-                    builder.into()
-                }
-            }
         )
     });
 
