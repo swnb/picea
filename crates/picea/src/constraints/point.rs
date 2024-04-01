@@ -29,6 +29,7 @@ pub struct PointConstraint<Obj: ConstraintObject> {
     mass_effective: FloatNum,
     obj: *mut Obj,
     #[r]
+    #[w]
     config: JoinConstraintConfig,
 }
 

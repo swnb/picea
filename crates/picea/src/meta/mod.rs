@@ -48,13 +48,13 @@ impl Transform {
 #[derive(Clone, Fields, Builder)]
 #[r]
 pub struct Meta {
-    #[w(reducer)]
+    #[w]
     velocity: Speed,
     #[shared(skip)]
     mass: ValueWithInv,
     #[shared(skip)]
     moment_of_inertia: ValueWithInv,
-    #[w(reducer)]
+    #[w]
     angle_velocity: FloatNum,
 
     #[w(vis(pub(crate)))]
@@ -113,8 +113,8 @@ impl Meta {
         self.mass.inv()
     }
 
-    pub fn set_mass(&mut self, mut reducer: impl FnMut(Mass) -> Mass) -> &mut Self {
-        self.mass.set_value(reducer(*self.mass));
+    pub fn set_mass(&mut self, mass: FloatNum) -> &mut Self {
+        self.mass.set_value(mass);
         self
     }
 
@@ -159,8 +159,8 @@ impl Meta {
 
     pub fn mark_is_sleeping(&mut self, is_sleeping: bool) {
         if is_sleeping {
-            self.set_velocity(|_| (0., 0.).into());
-            self.set_angle_velocity(|_| 0.);
+            *self.velocity_mut() = (0., 0.).into();
+            *self.angle_velocity_mut() = 0.;
         }
         self.is_sleeping = is_sleeping;
     }
@@ -174,13 +174,11 @@ impl Meta {
 
         let inv_mass = self.inv_mass();
 
-        self.set_velocity(|pre_velocity| pre_velocity + impulse * inv_mass);
+        *self.velocity_mut() += impulse * inv_mass;
 
         let inv_moment_of_inertia = self.inv_moment_of_inertia();
 
-        self.set_angle_velocity(|pre_angle_velocity| {
-            pre_angle_velocity + (r ^ impulse) * inv_moment_of_inertia
-        });
+        *self.angle_velocity_mut() += (r ^ impulse) * inv_moment_of_inertia
     }
 
     pub fn compute_kinetic_energy(&self) -> f32 {

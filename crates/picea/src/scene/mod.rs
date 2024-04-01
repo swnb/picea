@@ -119,7 +119,7 @@ impl<T: Clone + Default> Scene<T> {
         self.total_duration
     }
 
-    pub fn update_elements_by_duration(&mut self, delta_time: f32) {
+    pub fn tick(&mut self, delta_time: f32) {
         global_context_mut()
             .merge_shape_transform
             .store(true, Ordering::Relaxed);
@@ -451,8 +451,8 @@ impl<T: Clone + Default> Scene<T> {
         self.elements_iter_mut()
             .map(|element| element.meta_mut())
             .for_each(|meta| {
-                meta.set_angle_velocity(|_| 0.);
-                meta.set_velocity(|_| Default::default());
+                *meta.angle_velocity_mut() = 0.;
+                *meta.velocity_mut() = Default::default();
             })
     }
 
@@ -498,9 +498,7 @@ impl<T: Clone + Default> Scene<T> {
             .filter(|element| !element.meta().is_ignore_gravity())
             .for_each(|element| {
                 if enable_gravity {
-                    element
-                        .meta_mut()
-                        .set_velocity(|pre| pre + gravity * delta_time);
+                    *element.meta_mut().velocity_mut() += gravity * delta_time;
                 }
             });
     }

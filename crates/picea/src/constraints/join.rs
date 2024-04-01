@@ -1,3 +1,5 @@
+use macro_tools::Fields;
+
 use crate::{
     element::ID,
     math::{point::Point, vector::Vector, FloatNum},
@@ -9,7 +11,9 @@ use super::{
     JoinConstraintConfig,
 };
 
+#[derive(Fields)]
 pub struct JoinConstraint<Obj: ConstraintObject> {
+    #[r]
     id: u32,
     obj_a_id: ID,
     obj_b_id: ID,
@@ -18,9 +22,8 @@ pub struct JoinConstraint<Obj: ConstraintObject> {
     move_point_with_a: Point,
     move_point_with_b: Point,
     total_lambda: FloatNum,
-    // force_soft_factor: FloatNum,
-    // position_fix_factor: FloatNum,
-    // distance must large than or equal to zero
+    #[r]
+    #[w]
     config: JoinConstraintConfig,
     position_bias: FloatNum,
     soft_part: FloatNum,
@@ -55,10 +58,6 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
             soft_part: 0.,
             inv_mass_effective: 0.,
         }
-    }
-
-    pub fn id(&self) -> u32 {
-        self.id
     }
 
     pub fn obj_id_pair(&self) -> (ID, ID) {
