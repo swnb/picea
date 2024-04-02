@@ -8,7 +8,7 @@ use picea_macro_tools::{Deref, Shape};
 use crate::{
     element::ComputeMomentOfInertia,
     impl_shape_traits_use_deref,
-    math::{PI, TAU},
+    math::{pi, tau},
     meta::Mass,
     prelude::*,
 };
@@ -18,7 +18,7 @@ use super::{
         compute_polygon_approximate_center_point, rotate_polygon, translate_polygon,
         CenterPointHelper, VerticesIter, VerticesToEdgeIter,
     },
-    CenterPoint, Edge, EdgeIterable, GeometryTransformer, Transform,
+    CenterPoint, Edge, EdgeIterable, GeometryTransformer,
 };
 
 macro_rules! impl_shape_trait_for {
@@ -160,7 +160,7 @@ pub struct ConstRegularPolygon<const N: usize> {
 impl<const N: usize> ConstRegularPolygon<N> {
     const EDGE_COUNT: usize = N;
 
-    const EDGE_ANGLE: FloatNum = TAU() / (N as FloatNum);
+    const EDGE_ANGLE: FloatNum = tau() / (N as FloatNum);
 
     const IS_EVENT: bool = Self::EDGE_COUNT & 1 == 0;
 
@@ -202,7 +202,7 @@ impl<const N: usize> ComputeMomentOfInertia for ConstRegularPolygon<N> {
 
         0.5 * m
             * radius.powf(2.)
-            * (1. - (2. / 3. * (PI() * (Self::EDGE_COUNT as f32).recip()).sin().powf(2.)))
+            * (1. - (2. / 3. * (pi() * (Self::EDGE_COUNT as f32).recip()).sin().powf(2.)))
     }
 }
 
@@ -221,7 +221,7 @@ impl RegularPolygon {
     pub fn new(center_point: impl Into<Point>, edge_count: usize, radius: f32) -> Self {
         let mut vertices: Vec<Point> = Vec::with_capacity(edge_count);
 
-        let edge_angle = TAU() * (edge_count as f32).recip();
+        let edge_angle = tau() * (edge_count as f32).recip();
 
         let mut point: Vector<_> = (0., radius).into();
         vertices.push(point.to_point());
@@ -268,6 +268,6 @@ impl ComputeMomentOfInertia for RegularPolygon {
 
         let edge_count = self.inner_polygon.edge_count() as f32;
 
-        0.5 * m * radius.powf(2.) * (1. - (2. / 3. * (PI() * edge_count.recip()).sin().powf(2.)))
+        0.5 * m * radius.powf(2.) * (1. - (2. / 3. * (pi() * edge_count.recip()).sin().powf(2.)))
     }
 }

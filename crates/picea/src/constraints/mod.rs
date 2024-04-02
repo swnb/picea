@@ -2,7 +2,7 @@ use picea_macro_tools::{Builder, Fields};
 
 use crate::{
     element::ID,
-    math::{point::Point, vector::Vector, FloatNum, TAU},
+    math::{point::Point, tau, vector::Vector, FloatNum},
     meta::Meta,
 };
 
@@ -55,7 +55,7 @@ pub fn compute_soft_constraints_params(
     frequency: FloatNum,
     delta_time: FloatNum,
 ) -> (FloatNum, FloatNum) {
-    let spring_constant = mass * (TAU() * frequency).powf(2.);
+    let spring_constant = mass * (tau() * frequency).powf(2.);
     let damping_coefficient = 2. * mass * damping_ratio * frequency;
 
     let tmp1 = delta_time * spring_constant; // h * k

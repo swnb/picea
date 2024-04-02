@@ -778,6 +778,7 @@ macro_rules! impl_shape_traits_use_deref {
     };
 }
 
+#[cfg(test)]
 mod tests {
     use crate::math::{point::Point, vector::Vector, FloatNum};
 

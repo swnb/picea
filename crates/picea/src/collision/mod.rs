@@ -4,10 +4,11 @@ use crate::{
     math::{
         axis::AxisDirection,
         num::is_same_sign,
+        pi,
         point::Point,
         segment::Segment,
         vector::{Vector, Vector3},
-        FloatNum, PI,
+        FloatNum,
     },
     shape::{CenterPoint, NearestPoint},
 };
@@ -401,7 +402,7 @@ where
 
     let mut vector: Vector = (0., 1.).into();
     let mut result = Vec::with_capacity(SAMPLE_SIZE);
-    let rad = PI() * 2. * (SAMPLE_SIZE as FloatNum).recip();
+    let rad = pi() * 2. * (SAMPLE_SIZE as FloatNum).recip();
     for _ in 0..SAMPLE_SIZE {
         vector.affine_transformation_rotate_self(rad);
         let p = compute_support_point(vector);

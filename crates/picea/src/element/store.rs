@@ -16,8 +16,6 @@ use std::{
 };
 
 struct StoredElement<D: Clone> {
-    // TODO
-    is_deleted: bool,
     element: UnsafeCell<Element<D>>,
 }
 
@@ -91,7 +89,6 @@ impl<T: Clone> ElementStore<T> {
     pub fn push(&mut self, element: Element<T>) {
         let id = element.id;
         let element = StoredElement {
-            is_deleted: false,
             element: UnsafeCell::new(element),
         };
         let element = Rc::new(element);

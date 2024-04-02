@@ -6,7 +6,7 @@ use common::{ConfigBuilder, Handler};
 use picea::{
     constraints::JoinConstraintConfigBuilder,
     element::ElementBuilder,
-    math::PI,
+    math::pi,
     meta::MetaBuilder,
     scene::Scene,
     shape::{circle::Circle, line::Line},
@@ -42,7 +42,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
                 center_point,
                 JoinConstraintConfigBuilder::default()
                     .damping_ratio(0.5)
-                    .frequency(PI())
+                    .frequency(pi())
                     .distance(GAP),
             );
         }
@@ -69,7 +69,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
                     center_point_b,
                     JoinConstraintConfigBuilder::default()
                         .damping_ratio(0.5)
-                        .frequency(PI())
+                        .frequency(pi())
                         .distance(GAP),
                 );
             }

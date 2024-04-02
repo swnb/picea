@@ -156,13 +156,6 @@ impl<T: Clone> Element<T> {
         self.shape.sync_transform(transform);
     }
 
-    #[inline]
-    pub fn tick(&mut self, secs: f32) {
-        if !self.meta.is_fixed() {
-            todo!();
-        }
-    }
-
     // simple integrate position by velocity and angle_velocity;
     pub fn integrate_position(&mut self, delta_time: FloatNum) -> Option<(Vector, FloatNum)> {
         if self.meta().is_fixed() {

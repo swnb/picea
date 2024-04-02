@@ -546,7 +546,7 @@ pub fn wasm_config(attr: TokenStream, item: TokenStream) -> TokenStream {
     let optional_web_config_ident = Ident::new(&format!("OptionalWeb{}", ident), ident.span());
 
     let field_valid_warning = {
-        let mut field_valid_warning = format!("value of {} is not valid", ident);
+        let field_valid_warning = format!("value of {} is not valid", ident);
         // TODO list all field and it's type
         field_valid_warning
     };

@@ -112,19 +112,19 @@ impl ContactPointPairConstraintInfo {
 
         // let mut r_a: Vector = (pre_position_a, point_a).into();
         let r_a = self.r_a.affine_transformation_rotate(delta_angle_a);
-        let point_a = position_a + &r_a;
+        let point_a = position_a + r_a;
 
         // let mut r_b: Vector = (pre_position_b, point_b).into();
         let r_b = self.r_b.affine_transformation_rotate(delta_angle_b);
-        let point_b = position_b + &r_b;
+        let point_b = position_b + r_b;
 
-        let normal: Vector = (point_a, point_b).into();
+        // let normal: Vector = (point_a, point_b).into();
 
-        let normal_toward_a = if normal * (position_a - position_b) < 0. {
-            -normal
-        } else {
-            normal
-        };
+        // let normal_toward_a = if normal * (position_a - position_b) < 0. {
+        //     -normal
+        // } else {
+        //     normal
+        // };
 
         (point_a, point_b, r_a, r_b)
     }
@@ -195,39 +195,30 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         (self.obj_id_a, self.obj_id_b)
     }
 
-    pub unsafe fn object_a_mut(&mut self) -> &mut Obj {
-        &mut *self.obj_a
+    pub fn object_a(&self) -> &Obj {
+        unsafe { &*self.obj_a }
     }
 
-    pub unsafe fn object_b_mut(&mut self) -> &mut Obj {
-        &mut *self.obj_b
-    }
-
-    pub unsafe fn object_a(&self) -> &Obj {
-        &*self.obj_a
-    }
-
-    pub unsafe fn object_b(&self) -> &Obj {
-        &*self.obj_b
+    pub fn object_b(&self) -> &Obj {
+        unsafe { &*self.obj_b }
     }
 
     // TODO without compute inv_mass
     pub fn compute_delta_velocity_for_a(&self) -> Vector {
         self.contact_point_pair_constraint_infos.iter().fold(
             Vector::default(),
-            |delta_velocity, contact_info| unsafe {
+            |delta_velocity, contact_info| {
                 delta_velocity + contact_info.delta_velocity_for_a(self.object_a().meta())
             },
         )
     }
 
     pub fn compute_delta_angle_for_a(&self) -> FloatNum {
-        self.contact_point_pair_constraint_infos.iter().fold(
-            0.,
-            |delta_angle, contact_info| unsafe {
+        self.contact_point_pair_constraint_infos
+            .iter()
+            .fold(0., |delta_angle, contact_info| {
                 delta_angle + contact_info.delta_angle_for_a(self.object_a().meta())
-            },
-        )
+            })
     }
 
     pub fn compute_total_friction_lambda_toward_a(&self) -> Vector {
@@ -253,19 +244,21 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
     }
 
     pub fn delta_velocity_for_a(&self) -> Vector {
-        unsafe { *self.object_a().meta().velocity() - self.velocity_a }
+        {
+            *self.object_a().meta().velocity() - self.velocity_a
+        }
     }
 
     pub fn delta_velocity_for_b(&self) -> Vector {
-        unsafe { *self.object_b().meta().velocity() - self.velocity_b }
+        *self.object_b().meta().velocity() - self.velocity_b
     }
 
     pub fn delta_angle_velocity_for_a(&self) -> FloatNum {
-        unsafe { self.object_a().meta().angle_velocity() - self.angle_velocity_a }
+        self.object_a().meta().angle_velocity() - self.angle_velocity_a
     }
 
     pub fn delta_angle_velocity_for_b(&self) -> FloatNum {
-        unsafe { self.object_b().meta().angle_velocity() - self.angle_velocity_b }
+        self.object_b().meta().angle_velocity() - self.angle_velocity_b
     }
 
     pub(crate) unsafe fn pre_solve(
@@ -434,11 +427,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             });
     }
 
-    pub(crate) unsafe fn solve_position_constraint(
-        &mut self,
-        parameters: &ConstraintParameters,
-        index: usize,
-    ) {
+    pub(crate) unsafe fn solve_position_constraint(&mut self) {
         self.contact_point_pair_constraint_infos
             .iter()
             .for_each(|contact_info| {

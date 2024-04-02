@@ -1,35 +1,4 @@
-use std::{cell::RefCell, sync::atomic::AtomicBool};
-
 use crate::math::{vector::Vector, FloatNum};
-
-pub(crate) struct InnerGlobalContext {
-    // indicate whether to update shape immediately or not
-    pub(crate) merge_shape_transform: AtomicBool,
-}
-
-pub(crate) struct GlobalContext {
-    // indicate whether to update shape immediately or not
-    pub(crate) merge_shape_transform: bool,
-}
-
-static mut INNER_GLOBAL_CONTEXT: RefCell<InnerGlobalContext> = RefCell::new(InnerGlobalContext {
-    merge_shape_transform: AtomicBool::new(false),
-});
-
-pub fn global_context() -> GlobalContext {
-    unsafe {
-        GlobalContext {
-            merge_shape_transform: INNER_GLOBAL_CONTEXT
-                .borrow()
-                .merge_shape_transform
-                .load(std::sync::atomic::Ordering::Relaxed),
-        }
-    }
-}
-
-pub(crate) fn global_context_mut() -> &'static mut InnerGlobalContext {
-    unsafe { INNER_GLOBAL_CONTEXT.get_mut() }
-}
 
 #[derive(Debug)]
 pub struct ConstraintParameters {

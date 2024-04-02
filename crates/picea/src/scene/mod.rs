@@ -2,7 +2,7 @@ pub(crate) mod context;
 pub mod errors;
 pub(crate) mod hooks;
 
-use std::{collections::BTreeMap, ops::Shl, sync::atomic::Ordering};
+use std::{collections::BTreeMap, ops::Shl};
 
 use crate::{
     collision::{
@@ -14,7 +14,7 @@ use crate::{
     },
     element::{store::ElementStore, Element},
     math::{point::Point, vector::Vector, FloatNum},
-    scene::{context::global_context_mut, hooks::CallbackHook},
+    scene::hooks::CallbackHook,
 };
 
 use self::context::Context;
@@ -120,10 +120,6 @@ impl<T: Clone + Default> Scene<T> {
     }
 
     pub fn tick(&mut self, mut delta_time: f32) {
-        global_context_mut()
-            .merge_shape_transform
-            .store(true, Ordering::Relaxed);
-
         self.frame_count += 1;
 
         let Context {
@@ -214,10 +210,6 @@ impl<T: Clone + Default> Scene<T> {
             // TODO update move point use something else logic
             self.pre_solve_constraints(delta_time);
         }
-
-        global_context_mut()
-            .merge_shape_transform
-            .store(false, Ordering::Relaxed);
     }
 
     pub fn register_element_position_update_callback<F>(&mut self, callback: F) -> u32
@@ -647,10 +639,8 @@ impl<T: Clone + Default> Scene<T> {
         self.contact_constraints_manifold
             .values_mut()
             .filter(|constraint| constraint.is_active())
-            .enumerate()
-            .for_each(|(index, contact_constraint)| unsafe {
-                contact_constraint
-                    .solve_position_constraint(&self.context.constraint_parameters, index);
+            .for_each(|contact_constraint| unsafe {
+                contact_constraint.solve_position_constraint();
             })
     }
 
