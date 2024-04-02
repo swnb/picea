@@ -6,6 +6,8 @@ type Meta = {
   isTransparent: boolean
   angle: number
   velocity: { x: number; y: number }
+  factorRestitution: number
+  factorFriction: number
 }
 type MetaPartial = Partial<Meta>
 

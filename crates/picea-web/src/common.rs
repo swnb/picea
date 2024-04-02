@@ -88,6 +88,10 @@ pub(crate) struct Meta {
     pub is_fixed: bool,
     pub is_transparent: bool,
     pub velocity: Tuple2,
+    #[default = 0.2]
+    pub factor_friction: FloatNum,
+    #[default = 1.]
+    pub factor_restitution: FloatNum,
 }
 
 #[derive(Clone)]

@@ -258,6 +258,14 @@ impl WebScene {
                 *element.meta_mut().is_transparent_mut() = *is_transparent;
             };
 
+            if let Some(factor_friction) = meta_data.factor_friction() {
+                *element.meta_mut().factor_friction_mut() = *factor_friction;
+            };
+
+            if let Some(factor_restitution) = meta_data.factor_restitution() {
+                *element.meta_mut().factor_restitution_mut() = *factor_restitution;
+            };
+
             // if let Some(angle) = meta_data.angle() {
             //     element.meta_mut().set_angle(|_| *angle);
             // }
