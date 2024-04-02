@@ -278,4 +278,9 @@ impl<T: Clone> Collider for Element<T> {
     fn sub_colliders(&self) -> Option<Box<dyn Iterator<Item = &dyn SubCollider> + '_>> {
         self.shape().sub_colliders()
     }
+
+    fn measure_sub_collider_concat_point(&self, contact_point: &Point) -> bool {
+        self.shape()
+            .measure_sub_collider_concat_point(contact_point)
+    }
 }

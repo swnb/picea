@@ -51,7 +51,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
         for j in 0..6 {
             scene.push_element(ElementBuilder::new(
                 Circle::new(
-                    (50. + j as FloatNum * 5. + 2., 10. + i as FloatNum * 5. + 2.),
+                    (50. + j as FloatNum * 5. + 2., 30. + i as FloatNum * 5. + 2.),
                     2.,
                 ),
                 MetaBuilder::new().mass(10.),
@@ -66,7 +66,7 @@ fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut common::
 }
 
 fn main() {
-    let config = ConfigBuilder::default();
+    let config = ConfigBuilder::default().draw_contact_point_pair(true);
 
     common::run_window("concave", config, init, update)
 }

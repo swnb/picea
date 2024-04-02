@@ -191,6 +191,30 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             .collect()
     }
 
+    pub fn extend_contact_point_pairs(&mut self, contact_point_pairs: Vec<ContactPointPair>) {
+        self.contact_point_pair_constraint_infos
+            .extend(
+                contact_point_pairs
+                    .into_iter()
+                    .map(|v| ContactPointPairConstraintInfo {
+                        concat_point_pair: v,
+                        ..Default::default()
+                    }),
+            )
+    }
+
+    pub fn contact_point_pair_len(&self) -> usize {
+        self.contact_point_pair_constraint_infos.len()
+    }
+
+    pub fn filter_contact_point_pairs(&mut self, predicate: impl Fn(&ContactPointPair) -> bool) {
+        self.contact_point_pair_constraint_infos =
+            std::mem::take(&mut self.contact_point_pair_constraint_infos)
+                .into_iter()
+                .filter(|v| predicate(v))
+                .collect();
+    }
+
     pub fn obj_id_pair(&self) -> (ID, ID) {
         (self.obj_id_a, self.obj_id_b)
     }

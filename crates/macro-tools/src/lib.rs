@@ -239,20 +239,23 @@ pub fn fields(input: TokenStream) -> TokenStream {
             })
     };
 
-    let parse_attr_read = |attrs: &[syn::Attribute]| -> Option<Visibility> {
+    let parse_attr_read = |attrs: &[syn::Attribute]| -> Option<(Visibility, bool)> {
         find_attr(attrs, "r").map(|attr| {
             let mut field_vis: Visibility = input_vis.clone();
+            let mut auto_copy = false;
             let _ = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("vis") {
                     let content;
                     parenthesized!(content in meta.input);
                     let value = content.parse::<Visibility>()?;
                     field_vis = value;
+                } else if meta.path.is_ident("copy") {
+                    auto_copy = true
                 }
                 Ok(())
             });
 
-            field_vis
+            (field_vis, auto_copy)
         })
     };
 
@@ -318,8 +321,8 @@ pub fn fields(input: TokenStream) -> TokenStream {
             };
             let read_field_method = parse_attr_read(&field.attrs)
                 .or(global_attr_read.clone())
-                .map(|vis| {
-                    if should_return_copy_when_read {
+                .map(|(vis, auto_copy)| {
+                    if should_return_copy_when_read || auto_copy {
                         quote!(
                             #vis fn #field_ident(&self) -> #ty {
                                 self.#field_ident

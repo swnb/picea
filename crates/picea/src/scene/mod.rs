@@ -7,6 +7,7 @@ use std::{collections::BTreeMap, ops::Shl};
 use crate::{
     collision::{
         accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
+        Collider,
     },
     constraints::{
         contact::ContactConstraint, contact_manifold::ContactConstraintManifold,
@@ -208,6 +209,7 @@ impl<T: Clone + Default> Scene<T> {
 
         unsafe {
             // TODO update move point use something else logic
+            // must remove it
             self.pre_solve_constraints(delta_time);
         }
     }
@@ -504,9 +506,14 @@ impl<T: Clone + Default> Scene<T> {
                 let manifold_key = (a.id(), b.id());
 
                 if let Some(manifold) = self.contact_constraints_manifold.get_mut(&manifold_key) {
-                    // for performance; reuse exist manifold
-                    manifold.replace_contact_point_pairs(contact_pairs);
-                    manifold.set_is_active(true);
+                    if manifold.is_active() {
+                        // append new contact_pairs;
+                        manifold.extend_contact_point_pairs(contact_pairs)
+                    } else {
+                        // for performance; reuse exist manifold
+                        manifold.replace_contact_point_pairs(contact_pairs);
+                        manifold.set_is_active(true);
+                    }
                 } else {
                     let contact_constraint = ContactConstraint::new(a.id(), b.id(), contact_pairs);
 
@@ -543,6 +550,15 @@ impl<T: Clone + Default> Scene<T> {
                 // legacy_constraint_ids.push(contact_constraint.id());
                 continue;
             };
+
+            if contact_constraint.contact_point_pair_len() > 2 {
+                // is there is more contact_point_pair then we think , filter some contact point
+                // this is due to unbalance of impulse , make object flip
+                contact_constraint.filter_contact_point_pairs(|contact_point_pair| {
+                    element_a.measure_sub_collider_concat_point(contact_point_pair.point_a())
+                        && element_b.measure_sub_collider_concat_point(contact_point_pair.point_b())
+                });
+            }
 
             let obj_a = element_a as *mut _;
             let obj_b = element_b as *mut _;

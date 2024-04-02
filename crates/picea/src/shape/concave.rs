@@ -101,6 +101,10 @@ impl Collider for ConcavePolygon {
                 .map(|p| p as &dyn SubCollider),
         ))
     }
+
+    fn measure_sub_collider_concat_point(&self, contact_point: &Point) -> bool {
+        self.vertices.iter().any(|p| p == contact_point)
+    }
 }
 
 impl SelfClone for ConcavePolygon {

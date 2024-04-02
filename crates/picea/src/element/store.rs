@@ -2,7 +2,7 @@ use crate::{
     algo::sort::SortableCollection,
     collision::{
         accurate_collision_detection_for_sub_collider, prepare_accurate_collision_detection,
-        rough_collision_detection, CollisionalCollection, ContactPointPair,
+        rough_collision_detection, Collider, CollisionalCollection, ContactPointPair,
     },
 };
 
@@ -177,7 +177,6 @@ impl<T: Clone> ElementStore<T> {
                     ) {
                         let a = collider_a;
                         let b = collider_b;
-
                         handler(a, b, contact_pairs);
                     }
                 },

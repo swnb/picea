@@ -1,4 +1,4 @@
-use picea_macro_tools::Deref;
+use picea_macro_tools::{Deref, Fields};
 
 use crate::{
     math::{
@@ -38,6 +38,11 @@ impl<T> SubCollider for T where T: Projector + CenterPoint + NearestPoint {}
 pub trait Collider: Projector + CenterPoint + NearestPoint {
     fn sub_colliders(&'_ self) -> Option<Box<dyn Iterator<Item = &'_ dyn SubCollider> + '_>> {
         None
+    }
+
+    // measure whether should accept sub collider's concat point as parent collider's contact point
+    fn measure_sub_collider_concat_point(&self, _contact_point: &Point) -> bool {
+        true
     }
 }
 
@@ -93,10 +98,10 @@ where
             collider_a,
             collider_b,
             |sub_collider_a, sub_collider_b| {
-                if let Some(result) =
+                if let Some(contact_point_pairs) =
                     accurate_collision_detection_for_sub_collider(sub_collider_a, sub_collider_b)
                 {
-                    handler(collider_a, collider_b, result);
+                    handler(collider_a, collider_b, contact_point_pairs);
                 }
             },
         )
@@ -570,8 +575,8 @@ impl MinkowskiEdge {
             };
 
             let contact_point_pair = ContactPointPair {
-                contact_point_a: a1,
-                contact_point_b: b1,
+                point_a: a1,
+                point_b: b1,
                 normal_toward_a,
                 depth,
                 ..Default::default()
@@ -780,17 +785,19 @@ where
     minkowski.find_min_edge()
 }
 
-#[derive(Clone, Debug, Default)]
 /**
  * ContactInfo contain the collider collision info
  * contact_point is where the collision happen
  * normal toward the shape of collider
  * depth is how deep the collision happen
  */
+#[derive(Clone, Debug, Default, Fields)]
+#[r]
 pub struct ContactPointPair {
     point: Point,
-    contact_point_a: Point,
-    contact_point_b: Point,
+    point_a: Point,
+    point_b: Point,
+    #[r(copy)]
     normal_toward_a: Vector,
     depth: f32,
 }
@@ -800,42 +807,12 @@ impl ContactPointPair {
         let point = ((point_a.to_vector() + point_b.to_vector()) * 0.5).to_point();
 
         ContactPointPair {
-            contact_point_a: point_a,
-            contact_point_b: point_b,
+            point_a,
+            point_b,
             point,
             normal_toward_a: normal,
             depth,
         }
-    }
-}
-
-impl ContactPointPair {
-    pub fn point_a(&self) -> &Point {
-        &self.contact_point_a
-    }
-
-    pub fn point_b(&self) -> &Point {
-        &self.contact_point_b
-    }
-
-    pub fn point(&self) -> &Point {
-        &self.point
-    }
-
-    pub fn normal_toward_a(&self) -> Vector {
-        self.normal_toward_a
-    }
-
-    pub fn set_normal_toward_a(&mut self, normal: Vector) {
-        self.normal_toward_a = normal;
-    }
-
-    pub fn depth(&self) -> FloatNum {
-        self.depth
-    }
-
-    pub fn set_depth(&mut self, depth: FloatNum) {
-        self.depth = depth;
     }
 }
 
