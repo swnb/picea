@@ -119,7 +119,7 @@ impl<T: Clone + Default> Scene<T> {
         self.total_duration
     }
 
-    pub fn tick(&mut self, delta_time: f32) {
+    pub fn tick(&mut self, mut delta_time: f32) {
         global_context_mut()
             .merge_shape_transform
             .store(true, Ordering::Relaxed);
@@ -155,7 +155,10 @@ impl<T: Clone + Default> Scene<T> {
 
         // TODO 120 fps
         // max frame rate is 60
-        const MIN_DELTA_TIME: FloatNum = 1. / 61.;
+        const MIN_DELTA_TIME: FloatNum = 1. / 60.;
+        const MAX_DELTA_TIME: FloatNum = 1. / 25.;
+
+        delta_time = delta_time.max(MIN_DELTA_TIME).min(MAX_DELTA_TIME);
         // if self.total_skip_durations + delta_time < MIN_DELTA_TIME {
         //     // skip this frame
         //     self.total_skip_durations += delta_time;
@@ -168,7 +171,7 @@ impl<T: Clone + Default> Scene<T> {
 
         // TODO use dynamic delta_time
 
-        let delta_time: FloatNum = 1. / 61.;
+        // let delta_time: FloatNum = 1. / 61.;
 
         self.total_duration += delta_time;
 
