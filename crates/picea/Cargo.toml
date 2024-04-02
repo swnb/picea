@@ -2,6 +2,16 @@
 name = "picea"
 version = "0.1.0"
 edition = "2021"
+authors = ["swnb", "async-rustacean"]
+license-file = "LICENSE"
+repository = "https://github.com/swnb/picea"
+# homepage = ""
+# documentation = ""
+categories = ["physic-engine", "graph"]
+description = """
+picea is a little physics engine. can alos be used in web(wasm).
+"""
+rust-version = "1.77"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
