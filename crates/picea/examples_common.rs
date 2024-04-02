@@ -504,3 +504,17 @@ pub fn run_window<T: Default + Clone + 'static>(
         iter_count: 0,
     });
 }
+
+pub fn run_simple(init: fn(&mut Scene, &mut Handler<()>)) {
+    fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut Handler<()>) {
+        let duration = std::time::Duration::from_secs(10);
+        scene.tick(duration.as_secs_f32());
+    }
+
+    let config = ConfigBuilder::default()
+        .draw_center_point(false)
+        .draw_join_constraints(true)
+        .draw_point_constraints(true)
+        .enable_mouse_constraint(true);
+    run_window("point constraint - link", config, init, update)
+}

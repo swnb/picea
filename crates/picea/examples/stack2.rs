@@ -60,9 +60,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 }
 
 fn update(scene: &mut Scene, _selected_element_id: Option<u32>, handler: &mut common::Handler<()>) {
-    let duration = std::time::Duration::from_secs(10);
-
-    scene.update_elements_by_duration(duration.as_secs_f32());
+    scene.tick(1. / 60.);
 
     // scene.update_elements_by_duration_tick(duration.as_secs_f32(), handler.iter_count);
     // handler.iter_count += 1;

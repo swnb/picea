@@ -1,5 +1,4 @@
 use common::{ConfigBuilder, Handler};
-use picea::prelude::*;
 use picea::{element::ElementBuilder, meta::MetaBuilder, scene::Scene, shape::circle::Circle};
 
 #[path = "../examples_common.rs"]
@@ -41,8 +40,7 @@ fn init_elements(scene: &mut Scene, _: &mut Handler<()>) {
 }
 
 fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut Handler<()>) {
-    let duration = std::time::Duration::from_secs(10);
-    scene.update_elements_by_duration(duration.as_secs_f32());
+    scene.tick(1. / 60.);
 }
 
 fn main() {

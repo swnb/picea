@@ -29,7 +29,7 @@ fn update(
     _: &mut common::Handler<Data>,
 ) {
     let duration = std::time::Duration::from_secs(10);
-    scene.update_elements_by_duration(duration.as_secs_f32());
+    scene.tick(1. / 60.);
 
     let previous_created_time = scene.data.previous_created_time;
 

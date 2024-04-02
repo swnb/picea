@@ -1,5 +1,3 @@
-use std::ops::{Deref, DerefMut};
-
 use common::ConfigBuilder;
 use picea::{
     constraints::JoinConstraintConfigBuilder,
@@ -8,7 +6,7 @@ use picea::{
     meta::MetaBuilder,
     prelude::*,
     scene::Scene,
-    shape::{circle::Circle, ConstRegularPolygon},
+    shape::circle::Circle,
 };
 
 #[path = "../examples_common.rs"]
@@ -70,8 +68,7 @@ fn init_elements(scene: &mut Scene, _: &mut common::Handler<()>) {
 }
 
 fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut common::Handler<()>) {
-    let duration = std::time::Duration::from_secs(10);
-    scene.update_elements_by_duration(duration.as_secs_f32());
+    scene.tick(1. / 60.);
 }
 
 fn main() {
