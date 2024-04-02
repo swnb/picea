@@ -171,7 +171,7 @@ impl<T: Clone> Element<T> {
         let path = *self.meta().velocity() * delta_time;
         let rad = self.meta().angle_velocity() * delta_time;
 
-        self.transform(&(path, rad).into());
+        self.transform(&(path, -rad).into());
 
         (path, rad).into()
     }
@@ -183,10 +183,13 @@ impl<T: Clone> Element<T> {
     }
 
     pub(crate) fn get_bind_point(&self, id: u32) -> Option<Point> {
-        self.bind_points.get(&id).map(|reference| {
-            self.shape().center_point()
-                + reference.affine_transformation_rotate(-self.meta().total_transform().rotation())
-        })
+        self.bind_points
+            .get(&id)
+            .map(|reference| {
+                let rotation = self.meta().total_transform().rotation();
+                reference.affine_transformation_rotate(rotation)
+            })
+            .map(|reference| self.shape().center_point() + reference)
     }
 
     pub(crate) fn remove_bind_point(&mut self, id: u32) {
