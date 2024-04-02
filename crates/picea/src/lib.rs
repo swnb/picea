@@ -10,6 +10,8 @@ pub mod tools;
 
 pub mod prelude {
 
+    use crate::scene;
+
     pub use super::element::{
         ComputeMomentOfInertia, ElementBuilder, SelfClone, ShapeTraitUnion, ID,
     };
@@ -20,6 +22,8 @@ pub mod prelude {
     pub use super::shape::{CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint};
 
     pub use super::constraints::{JoinConstraintConfig, JoinConstraintConfigBuilder};
+
+    pub use scene::Scene;
 
     // pub use super::shape::{
     // CenterPoint, Circle, ConcavePolygon, ConstRegularPolygon, ConvexPolygon,
