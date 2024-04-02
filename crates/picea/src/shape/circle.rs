@@ -1,5 +1,5 @@
 use crate::{math::axis::AxisDirection, prelude::*, shape::Transform};
-use macro_tools::{Fields, Shape};
+use picea_macro_tools::{Fields, Shape};
 
 #[derive(Clone, Debug, Shape, Fields)]
 pub struct Circle {

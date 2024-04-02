@@ -1,6 +1,6 @@
 use core::ops::{Deref, DerefMut};
 
-use macro_tools::{Deref, Shape};
+use picea_macro_tools::{Deref, Shape};
 
 use crate::impl_shape_traits_use_deref;
 use crate::math::point::Point;

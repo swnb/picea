@@ -1,6 +1,6 @@
 pub mod force;
 
-use macro_tools::{Builder, Deref, Fields};
+use picea_macro_tools::{Builder, Deref, Fields};
 
 use crate::math::{vector::Vector, FloatNum};
 

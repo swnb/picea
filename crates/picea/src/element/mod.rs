@@ -2,7 +2,7 @@ pub(crate) mod store;
 
 use std::collections::BTreeMap;
 
-use macro_tools::Fields;
+use picea_macro_tools::Fields;
 
 use crate::{
     collision::{Collider, Projector, SubCollider},

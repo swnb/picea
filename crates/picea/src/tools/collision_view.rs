@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use macro_tools::Deref;
+use picea_macro_tools::Deref;
 
 use crate::{
     collision::ContactPointPair,

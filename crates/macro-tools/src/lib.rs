@@ -559,7 +559,7 @@ pub fn wasm_config(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     quote!(
         #(#attrs)*
-        #[derive(macro_tools::Fields)]
+        #[derive(picea_macro_tools::Fields)]
         #[r]
         #[derive(Deserialize, Serialize)]
         #vis struct #impl_generics #ident #ty_generics #where_clause {

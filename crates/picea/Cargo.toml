@@ -11,7 +11,6 @@ categories = ["physic-engine", "graph"]
 description = """
 picea is a little physics engine. can alos be used in web(wasm).
 """
-rust-version = "1.77"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -20,7 +19,7 @@ path = "src/lib.rs"
 
 
 [dependencies]
-macro-tools = { path = "../macro-tools" }
+picea-macro-tools = { path = "../macro-tools", version = "0.1.0" }
 
 [dev-dependencies]
 rand = "0.8.5"

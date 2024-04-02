@@ -1,4 +1,4 @@
-use macro_tools::Shape;
+use picea_macro_tools::Shape;
 
 use crate::{
     collision::Projector,

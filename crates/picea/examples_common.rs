@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 use std::time::{self, UNIX_EPOCH};
 
-use macro_tools::Builder;
 use picea::constraints::JoinConstraintConfigBuilder;
 use picea::math::edge::Edge;
 use picea::math::point::Point;
@@ -12,6 +11,7 @@ use picea::scene::Scene;
 use picea::shape::utils::{is_point_inside_shape, rotate_point};
 use picea::tools::collision_view::CollisionStatusViewer;
 use picea::tools::snapshot;
+use picea_macro_tools::Builder;
 use serde::Serialize;
 use speedy2d::color::Color;
 use speedy2d::dimen::Vector2;

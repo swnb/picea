@@ -16,4 +16,4 @@ js-sys = { version = "0.3.61" }
 serde = { version = "1.0.158", features = ["derive"] }
 serde-wasm-bindgen = { version = "0.6.5" }
 wasm-bindgen = { version = "0.2.84" }
-macro-tools = { path = "../macro-tools" }
+picea-macro-tools = { path = "../macro-tools", version = "0.1.0" }

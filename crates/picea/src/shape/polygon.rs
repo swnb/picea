@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use macro_tools::{Deref, Shape};
+use picea_macro_tools::{Deref, Shape};
 
 use crate::{
     element::ComputeMomentOfInertia,

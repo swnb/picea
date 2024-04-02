@@ -1,4 +1,4 @@
-use macro_tools::{Deref, Fields};
+use picea_macro_tools::{Deref, Fields};
 
 use crate::{
     collision::ContactPointPair,

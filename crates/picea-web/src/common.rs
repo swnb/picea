@@ -1,7 +1,7 @@
 use std::{cell::UnsafeCell, rc::Rc};
 
-use macro_tools::wasm_config;
 use picea::{prelude::*, scene::Scene};
+use picea_macro_tools::wasm_config;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
