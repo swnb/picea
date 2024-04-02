@@ -8,15 +8,15 @@ use super::{
     convex::ConvexPolygon,
     utils::{
         find_nearest_point, projection_polygon_on_vector, rotate_polygon,
-        split_concave_polygon_to_convex_polygons, VertexesToEdgeIter,
+        split_concave_polygon_to_convex_polygons, VerticesToEdgeIter,
     },
     CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform,
 };
 
 #[derive(Clone)]
 pub struct ConcavePolygon {
-    origin_vertexes: Vec<Point>,
-    vertexes: Vec<Point>,
+    origin_vertices: Vec<Point>,
+    vertices: Vec<Point>,
     sub_convex_polygons: Vec<ConvexPolygon>,
     origin_center_point: Point,
     center_point: Point,
@@ -24,9 +24,9 @@ pub struct ConcavePolygon {
 }
 
 impl ConcavePolygon {
-    pub fn new(vertexes: impl Into<Vec<Point>>) -> Self {
-        let vertexes: Vec<Point> = vertexes.into();
-        let sub_convex_polygons: Vec<_> = split_concave_polygon_to_convex_polygons(&vertexes)
+    pub fn new(vertices: impl Into<Vec<Point>>) -> Self {
+        let vertices: Vec<Point> = vertices.into();
+        let sub_convex_polygons: Vec<_> = split_concave_polygon_to_convex_polygons(&vertices)
             .into_iter()
             .map(ConvexPolygon::new)
             .collect();
@@ -45,8 +45,8 @@ impl ConcavePolygon {
             .to_point();
 
         Self {
-            origin_vertexes: vertexes.clone(),
-            vertexes,
+            origin_vertices: vertices.clone(),
+            vertices,
             sub_convex_polygons,
             origin_center_point: center_point,
             center_point,
@@ -61,20 +61,20 @@ impl ConcavePolygon {
 
 impl GeometryTransformer for ConcavePolygon {
     fn sync_transform(&mut self, transform: &Transform) {
-        for (i, p) in self.origin_vertexes.iter().enumerate() {
-            self.vertexes[i] = p + transform.translation();
+        for (i, p) in self.origin_vertices.iter().enumerate() {
+            self.vertices[i] = p + transform.translation();
         }
 
         self.center_point = self.origin_center_point + transform.translation();
 
         rotate_polygon(
             self.center_point,
-            self.vertexes.iter_mut(),
+            self.vertices.iter_mut(),
             transform.rotation(),
         );
 
         // TODO cache this method
-        self.sub_convex_polygons = split_concave_polygon_to_convex_polygons(&self.vertexes)
+        self.sub_convex_polygons = split_concave_polygon_to_convex_polygons(&self.vertices)
             .into_iter()
             .map(ConvexPolygon::new)
             .collect();
@@ -89,7 +89,7 @@ impl CenterPoint for ConcavePolygon {
 
 impl Projector for ConcavePolygon {
     fn projection_on_vector(&self, vector: &Vector) -> (Point, Point) {
-        projection_polygon_on_vector(self.vertexes.iter(), *vector)
+        projection_polygon_on_vector(self.vertices.iter(), *vector)
     }
 }
 
@@ -111,7 +111,7 @@ impl SelfClone for ConcavePolygon {
 
 impl EdgeIterable for ConcavePolygon {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
-        Box::new(VertexesToEdgeIter::new(&self.vertexes))
+        Box::new(VerticesToEdgeIter::new(&self.vertices))
     }
 }
 

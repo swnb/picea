@@ -156,7 +156,7 @@ macro_rules! impl_shape_for_common_polygon {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ConstPolygon<const N: usize> {
-    vertexes: [Point; N],
+    vertices: [Point; N],
     center_point: Point,
 }
 
@@ -164,12 +164,12 @@ impl<const N: usize> ConstPolygon<N> {
     const EDGE_COUNT: usize = N;
 
     #[inline]
-    pub fn new(vertexes: [Point; N]) -> Self {
+    pub fn new(vertices: [Point; N]) -> Self {
         let center_point =
-            compute_polygon_approximate_center_point(vertexes.iter(), vertexes.len() as f32);
+            compute_polygon_approximate_center_point(vertices.iter(), vertices.len() as f32);
 
         Self {
-            vertexes,
+            vertices,
             center_point,
         }
     }
@@ -197,12 +197,12 @@ impl<const N: usize> CommonPolygon for ConstPolygon<N> {
 
     #[inline]
     fn point_iter(&self) -> Self::PointIter<'_> {
-        self.vertexes.iter()
+        self.vertices.iter()
     }
 
     #[inline]
     fn point_iter_mut(&mut self) -> Self::PointIterMut<'_> {
-        self.vertexes.iter_mut()
+        self.vertices.iter_mut()
     }
 }
 
@@ -281,21 +281,21 @@ impl<const N: usize> ConstRegularPolygon<N> {
     #[inline]
     pub fn new(center: impl Into<Point>, radius: f32) -> Self {
         #[allow(clippy::uninit_assumed_init)]
-        let mut vertexes: [Point; N] = unsafe { MaybeUninit::uninit().assume_init() };
+        let mut vertices: [Point; N] = unsafe { MaybeUninit::uninit().assume_init() };
 
         let center = center.into().to_vector();
 
         let mut point: Vector<_> = (0., radius).into();
-        vertexes[0] = point.to_point();
+        vertices[0] = point.to_point();
 
         (1..N).for_each(|i| {
             point.affine_transformation_rotate_self(Self::EDGE_ANGLE);
-            vertexes[i] = point.to_point();
+            vertices[i] = point.to_point();
         });
 
         let mut this = Self {
             radius,
-            inner: ConstPolygon::new(vertexes),
+            inner: ConstPolygon::new(vertices),
         };
 
         if Self::IS_EVENT {
@@ -379,14 +379,14 @@ impl Triangle {
     }
 
     pub fn compute_area(&self) -> FloatNum {
-        compute_area_of_triangle(&self.inner.vertexes)
+        compute_area_of_triangle(&self.inner.vertices)
     }
 }
 
 impl ComputeMomentOfInertia for Triangle {
     // the inertia of triangle is (1/36) * m * (a^2 + b^2 + c^2)
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
-        compute_moment_of_inertia_of_triangle(&self.inner.vertexes, m)
+        compute_moment_of_inertia_of_triangle(&self.inner.vertices, m)
     }
 }
 
@@ -446,16 +446,16 @@ impl ComputeMomentOfInertia for Square {
 
 #[derive(Clone)]
 pub(crate) struct NormalPolygon {
-    vertexes: Vec<Point>,
+    vertices: Vec<Point>,
     center_point: Point,
 }
 
 impl NormalPolygon {
     #[inline]
-    pub fn new(center_point: impl Into<Point>, vertexes: Vec<Point>) -> Self {
+    pub fn new(center_point: impl Into<Point>, vertices: Vec<Point>) -> Self {
         let center_point = center_point.into();
         Self {
-            vertexes,
+            vertices,
             center_point,
         }
     }
@@ -478,17 +478,17 @@ impl CommonPolygon for NormalPolygon {
 
     #[inline]
     fn edge_count(&self) -> usize {
-        self.vertexes.len()
+        self.vertices.len()
     }
 
     #[inline]
     fn point_iter(&self) -> Self::PointIter<'_> {
-        self.vertexes.iter()
+        self.vertices.iter()
     }
 
     #[inline]
     fn point_iter_mut(&mut self) -> Self::PointIterMut<'_> {
-        self.vertexes.iter_mut()
+        self.vertices.iter_mut()
     }
 }
 
@@ -502,16 +502,16 @@ pub struct RegularPolygon {
 
 impl RegularPolygon {
     pub fn new(center_point: impl Into<Point>, edge_count: usize, radius: f32) -> Self {
-        let mut vertexes: Vec<Point> = Vec::with_capacity(edge_count);
+        let mut vertices: Vec<Point> = Vec::with_capacity(edge_count);
 
         let edge_angle = TAU() * (edge_count as f32).recip();
 
         let mut point: Vector<_> = (0., radius).into();
-        vertexes.push(point.to_point());
+        vertices.push(point.to_point());
 
         (1..edge_count).for_each(|_| {
             point.affine_transformation_rotate_self(edge_angle);
-            vertexes.push(point.to_point());
+            vertices.push(point.to_point());
         });
 
         let center_point = center_point.into();
@@ -520,7 +520,7 @@ impl RegularPolygon {
             radius,
             edge_count,
             edge_angle,
-            inner_polygon: NormalPolygon::new((0., 0.), vertexes),
+            inner_polygon: NormalPolygon::new((0., 0.), vertices),
         };
 
         if edge_count & 1 == 0 {

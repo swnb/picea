@@ -53,7 +53,7 @@ pub struct PolygonElementShape {
     id: ID,
     shape_type: String, // always polygon
     center_point: Tuple2,
-    vertexes: Vec<Tuple2>,
+    vertices: Vec<Tuple2>,
 }
 
 #[wasm_bindgen]
@@ -73,8 +73,8 @@ impl PolygonElementShape {
         self.center_point.into()
     }
 
-    pub fn vertexes(&self) -> Vec<WebPoint> {
-        self.vertexes
+    pub fn vertices(&self) -> Vec<WebPoint> {
+        self.vertices
             .iter()
             .map(|v| JsValue::from(*v).into())
             .collect()
@@ -167,11 +167,11 @@ impl WebScene {
     #[wasm_bindgen(js_name = "createPolygon")]
     pub fn create_polygon(
         &self,
-        vertexes: Vec<WebPoint>,
+        vertices: Vec<WebPoint>,
         meta_data: Option<OptionalWebMeta>,
     ) -> u32 {
         let shape = ConcavePolygon::new(
-            vertexes
+            vertices
                 .into_iter()
                 .map(|v| v.try_into().unwrap())
                 .collect::<Vec<Point>>(),
@@ -336,8 +336,8 @@ impl WebScene {
             .collect()
     }
 
-    #[wasm_bindgen(js_name = "getElementVertexes")]
-    pub fn get_element_vertexes(&self, element_id: ID) -> Vec<WebPoint> {
+    #[wasm_bindgen(js_name = "getElementVertices")]
+    pub fn get_element_vertices(&self, element_id: ID) -> Vec<WebPoint> {
         self.get_scene_mut()
             .get_element(element_id)
             .map(|element| {
@@ -423,7 +423,7 @@ impl WebScene {
                 id,
                 shape_type: "polygon".into(),
                 center_point: (&element.center_point()).into(),
-                vertexes: result,
+                vertices: result,
             });
 
             callback.call1(&this, &element_shape).unwrap();
@@ -547,37 +547,37 @@ impl WebScene {
 }
 
 /**
- * NOTE must be sure vertexes blew to a valid polygon
+ * NOTE must be sure vertices blew to a valid polygon
  */
 #[wasm_bindgen(js_name = "isPointValidAddIntoPolygon")]
-pub fn is_point_valid_add_into_polygon(point: WebPoint, vertexes: Vec<WebPoint>) -> bool {
-    if vertexes.len() <= 2 {
+pub fn is_point_valid_add_into_polygon(point: WebPoint, vertices: Vec<WebPoint>) -> bool {
+    if vertices.len() <= 2 {
         return true;
     }
 
     let point: Tuple2 = serde_wasm_bindgen::from_value(point.into()).unwrap();
     let point: Point = point.into();
 
-    let vertexes: Vec<Point> = vertexes
+    let vertices: Vec<Point> = vertices
         .into_iter()
         .map(|v| serde_wasm_bindgen::from_value::<Tuple2>(v.into()).unwrap())
         .map(|v| v.into())
         .collect();
 
-    let segment1: Segment = (vertexes[0], point).into();
-    let segment2: Segment = (*(vertexes.last().unwrap()), point).into();
+    let segment1: Segment = (vertices[0], point).into();
+    let segment2: Segment = (*(vertices.last().unwrap()), point).into();
 
-    let vertexes_len = vertexes.len();
-    for i in 0..(vertexes_len - 1) {
-        let start_point = vertexes[i];
-        let end_point = vertexes[(i + 1) % vertexes.len()];
+    let vertices_len = vertices.len();
+    for i in 0..(vertices_len - 1) {
+        let start_point = vertices[i];
+        let end_point = vertices[(i + 1) % vertices.len()];
         let segment: Segment = (start_point, end_point).into();
 
         if i == 0 {
             if check_is_segment_cross(&segment, &segment2) {
                 return false;
             }
-        } else if i == vertexes_len - 2 {
+        } else if i == vertices_len - 2 {
             if check_is_segment_cross(&segment, &segment1) {
                 return false;
             }

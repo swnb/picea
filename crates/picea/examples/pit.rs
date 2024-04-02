@@ -23,7 +23,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
         (),
     ));
 
-    let vertexes = [
+    let vertices = [
         (30, 70),
         (80, 70),
         (100, 50),
@@ -35,13 +35,13 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
         (40, 30),
     ];
 
-    let vertexes = vertexes
+    let vertices = vertices
         .iter()
         .map(|&(x, y)| (x as FloatNum, y as FloatNum))
         .map(|v| v.into())
         .collect::<VecDeque<Point>>();
 
-    let concave_polygon = ConcavePolygon::new(&Vec::from(vertexes)[..]);
+    let concave_polygon = ConcavePolygon::new(&Vec::from(vertices)[..]);
 
     let element = ElementBuilder::new(concave_polygon, MetaBuilder::new().mass(10.), ());
 

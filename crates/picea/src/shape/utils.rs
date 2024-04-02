@@ -16,7 +16,7 @@ use super::{CenterPoint, EdgeIterable, NearestPoint};
  */
 
 /**
- * this function simply return the avg point of vertexes, it doesn't suit for all convex polygon
+ * this function simply return the avg point of vertices, it doesn't suit for all convex polygon
  */
 pub fn compute_polygon_approximate_center_point<'a>(
     point_iter: impl Iterator<Item = &'a Point>,
@@ -52,17 +52,17 @@ pub fn compute_convex_center_point(points: &[Point]) -> Point {
 /**
  * split convex polygon into triangles , compute the sum of all triangle area
  */
-pub fn compute_area_of_convex(vertexes: &[Point]) -> FloatNum {
-    let triangles = split_convex_polygon_to_triangles(vertexes);
+pub fn compute_area_of_convex(vertices: &[Point]) -> FloatNum {
+    let triangles = split_convex_polygon_to_triangles(vertices);
     triangles.into_iter().fold(0., |acc, triangle| {
         acc + compute_area_of_triangle(&triangle)
     })
 }
 
-pub fn compute_moment_of_inertia_of_triangle(vertexes: &[Point; 3], m: Mass) -> FloatNum {
+pub fn compute_moment_of_inertia_of_triangle(vertices: &[Point; 3], m: Mass) -> FloatNum {
     let mut sum = 0.;
     for i in 0..3usize {
-        let edge: Vector = (vertexes[i], vertexes[(i + 1) % 3]).into();
+        let edge: Vector = (vertices[i], vertices[(i + 1) % 3]).into();
         sum += edge * edge;
     }
     (1. / 36.) * sum * m
@@ -72,8 +72,8 @@ pub fn compute_moment_of_inertia_of_triangle(vertexes: &[Point; 3], m: Mass) -> 
  * a,b,c is three vertex of triangle
  * s = 1/2 * (ab X ac);
  */
-pub fn compute_area_of_triangle(vertexes: &[Point; 3]) -> FloatNum {
-    let [a, b, c] = *vertexes;
+pub fn compute_area_of_triangle(vertices: &[Point; 3]) -> FloatNum {
+    let [a, b, c] = *vertices;
     let ab: Vector = (a, b).into();
     let ac = (a, c).into();
     (ab ^ ac).abs() * 0.5
@@ -142,7 +142,7 @@ pub fn rotate_polygon<'a>(
 }
 
 pub fn resize_by_vector<'a>(
-    vertexes: impl Iterator<Item = &'a mut Point>,
+    vertices: impl Iterator<Item = &'a mut Point>,
     center_point: &Point,
     from: &Point,
     to: &Point,
@@ -153,7 +153,7 @@ pub fn resize_by_vector<'a>(
     let hold_vector: Vector = (center_point, hold_point).into();
     let project_size = resize_vector >> &hold_vector;
 
-    vertexes.for_each(|point| {
+    vertices.for_each(|point| {
         let v: Vector = (center_point, &*point).into();
         let abs_vector = v.abs();
         let resized_vector = &(v.normalize() * (abs_vector + project_size));
@@ -180,16 +180,16 @@ pub fn indicate_increase_by_endpoint(
     start_vector_size < end_vector_size
 }
 
-struct VertexesHelper<'a>(&'a [Point]);
+struct VerticesHelper<'a>(&'a [Point]);
 
-impl<'a> Deref for VertexesHelper<'a> {
+impl<'a> Deref for VerticesHelper<'a> {
     type Target = &'a [Point];
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl VertexesHelper<'_> {
+impl VerticesHelper<'_> {
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -202,29 +202,29 @@ impl VertexesHelper<'_> {
     }
 }
 
-pub(crate) struct VertexesToEdgeIter<'a> {
+pub(crate) struct VerticesToEdgeIter<'a> {
     index: usize,
-    vertexes: &'a [Point],
+    vertices: &'a [Point],
 }
 
-impl<'a> VertexesToEdgeIter<'a> {
-    pub fn new(vertexes: &'a [Point]) -> Self {
-        Self { index: 0, vertexes }
+impl<'a> VerticesToEdgeIter<'a> {
+    pub fn new(vertices: &'a [Point]) -> Self {
+        Self { index: 0, vertices }
     }
 }
 
-impl<'a> Iterator for VertexesToEdgeIter<'a> {
+impl<'a> Iterator for VerticesToEdgeIter<'a> {
     type Item = Edge<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let len = self.vertexes.len();
+        let len = self.vertices.len();
         if self.index >= len {
             return None;
         }
 
         let edge = Edge::Line {
-            start_point: &self.vertexes[self.index],
-            end_point: &self.vertexes[(self.index + 1) % len],
+            start_point: &self.vertices[self.index],
+            end_point: &self.vertices[(self.index + 1) % len],
         };
 
         self.index += 1;
@@ -246,12 +246,12 @@ impl<'a> Iterator for VertexesToEdgeIter<'a> {
  *    else:
  *        return false
  */
-pub fn check_is_polygon_clockwise(vertexes: &[Point]) -> bool {
+pub fn check_is_polygon_clockwise(vertices: &[Point]) -> bool {
     let mut area = 0.;
-    let vertexes_len = vertexes.len();
-    for i in 0..vertexes_len {
-        let a = vertexes[i];
-        let b = vertexes[(i + 1) % vertexes_len];
+    let vertices_len = vertices.len();
+    for i in 0..vertices_len {
+        let a = vertices[i];
+        let b = vertices[(i + 1) % vertices_len];
         area += a.to_vector() ^ b.to_vector();
     }
 
@@ -334,13 +334,13 @@ pub fn compute_cross_point_between_two_segment(segment_a: &Segment, segment_b: &
 }
 
 // check is shape concave or not
-pub fn check_is_concave(vertexes: &[Point]) -> bool {
-    let vertexes_len = vertexes.len();
-    if vertexes_len <= 2 {
+pub fn check_is_concave(vertices: &[Point]) -> bool {
+    let vertices_len = vertices.len();
+    if vertices_len <= 2 {
         return false;
     }
 
-    let mut pre_edge: Vector = (vertexes[0], vertexes[1]).into();
+    let mut pre_edge: Vector = (vertices[0], vertices[1]).into();
 
     enum CrossResultSign {
         Negative,
@@ -360,9 +360,9 @@ pub fn check_is_concave(vertexes: &[Point]) -> bool {
 
     let mut pre_cross_result: CrossResultSign = CrossResultSign::Undefine;
 
-    for i in 1..vertexes_len {
-        let start_point = vertexes[i];
-        let end_point = vertexes[(i + 1) % vertexes_len];
+    for i in 1..vertices_len {
+        let start_point = vertices[i];
+        let end_point = vertices[(i + 1) % vertices_len];
 
         let current_edge: Vector = (start_point, end_point).into();
 
@@ -391,22 +391,22 @@ pub fn check_is_concave(vertexes: &[Point]) -> bool {
 }
 
 /**
- * NOTE we must ensure polygon vertexes is clockwise
- * if polygon vertexes is counter clockwise , this algo is failure
+ * NOTE we must ensure polygon vertices is clockwise
+ * if polygon vertices is counter clockwise , this algo is failure
  * try use check_is_polygon_clockwise to check is polygon clockwise
  * reference https://zhuanlan.zhihu.com/p/350994427
  */
 pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
-    vertexes: &[Point],
+    vertices: &[Point],
 ) -> Option<[Vec<Point>; 2]> {
-    let helper = VertexesHelper(vertexes);
+    let helper = VerticesHelper(vertices);
 
-    let vertexes_len = helper.len();
-    if vertexes_len <= 3 {
+    let vertices_len = helper.len();
+    if vertices_len <= 3 {
         return None;
     }
 
-    for i in 0..vertexes_len {
+    for i in 0..vertices_len {
         let edge_a = helper.index_edge(i);
         let edge_b = helper.index_edge(i + 1);
 
@@ -421,16 +421,16 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
         let reference_vector = reference_edge.to_vector();
 
         // find the minimum distance toward cut_edge
-        let mut min_cut_edge_index = vertexes_len;
+        let mut min_cut_edge_index = vertices_len;
         let mut cut_point = Point::new(0., 0.);
         // NOTE this can't be negative
         let min_projection_size_on_cut_edge = FloatNum::MAX;
 
         let mut cut_point_at_end_point = false;
 
-        for j in 0..vertexes_len {
+        for j in 0..vertices_len {
             // j can't index adjoin edge
-            if j == i || (i + 1) % vertexes_len == j || (j + 1) % vertexes_len == i {
+            if j == i || (i + 1) % vertices_len == j || (j + 1) % vertices_len == i {
                 continue;
             }
             let cut_edge = helper.index_edge(j);
@@ -457,39 +457,39 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
             }
         }
 
-        if min_cut_edge_index == vertexes_len {
+        if min_cut_edge_index == vertices_len {
             unreachable!(
                 "polygon {:?} cant' found the cut edge , something is wrong",
-                vertexes
+                vertices
             )
         }
 
         let z = min_cut_edge_index.max(i);
         let e = min_cut_edge_index.min(i);
 
-        let mut polygon_one = Vec::with_capacity(vertexes_len - z + e + 1);
-        polygon_one.extend(&vertexes[0..=e]);
+        let mut polygon_one = Vec::with_capacity(vertices_len - z + e + 1);
+        polygon_one.extend(&vertices[0..=e]);
         polygon_one.push(cut_point);
-        if z + 1 < vertexes_len {
-            polygon_one.extend(&vertexes[(z + 1)..]);
+        if z + 1 < vertices_len {
+            polygon_one.extend(&vertices[(z + 1)..]);
         }
 
-        debug_assert_eq!(polygon_one.len(), vertexes_len - z + e + 1);
+        debug_assert_eq!(polygon_one.len(), vertices_len - z + e + 1);
 
         let mut polygon_two = Vec::with_capacity(z - e + 1);
-        polygon_two.extend(&vertexes[(e + 1)..=z]);
+        polygon_two.extend(&vertices[(e + 1)..=z]);
         polygon_two.push(cut_point);
 
         debug_assert_eq!(polygon_two.len(), z - e + 1);
 
-        let remove_same_cut_point = |vertexes: &mut Vec<Point>| {
+        let remove_same_cut_point = |vertices: &mut Vec<Point>| {
             let mut i = 0;
-            while i < vertexes.len() {
-                if vertexes[i] == cut_point {
+            while i < vertices.len() {
+                if vertices[i] == cut_point {
                     let j = i + 1;
-                    if vertexes.len() > j {
-                        while vertexes[j] == cut_point {
-                            vertexes.remove(j);
+                    if vertices.len() > j {
+                        while vertices[j] == cut_point {
+                            vertices.remove(j);
                         }
                     }
                     break;
@@ -509,33 +509,33 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
     None
 }
 
-pub fn split_concave_polygon_to_convex_polygons(vertexes: &[Point]) -> Vec<Vec<Point>> {
-    if !check_is_concave(vertexes) {
-        return vec![vertexes.into()];
+pub fn split_concave_polygon_to_convex_polygons(vertices: &[Point]) -> Vec<Vec<Point>> {
+    if !check_is_concave(vertices) {
+        return vec![vertices.into()];
     }
 
-    let vertexes_cow = if check_is_polygon_clockwise(vertexes) {
-        Cow::Borrowed(vertexes)
+    let vertices_cow = if check_is_polygon_clockwise(vertices) {
+        Cow::Borrowed(vertices)
     } else {
-        let mut vertexes = vertexes.to_owned();
-        vertexes.reverse();
-        Cow::Owned(vertexes)
+        let mut vertices = vertices.to_owned();
+        vertices.reverse();
+        Cow::Owned(vertices)
     };
 
-    let vertexes = &vertexes_cow[..];
+    let vertices = &vertices_cow[..];
 
     let mut result = vec![];
 
     let mut stack = vec![];
 
-    if let Some(two_polygon) = split_clockwise_concave_polygon_to_two_convex_polygon(vertexes) {
+    if let Some(two_polygon) = split_clockwise_concave_polygon_to_two_convex_polygon(vertices) {
         stack.extend(two_polygon);
     } else {
-        let vertexes = match vertexes_cow {
+        let vertices = match vertices_cow {
             Cow::Borrowed(v) => v.to_owned(),
             Cow::Owned(v) => v,
         };
-        result.push(vertexes);
+        result.push(vertices);
     }
 
     while let Some(polygon) = stack.pop() {
@@ -695,24 +695,24 @@ mod test {
     }
 }
 
-pub trait VertexesIter {
-    fn vertexes_iter(&self) -> impl Iterator<Item = &Point>;
+pub trait VerticesIter {
+    fn vertices_iter(&self) -> impl Iterator<Item = &Point>;
 
-    fn vertexes_iter_mut(&mut self) -> impl Iterator<Item = &mut Point>;
+    fn vertices_iter_mut(&mut self) -> impl Iterator<Item = &mut Point>;
 }
 
 impl<T> Projector for T
 where
-    T: VertexesIter,
+    T: VerticesIter,
 {
     fn projection_on_vector(&self, &vector: &Vector) -> (Point, Point) {
-        projection_polygon_on_vector(self.vertexes_iter(), vector)
+        projection_polygon_on_vector(self.vertices_iter(), vector)
     }
 
     #[inline]
     fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
         use AxisDirection::*;
-        let point_iter = self.vertexes_iter();
+        let point_iter = self.vertices_iter();
         type Reducer<T> = fn((T, T), &Point<T>) -> (T, T);
         let reducer: Reducer<f32> = match axis {
             X => |mut pre, v| {
@@ -740,7 +740,7 @@ pub trait CenterPointHelper: CenterPoint {
 
 impl<T> NearestPoint for T
 where
-    T: VertexesIter + EdgeIterable,
+    T: VerticesIter + EdgeIterable,
 {
     fn support_find_nearest_point(&self) -> bool {
         true
@@ -754,13 +754,13 @@ where
 #[macro_export]
 macro_rules! impl_shape_traits_use_deref {
     ($struct_name:ty, $($variants:tt)*) => {
-        impl<$($variants)*> $crate::shape::utils::VertexesIter for $struct_name {
-            fn vertexes_iter(&self) -> impl Iterator<Item = &Point> {
-                self.deref().vertexes_iter()
+        impl<$($variants)*> $crate::shape::utils::VerticesIter for $struct_name {
+            fn vertices_iter(&self) -> impl Iterator<Item = &Point> {
+                self.deref().vertices_iter()
             }
 
-            fn vertexes_iter_mut(&mut self) -> impl Iterator<Item = &mut Point> {
-                self.deref_mut().vertexes_iter_mut()
+            fn vertices_iter_mut(&mut self) -> impl Iterator<Item = &mut Point> {
+                self.deref_mut().vertices_iter_mut()
             }
         }
 
@@ -790,25 +790,25 @@ mod tests {
         use crate::math::FloatNum;
         use crate::shape::utils::check_is_polygon_clockwise;
 
-        let vertexes = vec![(-1, 1), (0, 0), (1, 1), (1, -1), (-1, -1)];
+        let vertices = vec![(-1, 1), (0, 0), (1, 1), (1, -1), (-1, -1)];
 
-        let vertexes = &vertexes
+        let vertices = &vertices
             .iter()
             .map(|&(x, y)| (x as FloatNum, y as FloatNum))
             .map(|v| v.into())
             .collect::<Vec<Point>>();
 
         assert!(!check_is_polygon_clockwise(
-            &vertexes.iter().copied().rev().collect::<Vec<Point>>()
+            &vertices.iter().copied().rev().collect::<Vec<Point>>()
         ));
 
-        assert!(check_is_polygon_clockwise(vertexes));
+        assert!(check_is_polygon_clockwise(vertices));
 
-        let result = split_clockwise_concave_polygon_to_two_convex_polygon(vertexes).unwrap();
+        let result = split_clockwise_concave_polygon_to_two_convex_polygon(vertices).unwrap();
 
         // dbg!(result);
 
-        let vertexes = &vec![
+        let vertices = &vec![
             (1.0, 1.0),
             (1.0, -1.0),
             (-1.0, -1.0),
@@ -820,7 +820,7 @@ mod tests {
         .map(|v| v.into())
         .collect::<Vec<Point>>();
 
-        let result = split_clockwise_concave_polygon_to_two_convex_polygon(vertexes).unwrap();
+        let result = split_clockwise_concave_polygon_to_two_convex_polygon(vertices).unwrap();
 
         dbg!(result);
     }
@@ -829,7 +829,7 @@ mod tests {
     fn test_split_concave_polygon1() {
         use crate::math::point::Point;
 
-        let vertexes = vec![
+        let vertices = vec![
             Point { x: 15.0, y: 55.0 },
             Point { x: 20.0, y: 60.0 },
             Point { x: 25.0, y: 58.0 },
@@ -870,7 +870,7 @@ mod tests {
             Point { x: 10.0, y: -30.0 },
         ];
 
-        super::split_concave_polygon_to_convex_polygons(&vertexes);
+        super::split_concave_polygon_to_convex_polygons(&vertices);
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::{
 use super::{
     utils::{
         compute_polygon_approximate_center_point, rotate_polygon, translate_polygon,
-        CenterPointHelper, VertexesIter, VertexesToEdgeIter,
+        CenterPointHelper, VerticesIter, VerticesToEdgeIter,
     },
     CenterPoint, Edge, EdgeIterable, GeometryTransformer, Transform,
 };
@@ -35,19 +35,19 @@ macro_rules! impl_shape_trait_for {
             }
         }
 
-        impl<$($variants)*>  VertexesIter for $struct_name {
-            fn vertexes_iter(&self) -> impl Iterator<Item = &Point> {
-                self.vertexes.iter()
+        impl<$($variants)*>  VerticesIter for $struct_name {
+            fn vertices_iter(&self) -> impl Iterator<Item = &Point> {
+                self.vertices.iter()
             }
 
-            fn vertexes_iter_mut(&mut self) -> impl Iterator<Item = &mut Point> {
-                self.vertexes.iter_mut()
+            fn vertices_iter_mut(&mut self) -> impl Iterator<Item = &mut Point> {
+                self.vertices.iter_mut()
             }
         }
 
         impl<$($variants)*> EdgeIterable for $struct_name {
             fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
-                Box::new(VertexesToEdgeIter::new(&self.vertexes))
+                Box::new(VerticesToEdgeIter::new(&self.vertices))
             }
         }
 
@@ -55,15 +55,15 @@ macro_rules! impl_shape_trait_for {
             fn sync_transform(&mut self,transform: &crate::meta::Transform) {
                 let translation = transform.translation();
 
-                for (i, p) in self.origin_vertexes.iter().enumerate() {
-                    self.vertexes[i] = p + translation;
+                for (i, p) in self.origin_vertices.iter().enumerate() {
+                    self.vertices[i] = p + translation;
                 }
                 self.center_point = self.origin_center_point + translation;
 
 
                 let rotation = transform.rotation();
 
-                rotate_polygon(self.center_point, self.vertexes_iter_mut(), rotation)
+                rotate_polygon(self.center_point, self.vertices_iter_mut(), rotation)
             }
         }
     }
@@ -71,8 +71,8 @@ macro_rules! impl_shape_trait_for {
 
 #[derive(Clone, Debug)]
 pub struct ConstPolygon<const N: usize> {
-    origin_vertexes: [Point; N],
-    vertexes: [Point; N],
+    origin_vertices: [Point; N],
+    vertices: [Point; N],
     origin_center_point: Point,
     center_point: Point,
 }
@@ -81,32 +81,32 @@ impl<const N: usize> ConstPolygon<N> {
     const EDGE_COUNT: usize = N;
 
     #[inline]
-    pub fn new(vertexes: [Point; N]) -> Self {
+    pub fn new(vertices: [Point; N]) -> Self {
         let center_point =
-            compute_polygon_approximate_center_point(vertexes.iter(), vertexes.len() as f32);
+            compute_polygon_approximate_center_point(vertices.iter(), vertices.len() as f32);
 
         Self {
-            origin_vertexes: vertexes,
-            vertexes,
+            origin_vertices: vertices,
+            vertices,
             origin_center_point: center_point,
             center_point,
         }
     }
 
-    pub fn vertexes(&self) -> &[Point; N] {
-        &self.vertexes
+    pub fn vertices(&self) -> &[Point; N] {
+        &self.vertices
     }
 
     pub fn translate(&mut self, translation: &Vector) {
         self.center_point += translation;
         self.origin_center_point += translation;
-        translate_polygon(self.origin_vertexes.iter_mut(), translation);
-        translate_polygon(self.vertexes.iter_mut(), translation);
+        translate_polygon(self.origin_vertices.iter_mut(), translation);
+        translate_polygon(self.vertices.iter_mut(), translation);
     }
 
     pub fn rotate(&mut self, rotation: FloatNum) {
-        rotate_polygon(self.center_point, self.origin_vertexes.iter_mut(), rotation);
-        rotate_polygon(self.center_point, self.vertexes.iter_mut(), rotation);
+        rotate_polygon(self.center_point, self.origin_vertices.iter_mut(), rotation);
+        rotate_polygon(self.center_point, self.vertices.iter_mut(), rotation);
     }
 }
 
@@ -114,8 +114,8 @@ impl_shape_trait_for!(NormalPolygon,);
 
 #[derive(Clone)]
 pub struct NormalPolygon {
-    origin_vertexes: Vec<Point>,
-    vertexes: Vec<Point>,
+    origin_vertices: Vec<Point>,
+    vertices: Vec<Point>,
     origin_center_point: Point,
     center_point: Point,
 }
@@ -123,30 +123,30 @@ pub struct NormalPolygon {
 impl_shape_trait_for!(ConstPolygon<N>, const N:usize);
 
 impl NormalPolygon {
-    pub fn new(center_point: impl Into<Point>, vertexes: Vec<Point>) -> Self {
+    pub fn new(center_point: impl Into<Point>, vertices: Vec<Point>) -> Self {
         let center_point = center_point.into();
         Self {
-            origin_vertexes: vertexes.clone(),
-            vertexes,
+            origin_vertices: vertices.clone(),
+            vertices,
             origin_center_point: center_point,
             center_point,
         }
     }
 
     pub fn edge_count(&self) -> usize {
-        self.vertexes.len()
+        self.vertices.len()
     }
 
     pub fn translation(&mut self, translation: &Vector) {
         self.center_point += translation;
         self.origin_center_point += translation;
-        translate_polygon(self.origin_vertexes.iter_mut(), translation);
-        translate_polygon(self.vertexes.iter_mut(), translation);
+        translate_polygon(self.origin_vertices.iter_mut(), translation);
+        translate_polygon(self.vertices.iter_mut(), translation);
     }
 
     pub fn rotate(&mut self, rotation: FloatNum) {
-        rotate_polygon(self.center_point, self.origin_vertexes.iter_mut(), rotation);
-        rotate_polygon(self.center_point, self.vertexes.iter_mut(), rotation);
+        rotate_polygon(self.center_point, self.origin_vertices.iter_mut(), rotation);
+        rotate_polygon(self.center_point, self.vertices.iter_mut(), rotation);
     }
 }
 
@@ -169,21 +169,21 @@ impl<const N: usize> ConstRegularPolygon<N> {
     #[inline]
     pub fn new(center: impl Into<Point>, radius: f32) -> Self {
         #[allow(clippy::uninit_assumed_init)]
-        let mut vertexes: [Point; N] = unsafe { MaybeUninit::uninit().assume_init() };
+        let mut vertices: [Point; N] = unsafe { MaybeUninit::uninit().assume_init() };
 
         let center = center.into().to_vector();
 
         let mut point: Vector<_> = (0., radius).into();
-        vertexes[0] = point.to_point();
+        vertices[0] = point.to_point();
 
         (1..N).for_each(|i| {
             point.affine_transformation_rotate_self(Self::EDGE_ANGLE);
-            vertexes[i] = point.to_point();
+            vertices[i] = point.to_point();
         });
 
         let mut this = Self {
             radius,
-            inner: ConstPolygon::new(vertexes),
+            inner: ConstPolygon::new(vertices),
         };
 
         if Self::IS_EVENT {
@@ -219,16 +219,16 @@ pub struct RegularPolygon {
 
 impl RegularPolygon {
     pub fn new(center_point: impl Into<Point>, edge_count: usize, radius: f32) -> Self {
-        let mut vertexes: Vec<Point> = Vec::with_capacity(edge_count);
+        let mut vertices: Vec<Point> = Vec::with_capacity(edge_count);
 
         let edge_angle = TAU() * (edge_count as f32).recip();
 
         let mut point: Vector<_> = (0., radius).into();
-        vertexes.push(point.to_point());
+        vertices.push(point.to_point());
 
         (1..edge_count).for_each(|_| {
             point.affine_transformation_rotate_self(edge_angle);
-            vertexes.push(point.to_point());
+            vertices.push(point.to_point());
         });
 
         let center_point = center_point.into();
@@ -237,7 +237,7 @@ impl RegularPolygon {
             radius,
             edge_count,
             edge_angle,
-            inner_polygon: NormalPolygon::new((0., 0.), vertexes),
+            inner_polygon: NormalPolygon::new((0., 0.), vertices),
         };
 
         if edge_count & 1 == 0 {

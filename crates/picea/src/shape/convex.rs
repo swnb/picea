@@ -11,15 +11,15 @@ use super::{
     utils::{
         compute_area_of_convex, compute_area_of_triangle, compute_convex_center_point,
         compute_moment_of_inertia_of_triangle, resize_by_vector, split_convex_polygon_to_triangles,
-        VertexesIter, VertexesToEdgeIter,
+        VerticesIter, VerticesToEdgeIter,
     },
     CenterPoint, EdgeIterable, GeometryTransformer, Transform,
 };
 
 #[derive(Clone, Shape)]
 pub struct ConvexPolygon {
-    origin_vertexes: Vec<Point>,
-    vertexes: Vec<Point>,
+    origin_vertices: Vec<Point>,
+    vertices: Vec<Point>,
     origin_center_point: Point,
     center_point: Point,
     area: FloatNum,
@@ -27,13 +27,13 @@ pub struct ConvexPolygon {
 
 impl ConvexPolygon {
     pub fn new(points: impl Into<Vec<Point>>) -> Self {
-        let vertexes: Vec<_> = points.into();
-        let center_point = compute_convex_center_point(&vertexes);
-        let area = compute_area_of_convex(&vertexes);
+        let vertices: Vec<_> = points.into();
+        let center_point = compute_convex_center_point(&vertices);
+        let area = compute_area_of_convex(&vertices);
 
         Self {
-            origin_vertexes: vertexes.clone(),
-            vertexes,
+            origin_vertices: vertices.clone(),
+            vertices,
             origin_center_point: center_point,
             center_point,
             area,
@@ -45,30 +45,30 @@ impl ConvexPolygon {
     }
 
     pub fn scale_with_center_point(&mut self, center_point: &Point, from: &Point, to: &Point) {
-        resize_by_vector(self.vertexes.iter_mut(), center_point, from, to);
+        resize_by_vector(self.vertices.iter_mut(), center_point, from, to);
     }
 }
 
-impl VertexesIter for ConvexPolygon {
-    fn vertexes_iter(&self) -> impl Iterator<Item = &Point> {
-        self.vertexes.iter()
+impl VerticesIter for ConvexPolygon {
+    fn vertices_iter(&self) -> impl Iterator<Item = &Point> {
+        self.vertices.iter()
     }
 
-    fn vertexes_iter_mut(&mut self) -> impl Iterator<Item = &mut Point> {
-        self.vertexes.iter_mut()
+    fn vertices_iter_mut(&mut self) -> impl Iterator<Item = &mut Point> {
+        self.vertices.iter_mut()
     }
 }
 
 impl GeometryTransformer for ConvexPolygon {
     fn sync_transform(&mut self, transform: &Transform) {
-        for (i, p) in self.origin_vertexes.iter().enumerate() {
-            self.vertexes[i] = p + transform.translation();
+        for (i, p) in self.origin_vertices.iter().enumerate() {
+            self.vertices[i] = p + transform.translation();
         }
         self.center_point = self.origin_center_point + transform.translation();
 
         rotate_polygon(
             self.center_point,
-            self.vertexes.iter_mut(),
+            self.vertices.iter_mut(),
             transform.rotation(),
         );
     }
@@ -82,14 +82,14 @@ impl CenterPoint for ConvexPolygon {
 
 impl EdgeIterable for ConvexPolygon {
     fn edge_iter(&self) -> Box<dyn Iterator<Item = Edge<'_>> + '_> {
-        Box::new(VertexesToEdgeIter::new(&self.vertexes))
+        Box::new(VerticesToEdgeIter::new(&self.vertices))
     }
 }
 
 impl ComputeMomentOfInertia for ConvexPolygon {
     // split into multi triangles ,compute each triangle's moment_of_inertia , sum them all
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
-        let triangles = split_convex_polygon_to_triangles(&self.vertexes);
+        let triangles = split_convex_polygon_to_triangles(&self.vertices);
 
         let total_area = triangles
             .iter()

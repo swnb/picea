@@ -25,13 +25,13 @@ impl Triangle {
     }
 
     pub fn compute_area(&self) -> FloatNum {
-        compute_area_of_triangle(self.inner.vertexes())
+        compute_area_of_triangle(self.inner.vertices())
     }
 }
 
 impl ComputeMomentOfInertia for Triangle {
     // the inertia of triangle is (1/36) * m * (a^2 + b^2 + c^2)
     fn compute_moment_of_inertia(&self, m: Mass) -> f32 {
-        compute_moment_of_inertia_of_triangle(self.inner.vertexes(), m)
+        compute_moment_of_inertia_of_triangle(self.inner.vertices(), m)
     }
 }

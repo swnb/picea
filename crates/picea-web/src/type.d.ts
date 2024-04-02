@@ -29,7 +29,7 @@ type Shape = {
     }
   | {
       readonly shapeType: "polygon"
-      vertexes: () => Point[]
+      vertices: () => Point[]
     }
 )
 

@@ -19,9 +19,9 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     let mut x = 15;
     let mut y: i32 = down;
 
-    let mut vertexes = Vec::new();
+    let mut vertices = Vec::new();
     for i in 0..17 {
-        vertexes.push((x, y));
+        vertices.push((x, y));
         x += 5;
         if i % 2 == 0 {
             y += 5;
@@ -31,7 +31,7 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     }
 
     for i in 0..17 {
-        vertexes.push((x, y));
+        vertices.push((x, y));
         x += 5;
         if i % 2 == 0 {
             y -= 5;
@@ -42,18 +42,18 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     const WALL_HEIGHT: i32 = 120;
 
-    vertexes.push((185, 50));
-    vertexes.push((190, WALL_HEIGHT));
-    vertexes.push((1, WALL_HEIGHT));
-    vertexes.push((10, 50));
+    vertices.push((185, 50));
+    vertices.push((190, WALL_HEIGHT));
+    vertices.push((1, WALL_HEIGHT));
+    vertices.push((10, 50));
 
-    let vertexes = vertexes
+    let vertices = vertices
         .iter()
         .map(|&(x, y)| (x as FloatNum, y as FloatNum - 30.))
         .map(|v| v.into())
         .collect::<VecDeque<Point>>();
 
-    let concave_polygon = ConcavePolygon::new(&Vec::from(vertexes)[..]);
+    let concave_polygon = ConcavePolygon::new(&Vec::from(vertices)[..]);
 
     let element = ElementBuilder::new(
         concave_polygon,

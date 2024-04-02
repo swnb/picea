@@ -21,7 +21,7 @@ pub fn create_element_construct_code_snapshot<T: Clone>(element: &Element<T>) ->
     for point in points {
         tmp_string.push_str(&format!("({:.3},{:.3}).into(),", point.x, point.y));
     }
-    let raw_vertexes = tmp_string;
+    let raw_vertices = tmp_string;
 
     let mass = element.meta().mass();
     let angle_velocity = element.meta().angle_velocity();
@@ -56,7 +56,7 @@ pub fn create_element_construct_code_snapshot<T: Clone>(element: &Element<T>) ->
                 .is_transparent({})
                 .is_fixed({}){});"#,
         element_type,
-        raw_vertexes,
+        raw_vertices,
         mass,
         angle_velocity,
         velocity.x(),
