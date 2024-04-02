@@ -37,6 +37,7 @@ pub struct ContactConstraint<Obj: ConstraintObject> {
 #[derive(Default, Deref, Fields)]
 pub struct ContactPointPairConstraintInfo {
     #[deref]
+    #[r]
     concat_point_pair: ContactPointPair,
     #[r]
     r_a: Vector,
