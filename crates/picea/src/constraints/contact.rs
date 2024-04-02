@@ -38,7 +38,7 @@ pub struct ContactConstraint<Obj: ConstraintObject> {
 pub struct ContactPointPairConstraintInfo {
     #[deref]
     #[r]
-    concat_point_pair: ContactPointPair,
+    contact_point_pair: ContactPointPair,
     #[r]
     r_a: Vector,
     #[r]
@@ -160,7 +160,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         let contact_point_pair_constraint_infos = contact_point_pairs
             .into_iter()
             .map(|v| ContactPointPairConstraintInfo {
-                concat_point_pair: v,
+                contact_point_pair: v,
                 ..Default::default()
             })
             .collect();
@@ -186,7 +186,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         self.contact_point_pair_constraint_infos = contact_point_pairs
             .into_iter()
             .map(|v| ContactPointPairConstraintInfo {
-                concat_point_pair: v,
+                contact_point_pair: v,
                 ..Default::default()
             })
             .collect()
@@ -198,7 +198,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 contact_point_pairs
                     .into_iter()
                     .map(|v| ContactPointPairConstraintInfo {
-                        concat_point_pair: v,
+                        contact_point_pair: v,
                         ..Default::default()
                     }),
             )
