@@ -41,16 +41,28 @@ impl CollisionStatusViewer {
         self.minkowski_simplexes.clear();
         self.collision_infos.truncate(0);
 
-        scene
-            .element_store
-            .clone()
-            .detective_collision(|element_a, element_b, contact_pairs| {
-                self.collision_infos
-                    .extend(contact_pairs.into_iter().map(|contact_pair| ContactInfos {
-                        object_id_pair: (element_a.id(), element_b.id()),
-                        contact_point_pair: contact_pair,
-                    }))
-            });
+        self.collision_infos = scene
+            .contact_constraints_manifold
+            .values()
+            .flat_map(|v| {
+                v.contact_pair_constraint_infos_iter()
+                    .map(|contact| ContactInfos {
+                        object_id_pair: v.obj_id_pair(),
+                        contact_point_pair: contact.contact_point_pair().clone(),
+                    })
+            })
+            .collect();
+
+        // scene
+        //     .element_store
+        //     .clone()
+        //     .detective_collision(|element_a, element_b, contact_pairs| {
+        //         self.collision_infos
+        //             .extend(contact_pairs.into_iter().map(|contact_pair| ContactInfos {
+        //                 object_id_pair: (element_a.id(), element_b.id()),
+        //                 contact_point_pair: contact_pair,
+        //             }))
+        //     });
     }
 
     pub fn get_collision_infos(&self) -> &[ContactInfos] {
