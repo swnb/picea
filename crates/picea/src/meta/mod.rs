@@ -78,12 +78,15 @@ pub struct Meta {
     is_ignore_gravity: bool,
     // if element is is_sleeping , skip constraint or collision
     #[builder(skip)]
+    #[w]
     is_sleeping: bool,
     #[w]
     #[builder(skip)]
     contact_count: u16,
-    #[shared(skip)]
-    motionless_frame_counter: u8,
+    #[builder(skip)]
+    #[r(vis(pub(crate)))]
+    #[w(vis(pub(crate)))]
+    inactive_frame_count: u16,
 }
 
 #[derive(Deref, Clone, Fields, Builder)]
@@ -120,7 +123,6 @@ impl Meta {
 
     pub(crate) fn sync_transform(&mut self) {
         self.total_transform += &self.delta_transform;
-        self.delta_transform.reset();
     }
 
     pub fn motion(&self) -> Vector {
@@ -143,26 +145,6 @@ impl Meta {
         self.moment_of_inertia
             .set_value(reducer(*self.moment_of_inertia));
         self
-    }
-
-    pub fn mark_motionless(&mut self) {
-        self.motionless_frame_counter += 1;
-    }
-
-    pub fn motionless_frame_counter(&self) -> u8 {
-        self.motionless_frame_counter
-    }
-
-    pub fn reset_motionless_frame_counter(&mut self) {
-        self.motionless_frame_counter = 0;
-    }
-
-    pub fn mark_is_sleeping(&mut self, is_sleeping: bool) {
-        if is_sleeping {
-            *self.velocity_mut() = (0., 0.).into();
-            *self.angle_velocity_mut() = 0.;
-        }
-        self.is_sleeping = is_sleeping;
     }
 
     // r is vector from shape center_point to contact_point
@@ -189,6 +171,25 @@ impl Meta {
         let angle_velocity_square = angle_velocity * angle_velocity;
 
         0.5 * (self.mass() * velocity_square + self.moment_of_inertia() * angle_velocity_square)
+    }
+
+    pub fn compute_rough_energy(&self) -> [f32; 4] {
+        let velocity = self.velocity();
+        let velocity_square = velocity * velocity;
+
+        let angle_velocity = self.angle_velocity();
+        let angle_velocity_square = angle_velocity * angle_velocity;
+        [
+            velocity_square,
+            angle_velocity_square,
+            self.delta_transform().translation() * self.delta_transform().translation(),
+            self.delta_transform().rotation().abs(),
+        ]
+    }
+
+    pub(crate) fn silent(&mut self) {
+        *self.angle_velocity_mut() = Default::default();
+        *self.velocity_mut() = Default::default();
     }
 }
 

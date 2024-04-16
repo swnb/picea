@@ -37,8 +37,6 @@ where
     point_constraints: BTreeMap<u32, PointConstraint<Element<Data>>>,
     join_constraints: BTreeMap<u32, JoinConstraint<Element<Data>>>,
     pub data: Data,
-    pub is_debug_constraint: bool,
-    pub debug_step_count: u8,
 }
 
 type ID = u32;
@@ -123,52 +121,12 @@ impl<T: Clone + Default> Scene<T> {
     pub fn tick(&mut self, mut delta_time: f32) {
         self.frame_count += 1;
 
-        let Context {
-            max_enter_sleep_frame,
-            max_enter_sleep_motion,
-            ..
-        } = self.context;
-
-        // if self.context.enable_sleep_mode {
-        //     self.elements_iter_mut().for_each(|element| {
-        //         let v = element.meta().velocity();
-
-        //         let a_v = element.meta().angle_velocity();
-
-        //         // TODO better performance for abs
-        //         let motion = v.abs().powf(2.) + a_v.powf(2.);
-
-        //         if motion < max_enter_sleep_motion {
-        //             element.meta_mut().mark_motionless();
-        //             if element.meta().motionless_frame_counter() > max_enter_sleep_frame {
-        //                 element.meta_mut().reset_motionless_frame_counter();
-        //                 element.meta_mut().mark_is_sleeping(true);
-        //             }
-        //         } else {
-        //             element.meta_mut().mark_is_sleeping(false);
-        //         }
-        //     });
-        // }
-
         // TODO 120 fps
         // max frame rate is 60
         const MIN_DELTA_TIME: FloatNum = 1. / 60.;
         const MAX_DELTA_TIME: FloatNum = 1. / 25.;
 
         delta_time = delta_time.max(MIN_DELTA_TIME).min(MAX_DELTA_TIME);
-        // if self.total_skip_durations + delta_time < MIN_DELTA_TIME {
-        //     // skip this frame
-        //     self.total_skip_durations += delta_time;
-        //     return;
-        // }
-
-        // let delta_time = self.total_skip_durations + delta_time;
-
-        // self.total_skip_durations = 0.;
-
-        // TODO use dynamic delta_time
-
-        // let delta_time: FloatNum = 1. / 61.;
 
         self.total_duration += delta_time;
 
@@ -197,21 +155,41 @@ impl<T: Clone + Default> Scene<T> {
 
         self.integrate_position(delta_time);
 
-        const MAX_FIX_POSITION_ITER_TIMES: u8 = 10;
+        const MAX_FIX_POSITION_ITER_TIMES: u8 = 20;
 
         for _ in 0..MAX_FIX_POSITION_ITER_TIMES {
             self.solve_position_fix();
+        }
+
+        if self.context.enable_sleep_mode() {
+            let max_enter_sleep_kinetic = self.context.max_enter_sleep_kinetic();
+            let max_enter_sleep_frame = self.context.max_enter_sleep_frame();
+            self.elements_iter_mut().for_each(|element| {
+                if element.meta().angle_velocity().powf(2.) <= 0.02
+                    && element.meta().velocity() * element.meta().velocity() <= 0.05
+                    && (element.meta().delta_transform().translation()
+                        * element.meta().delta_transform().translation())
+                        < 0.007
+                    && element.meta().delta_transform().rotation().abs() < 0.005
+                {
+                    *element.meta_mut().inactive_frame_count_mut() += 1;
+                } else {
+                    *element.meta_mut().inactive_frame_count_mut() = 0;
+                }
+                if element.meta_mut().inactive_frame_count() > max_enter_sleep_frame {
+                    *element.meta_mut().is_sleeping_mut() = true;
+                    element.meta_mut().silent();
+                } else {
+                    *element.meta_mut().is_sleeping_mut() = false;
+                }
+            })
         }
 
         self.elements_iter_mut().for_each(|element| {
             element.apply_transform();
         });
 
-        unsafe {
-            // TODO update move point use something else logic
-            // must remove it
-            self.pre_solve_constraints(delta_time);
-        }
+        self.post_solve_constraints();
     }
 
     pub fn register_element_position_update_callback<F>(&mut self, callback: F) -> u32
@@ -319,7 +297,7 @@ impl<T: Clone + Default> Scene<T> {
 
     pub fn set_gravity(&mut self, reducer: impl Fn(&Vector) -> Vector) {
         let context = &mut self.context;
-        context.default_gravity = reducer(&context.default_gravity);
+        *context.default_gravity_mut() = reducer(context.default_gravity());
     }
 
     // TODO doc
@@ -443,6 +421,18 @@ impl<T: Clone + Default> Scene<T> {
         })
     }
 
+    pub fn set_sleep_mode(&mut self, enable_sleep_mode: bool) {
+        *self.context_mut().enable_sleep_mode_mut() = enable_sleep_mode;
+        if !enable_sleep_mode {
+            self.elements_iter_mut()
+                .filter(|element| element.meta().is_sleeping())
+                .for_each(|element| {
+                    *element.meta_mut().is_sleeping_mut() = false;
+                    *element.meta_mut().inactive_frame_count_mut() = 0;
+                })
+        }
+    }
+
     // clear velocity for  all element , just set zero to velocity
     pub fn silent(&mut self) {
         self.elements_iter_mut()
@@ -473,12 +463,17 @@ impl<T: Clone + Default> Scene<T> {
                     if let Some((element_a, element_b)) =
                         (*self_ptr).query_element_pair_mut(manifold.obj_id_pair())
                     {
-                        element_a
-                            .meta_mut()
-                            .apply_impulse(total_lambda, *info.r_a());
-                        element_b
-                            .meta_mut()
-                            .apply_impulse(-total_lambda, *info.r_b());
+                        if !element_a.meta().is_sleeping() {
+                            element_a
+                                .meta_mut()
+                                .apply_impulse(total_lambda, *info.r_a());
+                        }
+
+                        if !element_b.meta().is_sleeping() {
+                            element_b
+                                .meta_mut()
+                                .apply_impulse(-total_lambda, *info.r_b());
+                        }
                     }
                 }
 
@@ -487,11 +482,11 @@ impl<T: Clone + Default> Scene<T> {
     }
 
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
-        let gravity = self.context.default_gravity;
-        let enable_gravity = self.context.enable_gravity;
+        let gravity = *self.context.default_gravity();
+        let enable_gravity = self.context.enable_gravity();
         self.elements_iter_mut()
-            .filter(|element| !element.meta().is_fixed())
             .filter(|element| !element.meta().is_sleeping())
+            .filter(|element| !element.meta().is_fixed())
             .filter(|element| !element.meta().is_ignore_gravity())
             .for_each(|element| {
                 if enable_gravity {
@@ -541,6 +536,7 @@ impl<T: Clone + Default> Scene<T> {
 
         self.elements_iter_mut().for_each(|element| {
             *element.meta_mut().contact_count_mut() = 0;
+            element.meta_mut().delta_transform_mut().reset();
         });
 
         for contact_constraint in (*self_ptr).contact_constraints_manifold.values_mut() {
@@ -551,7 +547,8 @@ impl<T: Clone + Default> Scene<T> {
                 continue;
             };
 
-            if contact_constraint.contact_point_pair_len() > 2 {
+            const ENABLE_FILTER: bool = false;
+            if contact_constraint.contact_point_pair_len() > 2 && ENABLE_FILTER {
                 // is there is more contact_point_pair then we think , filter some contact point
                 // this is due to unbalance of impulse , make object flip
                 contact_constraint.filter_contact_point_pairs(|contact_point_pair| {
@@ -566,7 +563,7 @@ impl<T: Clone + Default> Scene<T> {
             contact_constraint.pre_solve(
                 (obj_a, obj_b),
                 delta_time,
-                &self.context.constraint_parameters,
+                self.context.constraint_parameters(),
             )
         }
 
@@ -620,23 +617,54 @@ impl<T: Clone + Default> Scene<T> {
         });
     }
 
-    unsafe fn post_solve_constraints(&mut self) {
-        self.contact_constraints_manifold
-            .values_mut()
-            .for_each(|constraint| {});
+    fn post_solve_constraints(&mut self) {
+        let self_ptr = self as *mut Scene<_>;
+
+        for point_constraint in self.point_constraints.values_mut() {
+            let constraint_id = point_constraint.id();
+
+            let Some(move_point) = unsafe { &mut *self_ptr }
+                .get_element_mut(point_constraint.obj_id())
+                .and_then(|constraint| constraint.get_bind_point(constraint_id))
+            else {
+                continue;
+            };
+
+            *point_constraint.move_point_mut() = move_point;
+        }
+
+        for join_constraint in unsafe { &mut *self_ptr }.join_constraints.values_mut() {
+            let Some((element_a, element_b)) =
+                unsafe { &mut *self_ptr }.query_element_pair_mut(join_constraint.obj_id_pair())
+            else {
+                continue;
+            };
+
+            let Some(move_point_a) = element_a.get_bind_point(join_constraint.id()) else {
+                continue;
+            };
+            *join_constraint.move_point_with_a_mut() = move_point_a;
+
+            let Some(move_point_b) = element_b.get_bind_point(join_constraint.id()) else {
+                continue;
+            };
+            *join_constraint.move_point_with_b_mut() = move_point_b;
+        }
     }
 
     fn solve_point_constraints(&mut self) {
         self.point_constraints
             .values_mut()
-            .for_each(|constraint| unsafe { constraint.solve(&self.context.constraint_parameters) })
+            .for_each(|constraint| unsafe {
+                constraint.solve(self.context.constraint_parameters())
+            })
     }
 
     fn solve_join_constraints(&mut self) {
         self.join_constraints
             .values_mut()
             .for_each(|join_constraint| unsafe {
-                join_constraint.solve(&self.context.constraint_parameters)
+                join_constraint.solve(self.context.constraint_parameters())
             })
     }
 
@@ -646,7 +674,7 @@ impl<T: Clone + Default> Scene<T> {
             .filter(|constraint| constraint.is_active())
             .for_each(|contact_constraint| unsafe {
                 contact_constraint
-                    .solve_velocity_constraint(&self.context.constraint_parameters, iter_count);
+                    .solve_velocity_constraint(self.context.constraint_parameters(), iter_count);
             })
     }
 
@@ -655,9 +683,17 @@ impl<T: Clone + Default> Scene<T> {
         self.contact_constraints_manifold
             .values_mut()
             .filter(|constraint| constraint.is_active())
-            .for_each(|contact_constraint| unsafe {
+            .for_each(|contact_constraint| {
                 contact_constraint.solve_position_constraint();
             })
+    }
+
+    pub fn get_position_fix_map(&self) -> Vec<((ID, ID), Vec<FloatNum>)> {
+        self.contact_constraints_manifold
+            .iter()
+            .filter(|v| v.1.is_active())
+            .map(|(id, constraint)| (*id, constraint.get_position_constraint_result()))
+            .collect()
     }
 
     fn solve_air_friction(&mut self) {

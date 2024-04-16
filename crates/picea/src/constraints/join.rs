@@ -19,7 +19,9 @@ pub struct JoinConstraint<Obj: ConstraintObject> {
     obj_b_id: ID,
     obj_a: *mut Obj,
     obj_b: *mut Obj,
+    #[w(vis(pub(crate)))]
     move_point_with_a: Point,
+    #[w(vis(pub(crate)))]
     move_point_with_b: Point,
     total_lambda: FloatNum,
     #[r]
@@ -136,7 +138,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
 
         let distance = self.stretch_length();
 
-        if distance.abs() < parameters.max_allow_permeate {
+        if distance.abs() < parameters.max_allow_permeate() {
             return;
         }
 

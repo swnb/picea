@@ -227,20 +227,6 @@ impl WebScene {
         self.get_scene_mut().remove_element(element_id);
     }
 
-    // #[wasm_bindgen(js_name = "updateElementPosition")]
-    // pub fn update_element_position(
-    //     &mut self,
-    //     element_id: ID,
-    //     translate_vector: WebVector,
-    //     rotation: FloatNum,
-    // ) {
-    //     if let Some(element) = self.get_scene_mut().get_element_mut(element_id) {
-    //         let translate_vector: Vector = translate_vector.try_into().unwrap();
-    //         element.translate(&translate_vector);
-    //         element.rotate(rotation)
-    //     }
-    // }
-
     #[wasm_bindgen(js_name = "updateElementMeta")]
     pub fn update_element_meta_data(&self, element_id: ID, meta_data: OptionalWebMeta) {
         if let Some(element) = self.get_scene_mut().get_element_mut(element_id) {
@@ -523,6 +509,39 @@ impl WebScene {
             .join_constraints()
             .map(|constraint| JoinConstraint::new(constraint.id(), self.scene.clone()))
             .collect()
+    }
+
+    #[wasm_bindgen(js_name = "getKinetic")]
+    pub fn get_element_kinetic(&self, element_id: ID) -> JsValue {
+        self.get_scene_mut()
+            .get_element(element_id)
+            .map(|element| {
+                serde_wasm_bindgen::to_value(&element.meta().compute_rough_energy()).unwrap()
+            })
+            .unwrap()
+    }
+
+    #[wasm_bindgen(js_name = "getSleepingStatus")]
+    pub fn get_element_is_sleeping(&self, element_id: ID) -> Option<bool> {
+        self.get_scene_mut()
+            .get_element(element_id)
+            .map(|element| element.meta().is_sleeping())
+    }
+
+    pub fn get_position_fix_map(&self) -> JsValue {
+        let result = self.get_scene_mut().get_position_fix_map();
+
+        serde_wasm_bindgen::to_value(&result).unwrap()
+    }
+
+    #[wasm_bindgen(js_name = "enableSleepMode")]
+    pub fn enable_sleep_mode(&self) {
+        self.get_scene_mut().set_sleep_mode(true)
+    }
+
+    #[wasm_bindgen(js_name = "disableSleepMode")]
+    pub fn disable_sleep_mode(&self) {
+        self.get_scene_mut().set_sleep_mode(false)
     }
 
     fn create_element(

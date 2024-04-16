@@ -91,7 +91,7 @@ impl ContactPointPairConstraintInfo {
         friction_lambda
     }
 
-    pub(crate) unsafe fn prepare_solve_position_constraint<Obj: ConstraintObject>(
+    pub(crate) fn prepare_solve_position_constraint<Obj: ConstraintObject>(
         &self,
         object_a: &Obj,
         object_b: &Obj,
@@ -299,7 +299,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             .iter_mut()
             .for_each(|constraint| {
                 constraint.max_allow_restrict_impulse =
-                    parameters.max_allow_restrict_force_for_contact_solve * delta_time;
+                    parameters.max_allow_restrict_force_for_contact_solve() * delta_time;
             });
 
         self.inv_delta_time = delta_time.recip();
@@ -327,9 +327,17 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             .for_each(|contact_point_pair_constraint_info| {
                 let contact_point = &contact_point_pair_constraint_info.point().clone();
 
-                let r_a = (&object_a.center_point(), contact_point).into();
+                let r_a = (
+                    &object_a.center_point(),
+                    contact_point_pair_constraint_info.point_a(),
+                )
+                    .into();
 
-                let r_b = (&object_b.center_point(), contact_point).into();
+                let r_b = (
+                    &object_b.center_point(),
+                    contact_point_pair_constraint_info.point_b(),
+                )
+                    .into();
 
                 contact_point_pair_constraint_info.r_a = r_a;
 
@@ -405,7 +413,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                     .apply_impulse(jv_b * lambda, contact_info.r_b);
             });
 
-        if iter_count >= 5 && !parameters.skip_friction_constraints {
+        if iter_count >= 5 && !parameters.skip_friction_constraints() {
             self.solve_friction_constraint();
         }
     }
@@ -452,12 +460,12 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             });
     }
 
-    pub(crate) unsafe fn solve_position_constraint(&mut self) {
+    pub(crate) fn solve_position_constraint(&mut self) {
         self.contact_point_pair_constraint_infos
             .iter()
             .for_each(|contact_info| {
-                let obj_a = &mut *self.obj_a;
-                let obj_b = &mut *self.obj_b;
+                let obj_a = unsafe { &mut *self.obj_a };
+                let obj_b = unsafe { &mut *self.obj_b };
 
                 let (point_a, point_b, r_a, r_b) =
                     contact_info.prepare_solve_position_constraint(obj_a, obj_b);
@@ -495,7 +503,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 //     depth_fix *= 2.;
                 // }
 
-                const POSITION_DAMPEN: FloatNum = 0.08;
+                const POSITION_DAMPEN: FloatNum = 0.2;
 
                 depth_fix *= POSITION_DAMPEN;
 
@@ -507,6 +515,26 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
 
                 obj_b.apply_position_fix(-f * (contact_count_b as FloatNum).recip(), r_b);
             })
+    }
+
+    pub(crate) fn get_position_constraint_result(&self) -> Vec<FloatNum> {
+        unsafe {
+            self.contact_point_pair_constraint_infos
+                .iter()
+                .map(|contact_info| {
+                    let obj_a = &mut *self.obj_a;
+                    let obj_b = &mut *self.obj_b;
+
+                    let (point_a, point_b, r_a, r_b) =
+                        contact_info.prepare_solve_position_constraint(obj_a, obj_b);
+                    // REVIEW
+                    let n = contact_info.normal_toward_a();
+                    let permeate: FloatNum = n * (point_b - point_a);
+
+                    permeate
+                })
+                .collect()
+        }
     }
 
     pub(crate) fn contact_pair_constraint_infos_iter(

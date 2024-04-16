@@ -1,21 +1,24 @@
+use picea_macro_tools::Fields;
+
 use crate::math::{vector::Vector, FloatNum};
 
-#[derive(Debug)]
+#[derive(Debug, Fields)]
+#[r(vis(pub(crate)))]
 pub struct ConstraintParameters {
     // 位子修正的系数
-    pub factor_position_bias: FloatNum,
+    factor_position_bias: FloatNum,
     // 弹性系数  0 - 1 之间
-    pub factor_restitution: FloatNum,
+    factor_restitution: FloatNum,
     // FIXME remove
-    pub max_allow_permeate: FloatNum,
-    pub factor_default_friction: FloatNum,
+    max_allow_permeate: FloatNum,
+    factor_default_friction: FloatNum,
     // 允许碰撞深度是负值
-    pub allow_permeate_negative: bool,
+    allow_permeate_negative: bool,
 
-    pub skip_friction_constraints: bool,
+    skip_friction_constraints: bool,
     // more detail about this variable, see contact constraint
-    pub max_allow_restrict_force_for_contact_solve: FloatNum,
-    pub split_position_fix: bool,
+    max_allow_restrict_force_for_contact_solve: FloatNum,
+    split_position_fix: bool,
 }
 
 impl Default for ConstraintParameters {
@@ -34,16 +37,21 @@ impl Default for ConstraintParameters {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Fields)]
+#[r]
 /// define global config and state
 pub struct Context {
-    pub constraint_parameters: ConstraintParameters,
+    #[w]
+    constraint_parameters: ConstraintParameters,
     // element will ignore sleep when when motion less than max_enter_sleep_motion for max_enter_sleep_frame times
-    pub enable_sleep_mode: bool,
-    pub max_enter_sleep_motion: FloatNum,
-    pub max_enter_sleep_frame: u8,
-    pub enable_gravity: bool,
-    pub default_gravity: Vector,
+    #[w]
+    enable_sleep_mode: bool,
+    max_enter_sleep_kinetic: FloatNum,
+    max_enter_sleep_frame: u16,
+    #[w]
+    enable_gravity: bool,
+    #[w]
+    default_gravity: Vector,
 }
 
 impl Default for Context {
@@ -51,8 +59,8 @@ impl Default for Context {
         Self {
             constraint_parameters: Default::default(),
             enable_sleep_mode: false,
-            max_enter_sleep_frame: 40,
-            max_enter_sleep_motion: 0.07,
+            max_enter_sleep_frame: 300,
+            max_enter_sleep_kinetic: 3.,
             enable_gravity: true,
             default_gravity: (0., 9.8).into(),
         }

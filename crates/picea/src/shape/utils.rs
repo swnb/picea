@@ -751,6 +751,7 @@ where
     }
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_shape_traits_use_deref {
     ($struct_name:ty, $($variants:tt)*) => {

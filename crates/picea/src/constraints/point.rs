@@ -18,6 +18,7 @@ pub struct PointConstraint<Obj: ConstraintObject> {
     #[w]
     fixed_point: Point,
     #[r]
+    #[w(vis(pub(crate)))]
     move_point: Point, // bind with element
     #[r]
     total_lambda: FloatNum,
@@ -112,7 +113,7 @@ impl<Obj: ConstraintObject> PointConstraint<Obj> {
 
     pub(crate) unsafe fn solve(&mut self, parameters: &ConstraintParameters) {
         let strength_length = self.stretch_length();
-        if strength_length.abs() < parameters.max_allow_permeate {
+        if strength_length.abs() < parameters.max_allow_permeate() {
             // no constraint if there is no need
             return;
         }
