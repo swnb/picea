@@ -101,6 +101,7 @@ impl<T: Clone + Default> Scene<T> {
         element.inject_id(element_id);
 
         self.element_store.push(element);
+        self.invalidate_contact_manifolds_after_element_store_mutation();
         element_id
     }
 
@@ -113,6 +114,7 @@ impl<T: Clone + Default> Scene<T> {
     pub fn remove_element(&mut self, element_id: ID) {
         if self.has_element(element_id) {
             self.element_store.remove_element(element_id);
+            self.invalidate_contact_manifolds_after_element_store_mutation();
         }
     }
 
@@ -394,6 +396,10 @@ impl<T: Clone + Default> Scene<T> {
 
     fn self_ptr(&mut self) -> *mut Self {
         self as *mut Self
+    }
+
+    fn invalidate_contact_manifolds_after_element_store_mutation(&mut self) {
+        self.contact_constraints_manifold.clear();
     }
 
     fn accumulate_frame_delta(&mut self, delta_time: FloatNum) {
@@ -771,14 +777,8 @@ impl<T: Clone + Default> Scene<T> {
         &mut self,
         (element_a_id, element_b_id): (ID, ID),
     ) -> Option<(&mut Element<T>, &mut Element<T>)> {
-        if element_a_id == element_b_id {
-            return None;
-        }
-
-        let element_a = self.get_element_mut(element_a_id)? as *mut Element<_>;
-
-        let element_b = self.get_element_mut(element_b_id)? as *mut Element<_>;
-        unsafe { (&mut *element_a, &mut *element_b).into() }
+        self.element_store
+            .get_pair_mut_by_id(element_a_id, element_b_id)
     }
 }
 
@@ -823,6 +823,30 @@ mod tests {
         let element_id = scene.push_element(element);
 
         (scene, element_id)
+    }
+
+    fn push_circle_at(scene: &mut Scene, x: FloatNum) -> u32 {
+        scene.push_element(ElementBuilder::new(
+            Circle::new((x, 0.), 1.),
+            MetaBuilder::new().mass(1.),
+            (),
+        ))
+    }
+
+    fn active_contact_scene() -> (Scene, u32, u32) {
+        let mut scene = Scene::width_capacity(2);
+        scene.set_gravity(|_| (0., 0.).into());
+
+        let element_a_id = push_circle_at(&mut scene, 0.);
+        let element_b_id = push_circle_at(&mut scene, 1.5);
+
+        scene.tick(STEP_DT);
+        assert!(
+            !scene.get_position_fix_map().is_empty(),
+            "overlapping circles should create an active contact"
+        );
+
+        (scene, element_a_id, element_b_id)
     }
 
     fn run_falling_circle(deltas: &[FloatNum]) -> StepSnapshot {
@@ -951,5 +975,82 @@ mod tests {
 
         assert_eq!(scene.frame_count(), 1);
         assert_float_close(scene.total_duration(), STEP_DT * 9.);
+    }
+
+    #[test]
+    fn query_element_pair_mut_rejects_same_and_stale_ids() {
+        let mut scene = Scene::new();
+        let element_a_id = push_circle_at(&mut scene, 0.);
+        let element_b_id = push_circle_at(&mut scene, 2.);
+
+        assert!(scene
+            .query_element_pair_mut((element_a_id, element_a_id))
+            .is_none());
+
+        scene.remove_element(element_b_id);
+
+        assert!(scene
+            .query_element_pair_mut((element_a_id, element_b_id))
+            .is_none());
+    }
+
+    #[test]
+    fn query_element_pair_mut_can_mutate_distinct_elements() {
+        let mut scene = Scene::new();
+        let element_a_id = push_circle_at(&mut scene, 0.);
+        let element_b_id = push_circle_at(&mut scene, 2.);
+
+        {
+            let (element_a, element_b) = scene
+                .query_element_pair_mut((element_a_id, element_b_id))
+                .expect("distinct live ids return a pair");
+            *element_a.meta_mut().velocity_mut() = (1., 0.).into();
+            *element_b.meta_mut().velocity_mut() = (2., 0.).into();
+        }
+
+        assert_eq!(
+            scene
+                .get_element(element_a_id)
+                .expect("element a remains accessible")
+                .meta()
+                .velocity()
+                .x(),
+            1.
+        );
+        assert_eq!(
+            scene
+                .get_element(element_b_id)
+                .expect("element b remains accessible")
+                .meta()
+                .velocity()
+                .x(),
+            2.
+        );
+    }
+
+    #[test]
+    fn push_after_active_contact_invalidates_stale_position_fix_pointers() {
+        let (mut scene, _, _) = active_contact_scene();
+
+        for i in 0..32 {
+            push_circle_at(&mut scene, 100. + i as FloatNum * 4.);
+        }
+
+        assert!(
+            scene.get_position_fix_map().is_empty(),
+            "store mutation must invalidate active contact pointers before public position queries"
+        );
+    }
+
+    #[test]
+    fn remove_active_contact_element_invalidates_stale_position_fix_pointers() {
+        let (mut scene, element_a_id, _) = active_contact_scene();
+
+        scene.remove_element(element_a_id);
+
+        assert!(
+            scene.get_position_fix_map().is_empty(),
+            "removing a contacted element must invalidate stale contact pointers before public position queries"
+        );
     }
 }

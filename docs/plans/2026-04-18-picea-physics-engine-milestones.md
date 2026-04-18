@@ -191,6 +191,21 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 不调 solver 参数。
 - 不做 collision 算法替换。
 
+**执行记录（2026-04-19，M3 implementer）**
+
+状态：M3 Storage And Handle Model 已完成最小 storage/handle/query 迁移，未进入 M4/M5/M6。
+
+- 实现策略：`ElementStore` 从 `Vec<Rc<StoredElement<T>>> + BTreeMap<ID, Rc<StoredElement<T>>> + UnsafeCell` 迁移为 `Vec<Box<Element<T>>> + BTreeMap<ID, usize>`；origin element order 继续由 `Vec` 保持，element allocation 地址在 `Vec` realloc 时保持稳定，broadphase sort cache 继续保存 `ID`，public `Scene` API 和 examples 调用方式保持兼容。
+- handle/query：新增 `ElementStore::get_pair_mut_by_id`，先通过 `ID -> usize` 查两个 index，再用 `Vec::split_at_mut` 返回两个不同元素的 `&mut Element<T>`；`Scene::query_element_pair_mut` 改为委托该方法，不再通过两次 mutable lookup 后转裸指针构造两个 `&mut`。同 id pair 和 stale id 仍返回 `None`。
+- remove/cache：`remove_element` 删除 Vec entry、map entry 和 `region_sort_result` 中的 stale id，并对删除点之后的 map index 重新编号；重复 id `push` 先移除旧 entry，再把 replacement 追加到 origin order 尾部，避免 map/cache 出现同 id 重复项。
+- clone 语义：保留 `ElementStore: Clone`，改为自定义 Clone，clone 后保留 element id、meta、shape、bind points 和 data，并避免旧 `Rc` 共享导致 clone/original mutable alias；没有修改 `Element::clone()` 本身“id reset to 0”的语义。
+- TDD RED：新增 storage tests 后，`rtk proxy cargo test -p picea element::store::tests --lib` 按预期失败，3 个失败分别锁住 remove 后 sort cache stale、duplicate id cache/map 不一致、clone 共享内部元素污染；新增 Scene pair tests 后，`rtk proxy cargo test -p picea scene::tests::query_element_pair_mut --lib` 当前基线通过，用作同 id/stale id/distinct mut 行为锁。
+- GREEN：最小实现后，`rtk proxy cargo test -p picea element::store::tests --lib` 通过，3 passed；`rtk proxy cargo test -p picea scene::tests::query_element_pair_mut --lib` 通过，2 passed。
+- Code review 返工：review 指出 inline `Vec<Element<T>>` 会让 active `ContactConstraint` 内长期保存的 `*mut Element` 在 `push_element` realloc 或 `remove_element` compact/drop 后变成 stale pointer，`get_position_fix_map` 等 public path 可能在下一次 `pre_solve` 刷新前解引用旧指针。补充 `tick -> push/remove -> get_position_fix_map` 回归测试后，`rtk proxy cargo test -p picea stale_position_fix --lib` 在修复前触发 SIGSEGV；修复为 `Vec<Box<Element<T>>>` 并在 `Scene::push_element` / `Scene::remove_element` 后清理 contact manifold，修复后该命令 2 passed。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，32 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test -p picea-web --lib` 通过，0 tests；`rtk git diff --check` 通过。验证输出仍有既有 warning，本轮未扩范围清理。
+- 边界核对：未改 constraints/contact/join/point 物理公式；未调 solver 参数；未替换 broad/narrow collision 算法；未改 wasm API；未删除或纳入未跟踪 `.DS_Store`。
+- residual risk：M3 只是最小 `ID -> index` 存储迁移，还不是 generation arena，外部长期持有的 stale id 只能返回 `None`，不能区分 removed/reinsert generation；`Vec::remove` 和 map reindex 仍是 O(n)；`region_sort_result` 仍是 ID cache 而不是更强类型 handle；`push_element` / `remove_element` 现在粗粒度清理 contact manifold，会丢弃 warm-start/cache 信息直到下一次 collision detect 重建；`Scene` 里为遍历 constraints/manifolds 留下的 `self_ptr` unsafe 仍存在，未在本轮扩大重构；`collision::sweep_and_prune_collision_detection` 内部仍有既有 raw pointer 读借用技巧，留到 M5 collision pipeline。
+
 ### M4 Geometry And Shape Pipeline
 
 **目标**
