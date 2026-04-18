@@ -28,15 +28,52 @@ pub fn compute_polygon_approximate_center_point<'a>(
     (sum * edge_count.recip()).to_point()
 }
 
+fn is_finite_point(point: &Point) -> bool {
+    point.x().is_finite() && point.y().is_finite()
+}
+
+fn finite_points(vertices: &[Point]) -> Vec<Point> {
+    vertices.iter().copied().filter(is_finite_point).collect()
+}
+
+fn compute_finite_average_point(points: &[Point]) -> Point {
+    let mut count = 0;
+    let sum = points.iter().fold(Vector::default(), |acc, point| {
+        if is_finite_point(point) {
+            count += 1;
+            acc + point.to_vector()
+        } else {
+            acc
+        }
+    });
+
+    if count == 0 {
+        Point::default()
+    } else {
+        (sum * (count as FloatNum).recip()).to_point()
+    }
+}
+
 /**
  * split convex polygon into triangles , use the rate of area sum all the center point of triangle
+ * Degenerate or non-finite inputs fall back to a finite vertex average/default point.
  */
 pub fn compute_convex_center_point(points: &[Point]) -> Point {
+    let finite_points = finite_points(points);
+    if finite_points.is_empty() {
+        return Point::default();
+    }
+    let points = &finite_points[..];
+
     let triangles = split_convex_polygon_to_triangles(points);
 
     let total_area = triangles
         .iter()
         .fold(0., |acc, triangle| acc + compute_area_of_triangle(triangle));
+
+    if !total_area.is_finite() || total_area <= FloatNum::EPSILON {
+        return compute_finite_average_point(points);
+    }
 
     let total_area_inv = total_area.recip();
 
@@ -106,23 +143,34 @@ pub fn projection_polygon_on_vector<'a>(
     point_iter: impl Iterator<Item = &'a Point>,
     vector: Vector,
 ) -> (Point, Point) {
+    // A zero or near-zero direction collapses every projection to the first
+    // finite vertex; non-finite vertices are ignored and all-invalid input
+    // returns the finite default point.
     let vector = vector.normalize();
-    let mut min = f32::MAX;
-    let mut min_point = (0., 0.).into();
-    let mut max = f32::MIN;
-    let mut max_point = (0., 0.).into();
+    let mut min: Option<(FloatNum, Point)> = None;
+    let mut max: Option<(FloatNum, Point)> = None;
     point_iter.for_each(|&cur| {
-        let size = cur.to_vector() * vector;
-        if size < min {
-            min = size;
-            min_point = cur;
+        if !is_finite_point(&cur) {
+            return;
         }
-        if size > max {
-            max = size;
-            max_point = cur;
+
+        let size = cur.to_vector() * vector;
+        if !size.is_finite() {
+            return;
+        }
+
+        if min.is_none_or(|(pre, _)| size < pre) {
+            min = Some((size, cur));
+        }
+        if max.is_none_or(|(pre, _)| size > pre) {
+            max = Some((size, cur));
         }
     });
-    (min_point, max_point)
+
+    (
+        min.map(|(_, point)| point).unwrap_or_default(),
+        max.map(|(_, point)| point).unwrap_or_default(),
+    )
 }
 
 pub fn translate_polygon<'a>(point_iter_mut: impl Iterator<Item = &'a mut Point>, vector: &Vector) {
@@ -459,10 +507,10 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
         }
 
         if min_cut_edge_index == vertices_len {
-            unreachable!(
-                "polygon {:?} cant' found the cut edge , something is wrong",
-                vertices
-            )
+            // Degenerate inputs can look concave but have no valid internal cut.
+            // Try another candidate; the caller will use a conservative fallback
+            // if no cut is found at all.
+            continue;
         }
 
         let z = min_cut_edge_index.max(i);
@@ -514,6 +562,64 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
     None
 }
 
+fn fallback_polygon_for_unsplittable_input(vertices: &[Point]) -> Vec<Point> {
+    let mut result = Vec::with_capacity(vertices.len());
+
+    for &point in vertices {
+        if !is_finite_point(&point) {
+            continue;
+        }
+        if result.last().is_some_and(|last| *last == point) {
+            continue;
+        }
+        result.push(point);
+    }
+
+    if result.len() > 1 && result.first() == result.last() {
+        result.pop();
+    }
+
+    let mut index = 0;
+    while result.len() > 3 && index < result.len() {
+        let len = result.len();
+        let prev = result[(index + len - 1) % len];
+        let current = result[index];
+        let next = result[(index + 1) % len];
+
+        let incoming: Vector = (prev, current).into();
+        let outgoing: Vector = (current, next).into();
+
+        if incoming.abs() <= FloatNum::EPSILON
+            || outgoing.abs() <= FloatNum::EPSILON
+            || (incoming ^ outgoing).abs() <= FloatNum::EPSILON
+        {
+            result.remove(index);
+        } else {
+            index += 1;
+        }
+    }
+
+    // If cleanup cannot produce a valid finite polygon, return a tiny
+    // conservative triangle so downstream shape constructors still see a
+    // finite, non-concave polygon with at least three points.
+    if is_valid_fallback_polygon(&result) {
+        result
+    } else {
+        conservative_finite_triangle()
+    }
+}
+
+fn is_valid_fallback_polygon(vertices: &[Point]) -> bool {
+    vertices.len() >= 3
+        && vertices.first() != vertices.last()
+        && vertices.iter().all(is_finite_point)
+        && !check_is_concave(vertices)
+}
+
+fn conservative_finite_triangle() -> Vec<Point> {
+    vec![(0., 0.).into(), (1., 0.).into(), (0., 1.).into()]
+}
+
 pub fn split_concave_polygon_to_convex_polygons(vertices: &[Point]) -> Vec<Vec<Point>> {
     if !check_is_concave(vertices) {
         return vec![vertices.into()];
@@ -540,14 +646,14 @@ pub fn split_concave_polygon_to_convex_polygons(vertices: &[Point]) -> Vec<Vec<P
             Cow::Borrowed(v) => v.to_owned(),
             Cow::Owned(v) => v,
         };
-        result.push(vertices);
+        result.push(fallback_polygon_for_unsplittable_input(&vertices));
     }
 
     while let Some(polygon) = stack.pop() {
         if let Some(two_polygon) = split_clockwise_concave_polygon_to_two_convex_polygon(&polygon) {
             stack.extend(two_polygon);
         } else {
-            result.push(polygon);
+            result.push(fallback_polygon_for_unsplittable_input(&polygon));
         }
     }
 
@@ -786,9 +892,229 @@ macro_rules! impl_shape_traits_use_deref {
 
 #[cfg(test)]
 mod tests {
+    use crate::math::segment::Segment;
     use crate::math::{point::Point, vector::Vector, FloatNum};
 
     use super::rotate_polygon;
+
+    fn points(raw: &[(FloatNum, FloatNum)]) -> Vec<Point> {
+        raw.iter().copied().map(Point::from).collect()
+    }
+
+    fn assert_finite_points(vertices: &[Point]) {
+        assert!(vertices
+            .iter()
+            .all(|point| point.x().is_finite() && point.y().is_finite()));
+    }
+
+    fn polygon_area(vertices: &[Point]) -> FloatNum {
+        if vertices.len() < 3 {
+            return 0.;
+        }
+
+        let double_area = vertices.iter().enumerate().fold(0., |acc, (index, point)| {
+            let next = vertices[(index + 1) % vertices.len()];
+            acc + (point.to_vector() ^ next.to_vector())
+        });
+
+        double_area.abs() * 0.5
+    }
+
+    fn assert_convex_partition(source: &[Point], result: &[Vec<Point>]) {
+        assert!(!result.is_empty());
+
+        for vertices in result {
+            assert_valid_output_polygon(vertices);
+        }
+
+        let source_area = polygon_area(source);
+        let result_area: FloatNum = result.iter().map(|vertices| polygon_area(vertices)).sum();
+        let tolerance = source_area.max(1.) * 0.0001;
+
+        assert!((source_area - result_area).abs() <= tolerance);
+    }
+
+    fn assert_valid_output_polygon(vertices: &[Point]) {
+        assert!(vertices.len() >= 3);
+        assert_ne!(vertices.first(), vertices.last());
+        assert_finite_points(vertices);
+        assert!(!super::check_is_concave(vertices));
+    }
+
+    #[test]
+    fn projection_on_zero_vector_returns_finite_collapsed_projection() {
+        let vertices = points(&[(2., 3.), (4., 6.), (5., 9.)]);
+
+        let (min_point, max_point) =
+            super::projection_polygon_on_vector(vertices.iter(), Vector::new(0., 0.));
+
+        assert_eq!(min_point, vertices[0]);
+        assert_eq!(max_point, vertices[0]);
+        assert_finite_points(&[min_point, max_point]);
+    }
+
+    #[test]
+    fn degenerate_polygon_inputs_use_conservative_finite_fallbacks() {
+        let cases = [
+            (
+                "collinear_zero_area",
+                points(&[(0., 0.), (1., 0.), (2., 0.), (3., 0.)]),
+            ),
+            (
+                "repeated_point",
+                points(&[(0., 0.), (1., 0.), (1., 0.), (1., 1.), (0., 1.)]),
+            ),
+            (
+                "tiny_edge",
+                points(&[
+                    (0., 0.),
+                    (f32::EPSILON * 0.25, 0.),
+                    (1., 0.),
+                    (1., 1.),
+                    (0., 1.),
+                ]),
+            ),
+        ];
+
+        for (name, vertices) in cases {
+            assert_finite_points(&vertices);
+            assert!(!super::check_is_concave(&vertices), "{name}");
+            assert!(!super::check_is_polygon_clockwise(&vertices) || polygon_area(&vertices) > 0.);
+
+            let result = super::split_concave_polygon_to_convex_polygons(&vertices);
+            assert_eq!(result.len(), 1, "{name}");
+            assert_eq!(result[0], vertices, "{name}");
+            assert_finite_points(&result[0]);
+        }
+    }
+
+    #[test]
+    fn convex_center_point_uses_average_for_zero_area_inputs() {
+        let vertices = points(&[(0., 0.), (1., 0.), (2., 0.), (3., 0.)]);
+
+        let center_point = super::compute_convex_center_point(&vertices);
+
+        assert_finite_points(&[center_point]);
+        assert_eq!(center_point, (1.5, 0.).into());
+    }
+
+    #[test]
+    fn segment_cross_handles_collinear_and_zero_length_segments() {
+        let cases: [(Segment, Segment); 3] = [
+            (
+                ((0., 0.).into(), (1., 0.).into()).into(),
+                ((2., 0.).into(), (3., 0.).into()).into(),
+            ),
+            (
+                ((0., 0.).into(), (1., 0.).into()).into(),
+                ((1., 0.).into(), (1., 0.).into()).into(),
+            ),
+            (
+                ((0., 0.).into(), (0., 0.).into()).into(),
+                ((0., 1.).into(), (1., 1.).into()).into(),
+            ),
+        ];
+
+        for (segment_a, segment_b) in cases {
+            assert!(!super::check_is_segment_cross(&segment_a, &segment_b));
+        }
+    }
+
+    #[test]
+    fn concave_split_accepts_clockwise_and_counter_clockwise_input() {
+        let clockwise = points(&[(-1., 1.), (0., 0.), (1., 1.), (1., -1.), (-1., -1.)]);
+        let mut counter_clockwise = clockwise.clone();
+        counter_clockwise.reverse();
+
+        let cases = [
+            ("clockwise", clockwise),
+            ("counter_clockwise", counter_clockwise),
+        ];
+
+        for (name, vertices) in cases {
+            let result = super::split_concave_polygon_to_convex_polygons(&vertices);
+            assert_convex_partition(&vertices, &result);
+            assert!(
+                result
+                    .iter()
+                    .all(|vertices| !super::check_is_concave(vertices)),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn concave_split_falls_back_when_degenerate_input_has_no_cut_edge() {
+        let vertices = points(&[(-1., -1.), (-1., 0.), (-1., 1.), (0., -1.)]);
+
+        assert!(super::check_is_concave(&vertices));
+
+        let result = super::split_concave_polygon_to_convex_polygons(&vertices);
+
+        assert_convex_partition(&vertices, &result);
+    }
+
+    #[test]
+    fn concave_split_fallback_never_returns_too_few_vertices() {
+        let vertices = points(&[(-1., -1.), (-1., -1.), (-1., 0.)]);
+
+        assert!(super::check_is_concave(&vertices));
+
+        let result = super::split_concave_polygon_to_convex_polygons(&vertices);
+
+        assert!(!result.is_empty());
+        for vertices in result {
+            assert_valid_output_polygon(&vertices);
+        }
+    }
+
+    #[test]
+    fn convex_center_point_ignores_non_finite_vertices() {
+        let vertices = [
+            Point::new(FloatNum::NAN, 0.),
+            Point::new(FloatNum::INFINITY, 1.),
+            Point::new(0., 0.),
+            Point::new(2., 0.),
+        ];
+
+        let center_point = super::compute_convex_center_point(&vertices);
+
+        assert_finite_points(&[center_point]);
+        assert_eq!(center_point, (1., 0.).into());
+    }
+
+    #[test]
+    fn polygon_projection_ignores_non_finite_vertices() {
+        let vertices = [
+            Point::new(FloatNum::NAN, 0.),
+            Point::new(FloatNum::INFINITY, 1.),
+            Point::new(2., 0.),
+            Point::new(4., 0.),
+        ];
+
+        let (min_point, max_point) =
+            super::projection_polygon_on_vector(vertices.iter(), Vector::new(1., 0.));
+
+        assert_finite_points(&[min_point, max_point]);
+        assert_eq!(min_point, (2., 0.).into());
+        assert_eq!(max_point, (4., 0.).into());
+    }
+
+    #[test]
+    fn finite_fallbacks_use_default_when_no_finite_vertices_exist() {
+        let vertices = [
+            Point::new(FloatNum::NAN, 0.),
+            Point::new(FloatNum::INFINITY, FloatNum::NEG_INFINITY),
+        ];
+
+        let center_point = super::compute_convex_center_point(&vertices);
+        let (min_point, max_point) =
+            super::projection_polygon_on_vector(vertices.iter(), Vector::new(1., 0.));
+
+        assert_eq!(center_point, Point::default());
+        assert_eq!(min_point, Point::default());
+        assert_eq!(max_point, Point::default());
+    }
 
     #[test]
     fn test_split_concave_polygon() {
@@ -879,14 +1205,7 @@ mod tests {
 
         let result = super::split_concave_polygon_to_convex_polygons(&vertices);
 
-        assert!(!result.is_empty());
-        assert!(result.iter().all(|vertices| vertices.len() >= 3));
-        assert!(result
-            .iter()
-            .all(|vertices| vertices.first() != vertices.last()));
-        assert!(result
-            .iter()
-            .all(|vertices| !super::check_is_concave(vertices)));
+        assert_convex_partition(&vertices, &result);
     }
 
     #[test]

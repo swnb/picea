@@ -77,7 +77,13 @@ macro_rules! impl_vector {
                 }
 
                 pub fn normalize(&self) -> Vector<$T> {
-                    let shrink = self.abs().recip();
+                    let abs = self.abs();
+                    // Degenerate vectors have no stable direction; keep them finite by
+                    // collapsing zero, near-zero, and non-finite inputs to zero.
+                    if !abs.is_finite() || abs <= $T::EPSILON {
+                        return (0., 0.).into();
+                    }
+                    let shrink = abs.recip();
                     (self.x() * shrink, self.y() * shrink).into()
                 }
 
@@ -489,16 +495,81 @@ where
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::Vector;
+
+    #[test]
+    fn normalize_returns_zero_for_degenerate_f32_vectors() {
+        let vectors = [
+            Vector::<f32>::new(0., 0.),
+            Vector::<f32>::new(f32::MIN_POSITIVE * f32::EPSILON, 0.),
+        ];
+
+        for vector in vectors {
+            let normalized = vector.normalize();
+            assert!(normalized.x().is_finite());
+            assert!(normalized.y().is_finite());
+            assert_eq!(normalized, Vector::new(0., 0.));
+        }
+    }
+
+    #[test]
+    fn normalize_returns_zero_for_degenerate_f64_vectors() {
+        let vectors = [
+            Vector::<f64>::new(0., 0.),
+            Vector::<f64>::new(f64::MIN_POSITIVE * f64::EPSILON, 0.),
+        ];
+
+        for vector in vectors {
+            let normalized = vector.normalize();
+            assert!(normalized.x().is_finite());
+            assert!(normalized.y().is_finite());
+            assert_eq!(normalized, Vector::new(0., 0.));
+        }
+    }
+
+    #[test]
+    fn normalize_preserves_regular_vectors() {
+        let normalized = Vector::<f32>::new(3., 4.).normalize();
+
+        assert!((normalized.abs() - 1.).abs() <= f32::EPSILON);
+        assert_eq!(normalized, Vector::new(0.6, 0.8));
+    }
+
+    #[test]
+    fn projection_onto_degenerate_vector_returns_zero() {
+        let vector = Vector::<f32>::new(3., 4.);
+        let zero = Vector::<f32>::new(0., 0.);
+        let tiny = Vector::<f32>::new(f32::MIN_POSITIVE * f32::EPSILON, 0.);
+
+        assert_eq!(vector >> zero, 0.);
+        assert_eq!(&vector >> &zero, 0.);
+        assert_eq!(vector >> tiny, 0.);
+    }
+}
+
+#[inline]
+fn project_vector_on_vector(lhs: &Vector, rhs: &Vector) -> f32 {
+    let rhs_abs = rhs.abs();
+    // Projection onto a degenerate axis has no meaningful signed length.
+    if !rhs_abs.is_finite() || rhs_abs <= f32::EPSILON {
+        0.
+    } else {
+        lhs * rhs * rhs_abs.recip()
+    }
+}
+
 impl Shr<Vector> for Vector {
     type Output = f32;
     fn shr(self, rhs: Vector) -> Self::Output {
-        self * rhs * rhs.abs().recip()
+        project_vector_on_vector(&self, &rhs)
     }
 }
 
 impl Shr<&Vector> for &Vector {
     type Output = f32;
     fn shr(self, rhs: &Vector) -> Self::Output {
-        self * rhs * rhs.abs().recip()
+        project_vector_on_vector(self, rhs)
     }
 }

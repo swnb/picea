@@ -106,6 +106,19 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 不改 collision pipeline。
 - 不改 storage 模型。
 
+**执行记录（2026-04-18，M1 implementer）**
+
+状态：M1 Math And Geometry Contracts 已完成，未进入 M2/M3/M4。
+
+- 几何输入策略：当前 public API 不改成 `Result`，M1 采用保守 fallback。退化向量归一化为零向量；退化投影轴返回零投影/折叠到输入首个有限点；零面积 convex center 回退到顶点平均值；非凹或退化多边形拆分保持原输入作为有限 fallback。
+- RED 证据：新增行为锁后，`rtk proxy cargo test -p picea --lib normalize_returns_zero` 失败于 `normalized.x().is_finite()`；`projection_on_zero_vector_returns_finite_collapsed_projection` 失败于返回默认 `(0,0)`；`projection_onto_degenerate_vector_returns_zero` 失败于 `NaN`；`convex_center_point_uses_average_for_zero_area_inputs` 失败于中心点非有限。
+- 实现：`Vector::normalize` 对零/极小/非有限向量返回零向量；`Vector >> Vector` 对退化投影轴返回 `0`；`compute_convex_center_point` 对零面积输入返回平均点；关键路径补了简短注释说明退化策略。
+- 行为锁：新增 math tests 覆盖 f32/f64 零向量与极小向量、正常 `(3,4)` 归一化、退化轴投影；shape utils table-driven tests 覆盖零方向投影、共线/零面积、重复点、极小边、退化 segment、顺/逆时针凹多边形输入；M0 凹多边形测试复用统一断言，检查非空、每个子多边形至少 3 点、首尾不重复、有限、非凹，并增加面积近似守恒。
+- Spec review 返工：review 发现 `split_clockwise_concave_polygon_to_two_convex_polygon` 仍有 no-cut `unreachable!` panic path。新增 `concave_split_falls_back_when_degenerate_input_has_no_cut_edge` 行为锁，RED 时命中该 `unreachable!`；修复后 no-cut 候选继续尝试其它候选点，最终无法切分时走保守 fallback，并清理相邻重复点、首尾重复点和共线中点，保证 formerly-unreachable case 输出有限、首尾不重复、至少 3 点且非凹。
+- Code review 返工：review 发现 fallback cleanup 可能输出少于 3 个点，且 `compute_convex_center_point` / `projection_polygon_on_vector` 没有 containment NaN/inf 顶点。新增 `concave_split_fallback_never_returns_too_few_vertices`、`convex_center_point_ignores_non_finite_vertices`、`polygon_projection_ignores_non_finite_vertices`、`finite_fallbacks_use_default_when_no_finite_vertices_exist` 行为锁；RED 时分别暴露 len < 3、中心点非有限、投影点非有限、无有限点未回默认值。修复后 center/projection 只使用有限点，无有限点返回 `Point::default()`；unsplittable fallback 最终校验 len、finite、首尾不重复、非凹，不满足时返回保守有限三角形。
+- GREEN 证据：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，20 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test -p picea-web --lib` 通过，0 tests。
+- residual risk：M1 未做完整 property testing/fuzzing；凹多边形拆分仍是现有算法的行为锁与有限性加固，不是 M4 shape pipeline 重构；warnings 未清理；未改 Scene tick、storage、collision pipeline、solver 或 wasm API。
+
 ### M2 Deterministic Step Pipeline
 
 **目标**
