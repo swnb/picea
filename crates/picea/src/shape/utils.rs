@@ -424,7 +424,7 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
         let mut min_cut_edge_index = vertices_len;
         let mut cut_point = Point::new(0., 0.);
         // NOTE this can't be negative
-        let min_projection_size_on_cut_edge = FloatNum::MAX;
+        let mut min_projection_size_on_cut_edge = FloatNum::MAX;
 
         let mut cut_point_at_end_point = false;
 
@@ -454,6 +454,7 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
             if projection_size < min_projection_size_on_cut_edge {
                 min_cut_edge_index = j;
                 cut_point = cross_point;
+                min_projection_size_on_cut_edge = projection_size;
             }
         }
 
@@ -483,18 +484,22 @@ pub fn split_clockwise_concave_polygon_to_two_convex_polygon(
         debug_assert_eq!(polygon_two.len(), z - e + 1);
 
         let remove_same_cut_point = |vertices: &mut Vec<Point>| {
-            let mut i = 0;
-            while i < vertices.len() {
-                if vertices[i] == cut_point {
-                    let j = i + 1;
-                    if vertices.len() > j {
-                        while vertices[j] == cut_point {
-                            vertices.remove(j);
-                        }
-                    }
-                    break;
+            let mut index = 0;
+            while index + 1 < vertices.len() {
+                if vertices[index] == cut_point && vertices[index + 1] == cut_point {
+                    vertices.remove(index + 1);
+                } else {
+                    index += 1;
                 }
-                i += 1;
+            }
+
+            // Endpoint cuts can put the same cut point at both ends of the
+            // polygon slice. Remove the wrapped duplicate before recursion.
+            if vertices.len() > 1
+                && vertices[0] == cut_point
+                && vertices[vertices.len() - 1] == cut_point
+            {
+                vertices.pop();
             }
         };
 
@@ -872,7 +877,16 @@ mod tests {
             Point { x: 10.0, y: -30.0 },
         ];
 
-        super::split_concave_polygon_to_convex_polygons(&vertices);
+        let result = super::split_concave_polygon_to_convex_polygons(&vertices);
+
+        assert!(!result.is_empty());
+        assert!(result.iter().all(|vertices| vertices.len() >= 3));
+        assert!(result
+            .iter()
+            .all(|vertices| vertices.first() != vertices.last()));
+        assert!(result
+            .iter()
+            .all(|vertices| !super::check_is_concave(vertices)));
     }
 
     #[test]

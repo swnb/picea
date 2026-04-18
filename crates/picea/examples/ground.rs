@@ -13,8 +13,9 @@ mod common;
 fn init(scene: &mut Scene, handler: &mut common::Handler<()>) {
     scene.set_gravity(|_| (0., 3.).into());
 
-    scene.context_mut().constraint_parameters.max_allow_permeate = 0.7;
-    scene.context_mut().constraint_parameters.split_position_fix = true;
+    let constraint_parameters = scene.context_mut().constraint_parameters_mut();
+    *constraint_parameters.max_allow_permeate_mut() = 0.7;
+    *constraint_parameters.split_position_fix_mut() = true;
 
     let mut start_x = 30.;
     let start_y = 60.;

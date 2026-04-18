@@ -202,14 +202,12 @@ where
                 }
 
                 VirtualKeyCode::E => {
-                    self.scene
-                        .context_mut()
-                        .constraint_parameters
-                        .skip_friction_constraints = !self
-                        .scene
-                        .context_mut()
-                        .constraint_parameters
-                        .skip_friction_constraints
+                    let constraint_parameters =
+                        self.scene.context_mut().constraint_parameters_mut();
+                    let skip_friction_constraints =
+                        !*constraint_parameters.skip_friction_constraints_mut();
+                    *constraint_parameters.skip_friction_constraints_mut() =
+                        skip_friction_constraints;
                 }
                 _ => {}
             }

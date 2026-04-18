@@ -18,8 +18,9 @@ fn init_elements(scene: &mut Scene, _: &mut common::Handler<()>) {
     //     .constraint_parameters
     //     .skip_friction_constraints = true;
 
-    scene.context_mut().constraint_parameters.max_allow_permeate = 0.01;
-    scene.context_mut().constraint_parameters.factor_restitution = 1.;
+    let constraint_parameters = scene.context_mut().constraint_parameters_mut();
+    *constraint_parameters.max_allow_permeate_mut() = 0.01;
+    *constraint_parameters.factor_restitution_mut() = 1.;
 
     scene.set_gravity(|_| (0., 30.).into());
 

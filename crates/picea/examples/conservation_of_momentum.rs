@@ -5,14 +5,12 @@ use picea::{element::ElementBuilder, meta::MetaBuilder, scene::Scene, shape::cir
 mod common;
 
 fn init_elements(scene: &mut Scene, _: &mut Handler<()>) {
-    scene
-        .context_mut()
-        .constraint_parameters
-        .skip_friction_constraints = true;
+    let constraint_parameters = scene.context_mut().constraint_parameters_mut();
+    *constraint_parameters.skip_friction_constraints_mut() = true;
 
-    scene.context_mut().constraint_parameters.split_position_fix = true;
+    *constraint_parameters.split_position_fix_mut() = true;
 
-    scene.context_mut().constraint_parameters.max_allow_permeate = 0.1;
+    *constraint_parameters.max_allow_permeate_mut() = 0.1;
 
     scene.set_gravity(|_| (0., 0.).into());
 

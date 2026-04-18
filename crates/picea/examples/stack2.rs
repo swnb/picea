@@ -12,13 +12,11 @@ mod common;
 fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     scene.set_gravity(|_| (0., 30.).into());
 
-    scene.context_mut().constraint_parameters.max_allow_permeate = 0.7;
-    scene.context_mut().constraint_parameters.split_position_fix = true;
+    let constraint_parameters = scene.context_mut().constraint_parameters_mut();
+    *constraint_parameters.max_allow_permeate_mut() = 0.7;
+    *constraint_parameters.split_position_fix_mut() = true;
 
-    scene
-        .context_mut()
-        .constraint_parameters
-        .skip_friction_constraints = false;
+    *constraint_parameters.skip_friction_constraints_mut() = false;
 
     // scene
     //     .context_mut()

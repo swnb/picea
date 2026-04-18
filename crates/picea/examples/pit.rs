@@ -15,7 +15,10 @@ mod common;
 fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     let ground_bottom: Line = Line::new((10., 90.), (210., 90.));
 
-    scene.context_mut().constraint_parameters.max_allow_permeate = 0.01;
+    *scene
+        .context_mut()
+        .constraint_parameters_mut()
+        .max_allow_permeate_mut() = 0.01;
 
     scene.push_element(ElementBuilder::new(
         ground_bottom,

@@ -8,16 +8,20 @@ pub struct ConstraintParameters {
     // 位子修正的系数
     factor_position_bias: FloatNum,
     // 弹性系数  0 - 1 之间
+    #[w]
     factor_restitution: FloatNum,
     // FIXME remove
+    #[w]
     max_allow_permeate: FloatNum,
     factor_default_friction: FloatNum,
     // 允许碰撞深度是负值
     allow_permeate_negative: bool,
 
+    #[w]
     skip_friction_constraints: bool,
     // more detail about this variable, see contact constraint
     max_allow_restrict_force_for_contact_solve: FloatNum,
+    #[w]
     split_position_fix: bool,
 }
 
