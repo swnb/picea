@@ -20,6 +20,12 @@ use crate::{
 
 use self::context::Context;
 
+const FIXED_DELTA_TIME: FloatNum = 1. / 60.;
+const MAX_SUBSTEPS_PER_TICK: u8 = 8;
+const STEP_EPSILON: FloatNum = 0.000001;
+const MAX_CONSTRAINTS_TIMES: u8 = 10;
+const MAX_FIX_POSITION_ITER_TIMES: u8 = 20;
+
 #[derive(Default)]
 pub struct Scene<Data = ()>
 where
@@ -29,6 +35,7 @@ where
     id_dispatcher: IDDispatcher,
     total_duration: FloatNum,
     total_skip_durations: FloatNum,
+    step_accumulator: FloatNum,
     pub(crate) context: Context,
     frame_count: u128,
     callback_hook: hooks::CallbackHook,
@@ -118,78 +125,18 @@ impl<T: Clone + Default> Scene<T> {
         self.total_duration
     }
 
-    pub fn tick(&mut self, mut delta_time: f32) {
-        self.frame_count += 1;
+    pub fn tick(&mut self, delta_time: f32) {
+        self.accumulate_frame_delta(delta_time);
 
-        // TODO 120 fps
-        // max frame rate is 60
-        const MIN_DELTA_TIME: FloatNum = 1. / 60.;
-        const MAX_DELTA_TIME: FloatNum = 1. / 25.;
-
-        delta_time = delta_time.max(MIN_DELTA_TIME).min(MAX_DELTA_TIME);
-
-        self.total_duration += delta_time;
-
-        self.integrate_velocity(delta_time);
-
-        // warm start and mark all manifold inactive
-        self.warm_start();
-
-        // gen collision manifold this step
-        self.collision_detective();
-
-        unsafe {
-            // reuse contact manifold , reset params and set object pointer
-            self.pre_solve_constraints(delta_time);
+        let mut substeps = 0;
+        while self.step_accumulator >= FIXED_DELTA_TIME && substeps < MAX_SUBSTEPS_PER_TICK {
+            self.step_accumulator -= FIXED_DELTA_TIME;
+            if self.step_accumulator.abs() <= STEP_EPSILON {
+                self.step_accumulator = 0.;
+            }
+            self.step_frame(FIXED_DELTA_TIME);
+            substeps += 1;
         }
-
-        const MAX_CONSTRAINTS_TIMES: u8 = 10;
-
-        for iter_count in 0..MAX_CONSTRAINTS_TIMES {
-            self.solve_point_constraints();
-
-            self.solve_join_constraints();
-
-            self.solve_contact_constraints(iter_count);
-        }
-
-        self.integrate_position(delta_time);
-
-        const MAX_FIX_POSITION_ITER_TIMES: u8 = 20;
-
-        for _ in 0..MAX_FIX_POSITION_ITER_TIMES {
-            self.solve_position_fix();
-        }
-
-        if self.context.enable_sleep_mode() {
-            let max_enter_sleep_kinetic = self.context.max_enter_sleep_kinetic();
-            let max_enter_sleep_frame = self.context.max_enter_sleep_frame();
-            self.elements_iter_mut().for_each(|element| {
-                if element.meta().angle_velocity().powf(2.) <= 0.02
-                    && element.meta().velocity() * element.meta().velocity() <= 0.05
-                    && (element.meta().delta_transform().translation()
-                        * element.meta().delta_transform().translation())
-                        < 0.007
-                    && element.meta().delta_transform().rotation().abs() < 0.005
-                {
-                    *element.meta_mut().inactive_frame_count_mut() += 1;
-                } else {
-                    *element.meta_mut().inactive_frame_count_mut() = 0;
-                }
-                if element.meta_mut().inactive_frame_count() > max_enter_sleep_frame {
-                    *element.meta_mut().is_sleeping_mut() = true;
-                    element.meta_mut().silent();
-                } else {
-                    *element.meta_mut().is_sleeping_mut() = false;
-                }
-            })
-        }
-
-        self.elements_iter_mut().for_each(|element| {
-            element.apply_transform();
-        });
-
-        self.post_solve_constraints();
     }
 
     pub fn register_element_position_update_callback<F>(&mut self, callback: F) -> u32
@@ -242,6 +189,8 @@ impl<T: Clone + Default> Scene<T> {
         self.contact_constraints_manifold.clear();
         self.point_constraints.clear();
         self.join_constraints.clear();
+        self.step_accumulator = 0.;
+        self.total_skip_durations = 0.;
         self.frame_count = 0;
     }
 
@@ -445,6 +394,99 @@ impl<T: Clone + Default> Scene<T> {
 
     fn self_ptr(&mut self) -> *mut Self {
         self as *mut Self
+    }
+
+    fn accumulate_frame_delta(&mut self, delta_time: FloatNum) {
+        if !delta_time.is_finite() || delta_time <= 0. {
+            return;
+        }
+
+        self.step_accumulator += delta_time;
+
+        let ready_steps = (self.step_accumulator / FIXED_DELTA_TIME).floor() as u32;
+        let max_substeps = u32::from(MAX_SUBSTEPS_PER_TICK);
+        if ready_steps > max_substeps {
+            let whole_ready_duration = ready_steps as FloatNum * FIXED_DELTA_TIME;
+            let mut fractional_remainder = self.step_accumulator - whole_ready_duration;
+            if fractional_remainder.abs() <= STEP_EPSILON {
+                fractional_remainder = 0.;
+            }
+            if fractional_remainder < 0. {
+                fractional_remainder = 0.;
+            }
+
+            let skipped_steps = ready_steps - max_substeps;
+            let skipped_duration = skipped_steps as FloatNum * FIXED_DELTA_TIME;
+            self.total_skip_durations += skipped_duration;
+            self.step_accumulator =
+                max_substeps as FloatNum * FIXED_DELTA_TIME + fractional_remainder;
+        }
+    }
+
+    fn step_frame(&mut self, delta_time: FloatNum) {
+        self.frame_count += 1;
+        self.total_duration += delta_time;
+
+        self.integrate_velocity(delta_time);
+        self.warm_start();
+        self.collision_detective();
+        unsafe {
+            self.pre_solve_constraints(delta_time);
+        }
+        self.solve_velocity_constraints();
+        self.integrate_position(delta_time);
+        self.solve_position_fix_iterations();
+        self.apply_sleep_state();
+        self.apply_transforms();
+        self.post_solve_constraints();
+    }
+
+    fn solve_velocity_constraints(&mut self) {
+        for iter_count in 0..MAX_CONSTRAINTS_TIMES {
+            self.solve_point_constraints();
+            self.solve_join_constraints();
+            self.solve_contact_constraints(iter_count);
+        }
+    }
+
+    fn solve_position_fix_iterations(&mut self) {
+        for _ in 0..MAX_FIX_POSITION_ITER_TIMES {
+            self.solve_position_fix();
+        }
+    }
+
+    fn apply_sleep_state(&mut self) {
+        if !self.context.enable_sleep_mode() {
+            return;
+        }
+
+        let max_enter_sleep_kinetic = self.context.max_enter_sleep_kinetic();
+        let max_enter_sleep_frame = self.context.max_enter_sleep_frame();
+        self.elements_iter_mut().for_each(|element| {
+            if element.meta().angle_velocity().powf(2.) <= 0.02
+                && element.meta().velocity() * element.meta().velocity() <= 0.05
+                && (element.meta().delta_transform().translation()
+                    * element.meta().delta_transform().translation())
+                    < 0.007
+                && element.meta().delta_transform().rotation().abs() < 0.005
+            {
+                *element.meta_mut().inactive_frame_count_mut() += 1;
+            } else {
+                *element.meta_mut().inactive_frame_count_mut() = 0;
+            }
+            if element.meta_mut().inactive_frame_count() > max_enter_sleep_frame {
+                *element.meta_mut().is_sleeping_mut() = true;
+                element.meta_mut().silent();
+            } else {
+                *element.meta_mut().is_sleeping_mut() = false;
+            }
+        })
+    }
+
+    fn apply_transforms(&mut self) {
+        self.elements_iter_mut().for_each(|element| {
+            element.apply_transform();
+        });
     }
 
     // warm start and mark all manifold active false
@@ -748,5 +790,166 @@ where
     type Output = ID;
     fn shl(self, rhs: T) -> Self::Output {
         self.push_element(rhs.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Scene, STEP_EPSILON};
+    use crate::{
+        element::ElementBuilder,
+        math::{vector::Vector, FloatNum},
+        meta::MetaBuilder,
+        shape::Circle,
+    };
+
+    const STEP_DT: FloatNum = 1. / 60.;
+    const EPSILON: FloatNum = 0.00001;
+
+    #[derive(Debug)]
+    struct StepSnapshot {
+        frame_count: u128,
+        total_duration: FloatNum,
+        center: Vector,
+        velocity: Vector,
+    }
+
+    fn falling_circle_scene() -> (Scene, u32) {
+        let mut scene = Scene::new();
+        scene.set_gravity(|_| (0., 60.).into());
+
+        let element =
+            ElementBuilder::new(Circle::new((0., 0.), 1.), MetaBuilder::new().mass(1.), ());
+        let element_id = scene.push_element(element);
+
+        (scene, element_id)
+    }
+
+    fn run_falling_circle(deltas: &[FloatNum]) -> StepSnapshot {
+        let (mut scene, element_id) = falling_circle_scene();
+
+        for delta_time in deltas {
+            scene.tick(*delta_time);
+        }
+
+        let element = scene.get_element(element_id).expect("element exists");
+
+        StepSnapshot {
+            frame_count: scene.frame_count(),
+            total_duration: scene.total_duration(),
+            center: element.center_point().to_vector(),
+            velocity: *element.meta().velocity(),
+        }
+    }
+
+    fn assert_float_close(actual: FloatNum, expected: FloatNum) {
+        assert!(
+            (actual - expected).abs() <= EPSILON,
+            "expected {actual} to be within {EPSILON} of {expected}"
+        );
+    }
+
+    fn assert_vector_close(actual: Vector, expected: Vector) {
+        assert_float_close(actual.x(), expected.x());
+        assert_float_close(actual.y(), expected.y());
+    }
+
+    fn assert_snapshot_close(actual: StepSnapshot, expected: &StepSnapshot) {
+        assert_eq!(actual.frame_count, expected.frame_count);
+        assert_float_close(actual.total_duration, expected.total_duration);
+        assert_vector_close(actual.center, expected.center);
+        assert_vector_close(actual.velocity, expected.velocity);
+    }
+
+    #[test]
+    fn tick_uses_fixed_steps_for_the_same_total_duration_across_frame_splits() {
+        let six_single_steps = [STEP_DT; 6];
+        let grouped_steps = [STEP_DT * 2., STEP_DT * 4.];
+        let half_steps = [STEP_DT * 0.5; 12];
+
+        let expected = StepSnapshot {
+            frame_count: 6,
+            total_duration: STEP_DT * 6.,
+            center: (0., 0.35).into(),
+            velocity: (0., 6.).into(),
+        };
+
+        assert_snapshot_close(run_falling_circle(&six_single_steps), &expected);
+        assert_snapshot_close(run_falling_circle(&grouped_steps), &expected);
+        assert_snapshot_close(run_falling_circle(&half_steps), &expected);
+    }
+
+    #[test]
+    fn tick_caps_substeps_and_drops_excess_backlog() {
+        let (mut scene, _) = falling_circle_scene();
+
+        scene.tick(STEP_DT * 20.);
+
+        assert_eq!(scene.frame_count(), 8);
+        assert_float_close(scene.total_duration(), STEP_DT * 8.);
+
+        scene.tick(0.);
+
+        assert_eq!(scene.frame_count(), 8);
+        assert_float_close(scene.total_duration(), STEP_DT * 8.);
+
+        scene.tick(STEP_DT);
+
+        assert_eq!(scene.frame_count(), 9);
+        assert_float_close(scene.total_duration(), STEP_DT * 9.);
+    }
+
+    #[test]
+    fn tick_preserves_fractional_remainder_when_dropping_excess_whole_steps() {
+        let (mut scene, _) = falling_circle_scene();
+
+        scene.tick(STEP_DT * 20.5);
+
+        assert_eq!(scene.frame_count(), 8);
+        assert_float_close(scene.total_duration(), STEP_DT * 8.);
+        assert_float_close(scene.total_skip_durations, STEP_DT * 12.);
+
+        scene.tick(STEP_DT * 0.5);
+
+        assert_eq!(scene.frame_count(), 9);
+        assert_float_close(scene.total_duration(), STEP_DT * 9.);
+    }
+
+    #[test]
+    fn tick_waits_for_full_fixed_step_without_epsilon_early_execution() {
+        let (mut scene, _) = falling_circle_scene();
+
+        scene.tick(STEP_DT - STEP_EPSILON * 0.5);
+
+        assert_eq!(scene.frame_count(), 0);
+        assert_float_close(scene.total_duration(), 0.);
+
+        scene.tick(STEP_EPSILON * 0.5);
+
+        assert_eq!(scene.frame_count(), 1);
+        assert_float_close(scene.total_duration(), STEP_DT);
+    }
+
+    #[test]
+    fn clear_resets_pending_remainder_and_skipped_duration() {
+        let (mut scene, _) = falling_circle_scene();
+
+        scene.tick(STEP_DT * 20.);
+        assert!(scene.total_skip_durations > 0.);
+
+        scene.tick(STEP_DT * 0.5);
+        scene.clear();
+
+        assert_float_close(scene.total_skip_durations, 0.);
+
+        scene.tick(STEP_DT * 0.5);
+
+        assert_eq!(scene.frame_count(), 0);
+        assert_float_close(scene.total_duration(), STEP_DT * 8.);
+
+        scene.tick(STEP_DT * 0.5);
+
+        assert_eq!(scene.frame_count(), 1);
+        assert_float_close(scene.total_duration(), STEP_DT * 9.);
     }
 }

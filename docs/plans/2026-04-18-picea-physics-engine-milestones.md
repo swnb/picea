@@ -148,6 +148,20 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 不改 collision 算法。
 - 不改物理公式。
 
+**执行记录（2026-04-19，M2 implementer）**
+
+状态：M2 Deterministic Step Pipeline 已完成最小实现，未进入 M3/M4/M5。
+
+- 实现策略：`Scene::tick(delta_time)` 公开 API 保持不变；内部改为私有固定步长 accumulator，固定 step 为 `1 / 60`，单次外部 tick 最多推进 8 个 substeps。超过上限的 backlog 只丢弃 excess whole steps 并计入内部 skipped duration，fractional remainder 保留到后续 tick，避免 spiral of death；不足一个 fixed step 的剩余时间留在 accumulator，下次 tick 继续累计；`clear()` 会清掉 pending accumulator 和 skipped duration。
+- pipeline 阶段：单个 fixed step 明确顺序为 integrate velocity -> warm start -> collision detect -> pre-solve -> velocity solve -> integrate position -> position fix -> sleep/apply transform -> post-solve。原有 collision、constraint solve、position fix 公式与迭代次数保持不变。
+- TDD RED：新增 `scene::tests::tick_uses_fixed_steps_for_the_same_total_duration_across_frame_splits` 和 `scene::tests::tick_caps_substeps_and_drops_excess_backlog` 后，`rtk proxy cargo test -p picea scene::tests --lib` 按预期失败；旧实现分别表现为 frame_count 仍按外部 frame 计数，以及超大 delta 只 clamp 成单步。
+- GREEN：实现 fixed-step pipeline 后，`rtk proxy cargo test -p picea scene::tests --lib` 通过，2 passed。determinism 行为锁使用简单无碰撞重力场景，验证 6 个 fixed steps 在 `[dt; 6]`、`[2dt, 4dt]`、`[0.5dt; 12]` 下得到相同 `frame_count = 6`、`total_duration = 6dt`、位置 `(0, 0.35)`、速度 `(0, 6)`。
+- Code review 返工：REQUEST_CHANGES 指出 accumulator boundary semantics 问题后，补充 RED 测试覆盖 `8.5dt + 0.5dt` 保留 fractional remainder、`fixed_dt - epsilon / 2` 不提前 step、`clear()` 重置 skipped duration 与 pending remainder；修复后 `rtk proxy cargo test -p picea scene::tests --lib` 通过，5 passed。
+- Spec review 返工：FAIL 指出 fractional remainder 行为锁没有真正触发 `ready_steps > MAX_SUBSTEPS_PER_TICK` 分支；测试改为 `20.5dt + 0.5dt`，并断言首个 tick 只推进 8 步且 `total_skip_durations == 12dt`，确保覆盖 excess whole steps drop 与 fractional remainder 保留。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，25 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test -p picea-web --lib` 通过，0 tests。
+- 边界核对：未改 `ElementStore`；未改 collision 算法；未改 constraints solver 物理公式；未做 wasm API hardening；未删除或纳入 `.DS_Store`。
+- residual risk：本轮只锁住无碰撞重力场景与 max-substep/drop backlog 语义，尚未覆盖有碰撞/约束场景的 deterministic 误差；fixed step、max substeps、skipped duration 仍是私有常量/状态，没有公开配置或观测 API；旧有 warning 仍存在，未在 M2 扩范围清理。
+
 ### M3 Storage And Handle Model
 
 **目标**
