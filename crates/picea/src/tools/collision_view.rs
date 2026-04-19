@@ -15,6 +15,7 @@ pub struct CollisionInfo {
 
 #[derive(Default)]
 pub struct CollisionStatusViewer {
+    #[allow(dead_code)]
     minkowski_different_gathers: Vec<Point>,
     minkowski_simplexes: Vec<[Point; 3]>,
     collision_infos: Vec<ContactInfos>,

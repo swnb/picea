@@ -34,7 +34,7 @@ pub fn create_element_construct_code_snapshot<T: Clone>(element: &Element<T>) ->
         "ConvexPolygon"
     };
 
-    let mut forces = String::new();
+    let forces = String::new();
 
     // element.meta().force_group().iter().for_each(|(name, f)| {
     //     forces.push_str(&format!(

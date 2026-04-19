@@ -426,6 +426,18 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test -p picea --lib` 通过，60 passed。
 - residual risk：core `crates/picea/src` 仍有既有 warnings（contact/scene/shape/utils/snapshot/dead_code 等），本批次按硬边界未处理；未新增 wasm-bindgen browser/Node smoke runner；未做大规模 `cargo fix`。
 
+**Post-M7 warning hygiene 批次 2（2026-04-19，Picea core lib warning hygiene implementer）**
+
+状态：完成 core `crates/picea/src` 低风险 warning hygiene 批次 2；范围限定在 `crates/picea/src/**` 与本计划文档；未改 examples、`picea-web`、`macro-tools`；未改 solver/collision/sleep/shape 物理行为；未 commit。
+
+- baseline 证据：清理前 `rtk proxy cargo test -p picea --lib` 通过，60 passed，但产生 18 个 `picea` lib-test warnings，集中在 unused locals、unused `mut`、future/debug helper dead code、未读取的私有配置/debug 字段。
+- unused locals：`ContactConstraint::get_position_constraint_result` 保留 `prepare_solve_position_constraint` 调用与点位计算，仅将未读取的 `r_a/r_b` 绑定改为 `_r_a/_r_b`；`Scene::apply_sleep_state` 保留读取 `max_enter_sleep_kinetic`，仅改为 `_max_enter_sleep_kinetic`，没有把该参数接入休眠判断。
+- shape/utils 与 tests：`Edge::Arc` / `Edge::Circle` 的未实现分支改为不绑定未用字段；`test_split_concave_polygon` 把第一段 split 结果改为非空断言，保留现有 debug 输出路径。
+- debug/future helpers：对 `collision::compute_minkowski`、`Scene::solve_air_friction`、`Scene::query_element_pair`、`CollisionStatusViewer::minkowski_different_gathers` 和未来配置字段使用精准 `#[allow(dead_code)]`；`Circle::rad` 保留并精准 allow；未删除这些可能用于调试/未来行为的 API/字段。
+- obvious unused cleanup：`tools/snapshot.rs` 删除不必要 `mut`；移除 `ConstPolygon::EDGE_COUNT` 这个私有且未引用的常量。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，60 passed，输出未见 `picea` crate-local warning；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`rtk git diff --check` 通过。
+- residual risk：本批次只消除当前 `picea --lib` 输出中的低风险 core warnings，没有启用全 workspace `-D warnings`；保留的 `#[allow(dead_code)]` 标记说明这些 helper/字段仍是未来用途或调试用途，后续若真正接入配置参数，应补行为锁再删除 allow。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：

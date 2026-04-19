@@ -642,7 +642,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                     let obj_a = &mut *self.obj_a;
                     let obj_b = &mut *self.obj_b;
 
-                    let (point_a, point_b, r_a, r_b) =
+                    let (point_a, point_b, _r_a, _r_b) =
                         contact_info.prepare_solve_position_constraint(obj_a, obj_b);
                     // REVIEW
                     let n = contact_info.normal_toward_a();

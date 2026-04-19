@@ -7,6 +7,7 @@ pub struct Circle {
     center_point: Point,
     #[r]
     radius: f32,
+    #[allow(dead_code)]
     rad: f32,
 }
 

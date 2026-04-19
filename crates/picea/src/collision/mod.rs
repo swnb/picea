@@ -521,6 +521,7 @@ pub(crate) fn gjk_collision_detective(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn compute_minkowski<F>(compute_support_point: F) -> Vec<MinkowskiDifferencePoint>
 where
     F: Fn(Vector) -> MinkowskiDifferencePoint,

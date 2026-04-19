@@ -467,7 +467,7 @@ impl<T: Clone + Default> Scene<T> {
             return;
         }
 
-        let max_enter_sleep_kinetic = self.context.max_enter_sleep_kinetic();
+        let _max_enter_sleep_kinetic = self.context.max_enter_sleep_kinetic();
         let max_enter_sleep_frame = self.context.max_enter_sleep_frame();
         self.elements_iter_mut().for_each(|element| {
             if element.meta().angle_velocity().powf(2.) <= 0.02
@@ -756,6 +756,7 @@ impl<T: Clone + Default> Scene<T> {
             .collect()
     }
 
+    #[allow(dead_code)]
     fn solve_air_friction(&mut self) {
         self.elements_iter_mut().for_each(|element| {
             let velocity = element.meta().velocity();
@@ -769,6 +770,7 @@ impl<T: Clone + Default> Scene<T> {
         })
     }
 
+    #[allow(dead_code)]
     unsafe fn query_element_pair(
         &self,
         element_a_id: ID,

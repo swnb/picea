@@ -6,6 +6,7 @@ use crate::math::{vector::Vector, FloatNum};
 #[r(vis(pub(crate)))]
 pub struct ConstraintParameters {
     // 位子修正的系数
+    #[allow(dead_code)]
     factor_position_bias: FloatNum,
     // 弹性系数  0 - 1 之间
     #[w]
@@ -13,8 +14,10 @@ pub struct ConstraintParameters {
     // FIXME remove
     #[w]
     max_allow_permeate: FloatNum,
+    #[allow(dead_code)]
     factor_default_friction: FloatNum,
     // 允许碰撞深度是负值
+    #[allow(dead_code)]
     allow_permeate_negative: bool,
 
     #[w]

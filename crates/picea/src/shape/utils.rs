@@ -703,18 +703,11 @@ pub fn find_nearest_point<T: EdgeIterable + ?Sized>(
 
     for edge in shape.edge_iter() {
         match edge {
-            Edge::Arc {
-                start_point,
-                support_point,
-                end_point,
-            } => {
+            Edge::Arc { .. } => {
                 // TODO
                 unimplemented!()
             }
-            Edge::Circle {
-                center_point,
-                radius,
-            } => {
+            Edge::Circle { .. } => {
                 unimplemented!()
             }
             Edge::Line {
@@ -777,11 +770,7 @@ pub fn is_point_inside_shape(
 
     for edge in edge_iter {
         let is_cross = match edge {
-            Edge::Arc {
-                start_point,
-                end_point,
-                ..
-            } => unimplemented!(),
+            Edge::Arc { .. } => unimplemented!(),
             Edge::Circle {
                 center_point,
                 radius,
@@ -1161,6 +1150,7 @@ mod tests {
         assert!(check_is_polygon_clockwise(vertices));
 
         let result = split_clockwise_concave_polygon_to_two_convex_polygon(vertices).unwrap();
+        assert!(!result.is_empty());
 
         // dbg!(result);
 

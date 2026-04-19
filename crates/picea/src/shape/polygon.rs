@@ -78,8 +78,6 @@ pub struct ConstPolygon<const N: usize> {
 }
 
 impl<const N: usize> ConstPolygon<N> {
-    const EDGE_COUNT: usize = N;
-
     #[inline]
     pub fn new(vertices: [Point; N]) -> Self {
         let center_point =
