@@ -458,6 +458,16 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过。
 - residual risk：invalid mass 仍是在 solver 层保守 no-op，没有提升到 `MetaBuilder::mass()` / public API 输入校验；PointConstraint 仍未新增 soft constraint invalid-mass 专项测试、diagnostic event 或错误返回；极端有限 denominator 仍可能产生非常大的 impulse，当前只按 contact/join 策略允许求解并用 lambda finite guard 防 NaN/inf。
 
+**Post-M7 sleep threshold hardening（2026-04-20，Picea sleep-mode kinetic threshold implementer）**
+
+状态：完成 `Context::max_enter_sleep_kinetic` 接入 sleep 进入判定；范围限定在 `crates/picea/src/scene/*` 与本计划文档；未改 wasm API、solver、collision 或 storage；未 commit。
+
+- RED 证据：先新增 `scene::tests` 行为锁后，`rtk proxy cargo test -p picea sleep_mode_ --lib` 在旧实现上失败 1 条：`sleep_mode_keeps_high_kinetic_element_awake_even_when_motion_thresholds_hold` 中，高质量低速度元素满足既有速度/位移/角速度静止阈值，但 kinetic energy 高于极低 `max_enter_sleep_kinetic`，旧逻辑仍在帧数阈值后进入 sleep；同组低 kinetic 正向边界测试通过。
+- 实现：`Scene::apply_sleep_state` 在既有 sleep 进入条件中追加 `element.meta().compute_kinetic_energy() <= max_enter_sleep_kinetic`，不重写 sleep 计数、唤醒或 silent 逻辑；为测试配置阈值仅新增 `#[cfg(test)]` 的 `Context::set_max_enter_sleep_kinetic_for_test` helper，不开放 wasm/public runtime API。
+- GREEN 证据：`rtk proxy cargo test -p picea sleep_mode_ --lib` 通过，2 passed；`rtk proxy cargo test -p picea scene::tests --lib` 通过，17 passed；`rtk proxy cargo test -p picea --lib` 通过，65 passed。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea scene::tests --lib` 通过；`rtk proxy cargo test -p picea --lib` 通过；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过；`rtk git diff --check` 通过。
+- residual risk：sleep threshold 现在只覆盖进入 sleep 的 kinetic gate，尚未新增 public/runtime API 来配置 kinetic/frame 阈值；sleep 唤醒策略、NaN kinetic 行为、质量/惯量输入校验和复杂接触场景下的 sleep/wakeup 仍未扩展，本轮按硬边界未触碰。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：

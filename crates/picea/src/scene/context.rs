@@ -73,3 +73,10 @@ impl Default for Context {
         }
     }
 }
+
+#[cfg(test)]
+impl Context {
+    pub(crate) fn set_max_enter_sleep_kinetic_for_test(&mut self, value: FloatNum) {
+        self.max_enter_sleep_kinetic = value;
+    }
+}

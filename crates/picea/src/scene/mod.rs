@@ -467,11 +467,12 @@ impl<T: Clone + Default> Scene<T> {
             return;
         }
 
-        let _max_enter_sleep_kinetic = self.context.max_enter_sleep_kinetic();
+        let max_enter_sleep_kinetic = self.context.max_enter_sleep_kinetic();
         let max_enter_sleep_frame = self.context.max_enter_sleep_frame();
         self.elements_iter_mut().for_each(|element| {
             if element.meta().angle_velocity().powf(2.) <= 0.02
                 && element.meta().velocity() * element.meta().velocity() <= 0.05
+                && element.meta().compute_kinetic_energy() <= max_enter_sleep_kinetic
                 && (element.meta().delta_transform().translation()
                     * element.meta().delta_transform().translation())
                     < 0.007
@@ -957,6 +958,33 @@ mod tests {
         }
     }
 
+    fn sleep_candidate_scene(
+        mass: FloatNum,
+        velocity: impl Into<Vector>,
+        max_enter_sleep_kinetic: FloatNum,
+    ) -> (Scene, u32) {
+        let mut scene = Scene::new();
+        scene.set_gravity(|_| (0., 0.).into());
+        scene.set_sleep_mode(true);
+        scene
+            .context_mut()
+            .set_max_enter_sleep_kinetic_for_test(max_enter_sleep_kinetic);
+
+        let element =
+            ElementBuilder::new(Circle::new((0., 0.), 1.), MetaBuilder::new().mass(mass), ());
+        let element_id = scene.push_element(element);
+        set_velocity_and_angle(&mut scene, element_id, velocity, 0.);
+
+        (scene, element_id)
+    }
+
+    fn tick_past_sleep_frame_threshold(scene: &mut Scene) {
+        let max_enter_sleep_frame = scene.context.max_enter_sleep_frame();
+        for _ in 0..=max_enter_sleep_frame {
+            scene.tick(STEP_DT);
+        }
+    }
+
     fn assert_float_close(actual: FloatNum, expected: FloatNum) {
         assert!(
             (actual - expected).abs() <= EPSILON,
@@ -1066,6 +1094,40 @@ mod tests {
 
         assert_eq!(scene.frame_count(), 1);
         assert_float_close(scene.total_duration(), STEP_DT * 9.);
+    }
+
+    #[test]
+    fn sleep_mode_keeps_high_kinetic_element_awake_even_when_motion_thresholds_hold() {
+        let (mut scene, element_id) = sleep_candidate_scene(1000., (0.1, 0.), 0.001);
+        let element = scene.get_element(element_id).expect("element exists");
+
+        assert!(element.meta().velocity() * element.meta().velocity() <= 0.05);
+        assert!(element.meta().compute_kinetic_energy() > scene.context.max_enter_sleep_kinetic());
+
+        tick_past_sleep_frame_threshold(&mut scene);
+
+        let element = scene.get_element(element_id).expect("element exists");
+        assert!(
+            !element.meta().is_sleeping(),
+            "kinetic energy above max_enter_sleep_kinetic must block sleep entry"
+        );
+    }
+
+    #[test]
+    fn sleep_mode_sleeps_low_kinetic_element_after_frame_threshold() {
+        let (mut scene, element_id) = sleep_candidate_scene(1., (0.1, 0.), 1.);
+        let element = scene.get_element(element_id).expect("element exists");
+
+        assert!(element.meta().velocity() * element.meta().velocity() <= 0.05);
+        assert!(element.meta().compute_kinetic_energy() <= scene.context.max_enter_sleep_kinetic());
+
+        tick_past_sleep_frame_threshold(&mut scene);
+
+        let element = scene.get_element(element_id).expect("element exists");
+        assert!(
+            element.meta().is_sleeping(),
+            "low kinetic energy should allow sleep entry once the frame threshold is exceeded"
+        );
     }
 
     #[test]
