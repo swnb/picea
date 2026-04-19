@@ -14,8 +14,8 @@ fn test_common_read_field() {
         field_b: 3,
     };
 
-    let field_a: &String = meta.field_a();
-    let field_b: i32 = meta.field_b();
+    assert_eq!(meta.field_a(), "");
+    assert_eq!(meta.field_b(), 3);
 }
 
 #[test]
@@ -32,8 +32,11 @@ fn test_common_write_field() {
         field_b: 3,
     };
 
-    let field_a_mut: &mut String = meta.field_a_mut();
-    let field_b_mut: &mut i32 = meta.field_b_mut();
+    meta.field_a_mut().push_str("updated");
+    *meta.field_b_mut() = 4;
+
+    assert_eq!(meta.field_a, "updated");
+    assert_eq!(meta.field_b, 4);
 }
 
 #[test]
@@ -121,6 +124,10 @@ mod private {
 
 #[test]
 fn test_custom_write_field_vis() {
-    let mut meta = unsafe { &mut private::META };
-    meta.set_field_a("");
+    let meta = std::ptr::addr_of_mut!(private::META);
+    unsafe {
+        (*meta).set_field_a("");
+        assert_eq!((*meta).field_a(), "");
+        assert_eq!((*meta).field_b(), 3);
+    }
 }

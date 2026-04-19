@@ -8,8 +8,7 @@ use fields::macro_fields;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
-    parenthesized, parse_macro_input, punctuated::Punctuated, spanned::Spanned, Attribute, Data,
-    DeriveInput, Ident, LitStr, Meta, Visibility,
+    parse_macro_input, punctuated::Punctuated, spanned::Spanned, DeriveInput, Ident, LitStr, Meta,
 };
 
 #[proc_macro_derive(Shape, attributes(inner))]

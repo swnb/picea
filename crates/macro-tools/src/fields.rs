@@ -1,8 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{
-    parenthesized, spanned::Spanned, Attribute, Data, DeriveInput, Ident, LitStr, Meta, Visibility,
-};
+use syn::{parenthesized, spanned::Spanned, Attribute, Data, DeriveInput, Ident, Visibility};
 
 pub fn macro_fields(input: DeriveInput) -> TokenStream {
     let ident = input.ident;

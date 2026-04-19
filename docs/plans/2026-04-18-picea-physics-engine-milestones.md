@@ -416,6 +416,16 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - GREEN 证据：`rtk proxy cargo test -p picea-web for_each_element_shape_builder_skips_unsupported_arc_edges_without_panic --lib` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown --no-run` 通过。
 - residual risk：仍未新增 wasm-bindgen browser/Node smoke runner；Arc edge 目前仍无 public constructor 覆盖真实 JS callback 流，只通过 helper 锁定 fallback。core `shape::utils` 内部仍存在 Arc `unimplemented!()`，不属于本轮 public wasm 边界范围。
 
+**Post-M7 warning hygiene 批次 1（2026-04-19，warning hygiene implementer）**
+
+状态：完成低风险 warning hygiene 批次 1；范围限定在 `crates/macro-tools/src/*`、`crates/macro-tools/tests/*` 与本计划文档；复核 `crates/picea-web/src/*` 但当前 native/wasm 编译未发现 picea-web crate-local unused warning；未改 core `crates/picea/src`、examples、public API 语义或功能；未 commit。
+
+- `picea-macro-tools`：删除 `fields.rs` 与 `lib.rs` 未使用的 `syn` imports，保持 proc-macro 生成逻辑不变。
+- `macro-tools` tests：把只用于类型证明但未读取的 bindings 改为断言或实际写入；`static mut META` 测试改用 raw pointer 访问，不再创建 `&mut static mut`；同时读取 `field_b`，避免 dead-code warning。
+- `picea-web` 复核：`rtk proxy cargo rustc -p picea-web --lib -- -D warnings` 对 picea-web lib target 通过；`picea-web --lib` native/wasm 验证输出中没有 picea-web crate-local unused warning。legacy wrapper tests 中涉及 `create_circle` / `create_regular_polygon` / `create_line` 的 `mut scene` 仍是当前 API 所需，保留不改。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test -p picea --lib` 通过，60 passed。
+- residual risk：core `crates/picea/src` 仍有既有 warnings（contact/scene/shape/utils/snapshot/dead_code 等），本批次按硬边界未处理；未新增 wasm-bindgen browser/Node smoke runner；未做大规模 `cargo fix`。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：
