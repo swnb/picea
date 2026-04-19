@@ -11,6 +11,10 @@ pub mod contact_manifold;
 pub mod join;
 pub mod point;
 
+pub(crate) fn can_solve_with_positive_denominator(denominator: FloatNum) -> bool {
+    denominator.is_finite() && denominator > 0.
+}
+
 #[derive(Clone, Builder, Fields)]
 #[r]
 #[w]

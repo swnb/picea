@@ -448,6 +448,16 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --examples --no-run` 通过，输出未见 examples/examples_common warnings；`rtk proxy cargo test -p picea --lib` 通过，60 passed；`rtk git diff --check` 通过。
 - residual risk：本批次只清理当前 examples no-run 输出中的低风险 unused/dead_code warnings，没有启用全 workspace `-D warnings`，也没有运行窗口交互示例；`run_simple` 保留为普通 example 入口，因 test harness 下可能未引用而使用精准 `#[allow(dead_code)]`。
 
+**Post-M7 point constraint invalid mass hardening（2026-04-19，Picea PointConstraint invalid-mass hardening implementer）**
+
+状态：完成 M6 residual risk 收口；范围限定在 `crates/picea/src/constraints/*` 与本计划文档；未改 wasm API、collision、storage 或 shape；未 commit。
+
+- RED 证据：先新增 `constraints::point::tests` 行为锁后，`rtk proxy cargo test -p picea point::tests --lib` 在旧实现上失败 2 条：`mass = 0` dynamic body 与 `mass = NaN` dynamic body 都产生 `{ x: NaN, y: NaN }` velocity；同组 `hard_point_with_very_small_finite_denominator_solves` 在旧实现下通过，用于防止后续修复误用 EPS cutoff。
+- 实现：`PointConstraint::reset_params` 改用 fixed-aware `effective_inv_mass()` / `effective_inv_moment_of_inertia()` 计算 effective mass；`PointConstraint::solve` 在取倒数前检查 `soft_part + mass_effective` 必须 finite 且 `> 0`，并对非有限 lambda no-op。join 的 denominator guard 提到 `constraints/mod.rs` 共享，保持 contact/join/point 的策略一致：只拒绝 non-finite 或 `<= 0`，不拒绝有限极小正数。
+- GREEN 证据：`rtk proxy cargo test -p picea point::tests --lib` 通过，3 passed；`rtk proxy cargo test -p picea --lib` 通过，63 passed。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过。
+- residual risk：invalid mass 仍是在 solver 层保守 no-op，没有提升到 `MetaBuilder::mass()` / public API 输入校验；PointConstraint 仍未新增 soft constraint invalid-mass 专项测试、diagnostic event 或错误返回；极端有限 denominator 仍可能产生非常大的 impulse，当前只按 contact/join 策略允许求解并用 lambda finite guard 防 NaN/inf。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：

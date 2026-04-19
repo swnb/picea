@@ -7,13 +7,9 @@ use crate::{
 };
 
 use super::{
-    compute_inv_mass_effective, compute_soft_constraints_params, ConstraintObject,
-    JoinConstraintConfig,
+    can_solve_with_positive_denominator, compute_inv_mass_effective,
+    compute_soft_constraints_params, ConstraintObject, JoinConstraintConfig,
 };
-
-fn can_solve_with_denominator(denominator: FloatNum) -> bool {
-    denominator.is_finite() && denominator > 0.
-}
 
 #[derive(Fields)]
 pub struct JoinConstraint<Obj: ConstraintObject> {
@@ -162,7 +158,7 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
         let jv_b = -(n * (point_a_v - point_b_v) + position_bias);
 
         let denominator = inv_mass_effective + soft_part;
-        if !can_solve_with_denominator(denominator) {
+        if !can_solve_with_positive_denominator(denominator) {
             return;
         }
 
