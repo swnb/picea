@@ -11,6 +11,10 @@ use super::{
     JoinConstraintConfig,
 };
 
+fn can_solve_with_denominator(denominator: FloatNum) -> bool {
+    denominator.is_finite() && denominator > 0.
+}
+
 #[derive(Fields)]
 pub struct JoinConstraint<Obj: ConstraintObject> {
     #[r]
@@ -157,9 +161,142 @@ impl<Obj: ConstraintObject> JoinConstraint<Obj> {
 
         let jv_b = -(n * (point_a_v - point_b_v) + position_bias);
 
-        let lambda = jv_b * (inv_mass_effective + soft_part).recip();
+        let denominator = inv_mass_effective + soft_part;
+        if !can_solve_with_denominator(denominator) {
+            return;
+        }
+
+        let lambda = jv_b * denominator.recip();
+        if !lambda.is_finite() {
+            return;
+        }
 
         obj_a.meta_mut().apply_impulse(n * lambda, r_a);
         obj_b.meta_mut().apply_impulse(-n * lambda, r_b);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        constraints::JoinConstraintConfigBuilder,
+        element::{Element, ElementBuilder},
+        meta::MetaBuilder,
+        shape::Circle,
+    };
+
+    const STEP_DT: FloatNum = 1. / 60.;
+
+    fn circle_element(center_x: FloatNum, mass: FloatNum, is_fixed: bool) -> Element<()> {
+        ElementBuilder::new(
+            Circle::new((center_x, 0.), 1.),
+            MetaBuilder::new().mass(mass).is_fixed(is_fixed),
+            (),
+        )
+        .into()
+    }
+
+    fn hard_join_config(distance: FloatNum) -> JoinConstraintConfig {
+        JoinConstraintConfigBuilder::new()
+            .distance(distance)
+            .hard(true)
+            .into()
+    }
+
+    fn solve_center_join_once(
+        mass_a: FloatNum,
+        is_a_fixed: bool,
+        mass_b: FloatNum,
+        is_b_fixed: bool,
+    ) -> (Vector, FloatNum, Vector, FloatNum) {
+        let mut object_a = circle_element(0., mass_a, is_a_fixed);
+        let mut object_b = circle_element(2., mass_b, is_b_fixed);
+        let mut constraint = JoinConstraint::new(
+            1,
+            (1, 2),
+            ((0., 0.).into(), (2., 0.).into()),
+            hard_join_config(1.),
+        );
+
+        unsafe {
+            constraint.reset_params(
+                (&mut object_a as *mut _, &mut object_b as *mut _),
+                ((0., 0.).into(), (2., 0.).into()),
+                STEP_DT,
+            );
+            constraint.solve(&ConstraintParameters::default());
+        }
+
+        (
+            *object_a.meta().velocity(),
+            object_a.meta().angle_velocity(),
+            *object_b.meta().velocity(),
+            object_b.meta().angle_velocity(),
+        )
+    }
+
+    fn assert_vector_finite(vector: Vector) {
+        assert!(vector.x().is_finite(), "expected finite x, got {vector}");
+        assert!(vector.y().is_finite(), "expected finite y, got {vector}");
+    }
+
+    fn assert_velocity_state_finite(state: &(Vector, FloatNum, Vector, FloatNum)) {
+        assert_vector_finite(state.0);
+        assert!(state.1.is_finite());
+        assert_vector_finite(state.2);
+        assert!(state.3.is_finite());
+    }
+
+    #[test]
+    fn hard_join_between_two_fixed_bodies_noops() {
+        let state = solve_center_join_once(1., true, 1., true);
+
+        assert_velocity_state_finite(&state);
+        assert_eq!(state.0, Vector::default());
+        assert_eq!(state.2, Vector::default());
+    }
+
+    #[test]
+    fn hard_join_noops_for_zero_mass_dynamic_body_without_nan() {
+        let state = solve_center_join_once(1., true, 0., false);
+
+        assert_velocity_state_finite(&state);
+        assert_eq!(state.2, Vector::default());
+    }
+
+    #[test]
+    fn hard_join_noops_for_non_finite_mass_dynamic_body_without_nan() {
+        let state = solve_center_join_once(1., true, FloatNum::NAN, false);
+
+        assert_velocity_state_finite(&state);
+        assert_eq!(state.2, Vector::default());
+    }
+
+    #[test]
+    fn hard_join_between_fixed_and_dynamic_body_moves_dynamic_side() {
+        let state = solve_center_join_once(1., true, 1., false);
+
+        assert_velocity_state_finite(&state);
+        assert_eq!(state.0, Vector::default());
+        assert!(
+            state.2.x() < 0.,
+            "dynamic body should be pulled toward the fixed body"
+        );
+    }
+
+    #[test]
+    fn hard_join_with_very_small_finite_denominator_solves() {
+        let state = solve_center_join_once(10000000000., false, 10000000000., false);
+
+        assert_velocity_state_finite(&state);
+        assert!(
+            state.0.x() > 0.,
+            "finite tiny denominator should still move object A"
+        );
+        assert!(
+            state.2.x() < 0.,
+            "finite tiny denominator should still move object B"
+        );
     }
 }

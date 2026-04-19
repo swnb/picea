@@ -507,11 +507,15 @@ impl<T: Clone + Default> Scene<T> {
             .for_each(|manifold| unsafe {
                 let iter = manifold.contact_pair_constraint_infos_iter();
                 for info in iter {
-                    let total_lambda = (info.normal_toward_a() * info.total_lambda())
-                        + (-!info.normal_toward_a() * info.total_friction_lambda());
                     if let Some((element_a, element_b)) =
                         (*self_ptr).query_element_pair_mut(manifold.obj_id_pair())
                     {
+                        let Some(total_lambda) =
+                            info.warm_start_impulse_toward_a(element_a, element_b)
+                        else {
+                            continue;
+                        };
+
                         if !element_a.meta().is_sleeping() {
                             element_a
                                 .meta_mut()
@@ -905,9 +909,23 @@ mod tests {
         *element.meta_mut().angle_velocity_mut() = angle_velocity;
     }
 
+    fn set_mass(scene: &mut Scene, element_id: u32, mass: FloatNum) {
+        let element = scene
+            .get_element_mut(element_id)
+            .expect("element remains mutable");
+        element.meta_mut().set_mass(mass);
+    }
+
     fn velocity_and_angle(scene: &Scene, element_id: u32) -> (Vector, FloatNum) {
         let element = scene.get_element(element_id).expect("element exists");
         (*element.meta().velocity(), element.meta().angle_velocity())
+    }
+
+    fn assert_velocity_and_angle_finite(scene: &Scene, element_id: u32) {
+        let (velocity, angle_velocity) = velocity_and_angle(scene, element_id);
+        assert!(velocity.x().is_finite());
+        assert!(velocity.y().is_finite());
+        assert!(angle_velocity.is_finite());
     }
 
     fn cached_contact_lambda_abs_sum(scene: &Scene, id_pair: (u32, u32)) -> FloatNum {
@@ -1325,5 +1343,40 @@ mod tests {
             delta_a > EPSILON || delta_b > EPSILON,
             "warm_start should apply the previous cached impulse before pre_solve refreshes contact pairs"
         );
+    }
+
+    #[test]
+    fn warm_start_skips_invalid_mass_cached_contact_impulse_without_nan() {
+        for invalid_mass in [0., FloatNum::NAN] {
+            let mut scene = Scene::width_capacity(2);
+            scene.set_gravity(|_| (0., 0.).into());
+
+            let element_a_id = push_circle_at(&mut scene, 0.);
+            let element_b_id = push_circle_at(&mut scene, 1.5);
+            set_velocity_and_angle(&mut scene, element_a_id, (8., 0.), 0.);
+            set_velocity_and_angle(&mut scene, element_b_id, (-8., 0.), 0.);
+
+            scene.tick(STEP_DT);
+
+            let id_pair = (element_a_id, element_b_id);
+            assert!(
+                cached_contact_lambda_abs_sum(&scene, id_pair) > EPSILON,
+                "first tick should leave cached impulse before mass changes"
+            );
+
+            reset_circle_center_to(&mut scene, element_a_id, 0.);
+            reset_circle_center_to(&mut scene, element_b_id, 1.5);
+            set_velocity_and_angle(&mut scene, element_a_id, (0., 0.), 0.);
+            set_velocity_and_angle(&mut scene, element_b_id, (0., 0.), 0.);
+            set_mass(&mut scene, element_a_id, invalid_mass);
+
+            scene.collision_detective();
+            assert!(scene.is_element_collide(element_a_id, element_b_id, true));
+
+            scene.warm_start();
+
+            assert_velocity_and_angle_finite(&scene, element_a_id);
+            assert_velocity_and_angle_finite(&scene, element_b_id);
+        }
     }
 }

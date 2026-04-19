@@ -330,6 +330,22 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 不改 JS 类型。
 - 不做 UI/渲染器。
 
+**执行记录（2026-04-19，M6 implementer）**
+
+状态：M6 Solver Realism 最小修复已完成，严格停在 M6，未进入 M7。
+
+- 实现策略：只处理 contact solver effective mass 与 fixed body effective inverse mass/inertia 语义；不改 wasm API/JS 类型/UI；不改 collision broadphase/narrowphase pipeline；不重写 solver 架构；velocity solver 公式、restitution threshold、velocity bias、摩擦参数和 sleep 参数保持不变。
+- RED 证据：新增 `constraints::contact::tests::position_solver_uses_b_inverse_mass_in_effective_mass` 后，旧实现失败为 A 位置修正 `-0.05`，期望 `-0.08`，暴露 `solve_position_constraint` 把 `obj_a_meta.inv_mass()` 加了两次且缺少 B 倒质量；新增 `fixed_body_does_not_contribute_to_position_effective_mass` 后，旧实现中 fixed A / dynamic B 场景 B 只修正 `0.0125`，期望 `0.1`。
+- 实现：`Meta` 增加 crate-private `effective_inv_mass()` / `effective_inv_moment_of_inertia()`，fixed body 返回 `0`，动态体返回原普通倒质量/倒惯量；`compute_inv_mass_effective()` 改用该 helper，让 contact pre-solve 的 normal/tangent effective mass 不再把 fixed body 当动态体；contact 位置修正改为复用 `compute_inv_mass_effective()`，移除手写且错误的 A+A 倒质量公式，并对非有限/零/负 effective inverse mass 做 no-op。
+- 行为锁：contact 单测覆盖非等质量中心重叠时位置修正按 A/B inverse mass 正确分摊，以及 fixed body 不参与 effective mass 且不被位置修正移动，动态体吸收完整位置修正。
+- GREEN 证据：`rtk proxy cargo test -p picea contact::tests --lib` 通过，2 passed。
+- Code review 返工：新增 contact invalid mass 行为锁，覆盖 normal/friction solver 在 `mass = 0` / `mass = NaN` 时必须 no-op 且 velocity/angle_velocity 保持有限；新增 join 行为锁，覆盖 both-fixed hard join no-op、`mass = 0` / `mass = NaN` dynamic body no-op、fixed-dynamic hard join 仍能修 dynamic side。RED 时 contact 4 个新增测试失败为 velocity NaN，join 2 个 invalid mass 测试失败为 velocity NaN。
+- 返工实现：contact normal/friction solve 在 effective mass 非有限或小于等于 `FloatNum::EPSILON` 时直接跳过，不再 apply zero impulse；join solve 在 `inv_mass_effective + soft_part` 非有限或小于等于 epsilon 时直接 no-op，并防御非有限 lambda。invalid mass 策略保持在 solver 层保守 no-op，不改 builder/API 输入契约。
+- Code review 二次返工：新增 scene warm-start invalid mass 行为锁，覆盖 cached contact impulse 在下一帧 warm-start 遇到 `mass = 0` / `mass = NaN` 时不产生非有限 velocity/angle；新增 contact 极小有限 effective mass 与 join 极小有限 denominator 行为锁，防止绝对 EPS cutoff 误 no-op。RED 时三个 targeted tests 分别失败于 warm-start velocity 非有限、contact 极小有限值未求解、join 极小有限 denominator 未求解。
+- 二次返工实现：contact/join 可解性 guard 改为只拒绝非有限或小于等于 `0` 的 effective mass / denominator；warm-start 通过 contact info 基于当前 A/B body 重新检查 cached normal/friction impulse 是否可解，并跳过 zero / non-finite cached impulse。有限但很小的正值不再被 EPS 拦截。
+- 最终验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，60 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test -p picea-web --lib` 通过，0 tests；`rtk git diff --check` 通过。输出仍有既有 warning，本轮未扩范围清理。
+- residual risk：静/动摩擦、restitution threshold、`velocity_bias` 未在本轮改动或调参；sleep/wakeup 未新增行为测试；invalid mass 目前不在 `MetaBuilder::mass()` / public API 边界拒绝，而是在 contact/join solver 层 no-op 防 NaN，后续若要生产化需要统一质量输入校验和错误策略；both-fixed / invalid-mass join 现在 no-op，未引入诊断事件或错误返回。
+
 ### M7 WASM API Hardening
 
 **目标**

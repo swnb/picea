@@ -11,6 +11,14 @@ use crate::{
 
 use super::{compute_inv_mass_effective, ConstraintObject};
 
+fn can_solve_with_effective_mass(mass_effective: FloatNum) -> bool {
+    mass_effective.is_finite() && mass_effective > 0.
+}
+
+fn can_solve_with_inv_mass_effective(inv_mass_effective: FloatNum) -> bool {
+    inv_mass_effective.is_finite() && inv_mass_effective > 0.
+}
+
 // TODO if two element is still collide in current frame, we can reuse this
 // contact info , is two element is not collide anymore , we don't need this frame
 #[derive(Fields)]
@@ -60,6 +68,47 @@ pub struct ContactPointPairConstraintInfo {
 }
 
 impl ContactPointPairConstraintInfo {
+    pub(crate) fn warm_start_impulse_toward_a<Obj: ConstraintObject>(
+        &self,
+        object_a: &Obj,
+        object_b: &Obj,
+    ) -> Option<Vector> {
+        if !self.total_lambda.is_finite() || !self.total_friction_lambda.is_finite() {
+            return None;
+        }
+
+        let has_normal_lambda = self.total_lambda != 0.;
+        let has_friction_lambda = self.total_friction_lambda != 0.;
+        if !has_normal_lambda && !has_friction_lambda {
+            return None;
+        }
+
+        let normal = self.normal_toward_a();
+        if has_normal_lambda {
+            let inv_mass_effective =
+                compute_inv_mass_effective(&normal, (object_a, object_b), self.r_a, self.r_b);
+            if !can_solve_with_inv_mass_effective(inv_mass_effective) {
+                return None;
+            }
+        }
+
+        if has_friction_lambda {
+            let tangent = !normal;
+            let inv_mass_effective =
+                compute_inv_mass_effective(&tangent, (object_a, object_b), self.r_a, self.r_b);
+            if !can_solve_with_inv_mass_effective(inv_mass_effective) {
+                return None;
+            }
+        }
+
+        let impulse = (normal * self.total_lambda) + (-!normal * self.total_friction_lambda);
+        if impulse.x().is_finite() && impulse.y().is_finite() && !impulse.is_zero() {
+            Some(impulse)
+        } else {
+            None
+        }
+    }
+
     // restrict total lambda must big than zero
     pub(crate) fn restrict_contact_lambda(&mut self, lambda: FloatNum) -> FloatNum {
         // if speed is very large , than sequence impulse is bad when resolve large speed
@@ -135,25 +184,25 @@ impl ContactPointPairConstraintInfo {
     pub fn delta_velocity_for_a(&self, object_a_meta: &Meta) -> Vector {
         ((self.normal_toward_a() * self.real_total_lambda)
             + (!self.normal_toward_a() * -self.real_total_friction_lambda))
-            * object_a_meta.inv_mass()
+            * object_a_meta.effective_inv_mass()
     }
 
     pub fn delta_angle_for_a(&self, object_a_meta: &Meta) -> FloatNum {
         ((self.r_a ^ (self.normal_toward_a() * self.real_total_lambda))
             + (self.r_a ^ (!self.normal_toward_a() * -self.real_total_friction_lambda)))
-            * object_a_meta.inv_moment_of_inertia()
+            * object_a_meta.effective_inv_moment_of_inertia()
     }
 
     pub fn delta_velocity_for_b(&self, object_b_meta: &Meta) -> Vector {
         ((self.normal_toward_a() * -self.real_total_lambda)
             + (!self.normal_toward_a() * self.real_total_friction_lambda))
-            * object_b_meta.inv_mass()
+            * object_b_meta.effective_inv_mass()
     }
 
     pub fn delta_angle_for_b(&self, object_b_meta: &Meta) -> FloatNum {
         ((self.r_b ^ (self.normal_toward_a() * -self.real_total_lambda))
             + (self.r_b ^ (!self.normal_toward_a() * self.real_total_friction_lambda)))
-            * object_b_meta.inv_moment_of_inertia()
+            * object_b_meta.effective_inv_moment_of_inertia()
     }
 }
 
@@ -388,14 +437,24 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
 
                 let normal = contact_point_pair_constraint_info.normal_toward_a();
 
-                let mass_effective =
-                    compute_inv_mass_effective(&normal, (object_a, object_b), r_a, r_b).recip();
+                let inv_mass_effective =
+                    compute_inv_mass_effective(&normal, (object_a, object_b), r_a, r_b);
+                let mass_effective = if can_solve_with_inv_mass_effective(inv_mass_effective) {
+                    inv_mass_effective.recip()
+                } else {
+                    0.
+                };
 
                 let tangent_normal: Vector = !normal;
 
+                let tangent_inv_mass_effective =
+                    compute_inv_mass_effective(&tangent_normal, (object_a, object_b), r_a, r_b);
                 let tangent_mass_effective =
-                    compute_inv_mass_effective(&tangent_normal, (object_a, object_b), r_a, r_b)
-                        .recip();
+                    if can_solve_with_inv_mass_effective(tangent_inv_mass_effective) {
+                        tangent_inv_mass_effective.recip()
+                    } else {
+                        0.
+                    };
 
                 contact_point_pair_constraint_info.mass_effective = mass_effective;
                 contact_point_pair_constraint_info.tangent_mass_effective = tangent_mass_effective;
@@ -428,6 +487,10 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 let jv_a = contact_info.normal_toward_a();
                 let jv_b = -jv_a;
 
+                if !can_solve_with_effective_mass(contact_info.mass_effective) {
+                    return;
+                }
+
                 let v_a = obj_a.compute_point_velocity(contact_info.point());
                 let v_b = obj_b.compute_point_velocity(contact_info.point());
 
@@ -443,6 +506,10 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 // };
 
                 let lambda = -(jv * (1. + self.factor_restitution)) * contact_info.mass_effective;
+
+                if !lambda.is_finite() {
+                    return;
+                }
 
                 let lambda = contact_info.restrict_contact_lambda(lambda);
 
@@ -470,6 +537,9 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             .iter_mut()
             .for_each(|contact_info| {
                 let mass_effective = contact_info.tangent_mass_effective;
+                if !can_solve_with_effective_mass(mass_effective) {
+                    return;
+                }
 
                 let contact_point = contact_info.point();
 
@@ -483,6 +553,10 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                     * tangent_normal
                     * mass_effective
                     * self.factor_friction;
+
+                if !friction_lambda.is_finite() {
+                    return;
+                }
 
                 let friction_lambda = contact_info.restrict_contact_friction_lambda(
                     friction_lambda,
@@ -513,9 +587,6 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 let (point_a, point_b, r_a, r_b) =
                     contact_info.prepare_solve_position_constraint(obj_a, obj_b);
 
-                let obj_a_meta = obj_a.meta();
-                let obj_b_meta = obj_b.meta();
-
                 // let delta_angle_a = obj_a_meta.delta_angle();
                 // let delta_position_a = obj_a_meta.delta_position();
                 // let delta_angle_b = obj_b_meta.delta_angle();
@@ -527,10 +598,13 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 // let n = contact_point_pair.normal_toward_a();
                 // let n = normal_toward_a;
 
-                let inv_mass_effective = obj_a_meta.inv_mass()
-                    + obj_a_meta.inv_mass()
-                    + obj_a_meta.inv_moment_of_inertia() * (r_a ^ n).powf(2.)
-                    + obj_b_meta.inv_moment_of_inertia() * (r_b ^ n).powf(2.);
+                let inv_mass_effective = compute_inv_mass_effective(&n, (obj_a, obj_b), r_a, r_b);
+                if !can_solve_with_inv_mass_effective(inv_mass_effective) {
+                    return;
+                }
+
+                let obj_a_meta = obj_a.meta();
+                let obj_b_meta = obj_b.meta();
 
                 let contact_count_a = obj_a_meta.contact_count();
                 let contact_count_b = obj_b_meta.contact_count();
@@ -584,5 +658,251 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         &self,
     ) -> impl Iterator<Item = &ContactPointPairConstraintInfo> {
         self.contact_point_pair_constraint_infos.iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        element::{Element, ElementBuilder},
+        math::FloatNum,
+        meta::MetaBuilder,
+        scene::context::ConstraintParameters,
+        shape::Circle,
+    };
+
+    const STEP_DT: FloatNum = 1. / 60.;
+    const EPSILON: FloatNum = 0.00001;
+    const CONTACT_DEPTH: FloatNum = 0.5;
+    const POSITION_DAMPEN: FloatNum = 0.2;
+
+    fn circle_element(center_x: FloatNum, mass: FloatNum, is_fixed: bool) -> Element<()> {
+        ElementBuilder::new(
+            Circle::new((center_x, 0.), 1.),
+            MetaBuilder::new().mass(mass).is_fixed(is_fixed),
+            (),
+        )
+        .into()
+    }
+
+    fn central_overlap_contact() -> ContactPointPair {
+        ContactPointPair::new(
+            (1., 0.).into(),
+            (0.5, 0.).into(),
+            (-1., 0.).into(),
+            CONTACT_DEPTH,
+        )
+    }
+
+    fn solve_position_once(
+        mass_a: FloatNum,
+        mass_b: FloatNum,
+        is_a_fixed: bool,
+        is_b_fixed: bool,
+    ) -> (FloatNum, FloatNum) {
+        let mut object_a = circle_element(0., mass_a, is_a_fixed);
+        let mut object_b = circle_element(1.5, mass_b, is_b_fixed);
+        let mut constraint = ContactConstraint::new(1, 2, vec![central_overlap_contact()]);
+
+        unsafe {
+            constraint.pre_solve(
+                (&mut object_a as *mut _, &mut object_b as *mut _),
+                STEP_DT,
+                &ConstraintParameters::default(),
+            );
+        }
+        constraint.solve_position_constraint();
+
+        (
+            object_a.meta().delta_transform().translation().x(),
+            object_b.meta().delta_transform().translation().x(),
+        )
+    }
+
+    fn solve_velocity_once(
+        mass_a: FloatNum,
+        velocity_a: Vector,
+        mass_b: FloatNum,
+        velocity_b: Vector,
+    ) -> (Vector, FloatNum, Vector, FloatNum) {
+        let mut object_a = circle_element(0., mass_a, false);
+        let mut object_b = circle_element(1.5, mass_b, false);
+        *object_a.meta_mut().velocity_mut() = velocity_a;
+        *object_b.meta_mut().velocity_mut() = velocity_b;
+
+        let mut constraint = ContactConstraint::new(1, 2, vec![central_overlap_contact()]);
+        unsafe {
+            constraint.pre_solve(
+                (&mut object_a as *mut _, &mut object_b as *mut _),
+                STEP_DT,
+                &ConstraintParameters::default(),
+            );
+            constraint.solve_velocity_constraint(&ConstraintParameters::default(), 0);
+        }
+
+        (
+            *object_a.meta().velocity(),
+            object_a.meta().angle_velocity(),
+            *object_b.meta().velocity(),
+            object_b.meta().angle_velocity(),
+        )
+    }
+
+    fn solve_friction_once(
+        mass_a: FloatNum,
+        velocity_a: Vector,
+        mass_b: FloatNum,
+        velocity_b: Vector,
+    ) -> (Vector, FloatNum, Vector, FloatNum) {
+        let mut object_a = circle_element(0., mass_a, false);
+        let mut object_b = circle_element(1.5, mass_b, false);
+        *object_a.meta_mut().velocity_mut() = velocity_a;
+        *object_b.meta_mut().velocity_mut() = velocity_b;
+
+        let mut constraint = ContactConstraint::new(1, 2, vec![central_overlap_contact()]);
+        unsafe {
+            constraint.pre_solve(
+                (&mut object_a as *mut _, &mut object_b as *mut _),
+                STEP_DT,
+                &ConstraintParameters::default(),
+            );
+            constraint.solve_friction_constraint();
+        }
+
+        (
+            *object_a.meta().velocity(),
+            object_a.meta().angle_velocity(),
+            *object_b.meta().velocity(),
+            object_b.meta().angle_velocity(),
+        )
+    }
+
+    fn assert_float_close(actual: FloatNum, expected: FloatNum) {
+        assert!(
+            (actual - expected).abs() <= EPSILON,
+            "expected {actual} to be within {EPSILON} of {expected}"
+        );
+    }
+
+    fn assert_vector_finite(vector: Vector) {
+        assert!(vector.x().is_finite(), "expected finite x, got {vector}");
+        assert!(vector.y().is_finite(), "expected finite y, got {vector}");
+    }
+
+    fn assert_velocity_state_finite(state: (Vector, FloatNum, Vector, FloatNum)) {
+        let (velocity_a, angle_velocity_a, velocity_b, angle_velocity_b) = state;
+        assert_vector_finite(velocity_a);
+        assert!(angle_velocity_a.is_finite());
+        assert_vector_finite(velocity_b);
+        assert!(angle_velocity_b.is_finite());
+    }
+
+    fn assert_velocity_state_unchanged(
+        state: (Vector, FloatNum, Vector, FloatNum),
+        expected_velocity_a: Vector,
+        expected_velocity_b: Vector,
+    ) {
+        assert_velocity_state_finite(state);
+        assert_eq!(state.0, expected_velocity_a);
+        assert_float_close(state.1, 0.);
+        assert_eq!(state.2, expected_velocity_b);
+        assert_float_close(state.3, 0.);
+    }
+
+    #[test]
+    fn position_solver_uses_b_inverse_mass_in_effective_mass() {
+        let (delta_a_x, delta_b_x) = solve_position_once(1., 4., false, false);
+
+        let expected_total_correction = CONTACT_DEPTH * POSITION_DAMPEN;
+        let inv_mass_a = 1.;
+        let inv_mass_b = 0.25;
+        let inv_mass_sum = inv_mass_a + inv_mass_b;
+
+        assert_float_close(
+            delta_a_x,
+            -expected_total_correction * inv_mass_a / inv_mass_sum,
+        );
+        assert_float_close(
+            delta_b_x,
+            expected_total_correction * inv_mass_b / inv_mass_sum,
+        );
+        assert_float_close(delta_b_x - delta_a_x, expected_total_correction);
+    }
+
+    #[test]
+    fn fixed_body_does_not_contribute_to_position_effective_mass() {
+        let (delta_a_x, delta_b_x) = solve_position_once(1., 4., true, false);
+
+        assert_float_close(delta_a_x, 0.);
+        assert_float_close(delta_b_x, CONTACT_DEPTH * POSITION_DAMPEN);
+    }
+
+    #[test]
+    fn normal_velocity_solver_noops_for_zero_effective_mass_without_nan() {
+        let velocity_a = (2., 0.).into();
+        let velocity_b = (-2., 0.).into();
+
+        assert_velocity_state_unchanged(
+            solve_velocity_once(0., velocity_a, 1., velocity_b),
+            velocity_a,
+            velocity_b,
+        );
+    }
+
+    #[test]
+    fn normal_velocity_solver_noops_for_non_finite_effective_mass_without_nan() {
+        let velocity_a = (2., 0.).into();
+        let velocity_b = (-2., 0.).into();
+
+        assert_velocity_state_unchanged(
+            solve_velocity_once(FloatNum::NAN, velocity_a, 1., velocity_b),
+            velocity_a,
+            velocity_b,
+        );
+    }
+
+    #[test]
+    fn normal_velocity_solver_handles_very_small_finite_effective_mass() {
+        let state = solve_velocity_once(
+            0.0000000001,
+            (2., 0.).into(),
+            0.0000000001,
+            (-2., 0.).into(),
+        );
+
+        assert_velocity_state_finite(state);
+        assert!(
+            state.0.x() < 0.,
+            "finite tiny effective mass should still solve normal impulse for A"
+        );
+        assert!(
+            state.2.x() > 0.,
+            "finite tiny effective mass should still solve normal impulse for B"
+        );
+    }
+
+    #[test]
+    fn friction_solver_noops_for_zero_effective_mass_without_nan() {
+        let velocity_a = (0., 2.).into();
+        let velocity_b = (0., -2.).into();
+
+        assert_velocity_state_unchanged(
+            solve_friction_once(0., velocity_a, 1., velocity_b),
+            velocity_a,
+            velocity_b,
+        );
+    }
+
+    #[test]
+    fn friction_solver_noops_for_non_finite_effective_mass_without_nan() {
+        let velocity_a = (0., 2.).into();
+        let velocity_b = (0., -2.).into();
+
+        assert_velocity_state_unchanged(
+            solve_friction_once(FloatNum::NAN, velocity_a, 1., velocity_b),
+            velocity_a,
+            velocity_b,
+        );
     }
 }

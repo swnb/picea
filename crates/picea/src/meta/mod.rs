@@ -116,6 +116,14 @@ impl Meta {
         self.mass.inv()
     }
 
+    pub(crate) fn effective_inv_mass(&self) -> Mass {
+        if self.is_fixed() {
+            0.
+        } else {
+            self.inv_mass()
+        }
+    }
+
     pub fn set_mass(&mut self, mass: FloatNum) -> &mut Self {
         self.mass.set_value(mass);
         self
@@ -136,6 +144,14 @@ impl Meta {
 
     pub fn inv_moment_of_inertia(&self) -> Mass {
         self.moment_of_inertia.inv()
+    }
+
+    pub(crate) fn effective_inv_moment_of_inertia(&self) -> Mass {
+        if self.is_fixed() {
+            0.
+        } else {
+            self.inv_moment_of_inertia()
+        }
     }
 
     pub(crate) fn set_moment_of_inertia(

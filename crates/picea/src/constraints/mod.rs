@@ -35,11 +35,11 @@ pub fn compute_inv_mass_effective<Obj: ConstraintObject>(
     let meta_a = obj_a.meta();
     let meta_b = obj_b.meta();
 
-    let inv_moment_of_inertia_a = meta_a.inv_moment_of_inertia();
-    let inv_moment_of_inertia_b = meta_b.inv_moment_of_inertia();
+    let inv_moment_of_inertia_a = meta_a.effective_inv_moment_of_inertia();
+    let inv_moment_of_inertia_b = meta_b.effective_inv_moment_of_inertia();
 
-    let inv_mass_a = meta_a.inv_mass();
-    let inv_mass_b = meta_b.inv_mass();
+    let inv_mass_a = meta_a.effective_inv_mass();
+    let inv_mass_b = meta_b.effective_inv_mass();
 
     let inv_mass_effective = inv_mass_a
         + inv_mass_b
