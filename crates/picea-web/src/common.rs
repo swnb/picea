@@ -41,8 +41,7 @@ impl From<&Vector> for Tuple2 {
 
 impl From<&Point> for WebPoint {
     fn from(value: &Point) -> Self {
-        let value: Tuple2 = value.into();
-        serde_wasm_bindgen::to_value(&value).unwrap().into()
+        to_web_point_or_null(value)
     }
 }
 
@@ -86,6 +85,30 @@ impl TryInto<Point> for WebPoint {
 
 pub(crate) fn js_error(message: impl AsRef<str>) -> JsValue {
     JsValue::from_str(message.as_ref())
+}
+
+pub(crate) fn to_js_value_result<T>(value: &T, label: &str) -> Result<JsValue, JsValue>
+where
+    T: Serialize + ?Sized,
+{
+    serde_wasm_bindgen::to_value(value)
+        .map_err(|_| js_error(format!("failed to serialize {label}")))
+}
+
+pub(crate) fn to_js_value_or_null<T>(value: &T) -> JsValue
+where
+    T: Serialize + ?Sized,
+{
+    to_js_value_result(value, "value").unwrap_or_else(|_| JsValue::null())
+}
+
+pub(crate) fn to_web_point_result(point: &Point) -> Result<WebPoint, JsValue> {
+    let value: Tuple2 = point.into();
+    to_js_value_result(&value, "point").map(Into::into)
+}
+
+fn to_web_point_or_null(point: &Point) -> WebPoint {
+    to_web_point_result(point).unwrap_or_else(|_| JsValue::null().into())
 }
 
 pub(crate) fn parse_web_vector(value: WebVector) -> Result<Vector, JsValue> {
@@ -559,5 +582,23 @@ mod tests {
         assert!(validate_regular_polygon_args(0., 0., 2.0_f64, 1.).is_err());
         assert!(validate_regular_polygon_args(0., 0., 1025.0_f64, 1.).is_err());
         assert!(validate_regular_polygon_args(0., 0., 3.0_f64, f32::NAN).is_err());
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn serialization_helpers_return_error_or_null_without_panic() {
+        struct FailingSerialize;
+
+        impl Serialize for FailingSerialize {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("forced serialization failure"))
+            }
+        }
+
+        assert!(to_js_value_result(&FailingSerialize, "test value").is_err());
+        assert!(to_js_value_or_null(&FailingSerialize).is_null());
     }
 }

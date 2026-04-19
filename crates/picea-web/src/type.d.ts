@@ -150,7 +150,7 @@ interface WebScene {
   /** Throws a JS error value when the element is missing or its edges cannot be represented as vertices. */
   tryGetElementVertices(elementId: number): Point[]
 
-  /** Callback errors are caught and ignored by the Rust scene. */
+  /** Callback errors are caught and ignored by the Rust scene. Unsupported arc edges are skipped without stopping iteration. */
   forEachElement: (callback: (shape: Shape) => void) => void
   /** Callback errors are caught and ignored by the Rust scene. */
   registerElementPositionUpdateCallback(

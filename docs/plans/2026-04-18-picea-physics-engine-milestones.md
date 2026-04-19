@@ -404,6 +404,18 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 二次返工验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，6 passed；`rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown --no-run` 通过；`rtk proxy cargo test -p picea --lib` 通过，60 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk git diff --check` 通过。输出仍有既有 warning，本轮未扩范围清理。
 - edgeCount 窄返工：review 指出 `FloatNum=f32` 会在 wasm binding 入参处吞掉 `3.00000001` / `1024.00001` 这类 near-integer JS number；最终实现改为 public `edgeCount: f64`，validator 也接收 `f64`，确保近整数小数不会先舍入成整数后通过。
 
+**Post-M7 known issues hardening（2026-04-19，public wasm panic hardening implementer）**
+
+状态：完成 M7 后残留 public wasm panic 风险收口；范围只触碰 `crates/picea-web/src/*` 与本计划文档；未改 core picea solver/collision/shape/storage；未做 UI/renderer；未 commit。
+
+- RED 证据：先新增 `for_each_element_shape_builder_skips_unsupported_arc_edges_without_panic` 行为锁，旧实现下 `rtk proxy cargo test -p picea-web for_each_element_shape_builder_skips_unsupported_arc_edges_without_panic --lib` 编译失败：缺少可覆盖 Arc fallback 的 builder/helper，且旧 `forEachElement` 仍停在 `Edge::Arc` 的 `todo!()` 分支。当前 public constructors 无法直接构造 Arc edge，因此用纯 helper 锁定 Arc fallback 语义。
+- 实现：`forEachElement` 改为通过 `build_for_each_element_shape` 生成 callback payload；`Edge::Arc` 返回 `UnsupportedEdge`，策略为跳过该 element、记录 wasm32 console log、继续迭代后续 element，不让一个 unsupported edge 中断整个 callback API。circle/polygon 仍按既有 shape payload 回调，callback throw 仍被捕获忽略。
+- public serialization unwrap 收口：新增 `to_js_value_result` / `to_js_value_or_null` / `to_web_point_result` helper；`getElementMetaData`、`getElementVertices`、`tryGetElementVertices`、`getElementCenterPoint`、`getPositionFixMap` 与 `From<&Point> for WebPoint` 不再直接 `serde_wasm_bindgen::to_value(...).unwrap()`。try path 返回 `JsValue` error；legacy query fallback 分别保持 `undefined` / `[]` / `null`。
+- `isPointValidAddIntoPolygon`：`vertices.last().unwrap()` 原本由 `vertices.len() <= 2` guard 保护，parse 后长度不变；本轮仍改为显式 `last().copied()` fallback，避免 public helper path 保留 panic unwrap。
+- TypeScript 文档：`forEachElement` 注释补充 unsupported arc edge 会被跳过且不会停止 iteration。
+- GREEN 证据：`rtk proxy cargo test -p picea-web for_each_element_shape_builder_skips_unsupported_arc_edges_without_panic --lib` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown --no-run` 通过。
+- residual risk：仍未新增 wasm-bindgen browser/Node smoke runner；Arc edge 目前仍无 public constructor 覆盖真实 JS callback 流，只通过 helper 锁定 fallback。core `shape::utils` 内部仍存在 Arc `unimplemented!()`，不属于本轮 public wasm 边界范围。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：

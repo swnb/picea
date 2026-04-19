@@ -21,9 +21,10 @@ use wasm_bindgen::prelude::*;
 
 use crate::common::{
     js_error, parse_web_join_constraint_config, parse_web_meta, parse_web_point, parse_web_vector,
-    validate_circle_args, validate_polygon_vertices, validate_rect_args,
-    validate_regular_polygon_args, JoinConstraint, Meta, OptionalWebJoinConstraintConfig,
-    OptionalWebMeta, PointConstraint, Tuple2, WebMeta, WebPoint, WebVector,
+    to_js_value_or_null, to_js_value_result, to_web_point_result, validate_circle_args,
+    validate_polygon_vertices, validate_rect_args, validate_regular_polygon_args, JoinConstraint,
+    Meta, OptionalWebJoinConstraintConfig, OptionalWebMeta, PointConstraint, Tuple2, WebMeta,
+    WebPoint, WebVector,
 };
 
 #[wasm_bindgen(js_name = "setPanicConsoleHook")]
@@ -50,6 +51,16 @@ fn log_callback_error(context: &str, _error: &JsValue) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn log_callback_error(_context: &str, _error: &JsValue) {}
+
+#[cfg(target_arch = "wasm32")]
+fn log_unsupported_edge(context: &str, id: ID) {
+    log(&format!(
+        "picea-web skipped unsupported edge while running {context} for element {id}"
+    ));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn log_unsupported_edge(_context: &str, _id: ID) {}
 
 #[wasm_bindgen]
 pub struct WebScene {
@@ -126,6 +137,47 @@ impl CircleElementShape {
     pub fn center_point(&self) -> JsValue {
         JsValue::from(self.center_point)
     }
+}
+
+enum ElementIterationShape {
+    Circle(CircleElementShape),
+    Polygon(PolygonElementShape),
+    UnsupportedEdge,
+}
+
+fn build_for_each_element_shape<'a>(
+    id: ID,
+    center_point: Point,
+    edges: impl IntoIterator<Item = Edge<'a>>,
+) -> ElementIterationShape {
+    let mut vertices = Vec::new();
+
+    for edge in edges {
+        match edge {
+            Edge::Arc { .. } => return ElementIterationShape::UnsupportedEdge,
+            Edge::Circle {
+                center_point,
+                radius,
+            } => {
+                return ElementIterationShape::Circle(CircleElementShape {
+                    id,
+                    center_point: Tuple2::from(&center_point),
+                    shape_type: "circle".into(),
+                    radius,
+                });
+            }
+            Edge::Line { start_point, .. } => {
+                vertices.push(Tuple2::from(start_point));
+            }
+        }
+    }
+
+    ElementIterationShape::Polygon(PolygonElementShape {
+        id,
+        shape_type: "polygon".into(),
+        center_point: Tuple2::from(&center_point),
+        vertices,
+    })
 }
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -391,8 +443,11 @@ impl WebScene {
             .map(|element| element.meta())
             .map(|meta_data| {
                 let meta_data: Meta = meta_data.into();
-                serde_wasm_bindgen::to_value(&meta_data).unwrap().into()
+                to_js_value_result(&meta_data, "element metadata")
+                    .ok()
+                    .map(Into::into)
             })
+            .flatten()
     }
 
     #[wasm_bindgen(skip_typescript, js_name = "registerElementPositionUpdateCallback")]
@@ -455,10 +510,10 @@ impl WebScene {
         for edge in element.shape().edge_iter() {
             match edge {
                 Edge::Line { start_point, .. } => {
-                    let Ok(value) = serde_wasm_bindgen::to_value(&Tuple2::from(start_point)) else {
+                    let Ok(value) = to_web_point_result(start_point) else {
                         return Vec::new();
                     };
-                    vertices.push(value.into());
+                    vertices.push(value);
                 }
                 Edge::Arc { .. } | Edge::Circle { .. } => {
                     return Vec::new();
@@ -480,11 +535,7 @@ impl WebScene {
                 for edge in element.shape().edge_iter() {
                     match edge {
                         Edge::Line { start_point, .. } => {
-                            vertices.push(
-                                serde_wasm_bindgen::to_value(&Tuple2::from(start_point))
-                                    .map_err(|_| js_error("failed to serialize element vertex"))?
-                                    .into(),
-                            );
+                            vertices.push(to_web_point_result(start_point)?);
                         }
                         Edge::Arc { .. } => {
                             return Err(js_error("arc vertices are not supported"));
@@ -504,8 +555,7 @@ impl WebScene {
         let element = self.get_scene_mut().get_element(element_id);
         element
             .map(|element| element.shape().center_point())
-            .map(|ref point| point.into())
-            .map(|point: Tuple2| serde_wasm_bindgen::to_value(&point).unwrap().into())
+            .and_then(|ref point| to_web_point_result(point).ok())
     }
 
     #[wasm_bindgen(skip_typescript, js_name = "forEachElement")]
@@ -514,51 +564,23 @@ impl WebScene {
 
         self.get_scene_mut().elements_iter().for_each(|element| {
             let id = element.id();
-            let mut result = Vec::new();
-
-            for edge in element.shape().edge_iter() {
-                match edge {
-                    Edge::Arc {
-                        start_point,
-                        support_point,
-                        end_point,
-                    } => {
-                        todo!()
-                    }
-                    Edge::Circle {
-                        center_point,
-                        radius,
-                    } => {
-                        let circle_element_shape = CircleElementShape {
-                            id,
-                            center_point: Tuple2 {
-                                x: center_point.x(),
-                                y: center_point.y(),
-                            },
-                            shape_type: "circle".into(),
-                            radius,
-                        };
-
-                        let value = &JsValue::from(circle_element_shape);
-
-                        ignore_callback_error("forEachElement", callback.call1(&this, value));
-                        return;
-                    }
-                    Edge::Line { start_point, .. } => {
-                        let point: Tuple2 = (start_point).into();
-                        result.push(point);
-                    }
+            match build_for_each_element_shape(
+                id,
+                element.center_point(),
+                element.shape().edge_iter(),
+            ) {
+                ElementIterationShape::Circle(shape) => {
+                    let value = JsValue::from(shape);
+                    ignore_callback_error("forEachElement", callback.call1(&this, &value));
+                }
+                ElementIterationShape::Polygon(shape) => {
+                    let value = JsValue::from(shape);
+                    ignore_callback_error("forEachElement", callback.call1(&this, &value));
+                }
+                ElementIterationShape::UnsupportedEdge => {
+                    log_unsupported_edge("forEachElement", id);
                 }
             }
-
-            let element_shape = JsValue::from(PolygonElementShape {
-                id,
-                shape_type: "polygon".into(),
-                center_point: (&element.center_point()).into(),
-                vertices: result,
-            });
-
-            ignore_callback_error("forEachElement", callback.call1(&this, &element_shape));
         });
     }
 
@@ -729,7 +751,7 @@ impl WebScene {
     pub fn get_position_fix_map(&self) -> JsValue {
         let result = self.get_scene_mut().get_position_fix_map();
 
-        serde_wasm_bindgen::to_value(&result).unwrap()
+        to_js_value_or_null(&result)
     }
 
     #[wasm_bindgen(js_name = "enableSleepMode")]
@@ -797,7 +819,10 @@ pub fn try_is_point_valid_add_into_polygon(
         .collect::<Result<Vec<Point>, JsValue>>()?;
 
     let segment1: Segment = (vertices[0], point).into();
-    let segment2: Segment = (*(vertices.last().unwrap()), point).into();
+    let Some(last_vertex) = vertices.last().copied() else {
+        return Ok(true);
+    };
+    let segment2: Segment = (last_vertex, point).into();
 
     let vertices_len = vertices.len();
     for i in 0..(vertices_len - 1) {
@@ -967,10 +992,33 @@ mod tests {
         .is_ok());
     }
 
+    #[test]
+    fn for_each_element_shape_builder_skips_unsupported_arc_edges_without_panic() {
+        let start_point = Point::new(0., 0.);
+        let support_point = Point::new(1., 1.);
+        let end_point = Point::new(2., 0.);
+
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            assert!(matches!(
+                build_for_each_element_shape(
+                    7,
+                    Point::new(1., 0.),
+                    [Edge::Arc {
+                        start_point: &start_point,
+                        support_point: &support_point,
+                        end_point: &end_point,
+                    }]
+                ),
+                ElementIterationShape::UnsupportedEdge
+            ));
+        }))
+        .is_ok());
+    }
+
     #[cfg(target_arch = "wasm32")]
     #[test]
     fn remaining_try_creation_methods_return_errors_for_invalid_input() {
-        let mut scene = create_scene();
+        let scene = create_scene();
         let element_id = scene.create_rect(0., 0., 10., 10., None);
 
         assert!(scene.try_create_rect(0., 0., 0., 10., None).is_err());
