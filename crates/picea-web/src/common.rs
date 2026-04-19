@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 
+pub(crate) const MAX_REGULAR_POLYGON_EDGE_COUNT: usize = 1024;
+
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub struct Tuple2 {
@@ -65,6 +67,7 @@ impl TryInto<Vector> for WebVector {
         let value: JsValue = self.into();
         let value: Tuple2 = serde_wasm_bindgen::from_value(value)
             .map_err(|_| "vector should be {x:number,y:number}")?;
+        validate_tuple2("vector", &value)?;
         Ok(value.into())
     }
 }
@@ -76,8 +79,187 @@ impl TryInto<Point> for WebPoint {
         let value: JsValue = self.into();
         let value: Tuple2 = serde_wasm_bindgen::from_value(value)
             .map_err(|_| "point should be {x:number,y:number}")?;
+        validate_tuple2("point", &value)?;
         Ok(value.into())
     }
+}
+
+pub(crate) fn js_error(message: impl AsRef<str>) -> JsValue {
+    JsValue::from_str(message.as_ref())
+}
+
+pub(crate) fn parse_web_vector(value: WebVector) -> Result<Vector, JsValue> {
+    value.try_into().map_err(js_error)
+}
+
+pub(crate) fn parse_web_point(value: WebPoint) -> Result<Point, JsValue> {
+    value.try_into().map_err(js_error)
+}
+
+pub(crate) fn parse_web_meta(value: OptionalWebMeta) -> Result<Meta, JsValue> {
+    let meta: Meta = value.try_into().map_err(js_error)?;
+    validate_meta(&meta).map_err(js_error)?;
+    Ok(meta)
+}
+
+pub(crate) fn parse_web_join_constraint_config(
+    value: OptionalWebJoinConstraintConfig,
+) -> Result<JoinConstraintConfig, JsValue> {
+    let config: JoinConstraintConfig = value.try_into().map_err(js_error)?;
+    validate_join_constraint_config(&config).map_err(js_error)?;
+    Ok(config)
+}
+
+pub(crate) fn validate_polygon_vertices(vertices: &[Point]) -> Result<(), &'static str> {
+    if vertices.len() < 3 {
+        return Err("polygon should contain at least 3 points");
+    }
+
+    Ok(())
+}
+
+pub(crate) fn validate_rect_args(
+    top_left_x: FloatNum,
+    top_right_y: FloatNum,
+    width: FloatNum,
+    height: FloatNum,
+) -> Result<(), &'static str> {
+    validate_finite_number(top_left_x, "rect.x should be a finite number")?;
+    validate_finite_number(top_right_y, "rect.y should be a finite number")?;
+    validate_positive_number(width, "rect.width should be greater than 0")?;
+    validate_positive_number(height, "rect.height should be greater than 0")?;
+    Ok(())
+}
+
+pub(crate) fn validate_circle_args(
+    center_point_x: FloatNum,
+    center_point_y: FloatNum,
+    radius: FloatNum,
+) -> Result<(), &'static str> {
+    validate_finite_number(center_point_x, "circle.x should be a finite number")?;
+    validate_finite_number(center_point_y, "circle.y should be a finite number")?;
+    validate_positive_number(radius, "circle.radius should be greater than 0")?;
+    Ok(())
+}
+
+pub(crate) fn validate_regular_polygon_args(
+    x: FloatNum,
+    y: FloatNum,
+    edge_count: f64,
+    radius: FloatNum,
+) -> Result<usize, &'static str> {
+    validate_finite_number(x, "regularPolygon.x should be a finite number")?;
+    validate_finite_number(y, "regularPolygon.y should be a finite number")?;
+
+    let edge_count = parse_regular_polygon_edge_count(edge_count)?;
+    validate_positive_number(radius, "regularPolygon.radius should be greater than 0")?;
+    Ok(edge_count)
+}
+
+fn parse_regular_polygon_edge_count(edge_count: f64) -> Result<usize, &'static str> {
+    validate_finite_number(
+        edge_count,
+        "regularPolygon.edgeCount should be a finite number",
+    )?;
+    if edge_count.fract() != 0. {
+        return Err("regularPolygon.edgeCount should be an integer");
+    }
+    if edge_count < 3. {
+        return Err("regularPolygon.edgeCount should be at least 3");
+    }
+    if edge_count > MAX_REGULAR_POLYGON_EDGE_COUNT as f64 {
+        return Err("regularPolygon.edgeCount should be at most 1024");
+    }
+
+    Ok(edge_count as usize)
+}
+
+fn validate_tuple2(label: &'static str, value: &Tuple2) -> Result<(), &'static str> {
+    if value.x.is_finite() && value.y.is_finite() {
+        return Ok(());
+    }
+
+    match label {
+        "vector" => Err("vector x/y should be finite numbers"),
+        "point" => Err("point x/y should be finite numbers"),
+        _ => Err("tuple x/y should be finite numbers"),
+    }
+}
+
+fn validate_finite_number<T: Into<f64>>(
+    value: T,
+    error_message: &'static str,
+) -> Result<(), &'static str> {
+    let value = value.into();
+    if !value.is_finite() {
+        return Err(error_message);
+    }
+
+    Ok(())
+}
+
+fn validate_positive_number(
+    value: FloatNum,
+    error_message: &'static str,
+) -> Result<(), &'static str> {
+    validate_finite_number(value, error_message)?;
+    if value <= 0. {
+        return Err(error_message);
+    }
+
+    Ok(())
+}
+
+fn validate_optional_float(
+    value: Option<&FloatNum>,
+    error_message: &'static str,
+) -> Result<(), &'static str> {
+    if value.is_some_and(|value| !value.is_finite()) {
+        return Err(error_message);
+    }
+
+    Ok(())
+}
+
+fn validate_meta(meta: &Meta) -> Result<(), &'static str> {
+    validate_optional_float(meta.mass().as_ref(), "meta.mass should be a finite number")?;
+    validate_optional_float(
+        meta.factor_friction().as_ref(),
+        "meta.factorFriction should be a finite number",
+    )?;
+    validate_optional_float(
+        meta.factor_restitution().as_ref(),
+        "meta.factorRestitution should be a finite number",
+    )?;
+
+    if let Some(velocity) = meta.velocity() {
+        validate_tuple2("vector", velocity)?;
+    }
+
+    Ok(())
+}
+
+fn validate_join_constraint_config(config: &JoinConstraintConfig) -> Result<(), &'static str> {
+    validate_optional_float(
+        config.distance().as_ref(),
+        "constraint.distance should be a finite number",
+    )?;
+    validate_optional_float(
+        config.damping_ratio().as_ref(),
+        "constraint.dampingRatio should be a finite number",
+    )?;
+    validate_optional_float(
+        config.frequency().as_ref(),
+        "constraint.frequency should be a finite number",
+    )?;
+
+    if let Some(distance) = config.distance() {
+        if *distance < 0. {
+            return Err("constraint.distance should be greater than or equal to 0");
+        }
+    }
+
+    Ok(())
 }
 
 #[wasm_config(bind = Meta)]
@@ -153,10 +335,18 @@ impl PointConstraint {
 
     #[wasm_bindgen(js_name = "updateMovePoint")]
     pub fn update_move_point(&self, point: WebPoint) {
-        if let Some(constraint) = self.scene_mut().get_point_constraint_mut(self.id) {
-            let point: Point = point.try_into().unwrap();
-            *constraint.fixed_point_mut() = point;
-        }
+        let _ = self.try_update_move_point(point);
+    }
+
+    #[wasm_bindgen(js_name = "tryUpdateMovePoint")]
+    pub fn try_update_move_point(&self, point: WebPoint) -> Result<(), JsValue> {
+        let point = parse_web_point(point)?;
+        let Some(constraint) = self.scene_mut().get_point_constraint_mut(self.id) else {
+            return Err(js_error("point constraint not found"));
+        };
+
+        *constraint.fixed_point_mut() = point;
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = "getPointPair")]
@@ -174,10 +364,21 @@ impl PointConstraint {
 
     #[wasm_bindgen(js_name = "updateConfig")]
     pub fn update_config(&self, config: OptionalWebJoinConstraintConfig) {
-        if let Some(point_constraint) = self.scene_mut().get_point_constraint_mut(self.id) {
-            let config: &JoinConstraintConfig = &config.try_into().unwrap();
-            config.assign(point_constraint.config_mut());
-        }
+        let _ = self.try_update_config(config);
+    }
+
+    #[wasm_bindgen(js_name = "tryUpdateConfig")]
+    pub fn try_update_config(
+        &self,
+        config: OptionalWebJoinConstraintConfig,
+    ) -> Result<(), JsValue> {
+        let config = parse_web_join_constraint_config(config)?;
+        let Some(point_constraint) = self.scene_mut().get_point_constraint_mut(self.id) else {
+            return Err(js_error("point constraint not found"));
+        };
+
+        config.assign(point_constraint.config_mut());
+        Ok(())
     }
 
     pub fn dispose(&self) {
@@ -239,10 +440,21 @@ impl JoinConstraint {
 
     #[wasm_bindgen(js_name = "updateConfig")]
     pub fn update_config(&self, config: OptionalWebJoinConstraintConfig) {
-        if let Some(join_constraint) = self.scene_mut().get_join_constraint_mut(self.id) {
-            let config: &JoinConstraintConfig = &config.try_into().unwrap();
-            config.assign(join_constraint.config_mut());
-        }
+        let _ = self.try_update_config(config);
+    }
+
+    #[wasm_bindgen(js_name = "tryUpdateConfig")]
+    pub fn try_update_config(
+        &self,
+        config: OptionalWebJoinConstraintConfig,
+    ) -> Result<(), JsValue> {
+        let config = parse_web_join_constraint_config(config)?;
+        let Some(join_constraint) = self.scene_mut().get_join_constraint_mut(self.id) else {
+            return Err(js_error("join constraint not found"));
+        };
+
+        config.assign(join_constraint.config_mut());
+        Ok(())
     }
 
     pub fn dispose(&self) {
@@ -258,5 +470,94 @@ impl JoinConstraint {
     #[allow(clippy::mut_from_ref)]
     fn scene_mut(&self) -> &mut Scene {
         unsafe { &mut *self.scene.get() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_meta() -> Meta {
+        Meta {
+            mass: None,
+            is_fixed: None,
+            is_transparent: None,
+            velocity: None,
+            factor_friction: None,
+            factor_restitution: None,
+        }
+    }
+
+    fn empty_join_config() -> JoinConstraintConfig {
+        JoinConstraintConfig {
+            distance: None,
+            damping_ratio: None,
+            frequency: None,
+            hard: None,
+        }
+    }
+
+    #[test]
+    fn validation_rejects_invalid_vector_point_and_meta_without_panic() {
+        assert!(validate_tuple2("vector", &Tuple2 { x: f32::NAN, y: 0. }).is_err());
+        assert!(validate_tuple2(
+            "point",
+            &Tuple2 {
+                x: 0.,
+                y: f32::INFINITY
+            }
+        )
+        .is_err());
+
+        let mut meta = empty_meta();
+        meta.mass = Some(f32::NAN);
+        assert!(validate_meta(&meta).is_err());
+
+        let mut meta = empty_meta();
+        meta.velocity = Some(Tuple2 {
+            x: 0.,
+            y: f32::NEG_INFINITY,
+        });
+        assert!(validate_meta(&meta).is_err());
+    }
+
+    #[test]
+    fn validation_rejects_invalid_polygon_and_constraint_config_without_panic() {
+        assert!(validate_polygon_vertices(&[(0., 0.).into(), (1., 0.).into()]).is_err());
+
+        let mut config = empty_join_config();
+        config.distance = Some(-1.);
+        assert!(validate_join_constraint_config(&config).is_err());
+
+        let mut config = empty_join_config();
+        config.frequency = Some(f32::NAN);
+        assert!(validate_join_constraint_config(&config).is_err());
+    }
+
+    #[test]
+    fn validation_rejects_invalid_shape_creation_numbers_without_panic() {
+        assert!(validate_rect_args(0., 0., 10., 10.).is_ok());
+        assert!(validate_rect_args(f32::NAN, 0., 10., 10.).is_err());
+        assert!(validate_rect_args(0., 0., 0., 10.).is_err());
+        assert!(validate_rect_args(0., 0., 10., -1.).is_err());
+
+        assert!(validate_circle_args(0., 0., 1.).is_ok());
+        assert!(validate_circle_args(0., f32::INFINITY, 1.).is_err());
+        assert!(validate_circle_args(0., 0., 0.).is_err());
+
+        assert_eq!(validate_regular_polygon_args(0., 0., 3.0_f64, 1.), Ok(3));
+        assert_eq!(
+            validate_regular_polygon_args(0., 0., 1024.0_f64, 1.),
+            Ok(1024)
+        );
+        assert!(validate_regular_polygon_args(0., 0., f64::NAN, 1.).is_err());
+        assert!(validate_regular_polygon_args(0., 0., f64::INFINITY, 1.).is_err());
+        assert!(validate_regular_polygon_args(0., 0., -3.0_f64, 1.).is_err());
+        assert!(validate_regular_polygon_args(0., 0., 3.00000001_f64, 1.).is_err());
+        assert!(validate_regular_polygon_args(0., 0., 1024.00001_f64, 1.).is_err());
+        assert!(validate_regular_polygon_args(0., 0., 3.5_f64, 1.).is_err());
+        assert!(validate_regular_polygon_args(0., 0., 2.0_f64, 1.).is_err());
+        assert!(validate_regular_polygon_args(0., 0., 1025.0_f64, 1.).is_err());
+        assert!(validate_regular_polygon_args(0., 0., 3.0_f64, f32::NAN).is_err());
     }
 }

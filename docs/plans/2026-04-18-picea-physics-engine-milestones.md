@@ -376,6 +376,34 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 不引入 UI 框架。
 - 不把 M5/M6 的 collision/solver 改动塞进 wasm hardening。
 
+**执行记录（2026-04-19，M7 implementer）**
+
+状态：M7 WASM API Hardening 已完成最小 public API 加固；未改 core solver/collision/storage/shape；未做 JS UI/renderer；未 commit。
+
+- RED 证据：先新增 `picea-web` 行为锁后，`rtk proxy cargo test -p picea-web try_methods_return_errors_for_invalid_js_values --lib` 在旧实现上失败：缺少 `try_set_gravity`、`try_create_polygon`、`try_create_line`、`try_update_element_meta_data`、`try_create_point_constraint`、`try_create_join_constraint` 和 callback error isolation helper。
+- native 测试边界：`wasm-bindgen::JsValue` 在 non-wasm target 上对 object/string 反序列化与 `JsValue::from_str` 会触发 non-unwinding abort，因此 public invalid-JS smoke tests 保留为 `wasm32` cfg；native `picea-web --lib` 使用纯 helper tests 覆盖 invalid vector/point/meta/config/polygon 校验不 panic，以及 callback error path 不 unwrap。
+- 实现：新增 `trySetGravity`、`tryCreatePolygon`、`tryCreateLine`、`tryUpdateElementMeta`、`tryCreatePointConstraint`、`tryCreateJoinConstraint`、constraint `tryUpdateMovePoint` / `tryUpdateConfig`、`tryGetKinetic`、`tryIsPointValidAddIntoPolygon`。旧 API 保持兼容包装：void update 失败 no-op，返回 `u32` 的旧 create 失败返回 `0`，constraint create 失败返回 `undefined`，`getKinetic` 缺失 element 返回 `null`，polygon validity 旧函数失败返回 `false`。
+- callback isolation：`registerElementPositionUpdateCallback` 与 `forEachElement` 的 `call*().unwrap()` 改为捕获 `Err(JsValue)` 并忽略；wasm32 下可选 console log，不让 JS callback throw 破坏 Rust scene。
+- TS 类型同步：`crates/picea-web/src/type.d.ts` 标注新增 `try*` 方法和旧 API error behavior；Result/`JsValue` 在 TypeScript 侧表现为 throw。
+- GREEN 证据：`rtk proxy cargo test -p picea-web --lib` 通过，3 passed。
+- residual risk：本轮未引入 wasm-bindgen browser/Node smoke runner，`wasm32` public invalid-JS tests 未纳入本地验证门；`getElementVertices` / `forEachElement` 对 Arc edge 仍保留既有 `todo!()`；部分 serde serialization `to_value(...).unwrap()` 仍基于内部可序列化数据假设，未扩成全 API Result 化。
+
+**Spec review 返工（2026-04-19，M7 implementer）**
+
+- 补齐剩余 public shape creation error channel：新增 `tryCreateRect`、`tryCreateCircle`、`tryCreateRegularPolygon`，并同步 TypeScript。策略明确为 rect `width/height > 0`、circle/regular polygon `radius > 0`、regular polygon `edgeCount >= 3`，所有数值参数必须 finite；旧 `createRect` / `createCircle` / `createRegularPolygon` 失败返回 `0`。
+- 明确 `cloneElement(metaData)` 在 public error-input 范围内：新增 `tryCloneElement`，source id 缺失或 meta invalid 返回 `JsValue` error；旧 `cloneElement` 保持原兼容，source id 缺失返回 `None`/`undefined`，invalid meta 继续 fallback default meta。
+- 行为锁：新增 native helper test 覆盖 numeric shape validation；新增 native legacy wrapper test 覆盖 numeric fallback 返回 `0` 与 clone missing source 返回 `None`；新增 wasm32 cfg public smoke test 覆盖 `tryCreateRect` / `tryCreateCircle` / `tryCreateRegularPolygon` / `tryCloneElement` 的 invalid input 和 invalid meta error path。
+- 返工验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，5 passed；`rtk proxy cargo test -p picea --lib` 通过，60 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk git diff --check` 通过。输出仍有既有 warning，本轮未扩范围清理。
+
+**Spec review 二次返工（2026-04-19，M7 implementer）**
+
+- `createRegularPolygon` / `tryCreateRegularPolygon` 的 wasm public `edgeCount` 从 `usize` 改为 `f64`，先在 JS number 对应的 f64 层验证 finite、integer、`3..=1024`，再 cast 到 `usize`；TypeScript 仍为 `number`，文档标注必须是 3 到 1024 的整数。
+- `tryIsPointValidAddIntoPolygon` 调整为先解析/校验 `point`，再处理 `vertices.len() <= 2` 的 early return，避免 invalid point 被短路吞掉。
+- `getElementVertices` 新增 `tryGetElementVertices` error channel；旧 `getElementVertices` 对 missing element、circle edge、arc edge 或序列化失败统一 fallback `[]`，不再在 public query path `todo!()` panic。`tryGetElementVertices` 对 missing element / circle / arc 返回 `JsValue` error。
+- 行为锁：native helper 覆盖 `edgeCount` NaN、Infinity、valid exact 1024、negative、near-integer fractional、too-small、too-large；native public test 覆盖 circle `getElementVertices` fallback 不 panic；wasm32 cfg smoke 覆盖 invalid point 必须先 error、`tryGetElementVertices` circle error/fallback，以及 `tryCreateRegularPolygon` 的 valid/invalid edgeCount。
+- 二次返工验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，6 passed；`rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown --no-run` 通过；`rtk proxy cargo test -p picea --lib` 通过，60 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk git diff --check` 通过。输出仍有既有 warning，本轮未扩范围清理。
+- edgeCount 窄返工：review 指出 `FloatNum=f32` 会在 wasm binding 入参处吞掉 `3.00000001` / `1024.00001` 这类 near-integer JS number；最终实现改为 public `edgeCount: f64`，validator 也接收 `f64`，确保近整数小数不会先舍入成整数后通过。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：
