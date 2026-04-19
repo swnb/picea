@@ -11,7 +11,7 @@ struct Data {
     previous_created_time: FloatNum,
 }
 
-fn init(scene: &mut Scene<Data>, handler: &mut common::Handler<Data>) {
+fn init(scene: &mut Scene<Data>, _handler: &mut common::Handler<Data>) {
     scene.set_gravity(|_| (0., 3.).into());
 
     let incline = Line::new((10., 70.), (1000., 200.));

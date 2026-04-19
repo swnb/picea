@@ -152,8 +152,8 @@ where
 {
     fn on_start(
         &mut self,
-        helper: &mut WindowHelper<()>,
-        info: speedy2d::window::WindowStartupInfo,
+        _helper: &mut WindowHelper<()>,
+        _info: speedy2d::window::WindowStartupInfo,
     ) {
         let self_ptr = self as *mut _;
 
@@ -164,9 +164,9 @@ where
 
     fn on_key_down(
         &mut self,
-        helper: &mut WindowHelper<()>,
+        _helper: &mut WindowHelper<()>,
         virtual_key_code: Option<speedy2d::window::VirtualKeyCode>,
-        scancode: speedy2d::window::KeyScancode,
+        _scancode: speedy2d::window::KeyScancode,
     ) {
         let self_ptr = self as *mut _;
 
@@ -216,16 +216,16 @@ where
 
     fn on_mouse_button_down(
         &mut self,
-        helper: &mut WindowHelper<()>,
-        button: speedy2d::window::MouseButton,
+        _helper: &mut WindowHelper<()>,
+        _button: speedy2d::window::MouseButton,
     ) {
         self.is_mouse_down = true;
     }
 
     fn on_mouse_button_up(
         &mut self,
-        helper: &mut WindowHelper<()>,
-        button: speedy2d::window::MouseButton,
+        _helper: &mut WindowHelper<()>,
+        _button: speedy2d::window::MouseButton,
     ) {
         self.is_mouse_down = false;
         self.current_mouse_pos = None;
@@ -237,7 +237,7 @@ where
 
     fn on_mouse_wheel_scroll(
         &mut self,
-        helper: &mut WindowHelper<()>,
+        _helper: &mut WindowHelper<()>,
         distance: speedy2d::window::MouseScrollDistance,
     ) {
         if let MouseScrollDistance::Pixels { y, .. } = distance {
@@ -245,7 +245,7 @@ where
         }
     }
 
-    fn on_mouse_move(&mut self, helper: &mut WindowHelper<()>, position: speedy2d::dimen::Vec2) {
+    fn on_mouse_move(&mut self, _helper: &mut WindowHelper<()>, position: speedy2d::dimen::Vec2) {
         if !self.is_mouse_down {
             return;
         }
@@ -283,7 +283,7 @@ where
         self.solve_mouse_constraint()
     }
 
-    fn on_user_event(&mut self, helper: &mut WindowHelper<()>, user_event: ()) {}
+    fn on_user_event(&mut self, _helper: &mut WindowHelper<()>, _user_event: ()) {}
 
     fn on_draw(&mut self, helper: &mut WindowHelper, graphics: &mut Graphics2D) {
         let self_ptr = self as *mut _;
@@ -365,9 +365,9 @@ where
             for edge in element.shape().edge_iter() {
                 match edge {
                     Edge::Arc {
-                        start_point,
-                        support_point,
-                        end_point,
+                        start_point: _,
+                        support_point: _,
+                        end_point: _,
                     } => {}
                     Edge::Circle {
                         center_point,
@@ -379,8 +379,8 @@ where
                         draw_helper.draw_line(&center_point, &(center_point + p), Color::BLUE)
                     }
                     Edge::Line {
-                        start_point,
-                        end_point,
+                        start_point: _,
+                        end_point: _,
                     } => {}
                 }
             }
@@ -430,7 +430,7 @@ where
                 .get_collision_infos()
                 .iter()
                 .for_each(|contact_info| {
-                    let (object_id_a, object_id_b) = contact_info.object_id_pair();
+                    let (_object_id_a, _object_id_b) = contact_info.object_id_pair();
 
                     draw_helper.draw_circle(contact_info.point_a(), 0.3, Color::MAGENTA);
                     // draw_helper.draw_line(
@@ -503,6 +503,7 @@ pub fn run_window<T: Default + Clone + 'static>(
     });
 }
 
+#[allow(dead_code)]
 pub fn run_simple(init: fn(&mut Scene, &mut Handler<()>)) {
     fn update(scene: &mut Scene, _selected_element_id: Option<u32>, _: &mut Handler<()>) {
         let duration = std::time::Duration::from_secs(10);

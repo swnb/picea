@@ -10,7 +10,7 @@ use picea::{
 #[path = "../examples_common.rs"]
 mod common;
 
-fn init(scene: &mut Scene, handler: &mut common::Handler<()>) {
+fn init(scene: &mut Scene, _handler: &mut common::Handler<()>) {
     scene.set_gravity(|_| (0., 3.).into());
 
     let constraint_parameters = scene.context_mut().constraint_parameters_mut();
@@ -41,7 +41,7 @@ fn init(scene: &mut Scene, handler: &mut common::Handler<()>) {
         let mut ball = Square::new(start_x, start_y, BALL_SIZE);
         ball.rotate(-0.1);
 
-        let mut element: Element<()> =
+        let element: Element<()> =
             ElementBuilder::new(ball, MetaBuilder::new().factor_restitution(1.), ()).into();
 
         let id = scene.push_element(element);

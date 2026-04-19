@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 mod common;
 
 fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
-    let top = 10;
+    let _top = 10;
     let down = 85;
 
     let mut x = 15;

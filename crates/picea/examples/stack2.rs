@@ -36,9 +36,9 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     const MAX_LEVEL: usize = 3;
 
-    let mut start_y = 30.;
+    let start_y = 30.;
 
-    let mut start_x = 100.;
+    let start_x = 100.;
 
     for level in 0..MAX_LEVEL {
         let mut meta = MetaBuilder::new()
@@ -57,7 +57,11 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
     }
 }
 
-fn update(scene: &mut Scene, _selected_element_id: Option<u32>, handler: &mut common::Handler<()>) {
+fn update(
+    scene: &mut Scene,
+    _selected_element_id: Option<u32>,
+    _handler: &mut common::Handler<()>,
+) {
     scene.tick(1. / 60.);
 
     // scene.update_elements_by_duration_tick(duration.as_secs_f32(), handler.iter_count);

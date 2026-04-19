@@ -438,6 +438,16 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，60 passed，输出未见 `picea` crate-local warning；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`rtk git diff --check` 通过。
 - residual risk：本批次只消除当前 `picea --lib` 输出中的低风险 core warnings，没有启用全 workspace `-D warnings`；保留的 `#[allow(dead_code)]` 标记说明这些 helper/字段仍是未来用途或调试用途，后续若真正接入配置参数，应补行为锁再删除 allow。
 
+**Post-M7 warning hygiene 批次 3（2026-04-19，Picea examples warning hygiene implementer）**
+
+状态：清理 `rtk proxy cargo test -p picea --examples --no-run` 输出中的 examples/examples_common 低风险 warnings；范围限定在 `crates/picea/examples_common.rs`、`crates/picea/examples/*.rs` 与本计划文档；未改 core `crates/picea/src`、`picea-web`、`macro-tools`；未改示例物理逻辑或场景参数；未 commit。
+
+- baseline 证据：清理前 `rtk proxy cargo test -p picea --examples --no-run` 通过，但产生 examples 侧 warnings，集中在 `examples_common.rs` 的 Speedy2D 回调未用参数、debug 绘制 match 中未用 edge 字段、contact object id debug binding、test harness 下未引用的 `run_simple`，以及 `accumulation`/`stack2`/`ground`/`friction` 的少量 unused/unused_mut。
+- `examples_common.rs`：保留 `WindowHandler` 回调签名和 `run_simple` 示例入口，只把未读取的回调参数改为 `_` 前缀；debug 绘制中未读取的 Arc/Line 字段改为忽略字段；contact id binding 改为 `_object_id_a/_object_id_b`；`run_simple` 用精准 `#[allow(dead_code)]` 说明它在 example test harness 下可能未被引用。
+- examples：`accumulation` 的未用 `top` 改为 `_top`；`stack2` 删除未必要的 `mut` 并标记未用 handler；`ground` 标记未用 handler 并删除未必要的 element `mut`；`friction` 标记未用 handler。所有改动只处理 lint 信号，不调整示例构造参数、tick、gravity、shape 或 constraint 配置。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --examples --no-run` 通过，输出未见 examples/examples_common warnings；`rtk proxy cargo test -p picea --lib` 通过，60 passed；`rtk git diff --check` 通过。
+- residual risk：本批次只清理当前 examples no-run 输出中的低风险 unused/dead_code warnings，没有启用全 workspace `-D warnings`，也没有运行窗口交互示例；`run_simple` 保留为普通 example 入口，因 test harness 下可能未引用而使用精准 `#[allow(dead_code)]`。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：
