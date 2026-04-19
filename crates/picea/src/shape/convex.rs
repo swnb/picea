@@ -4,7 +4,7 @@ use crate::{
     element::ComputeMomentOfInertia,
     math::{edge::Edge, point::Point, FloatNum},
     meta::Mass,
-    shape::utils::rotate_polygon,
+    shape::utils::{rotate_point, rotate_polygon},
 };
 
 use super::{
@@ -44,8 +44,49 @@ impl ConvexPolygon {
         self.area
     }
 
+    #[cfg(test)]
+    pub(crate) fn origin_vertices(&self) -> &[Point] {
+        &self.origin_vertices
+    }
+
+    #[cfg(test)]
+    pub(crate) fn vertices(&self) -> &[Point] {
+        &self.vertices
+    }
+
+    #[cfg(test)]
+    pub(crate) fn origin_center_point(&self) -> Point {
+        self.origin_center_point
+    }
+
     pub fn scale_with_center_point(&mut self, center_point: &Point, from: &Point, to: &Point) {
         resize_by_vector(self.vertices.iter_mut(), center_point, from, to);
+    }
+
+    pub(crate) fn sync_transform_around_point(
+        &mut self,
+        transform: &Transform,
+        origin_point: Point,
+    ) {
+        for (i, p) in self.origin_vertices.iter().enumerate() {
+            self.vertices[i] = p + transform.translation();
+        }
+        self.center_point = self.origin_center_point + transform.translation();
+
+        let rotation_origin = origin_point + transform.translation();
+        rotate_polygon(
+            rotation_origin,
+            self.vertices.iter_mut(),
+            transform.rotation(),
+        );
+        self.center_point =
+            rotate_point(&self.center_point, &rotation_origin, transform.rotation());
+    }
+
+    pub(crate) fn into_current_pose(mut self) -> Self {
+        self.origin_vertices = self.vertices.clone();
+        self.origin_center_point = self.center_point;
+        self
     }
 }
 

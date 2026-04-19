@@ -235,6 +235,22 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 不做 3D。
 - 不改 solver 真实感参数。
 
+**执行记录（2026-04-19）**
+
+状态：M4 Geometry And Shape Pipeline 已完成最小 concave geometry/shape pipeline，未进入 M5/M6/M7。
+
+- 实现：`ConcavePolygon::new` 仍在构造期基于 local/origin vertices 调用 `split_concave_polygon_to_convex_polygons` 分解一次；`sync_transform` 不再用 world vertices 重拆，而是把已缓存的 `ConvexPolygon` sub-colliders 按 parent `origin_center_point` 同步到 world-space。
+- 实现：`ConvexPolygon` 增加 crate-private `sync_transform_around_point`，用于 parent-space transform；`to_convex_polygons()` 返回前通过 `into_current_pose` 把 returned convex pieces rebase 到当前 world vertices/current center，避免作为独立 shape 后再次 transform snap back 到 local cached pose；`sub_colliders()` 仍返回 world-space convex sub-polygons，parent `projection_on_vector` / `edge_iter` / `center_point` 仍基于 parent world vertices。
+- 测试：新增 `shape::concave` 行为锁，覆盖重复 transform 不重复拆分、sub-collider count/local pieces 稳定、parent/sub-collider center/projection 随 translation/rotation 更新、repeated transform 后 area/moment of inertia 稳定，以及 consuming `to_convex_polygons()` 暴露后继续从 current world pose transform。
+- 测试 helper：只在 `#[cfg(test)]` 下给 concave split 增加线程本地调用计数，并给 `ConvexPolygon` 暴露测试只读访问器；未扩 public API。
+- TDD RED：`rtk proxy cargo test -p picea shape::concave --lib` 在旧实现下失败于 `repeated_transform_uses_cached_local_decomposition`，split count 为 `2`，预期为 `1`。
+- Code review RED：review 发现 consuming `to_convex_polygons()` 暴露的 current vertices 与 local origin fields 不一致；新增 `exposed_convex_polygons_continue_transforming_from_current_world_pose` 后，旧实现失败于 returned piece 第二次 transform 从 local cached origin 跳回。
+- GREEN：实现后 `rtk proxy cargo test -p picea shape::concave --lib` 通过，4 passed。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，37 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test -p picea-web --lib` 通过，0 tests。输出仍有既有 warning，本轮未扩范围清理。
+- 边界核对：未改 `collision/mod.rs` broadphase、GJK/EPA 或 collision pipeline 语义；未改 `constraints/*` solver；未改 `ElementStore` 存储模型；未改 wasm API；未做 UI/3D；未删除或纳入未跟踪 `.DS_Store`。
+- residual risk：M4 只完成 concave decomposition hot path 的最小 local-space cache，未实现 AABB cache、support point cache 或更通用 shape cache invalidation；`ConvexPolygon::compute_moment_of_inertia` 仍沿用现有基于当前 vertices 的算法，只通过 repeated transform 稳定性锁住未漂移；凹多边形拆分算法本身仍沿用 M1 的有限行为锁与 fallback，不在本轮重写；sub-collider cache 假设 polygon 构造后 local geometry 不变。
+- 最终 diff 检查：`rtk git diff --check` 通过。
+
 ### M5 Collision Pipeline
 
 **目标**

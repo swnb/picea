@@ -11,6 +11,26 @@ use crate::{
 
 use super::{CenterPoint, EdgeIterable, NearestPoint};
 
+#[cfg(test)]
+thread_local! {
+    static CONCAVE_SPLIT_CALL_COUNT: std::cell::Cell<usize> = std::cell::Cell::new(0);
+}
+
+#[cfg(test)]
+fn record_concave_split_call() {
+    CONCAVE_SPLIT_CALL_COUNT.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+pub(crate) fn reset_concave_split_call_count() {
+    CONCAVE_SPLIT_CALL_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn concave_split_call_count() -> usize {
+    CONCAVE_SPLIT_CALL_COUNT.with(std::cell::Cell::get)
+}
+
 /**
  * useful tool for polygon to transform
  */
@@ -621,6 +641,9 @@ fn conservative_finite_triangle() -> Vec<Point> {
 }
 
 pub fn split_concave_polygon_to_convex_polygons(vertices: &[Point]) -> Vec<Vec<Point>> {
+    #[cfg(test)]
+    record_concave_split_call();
+
     if !check_is_concave(vertices) {
         return vec![vertices.into()];
     }
