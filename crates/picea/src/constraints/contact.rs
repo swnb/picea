@@ -26,6 +26,8 @@ pub struct ContactConstraint<Obj: ConstraintObject> {
     #[r]
     #[w(set)]
     is_active: bool,
+    was_active_last_pass: bool,
+    pending_contact_point_pairs: Option<Vec<ContactPointPair>>,
     factor_friction: FloatNum,
     factor_restitution: FloatNum,
     velocity_a: Vector,
@@ -173,6 +175,8 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             obj_b: std::ptr::null_mut(),
             inv_delta_time: 0.,
             is_active: true,
+            was_active_last_pass: false,
+            pending_contact_point_pairs: None,
             factor_friction: 0.,
             factor_restitution: 0.,
             velocity_a: Default::default(),
@@ -190,6 +194,45 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 ..Default::default()
             })
             .collect()
+    }
+
+    pub(crate) fn begin_collision_pass(&mut self) {
+        self.pending_contact_point_pairs = None;
+        self.was_active_last_pass = self.is_active;
+        self.is_active = false;
+    }
+
+    pub(crate) fn queue_contact_point_pairs_for_warm_started_refresh(
+        &mut self,
+        contact_point_pairs: Vec<ContactPointPair>,
+    ) {
+        self.is_active = true;
+        if self.was_active_last_pass {
+            self.pending_contact_point_pairs = Some(contact_point_pairs);
+        } else {
+            self.replace_contact_point_pairs(contact_point_pairs);
+        }
+    }
+
+    pub(crate) fn can_warm_start_current_pass(&self) -> bool {
+        self.is_active && self.was_active_last_pass
+    }
+
+    pub(crate) fn extend_current_contact_point_pairs(
+        &mut self,
+        mut contact_point_pairs: Vec<ContactPointPair>,
+    ) {
+        if let Some(pending_contact_point_pairs) = &mut self.pending_contact_point_pairs {
+            pending_contact_point_pairs.append(&mut contact_point_pairs);
+        } else {
+            self.extend_contact_point_pairs(contact_point_pairs);
+        }
+    }
+
+    pub(crate) fn refresh_contact_point_pairs_after_warm_start(&mut self) {
+        if let Some(contact_point_pairs) = self.pending_contact_point_pairs.take() {
+            self.replace_contact_point_pairs(contact_point_pairs);
+        }
     }
 
     pub fn extend_contact_point_pairs(&mut self, contact_point_pairs: Vec<ContactPointPair>) {

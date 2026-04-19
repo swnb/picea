@@ -81,6 +81,157 @@ impl<T: CollisionalCollection> DerefMut for CollisionalCollectionWrapper<T> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Aabb {
+    min_x: FloatNum,
+    max_x: FloatNum,
+    min_y: FloatNum,
+    max_y: FloatNum,
+}
+
+impl Aabb {
+    fn from_collider(collider: &impl Projector) -> Option<Self> {
+        Self::from_axis_ranges(
+            collider.projection_on_axis(AxisDirection::X),
+            collider.projection_on_axis(AxisDirection::Y),
+        )
+    }
+
+    fn from_axis_ranges(x: (FloatNum, FloatNum), y: (FloatNum, FloatNum)) -> Option<Self> {
+        let (min_x, max_x) = normalize_finite_range(x)?;
+        let (min_y, max_y) = normalize_finite_range(y)?;
+
+        Self {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+        }
+        .into()
+    }
+
+    fn min_on_axis(&self, axis: AxisDirection) -> FloatNum {
+        match axis {
+            AxisDirection::X => self.min_x,
+            AxisDirection::Y => self.min_y,
+        }
+    }
+
+    fn max_on_axis(&self, axis: AxisDirection) -> FloatNum {
+        match axis {
+            AxisDirection::X => self.max_x,
+            AxisDirection::Y => self.max_y,
+        }
+    }
+
+    fn overlaps(&self, other: &Self) -> bool {
+        !(self.max_x < other.min_x
+            || other.max_x < self.min_x
+            || self.max_y < other.min_y
+            || other.max_y < self.min_y)
+    }
+}
+
+fn normalize_finite_range((a, b): (FloatNum, FloatNum)) -> Option<(FloatNum, FloatNum)> {
+    if a == FloatNum::MAX && b == FloatNum::MIN {
+        return None;
+    }
+
+    if !(a.is_finite() && b.is_finite()) {
+        return None;
+    }
+
+    if a <= b {
+        Some((a, b))
+    } else {
+        Some((b, a))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BroadphasePair {
+    first_index: usize,
+    second_index: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AabbCacheEntry {
+    collider_index: usize,
+    aabb: Aabb,
+}
+
+#[derive(Clone, Debug, Default)]
+struct AabbCache {
+    entries: Vec<AabbCacheEntry>,
+}
+
+impl AabbCache {
+    fn build<T>(elements: &CollisionalCollectionWrapper<T>) -> Self
+    where
+        T: CollisionalCollection,
+    {
+        let entries = (0..elements.len())
+            .filter_map(|collider_index| {
+                Aabb::from_collider(&elements[collider_index]).map(|aabb| AabbCacheEntry {
+                    collider_index,
+                    aabb,
+                })
+            })
+            .collect();
+
+        Self { entries }
+    }
+}
+
+trait BroadphaseStrategy {
+    fn generate_candidates(&self, cache: &AabbCache, handler: impl FnMut(BroadphasePair));
+}
+
+#[derive(Clone, Copy)]
+struct SweepAndPruneBroadphase {
+    axis: AxisDirection,
+}
+
+impl SweepAndPruneBroadphase {
+    fn new(axis: AxisDirection) -> Self {
+        Self { axis }
+    }
+}
+
+impl BroadphaseStrategy for SweepAndPruneBroadphase {
+    fn generate_candidates(&self, cache: &AabbCache, mut handler: impl FnMut(BroadphasePair)) {
+        if cache.entries.len() < 2 {
+            return;
+        }
+
+        let mut entries = cache.entries.clone();
+        entries.sort_by(|a, b| {
+            a.aabb
+                .min_on_axis(self.axis)
+                .total_cmp(&b.aabb.min_on_axis(self.axis))
+                .then_with(|| a.collider_index.cmp(&b.collider_index))
+        });
+
+        for i in 0..(entries.len() - 1) {
+            let current = entries[i];
+            let current_max = current.aabb.max_on_axis(self.axis);
+
+            for candidate in entries.iter().skip(i + 1) {
+                if candidate.aabb.min_on_axis(self.axis) > current_max {
+                    break;
+                }
+
+                if current.aabb.overlaps(&candidate.aabb) {
+                    handler(BroadphasePair {
+                        first_index: current.collider_index,
+                        second_index: candidate.collider_index,
+                    });
+                }
+            }
+        }
+    }
+}
+
 // entry of collision check, if element is collision, handler will call
 pub fn detect_collision<T, H, F>(elements: T, handler: H, skip: F)
 where
@@ -120,14 +271,13 @@ where
 {
     // let time = std::time::Instant::now();
 
-    // TODO
-    let axis = AxisDirection::X;
-
     let elements = CollisionalCollectionWrapper(elements);
+    let aabb_cache = AabbCache::build(&elements);
+    let broadphase = SweepAndPruneBroadphase::new(AxisDirection::X);
 
-    sweep_and_prune_collision_detection(elements, axis, |a, b| {
+    broadphase.generate_candidates(&aabb_cache, |pair| {
         // TODO special collision algo for circle and circle
-        handler(a, b);
+        handler(&elements[pair.first_index], &elements[pair.second_index]);
     });
 
     // dbg!(time.elapsed());
@@ -177,6 +327,26 @@ pub fn accurate_collision_detection_for_sub_collider(
     a: &dyn SubCollider,
     b: &dyn SubCollider,
 ) -> Option<Vec<ContactPointPair>> {
+    GjkEpaNarrowphase.detect(a, b)
+}
+
+trait NarrowphaseStrategy {
+    fn detect(&self, a: &dyn SubCollider, b: &dyn SubCollider) -> Option<Vec<ContactPointPair>>;
+}
+
+#[derive(Clone, Copy, Debug)]
+struct GjkEpaNarrowphase;
+
+impl NarrowphaseStrategy for GjkEpaNarrowphase {
+    fn detect(&self, a: &dyn SubCollider, b: &dyn SubCollider) -> Option<Vec<ContactPointPair>> {
+        gjk_epa_collision_detection(a, b)
+    }
+}
+
+fn gjk_epa_collision_detection(
+    a: &dyn SubCollider,
+    b: &dyn SubCollider,
+) -> Option<Vec<ContactPointPair>> {
     let center_point_a = a.center_point();
     let center_point_b = b.center_point();
     let first_approximation_vector: Vector = (center_point_a, center_point_b).into();
@@ -204,54 +374,6 @@ pub fn accurate_collision_detection_for_sub_collider(
     let contact_infos: Vec<ContactPointPair> = minkowski_edge.get_contact_info(a, b);
 
     contact_infos.into()
-}
-
-/**
- * 粗检测
- * find the elements that maybe collision
- */
-fn sweep_and_prune_collision_detection<T, Z>(
-    mut elements: CollisionalCollectionWrapper<T>,
-    axis: AxisDirection,
-    mut handler: Z,
-) where
-    T: CollisionalCollection,
-    Z: FnMut(&T::Collider, &T::Collider),
-{
-    if elements.is_empty() {
-        return;
-    }
-
-    elements.sort(|a, b| {
-        let (min_a_x, _) = a.projection_on_axis(axis);
-        let (min_b_x, _) = b.projection_on_axis(axis);
-        min_a_x.partial_cmp(&min_b_x).unwrap()
-    });
-
-    let len = elements.len();
-
-    for i in 0..(len - 1) {
-        let cur = &elements[i];
-        let (_, max_x) = cur.projection_on_axis(axis);
-        for j in (i + 1)..len {
-            let is_collision_on_x = elements[j].projection_on_axis(axis).0 <= max_x;
-            if is_collision_on_x {
-                let (a_min_y, a_max_y) = elements[i].projection_on_axis(!axis);
-                let (b_min_y, b_max_y) = elements[j].projection_on_axis(!axis);
-
-                if !(a_max_y < b_min_y || b_max_y < a_min_y) {
-                    // detective precise collision
-                    let a: *const _ = &elements[i];
-                    let b: *const _ = &elements[j];
-                    unsafe {
-                        handler(&*a, &*b);
-                    };
-                }
-            } else {
-                break;
-            }
-        }
-    }
 }
 
 // TODO object is too large , we need shrink this struct in the future， rm start_point and end_point
@@ -1015,7 +1137,134 @@ fn clip(reference_edge: &Segment<f32>, incident_edge: &Segment<f32>) -> Vec<Poin
 //     collision_normal.1
 // }
 
+#[cfg(test)]
 mod tests {
+    use std::ops::{Index, IndexMut};
+
+    use crate::{
+        element::{store::ElementStore, Element, ElementBuilder, ID},
+        math::{axis::AxisDirection, point::Point, vector::Vector},
+        meta::MetaBuilder,
+        shape::{CenterPoint, Circle, ConvexPolygon, NearestPoint},
+    };
+
+    use super::{
+        accurate_collision_detection_for_sub_collider, rough_collision_detection, Collider,
+        CollisionalCollection, Projector,
+    };
+
+    #[derive(Clone, Debug)]
+    struct TestCollider {
+        id: u32,
+        projection_x: (f32, f32),
+        projection_y: (f32, f32),
+    }
+
+    impl TestCollider {
+        fn new(id: u32, projection_x: (f32, f32), projection_y: (f32, f32)) -> Self {
+            Self {
+                id,
+                projection_x,
+                projection_y,
+            }
+        }
+    }
+
+    impl Projector for TestCollider {
+        fn projection_on_vector(&self, _vector: &Vector) -> (Point, Point) {
+            let center_point = self.center_point();
+            (center_point, center_point)
+        }
+
+        fn projection_on_axis(&self, axis: AxisDirection) -> (f32, f32) {
+            match axis {
+                AxisDirection::X => self.projection_x,
+                AxisDirection::Y => self.projection_y,
+            }
+        }
+    }
+
+    impl CenterPoint for TestCollider {
+        fn center_point(&self) -> Point {
+            let center_axis = |(min, max): (f32, f32)| {
+                if min.is_finite() && max.is_finite() {
+                    (min + max) * 0.5
+                } else {
+                    0.
+                }
+            };
+
+            (
+                center_axis(self.projection_x),
+                center_axis(self.projection_y),
+            )
+                .into()
+        }
+    }
+
+    impl NearestPoint for TestCollider {
+        fn nearest_point(&self, _reference_point: &Point, _direction: &Vector) -> Point {
+            self.center_point()
+        }
+    }
+
+    impl Collider for TestCollider {}
+
+    struct TestCollection(Vec<TestCollider>);
+
+    impl Index<usize> for TestCollection {
+        type Output = TestCollider;
+
+        fn index(&self, index: usize) -> &Self::Output {
+            &self.0[index]
+        }
+    }
+
+    impl IndexMut<usize> for TestCollection {
+        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+            &mut self.0[index]
+        }
+    }
+
+    impl CollisionalCollection for TestCollection {
+        type Collider = TestCollider;
+
+        fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        fn sort(
+            &mut self,
+            compare: impl Fn(&Self::Collider, &Self::Collider) -> std::cmp::Ordering,
+        ) {
+            self.0.sort_by(compare);
+        }
+    }
+
+    fn rough_candidate_ids(colliders: Vec<TestCollider>) -> Vec<(u32, u32)> {
+        let mut pairs = Vec::new();
+
+        rough_collision_detection(TestCollection(colliders), |a, b| {
+            pairs.push(if a.id < b.id {
+                (a.id, b.id)
+            } else {
+                (b.id, a.id)
+            });
+        });
+
+        pairs.sort();
+        pairs
+    }
+
+    fn element_with_shape(
+        id: ID,
+        shape: impl Into<Box<dyn crate::element::ShapeTraitUnion>>,
+    ) -> Element<()> {
+        let mut element: Element<()> =
+            ElementBuilder::new(shape, MetaBuilder::new().mass(1.), ()).into();
+        element.inject_id(id);
+        element
+    }
 
     #[test]
     fn test_minkowski_point() {
@@ -1041,5 +1290,83 @@ mod tests {
         let edge: MinkowskiEdge = (start_different_point, end_different_point).into();
 
         assert!(edge.depth == 0.);
+    }
+
+    #[test]
+    fn rough_collision_detection_filters_candidates_by_aabb_overlap() {
+        let pairs = rough_candidate_ids(vec![
+            TestCollider::new(1, (0., 2.), (0., 2.)),
+            TestCollider::new(2, (1., 3.), (1., 3.)),
+            TestCollider::new(3, (1., 3.), (5., 6.)),
+            TestCollider::new(4, (5., 6.), (0., 2.)),
+        ]);
+
+        assert_eq!(pairs, vec![(1, 2)]);
+    }
+
+    #[test]
+    fn rough_collision_detection_normalizes_degenerate_projection_ranges() {
+        let pairs = rough_candidate_ids(vec![
+            TestCollider::new(1, (3., 1.), (0., 2.)),
+            TestCollider::new(2, (0., 2.), (1., 3.)),
+        ]);
+
+        assert_eq!(pairs, vec![(1, 2)]);
+    }
+
+    #[test]
+    fn rough_collision_detection_skips_non_finite_aabbs_without_panicking() {
+        let result = std::panic::catch_unwind(|| {
+            rough_candidate_ids(vec![
+                TestCollider::new(1, (f32::NAN, 1.), (0., 2.)),
+                TestCollider::new(2, (0., 2.), (0., 2.)),
+                TestCollider::new(3, (0.5, 1.5), (0.5, 1.5)),
+            ])
+        });
+
+        let pairs = result.expect("non-finite AABB projection must not panic broadphase");
+        assert_eq!(pairs, vec![(2, 3)]);
+    }
+
+    #[test]
+    fn rough_collision_detection_skips_empty_convex_polygon_projection_without_panicking() {
+        let mut store = ElementStore::with_capacity(2);
+        store.push(element_with_shape(
+            1,
+            ConvexPolygon::new(Vec::<Point>::new()),
+        ));
+        store.push(element_with_shape(2, Circle::new((0., 0.), 1.)));
+
+        let mut pairs = Vec::new();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            rough_collision_detection(&mut store, |a, b| {
+                pairs.push((a.id(), b.id()));
+            });
+        }));
+
+        assert!(
+            result.is_ok(),
+            "empty polygon projection must not panic broadphase"
+        );
+        assert!(
+            pairs.is_empty(),
+            "empty polygon projection sentinel must not create broadphase candidates"
+        );
+    }
+
+    #[test]
+    fn narrowphase_gjk_epa_keeps_existing_circle_collision_behavior() {
+        let collider_a = Circle::new((0., 0.), 1.);
+        let overlapping_collider = Circle::new((1.5, 0.), 1.);
+        let separated_collider = Circle::new((4., 0.), 1.);
+
+        assert!(
+            accurate_collision_detection_for_sub_collider(&collider_a, &overlapping_collider)
+                .is_some_and(|pairs| !pairs.is_empty())
+        );
+        assert!(
+            accurate_collision_detection_for_sub_collider(&collider_a, &separated_collider)
+                .is_none()
+        );
     }
 }

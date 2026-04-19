@@ -434,8 +434,9 @@ impl<T: Clone + Default> Scene<T> {
         self.total_duration += delta_time;
 
         self.integrate_velocity(delta_time);
-        self.warm_start();
         self.collision_detective();
+        self.warm_start();
+        self.refresh_contact_point_pairs_after_warm_start();
         unsafe {
             self.pre_solve_constraints(delta_time);
         }
@@ -495,14 +496,14 @@ impl<T: Clone + Default> Scene<T> {
         });
     }
 
-    // warm start and mark all manifold active false
+    // warm start current active manifolds after collision refresh
     fn warm_start(&mut self) {
         let self_ptr = self.self_ptr();
 
         // warm start
         self.contact_constraints_manifold
             .values_mut()
-            .filter(|v| v.is_active())
+            .filter(|v| v.can_warm_start_current_pass())
             .for_each(|manifold| unsafe {
                 let iter = manifold.contact_pair_constraint_infos_iter();
                 for info in iter {
@@ -524,9 +525,12 @@ impl<T: Clone + Default> Scene<T> {
                         }
                     }
                 }
-
-                manifold.set_is_active(false);
             });
+    }
+
+    fn refresh_contact_point_pairs_after_warm_start(&mut self) {
+        self.contact_constraints_manifold
+            .refresh_contact_point_pairs_after_warm_start();
     }
 
     fn integrate_velocity(&mut self, delta_time: FloatNum) {
@@ -544,6 +548,8 @@ impl<T: Clone + Default> Scene<T> {
     }
 
     fn collision_detective(&mut self) {
+        self.contact_constraints_manifold.mark_all_inactive();
+
         self.element_store
             .detective_collision(|a, b, contact_pairs| {
                 let manifold_key = (a.id(), b.id());
@@ -551,11 +557,9 @@ impl<T: Clone + Default> Scene<T> {
                 if let Some(manifold) = self.contact_constraints_manifold.get_mut(&manifold_key) {
                     if manifold.is_active() {
                         // append new contact_pairs;
-                        manifold.extend_contact_point_pairs(contact_pairs)
+                        manifold.extend_current_contact_point_pairs(contact_pairs)
                     } else {
-                        // for performance; reuse exist manifold
-                        manifold.replace_contact_point_pairs(contact_pairs);
-                        manifold.set_is_active(true);
+                        manifold.queue_contact_point_pairs_for_warm_started_refresh(contact_pairs);
                     }
                 } else {
                     let contact_constraint = ContactConstraint::new(a.id(), b.id(), contact_pairs);
@@ -587,7 +591,11 @@ impl<T: Clone + Default> Scene<T> {
             element.meta_mut().delta_transform_mut().reset();
         });
 
-        for contact_constraint in (*self_ptr).contact_constraints_manifold.values_mut() {
+        for contact_constraint in (*self_ptr)
+            .contact_constraints_manifold
+            .values_mut()
+            .filter(|contact_constraint| contact_constraint.is_active())
+        {
             let Some((element_a, element_b)) =
                 (*self_ptr).query_element_pair_mut(contact_constraint.obj_id_pair())
             else {
@@ -849,6 +857,69 @@ mod tests {
         (scene, element_a_id, element_b_id)
     }
 
+    fn move_circle_center_to(scene: &mut Scene, element_id: u32, x: FloatNum) {
+        let center_point = scene
+            .get_element(element_id)
+            .expect("element exists")
+            .center_point();
+        let translation = (x - center_point.x(), -center_point.y()).into();
+        let transform = (translation, 0.).into();
+        let element = scene
+            .get_element_mut(element_id)
+            .expect("element remains mutable");
+        element.transform(&transform);
+        element.apply_transform();
+    }
+
+    fn reset_circle_center_to(scene: &mut Scene, element_id: u32, x: FloatNum) {
+        let element = scene
+            .get_element_mut(element_id)
+            .expect("element remains mutable");
+        element.meta_mut().delta_transform_mut().reset();
+
+        let center_point = element.center_point();
+        let translation = (x - center_point.x(), -center_point.y()).into();
+        let transform = (translation, 0.).into();
+        element.transform(&transform);
+        element.apply_transform();
+    }
+
+    fn contact_count(scene: &Scene, element_id: u32) -> u16 {
+        scene
+            .get_element(element_id)
+            .expect("element exists")
+            .meta()
+            .contact_count()
+    }
+
+    fn set_velocity_and_angle(
+        scene: &mut Scene,
+        element_id: u32,
+        velocity: impl Into<Vector>,
+        angle_velocity: FloatNum,
+    ) {
+        let element = scene
+            .get_element_mut(element_id)
+            .expect("element remains mutable");
+        *element.meta_mut().velocity_mut() = velocity.into();
+        *element.meta_mut().angle_velocity_mut() = angle_velocity;
+    }
+
+    fn velocity_and_angle(scene: &Scene, element_id: u32) -> (Vector, FloatNum) {
+        let element = scene.get_element(element_id).expect("element exists");
+        (*element.meta().velocity(), element.meta().angle_velocity())
+    }
+
+    fn cached_contact_lambda_abs_sum(scene: &Scene, id_pair: (u32, u32)) -> FloatNum {
+        scene
+            .contact_constraints_manifold
+            .get(&id_pair)
+            .expect("contact manifold exists")
+            .contact_pair_constraint_infos_iter()
+            .map(|info| info.total_lambda().abs() + info.total_friction_lambda().abs())
+            .sum()
+    }
+
     fn run_falling_circle(deltas: &[FloatNum]) -> StepSnapshot {
         let (mut scene, element_id) = falling_circle_scene();
 
@@ -1051,6 +1122,208 @@ mod tests {
         assert!(
             scene.get_position_fix_map().is_empty(),
             "removing a contacted element must invalidate stale contact pointers before public position queries"
+        );
+    }
+
+    #[test]
+    fn collision_detective_deactivates_pairs_not_seen_in_current_pass() {
+        let mut scene = Scene::width_capacity(2);
+        scene.set_gravity(|_| (0., 0.).into());
+
+        let element_a_id = push_circle_at(&mut scene, 0.);
+        let element_b_id = push_circle_at(&mut scene, 1.5);
+
+        scene.collision_detective();
+        assert!(scene.is_element_collide(element_a_id, element_b_id, true));
+
+        move_circle_center_to(&mut scene, element_b_id, 10.);
+        scene.collision_detective();
+
+        assert!(
+            !scene.is_element_collide(element_a_id, element_b_id, true),
+            "a persistent manifold pair must not remain active when it is not found in the current collision pass"
+        );
+        assert_eq!(
+            scene.contact_constraints_manifold.len(),
+            1,
+            "M5 keeps the persistent manifold cache but marks stale pairs inactive"
+        );
+    }
+
+    #[test]
+    fn tick_pre_solve_ignores_inactive_manifolds_when_counting_contacts() {
+        let mut scene = Scene::width_capacity(3);
+        scene.set_gravity(|_| (0., 0.).into());
+
+        let element_a_id = push_circle_at(&mut scene, 0.);
+        let element_b_id = push_circle_at(&mut scene, 1.5);
+        let element_c_id = push_circle_at(&mut scene, 20.);
+
+        scene.tick(STEP_DT);
+        assert!(scene.is_element_collide(element_a_id, element_b_id, true));
+
+        move_circle_center_to(&mut scene, element_b_id, 40.);
+        let element_a_x = scene
+            .get_element(element_a_id)
+            .expect("element a exists")
+            .center_point()
+            .x();
+        move_circle_center_to(&mut scene, element_c_id, element_a_x + 1.5);
+
+        scene.tick(STEP_DT);
+
+        assert!(!scene.is_element_collide(element_a_id, element_b_id, true));
+        assert!(scene.is_element_collide(element_a_id, element_c_id, true));
+        assert_eq!(
+            scene.contact_constraints_manifold.len(),
+            2,
+            "stale inactive manifold stays cached while the new active pair is present"
+        );
+        assert_eq!(
+            contact_count(&scene, element_a_id),
+            1,
+            "only the active A-C manifold should contribute to A's contact count"
+        );
+        assert_eq!(
+            contact_count(&scene, element_b_id),
+            0,
+            "inactive stale A-B manifold must not contribute to B's contact count"
+        );
+        assert_eq!(
+            contact_count(&scene, element_c_id),
+            1,
+            "active A-C manifold should contribute to C's contact count"
+        );
+    }
+
+    #[test]
+    fn tick_does_not_warm_start_stale_manifold_after_pair_separates() {
+        let mut scene = Scene::width_capacity(2);
+        scene.set_gravity(|_| (0., 0.).into());
+
+        let element_a_id = push_circle_at(&mut scene, 0.);
+        let element_b_id = push_circle_at(&mut scene, 1.5);
+        set_velocity_and_angle(&mut scene, element_a_id, (8., 0.), 0.);
+        set_velocity_and_angle(&mut scene, element_b_id, (-8., 0.), 0.);
+
+        scene.tick(STEP_DT);
+        assert!(scene.is_element_collide(element_a_id, element_b_id, true));
+        assert!(
+            cached_contact_lambda_abs_sum(&scene, (element_a_id, element_b_id)) > EPSILON,
+            "first tick should leave a cached warm-start lambda"
+        );
+
+        set_velocity_and_angle(&mut scene, element_a_id, (0., 0.), 0.);
+        set_velocity_and_angle(&mut scene, element_b_id, (0., 0.), 0.);
+        move_circle_center_to(&mut scene, element_b_id, 20.);
+        let element_a_before = velocity_and_angle(&scene, element_a_id);
+        let element_b_before = velocity_and_angle(&scene, element_b_id);
+
+        scene.tick(STEP_DT);
+
+        assert!(!scene.is_element_collide(element_a_id, element_b_id, true));
+        assert_eq!(velocity_and_angle(&scene, element_a_id), element_a_before);
+        assert_eq!(velocity_and_angle(&scene, element_b_id), element_b_before);
+    }
+
+    #[test]
+    fn recontact_after_inactive_pass_does_not_warm_start_pre_separation_lambda() {
+        let mut scene = Scene::width_capacity(2);
+        scene.set_gravity(|_| (0., 0.).into());
+
+        let element_a_id = push_circle_at(&mut scene, 0.);
+        let element_b_id = push_circle_at(&mut scene, 1.5);
+        set_velocity_and_angle(&mut scene, element_a_id, (8., 0.), 0.);
+        set_velocity_and_angle(&mut scene, element_b_id, (-8., 0.), 0.);
+
+        scene.tick(STEP_DT);
+
+        let id_pair = (element_a_id, element_b_id);
+        assert!(
+            cached_contact_lambda_abs_sum(&scene, id_pair) > EPSILON,
+            "first tick should leave cached impulse before the pair separates"
+        );
+
+        reset_circle_center_to(&mut scene, element_b_id, 20.);
+        scene.collision_detective();
+
+        assert!(
+            !scene.is_element_collide(element_a_id, element_b_id, true),
+            "the separating collision pass should mark the persistent pair inactive"
+        );
+
+        reset_circle_center_to(&mut scene, element_a_id, 0.);
+        reset_circle_center_to(&mut scene, element_b_id, 1.5);
+        set_velocity_and_angle(&mut scene, element_a_id, (0., 0.), 0.);
+        set_velocity_and_angle(&mut scene, element_b_id, (0., 0.), 0.);
+
+        let element_a_before = velocity_and_angle(&scene, element_a_id);
+        let element_b_before = velocity_and_angle(&scene, element_b_id);
+
+        scene.collision_detective();
+
+        assert!(scene.is_element_collide(element_a_id, element_b_id, true));
+
+        scene.warm_start();
+
+        assert_eq!(
+            velocity_and_angle(&scene, element_a_id),
+            element_a_before,
+            "re-contact must not reuse cached impulse from before the inactive pass"
+        );
+        assert_eq!(
+            velocity_and_angle(&scene, element_b_id),
+            element_b_before,
+            "re-contact must not reuse cached impulse from before the inactive pass"
+        );
+    }
+
+    #[test]
+    fn continuing_contact_warm_start_uses_cached_lambda_before_pre_solve_refresh() {
+        let mut scene = Scene::width_capacity(2);
+        scene.set_gravity(|_| (0., 0.).into());
+
+        let element_a_id = push_circle_at(&mut scene, 0.);
+        let element_b_id = push_circle_at(&mut scene, 1.5);
+        set_velocity_and_angle(&mut scene, element_a_id, (8., 0.), 0.);
+        set_velocity_and_angle(&mut scene, element_b_id, (-8., 0.), 0.);
+
+        scene.tick(STEP_DT);
+
+        let id_pair = (element_a_id, element_b_id);
+        assert!(
+            cached_contact_lambda_abs_sum(&scene, id_pair) > EPSILON,
+            "first tick should leave cached impulse for the continuing manifold"
+        );
+
+        reset_circle_center_to(&mut scene, element_a_id, 0.);
+        reset_circle_center_to(&mut scene, element_b_id, 1.5);
+        set_velocity_and_angle(&mut scene, element_a_id, (0., 0.), 0.);
+        set_velocity_and_angle(&mut scene, element_b_id, (0., 0.), 0.);
+
+        let element_a_before = velocity_and_angle(&scene, element_a_id);
+        let element_b_before = velocity_and_angle(&scene, element_b_id);
+
+        scene.collision_detective();
+
+        assert!(scene.is_element_collide(element_a_id, element_b_id, true));
+        assert!(
+            cached_contact_lambda_abs_sum(&scene, id_pair) > EPSILON,
+            "current collision pass must not discard cached impulse before warm_start consumes it"
+        );
+
+        scene.warm_start();
+
+        let element_a_after = velocity_and_angle(&scene, element_a_id);
+        let element_b_after = velocity_and_angle(&scene, element_b_id);
+        let delta_a = (element_a_after.0 - element_a_before.0).abs()
+            + (element_a_after.1 - element_a_before.1).abs();
+        let delta_b = (element_b_after.0 - element_b_before.0).abs()
+            + (element_b_after.1 - element_b_before.1).abs();
+
+        assert!(
+            delta_a > EPSILON || delta_b > EPSILON,
+            "warm_start should apply the previous cached impulse before pre_solve refreshes contact pairs"
         );
     }
 }
