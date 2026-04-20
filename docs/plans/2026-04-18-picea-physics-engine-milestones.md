@@ -522,6 +522,43 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - GREEN 证据：`rtk proxy cargo test -p picea contact_identity --lib` 通过，8 passed；`rtk proxy cargo test -p picea continuing_contact_refresh_preserves_cached_lambda_for_next_warm_start --lib` 通过，1 passed。
 - residual risk：当前 contact key 是保守的 body-anchor/local-ish quantized geometry，不是 SAT feature id；旋转、feature drift 或 ambiguous duplicate key 会丢弃 warm-start cache，从 0 开始，而不是冒险错配。没有 object pointers 的测试/构造路径仍使用 world geometry fallback，因此不具备整体平移不变性；真实 scene continuing refresh 依赖上一轮 `pre_solve` 已写入 `r_a` / `r_b` stable key。法线翻转或 A/B 语义交换也会保守不继承，避免 A/B impulse 符号错配。
 
+### M9 Contact Manager Extraction
+
+**目标**
+
+把 contact pair 的 active / inactive / pending refresh 生命周期从 `ContactConstraint` 抽到 manager / manifold entry 层，让 solver constraint 只保留 contact infos、cached impulses、`pre_solve` 和求解公式。
+
+**范围**
+
+- 引入 `ContactManager`，保留 `ContactConstraintManifold` 作为原有 public wrapper。
+- manager entry 持有 active、was-active-last-pass、pending contact pairs 和 warm-start eligibility。
+- `Scene::collision_detective` 只负责开始 collision pass 并把当前 contact pairs ingest 到 manager，不再手动检查 `ContactConstraint::is_active()` 或调用 constraint lifecycle 方法。
+- 保留 M5 stale warm-start 与 M8 stable contact identity / cached impulse transfer 行为。
+- 增加 manager-level lifecycle tests，不依赖完整 `Scene`。
+- 增加最小 Criterion baseline：`manifold/contact_refresh_transfer`。
+
+**硬边界**
+
+- 不做 generation arena。
+- 不改 `ElementStore` handle 模型。
+- 不替换 broadphase，不重写 GJK / EPA。
+- 不改 solver 公式、friction / restitution / sleep 参数。
+- 不改 wasm API / JS / TS。
+- 不进入 M10 SolverWorld / solver batching。
+
+**执行记录（2026-04-20，M9 implementer）**
+
+状态：M9 Contact Manager Extraction 已完成最小实现；未进入 M10 / SolverWorld；未 commit。
+
+- RED 证据：先补 `contact_manager_*` manager-level 行为锁后，`rtk proxy cargo test -p picea contact_manager --lib` 在旧实现下编译失败，错误为 `ContactManager` 类型/API 不存在；这锁住了“生命周期不能继续只由 `ContactConstraint` 暴露给 Scene 驱动”的结构目标。
+- 实现策略：`constraints/contact_manifold.rs` 新增 crate-private `ContactManager` 和内部 `ContactManifoldEntry`；entry 管理 active / inactive / pending refresh / warm-start eligibility，constraint 只保留 contact infos、cached impulses、object pointer pre_solve state 和求解方法。`ContactConstraintManifold` 保持原有 public wrapper 形态并委托给 manager，避免扩大公开 API。
+- Scene 集成：`Scene::collision_detective` 改为 `begin_collision_pass()` + `ingest_contact_point_pairs()`；warm start、pre_solve、velocity solve、position fix 和 position-fix query 改为使用 manager 的 active / warm-start eligible iterator。`tools::collision_view` 只读取 active constraints，避免把 stale inactive manifold 当作当前 collision info。
+- 行为锁：新增 `contact_manager_keeps_lifecycle_outside_solver_constraint`、`contact_manager_recontact_after_inactive_replaces_without_warm_start`、`contact_manager_continuing_pair_preserves_warm_start_until_refresh`。覆盖 manager 不依赖 `Scene` 即可驱动 pass lifecycle；re-contact after inactive 不 warm-start 且 cached impulses 归零；continuing pair 在 refresh 前仍可 warm-start，refresh 后按稳定 key 转移 cached impulses。
+- GREEN 证据：`rtk proxy cargo test -p picea contact_manager --lib` 通过，3 passed；`rtk proxy cargo test -p picea contact_identity --lib` 通过，8 passed；`rtk proxy cargo test -p picea continuing_contact_refresh_preserves_cached_lambda_for_next_warm_start --lib` 通过，1 passed；`rtk proxy cargo test -p picea warm_start --lib` 通过，7 passed。
+- Benchmark：新增 `crates/picea/benches/physics_scenarios.rs`，`rtk proxy cargo bench -p picea --bench physics_scenarios -- --test` 通过，`Testing manifold/contact_refresh_transfer` 为 `Success`。
+- Code review 返工（P2）：review 指出 M9 声明 no public API changes，但 `ContactConstraint` 失去 `Fields` 宏生成的 `is_active()` / `set_is_active(...)`，且 `ContactConstraintManifold` 不再 `Deref` 到 `BTreeMap` 后会破坏常见 map-like 调用。补充 `public_compat_surface_keeps_constraint_lifecycle_and_map_like_methods` 行为锁；RED 时编译失败于缺失 `is_active` / `set_is_active` / `contains_key` / `keys` / `values_mut`。修复后 `ContactConstraint` 增加 lifecycle compatibility mirror，由 manager 在 pass lifecycle 中同步；`set_is_active` 仅作为兼容 shim 修改 mirror，不重新让 Scene 驱动 constraint lifecycle。`ContactConstraintManifold` 保留 public wrapper，并补 `get`、`get_mut`、`contains_key`、`keys`、`values`、`values_mut`、`iter`、`len`、`is_empty` 等常用 map-like surface。
+- residual risk：`ContactManager` 仍复用旧 `ContactConstraint` 内部 object pointers 和 pre_solve state；raw pointer / handle 生命周期没有解决，留给 M10 SolverWorld。manager 尚未暴露正式 drop reason/debug artifact，当前只通过测试辅助查询 active / pending / warm-start eligibility。contact reduction、SAT feature id、persistent allocation optimization 仍未做；benchmark 是 continuing scene tick baseline，不是纯粹 microbenchmark。`ContactConstraintManifold` 没有恢复完整 `Deref<Target = BTreeMap<...>>` identity，当前只保留常见 read/query/mutable iteration surface；外部直接依赖任意 `BTreeMap` 方法的代码仍可能需要后续兼容补齐。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：

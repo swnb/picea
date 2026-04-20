@@ -10,8 +10,8 @@ use crate::{
         Collider,
     },
     constraints::{
-        contact::ContactConstraint, contact_manifold::ContactConstraintManifold,
-        join::JoinConstraint, point::PointConstraint, JoinConstraintConfig,
+        contact_manifold::ContactConstraintManifold, join::JoinConstraint, point::PointConstraint,
+        JoinConstraintConfig,
     },
     element::{store::ElementStore, Element},
     math::{point::Point, vector::Vector, FloatNum},
@@ -214,10 +214,7 @@ impl<T: Clone + Default> Scene<T> {
                 (element_a_id, element_b_id)
             };
 
-            return self
-                .contact_constraints_manifold
-                .get(&id_pair)
-                .map_or(false, |v| v.is_active());
+            return self.contact_constraints_manifold.is_pair_active(id_pair);
         }
 
         let collider_a = self.element_store.get_element_by_id(element_a_id);
@@ -503,8 +500,7 @@ impl<T: Clone + Default> Scene<T> {
 
         // warm start
         self.contact_constraints_manifold
-            .values_mut()
-            .filter(|v| v.can_warm_start_current_pass())
+            .warm_start_constraints_mut()
             .for_each(|manifold| unsafe {
                 let iter = manifold.contact_pair_constraint_infos_iter();
                 for info in iter {
@@ -553,25 +549,12 @@ impl<T: Clone + Default> Scene<T> {
     }
 
     fn collision_detective(&mut self) {
-        self.contact_constraints_manifold.mark_all_inactive();
+        self.contact_constraints_manifold.begin_collision_pass();
 
         self.element_store
             .detective_collision(|a, b, contact_pairs| {
-                let manifold_key = (a.id(), b.id());
-
-                if let Some(manifold) = self.contact_constraints_manifold.get_mut(&manifold_key) {
-                    if manifold.is_active() {
-                        // append new contact_pairs;
-                        manifold.extend_current_contact_point_pairs(contact_pairs)
-                    } else {
-                        manifold.queue_contact_point_pairs_for_warm_started_refresh(contact_pairs);
-                    }
-                } else {
-                    let contact_constraint = ContactConstraint::new(a.id(), b.id(), contact_pairs);
-
-                    self.contact_constraints_manifold
-                        .insert(manifold_key, contact_constraint);
-                }
+                self.contact_constraints_manifold
+                    .ingest_contact_point_pairs(a.id(), b.id(), contact_pairs);
             });
     }
 
@@ -598,8 +581,7 @@ impl<T: Clone + Default> Scene<T> {
 
         for contact_constraint in (*self_ptr)
             .contact_constraints_manifold
-            .values_mut()
-            .filter(|contact_constraint| contact_constraint.is_active())
+            .active_constraints_mut()
         {
             let Some((element_a, element_b)) =
                 (*self_ptr).query_element_pair_mut(contact_constraint.obj_id_pair())
@@ -731,8 +713,7 @@ impl<T: Clone + Default> Scene<T> {
 
     fn solve_contact_constraints(&mut self, iter_count: u8) {
         self.contact_constraints_manifold
-            .values_mut()
-            .filter(|constraint| constraint.is_active())
+            .active_constraints_mut()
             .for_each(|contact_constraint| unsafe {
                 contact_constraint
                     .solve_velocity_constraint(self.context.constraint_parameters(), iter_count);
@@ -742,8 +723,7 @@ impl<T: Clone + Default> Scene<T> {
     // separate contact object by change their position directly;
     fn solve_position_fix(&mut self) {
         self.contact_constraints_manifold
-            .values_mut()
-            .filter(|constraint| constraint.is_active())
+            .active_constraints_mut()
             .for_each(|contact_constraint| {
                 contact_constraint.solve_position_constraint();
             })
@@ -751,8 +731,7 @@ impl<T: Clone + Default> Scene<T> {
 
     pub fn get_position_fix_map(&self) -> Vec<((ID, ID), Vec<FloatNum>)> {
         self.contact_constraints_manifold
-            .iter()
-            .filter(|v| v.1.is_active())
+            .active_constraints_with_keys()
             .map(|(id, constraint)| (*id, constraint.get_position_constraint_result()))
             .collect()
     }

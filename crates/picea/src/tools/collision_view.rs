@@ -44,7 +44,7 @@ impl CollisionStatusViewer {
 
         self.collision_infos = scene
             .contact_constraints_manifold
-            .values()
+            .active_constraints()
             .flat_map(|v| {
                 v.contact_pair_constraint_infos_iter()
                     .map(|contact| ContactInfos {

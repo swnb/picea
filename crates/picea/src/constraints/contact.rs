@@ -31,11 +31,10 @@ pub struct ContactConstraint<Obj: ConstraintObject> {
     obj_b: *mut Obj,
     // max_allow_restrict_impulse: FloatNum,
     inv_delta_time: FloatNum,
+    // Compatibility mirror; ContactManager owns lifecycle decisions.
     #[r]
     #[w(set)]
     is_active: bool,
-    was_active_last_pass: bool,
-    pending_contact_point_pairs: Option<Vec<ContactPointPair>>,
     factor_friction: FloatNum,
     factor_restitution: FloatNum,
     velocity_a: Vector,
@@ -249,8 +248,6 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             obj_b: std::ptr::null_mut(),
             inv_delta_time: 0.,
             is_active: true,
-            was_active_last_pass: false,
-            pending_contact_point_pairs: None,
             factor_friction: 0.,
             factor_restitution: 0.,
             velocity_a: Default::default(),
@@ -267,7 +264,7 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
             .collect()
     }
 
-    fn replace_contact_point_pairs_with_cached_impulse_transfer(
+    pub(crate) fn replace_contact_point_pairs_with_cached_impulse_transfer(
         &mut self,
         contact_point_pairs: Vec<ContactPointPair>,
     ) {
@@ -329,49 +326,6 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
         }
 
         next_info.contact_point_pair.contact_key()
-    }
-
-    pub(crate) fn begin_collision_pass(&mut self) {
-        self.pending_contact_point_pairs = None;
-        self.was_active_last_pass = self.is_active;
-        self.is_active = false;
-    }
-
-    pub(crate) fn queue_contact_point_pairs_for_warm_started_refresh(
-        &mut self,
-        contact_point_pairs: Vec<ContactPointPair>,
-    ) {
-        self.is_active = true;
-        if self.was_active_last_pass {
-            self.pending_contact_point_pairs = Some(contact_point_pairs);
-        } else {
-            self.replace_contact_point_pairs(contact_point_pairs);
-        }
-    }
-
-    pub(crate) fn can_warm_start_current_pass(&self) -> bool {
-        self.is_active && self.was_active_last_pass
-    }
-
-    pub(crate) fn extend_current_contact_point_pairs(
-        &mut self,
-        mut contact_point_pairs: Vec<ContactPointPair>,
-    ) {
-        if let Some(pending_contact_point_pairs) = &mut self.pending_contact_point_pairs {
-            pending_contact_point_pairs.append(&mut contact_point_pairs);
-        } else {
-            self.extend_contact_point_pairs(contact_point_pairs);
-        }
-    }
-
-    pub(crate) fn refresh_contact_point_pairs_after_warm_start(&mut self) {
-        if let Some(contact_point_pairs) = self.pending_contact_point_pairs.take() {
-            if self.was_active_last_pass && self.is_active {
-                self.replace_contact_point_pairs_with_cached_impulse_transfer(contact_point_pairs);
-            } else {
-                self.replace_contact_point_pairs(contact_point_pairs);
-            }
-        }
     }
 
     pub fn extend_contact_point_pairs(&mut self, contact_point_pairs: Vec<ContactPointPair>) {
@@ -750,6 +704,29 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
 }
 
 #[cfg(test)]
+impl<Obj: ConstraintObject> ContactConstraint<Obj> {
+    pub(crate) fn set_cached_impulse_for_test(
+        &mut self,
+        contact_index: usize,
+        total_lambda: FloatNum,
+        total_friction_lambda: FloatNum,
+    ) {
+        let contact_info = self
+            .contact_point_pair_constraint_infos
+            .get_mut(contact_index)
+            .expect("contact info exists");
+        contact_info.total_lambda = total_lambda;
+        contact_info.total_friction_lambda = total_friction_lambda;
+    }
+
+    pub(crate) fn cached_impulses_for_test(&self) -> Vec<(FloatNum, FloatNum)> {
+        self.contact_pair_constraint_infos_iter()
+            .map(|info| (info.total_lambda(), info.total_friction_lambda()))
+            .collect()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
@@ -821,38 +798,25 @@ mod tests {
         total_lambda: FloatNum,
         total_friction_lambda: FloatNum,
     ) {
-        let contact_info = constraint
-            .contact_point_pair_constraint_infos
-            .get_mut(contact_index)
-            .expect("contact info exists");
-        contact_info.total_lambda = total_lambda;
-        contact_info.total_friction_lambda = total_friction_lambda;
+        constraint.set_cached_impulse_for_test(contact_index, total_lambda, total_friction_lambda);
     }
 
     fn refresh_as_continuing_contact(
         constraint: &mut ContactConstraint<Element<()>>,
         contact_point_pairs: Vec<ContactPointPair>,
     ) {
-        constraint.begin_collision_pass();
-        constraint.queue_contact_point_pairs_for_warm_started_refresh(contact_point_pairs);
-        constraint.refresh_contact_point_pairs_after_warm_start();
+        constraint.replace_contact_point_pairs_with_cached_impulse_transfer(contact_point_pairs);
     }
 
     fn refresh_after_inactive_pass(
         constraint: &mut ContactConstraint<Element<()>>,
         contact_point_pairs: Vec<ContactPointPair>,
     ) {
-        constraint.begin_collision_pass();
-        constraint.begin_collision_pass();
-        constraint.queue_contact_point_pairs_for_warm_started_refresh(contact_point_pairs);
-        constraint.refresh_contact_point_pairs_after_warm_start();
+        constraint.replace_contact_point_pairs(contact_point_pairs);
     }
 
     fn cached_impulses(constraint: &ContactConstraint<Element<()>>) -> Vec<(FloatNum, FloatNum)> {
-        constraint
-            .contact_pair_constraint_infos_iter()
-            .map(|info| (info.total_lambda(), info.total_friction_lambda()))
-            .collect()
+        constraint.cached_impulses_for_test()
     }
 
     fn solve_position_once(

@@ -106,6 +106,15 @@
   applies_to: [debugging, observability, trace, artifacts]
   keywords: [trace, debug-render, repro, snapshot, observability]
   last_reviewed: 2026-04-20
+- path: docs/design/architecture-refactor-requirements.md
+  title: Architecture Refactor Requirements
+  kind: design
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [architecture, refactor, acceptance, benchmarks, examples]
+  keywords: [contact-manager, solver-world, shape-proxy, acceptance, benchmark, examples]
+  last_reviewed: 2026-04-20
 - path: docs/ai/skill-candidates.md
   title: Repository Skills
   kind: doc
@@ -167,7 +176,7 @@
   status: active
   owner: supervisor
   applies_to: [milestone, scope, acceptance]
-  keywords: [m0, m1, m2, m3, m4, m5, m6, m7, m8]
+  keywords: [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9]
   last_reviewed: 2026-04-20
 - path: crates/picea/src/lib.rs
   title: Picea core entrypoint
@@ -204,6 +213,15 @@
   owner: picea-core
   applies_to: [solver, contact, join, point]
   keywords: [effective-mass, friction, restitution, warm-start]
+  last_reviewed: 2026-04-20
+- path: crates/picea/benches/physics_scenarios.rs
+  title: Physics Scenario Benchmarks
+  kind: benchmark
+  authority: medium
+  status: active
+  owner: picea-core
+  applies_to: [benchmark, contact-manager, manifold, warm-start]
+  keywords: [criterion, manifold, contact-refresh-transfer, m9]
   last_reviewed: 2026-04-20
 - path: crates/picea/src/shape/mod.rs
   title: Shape system
