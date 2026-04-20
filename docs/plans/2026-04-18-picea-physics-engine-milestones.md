@@ -479,6 +479,16 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 最终验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 通过，7 passed；`rtk proxy cargo test -p picea --lib` 通过，65 passed；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过；`rtk git diff --check` 通过。
 - residual risk：为了匹配已存在的 local runner，Cargo 当前解析到 crates.io `wasm-bindgen 0.2.104`，因此会提示根 `wasm-bindgen v0.2.92` patch 未被使用；这是依赖解析/runner 版本兼容风险，不是 rustc warning。当前 smoke 走 Node runner，尚未增加 browser runner 覆盖；Arc edge 仍无 public constructor 覆盖真实 JS callback 流，沿用前序 helper 锁定。
 
+**Post-M7 wasm-bindgen 0.2.118 对齐（2026-04-20，dependency follow-up）**
+
+状态：完成 wasm-bindgen runtime / test harness / local runner 版本对齐；未改 core `picea`、wasm public API 或测试语义。
+
+- RED 证据：`crates/picea-web/Cargo.toml` 已将直接依赖升级到 `wasm-bindgen = "0.2.118"`，但 dev-dependency 仍 pin 在 `wasm-bindgen-test = "=0.3.54"`；`rtk proxy cargo test -p picea --lib` 和 `rtk proxy cargo test -p picea-web --lib` 均在 Cargo 依赖解析阶段失败，因为 `wasm-bindgen-test 0.3.54` 绑定 `wasm-bindgen = 0.2.104`。
+- 修复：将 `wasm-bindgen-test` 精确 pin 到 `=0.3.68`，并执行 `rtk proxy cargo update -p wasm-bindgen-test --precise 0.3.68`；Cargo 解析到 `wasm-bindgen 0.2.118`、`wasm-bindgen-test 0.3.68`、`wasm-bindgen-test-shared 0.2.118`。
+- runner 修复：本机 `wasm-bindgen-test-runner` 仍是 `0.2.104`，wasm smoke 首次失败于 schema `0.2.118` vs binary schema `0.2.104`；按工具提示执行 `rtk proxy cargo install -f wasm-bindgen-cli --version 0.2.118` 后，`wasm-bindgen-test-runner --version` 为 `0.2.118`。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，74 passed；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过；`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 通过，7 passed。
+- residual risk：当前验证依赖本机已安装 `wasm-bindgen-test-runner 0.2.118`；其他机器如果仍是旧 runner，需要同步更新 wasm-bindgen CLI。Cargo.lock 当前仍按仓库既有策略忽略，不作为提交产物。
+
 ### M8 Stable Contact Identity And Warm-Start Transfer
 
 **目标**

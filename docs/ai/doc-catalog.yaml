@@ -1,0 +1,180 @@
+- path: AGENTS.md
+  title: Picea AI Context Navigation
+  kind: doc
+  authority: high
+  status: active
+  owner: ai-context
+  applies_to: [all]
+  keywords: [rtk, navigation, milestone, dirty, authority]
+  last_reviewed: 2026-04-20
+- path: README.md
+  title: Picea User Entry
+  kind: readme
+  authority: medium
+  status: active
+  owner: project
+  applies_to: [onboarding, usage, workspace, validation]
+  keywords: [readme, quick-start, workspace, examples, tests]
+  last_reviewed: 2026-04-20
+- path: crates/picea/README.md
+  title: Picea Core Crate Entry
+  kind: readme
+  authority: medium
+  status: active
+  owner: picea-core
+  applies_to: [core, crate, scene, collision, constraints, shape]
+  keywords: [readme, core-crate, modules, tests, examples]
+  last_reviewed: 2026-04-20
+- path: docs/ai/index.md
+  title: AI Route Index
+  kind: doc
+  authority: high
+  status: active
+  owner: ai-context
+  applies_to: [all, triage, routing]
+  keywords: [route, questions, module, verification, docs]
+  last_reviewed: 2026-04-20
+- path: docs/ai/repo-map.md
+  title: Repo Map
+  kind: doc
+  authority: high
+  status: active
+  owner: ai-context
+  applies_to: [architecture, debugging, implementation]
+  keywords: [scene, collision, constraints, shape, element, wasm, macro]
+  last_reviewed: 2026-04-20
+- path: docs/ai/skill-candidates.md
+  title: Repository Skills
+  kind: doc
+  authority: medium
+  status: active
+  owner: ai-context
+  applies_to: [skills, workflow, governance]
+  keywords: [skill, repository-skill, doc-routing, milestone-runner]
+  last_reviewed: 2026-04-20
+- path: .agents/skills/picea-doc-routing/SKILL.md
+  title: Picea Doc Routing Skill
+  kind: skill
+  authority: high
+  status: active
+  owner: ai-context
+  applies_to: [docs, routing, ai-context, skills]
+  keywords: [skill, doc-routing, AGENTS, repo-map, doc-catalog]
+  last_reviewed: 2026-04-20
+- path: .agents/skills/picea-milestone-runner/SKILL.md
+  title: Picea Milestone Runner Skill
+  kind: skill
+  authority: high
+  status: active
+  owner: ai-context
+  applies_to: [milestone, implementation, validation, review]
+  keywords: [skill, milestone, behavior-lock, gates, supervisor]
+  last_reviewed: 2026-04-20
+- path: docs/ai/debug-playbook.md
+  title: Picea Debug Playbook
+  kind: runbook
+  authority: high
+  status: active
+  owner: ai-context
+  applies_to: [debugging, regression, reproduction, verification]
+  keywords: [debug, repro, fixed-dt, behavior-lock, supervisor, review]
+  last_reviewed: 2026-04-20
+- path: docs/ai/debug-artifacts.md
+  title: Picea Debug Artifacts
+  kind: runbook
+  authority: high
+  status: active
+  owner: ai-context
+  applies_to: [debugging, trace, snapshot, visualization]
+  keywords: [trace-jsonl, repro, snapshot, contact-key, lambda, sleep]
+  last_reviewed: 2026-04-20
+- path: docs/ai/evals.md
+  title: Picea AI Evals
+  kind: eval
+  authority: high
+  status: active
+  owner: ai-context
+  applies_to: [repo-understanding, routing, debug, readiness, freshness]
+  keywords: [eval, benchmark, routing, pass-criteria, expected-sources]
+  last_reviewed: 2026-04-20
+- path: docs/plans/2026-04-18-picea-physics-engine-milestones.md
+  title: Picea Physics Engine Milestones
+  kind: plan
+  authority: high
+  status: active
+  owner: supervisor
+  applies_to: [milestone, scope, acceptance]
+  keywords: [m0, m1, m2, m3, m4, m5, m6, m7, m8]
+  last_reviewed: 2026-04-20
+- path: crates/picea/src/lib.rs
+  title: Picea core entrypoint
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [core, architecture]
+  keywords: [lib, prelude, module-entry]
+  last_reviewed: 2026-04-20
+- path: crates/picea/src/scene/mod.rs
+  title: Scene orchestration
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [scene, tick, sleep]
+  keywords: [pipeline, callback, sleep, step]
+  last_reviewed: 2026-04-20
+- path: crates/picea/src/collision/mod.rs
+  title: Collision pipeline
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [collision, warm-start, manifold]
+  keywords: [broadphase, narrowphase, aabb, contact]
+  last_reviewed: 2026-04-20
+- path: crates/picea/src/constraints/mod.rs
+  title: Constraint solvers
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [solver, contact, join, point]
+  keywords: [effective-mass, friction, restitution, warm-start]
+  last_reviewed: 2026-04-20
+- path: crates/picea/src/shape/mod.rs
+  title: Shape system
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [shape, geometry, cache]
+  keywords: [local-space, convex, concave, aabb]
+  last_reviewed: 2026-04-20
+- path: crates/picea/src/element/mod.rs
+  title: Element model
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [storage, handle, element]
+  keywords: [id, store, clone, query]
+  last_reviewed: 2026-04-20
+- path: crates/picea-web/src/lib.rs
+  title: Picea wasm API
+  kind: code
+  authority: high
+  status: active
+  owner: picea-web
+  applies_to: [wasm, api, ts]
+  keywords: [wasm-bindgen, typescript, smoke, js]
+  last_reviewed: 2026-04-20
+- path: crates/macro-tools/src/lib.rs
+  title: Proc macro helpers
+  kind: code
+  authority: medium
+  status: active
+  owner: macro-tools
+  applies_to: [proc-macro, derive, builder]
+  keywords: [syn, quote, derive, attribute]
+  last_reviewed: 2026-04-20

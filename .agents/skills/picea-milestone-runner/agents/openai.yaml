@@ -1,0 +1,4 @@
+interface:
+  display_name: "Picea Milestone Runner"
+  short_description: "Run Picea milestone work within gates"
+  default_prompt: "Use $picea-milestone-runner to execute one Picea milestone without crossing its scope boundary."

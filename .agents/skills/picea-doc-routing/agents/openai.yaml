@@ -1,0 +1,4 @@
+interface:
+  display_name: "Picea Doc Routing"
+  short_description: "Keep Picea AI docs routed and fresh"
+  default_prompt: "Use $picea-doc-routing to update Picea AI routing docs after a repo or milestone change."
