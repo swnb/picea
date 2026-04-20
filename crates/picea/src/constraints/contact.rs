@@ -1,7 +1,7 @@
 use picea_macro_tools::{Deref, Fields};
 
 use crate::{
-    collision::ContactPointPair,
+    collision::{ContactPointKey, ContactPointPair},
     element::ID,
     math::{num::limit_at_range, vector::Vector, FloatNum},
     meta::Meta,
@@ -49,6 +49,7 @@ pub struct ContactPointPairConstraintInfo {
     #[deref]
     #[r]
     contact_point_pair: ContactPointPair,
+    stable_contact_key: Option<ContactPointKey>,
     #[r]
     r_a: Vector,
     #[r]
@@ -68,6 +69,23 @@ pub struct ContactPointPairConstraintInfo {
 }
 
 impl ContactPointPairConstraintInfo {
+    fn new(contact_point_pair: ContactPointPair) -> Self {
+        Self {
+            contact_point_pair,
+            ..Default::default()
+        }
+    }
+
+    fn transfer_cached_impulses_from(&mut self, previous: &Self) {
+        self.total_lambda = previous.total_lambda;
+        self.total_friction_lambda = previous.total_friction_lambda;
+    }
+
+    fn contact_key_for_transfer(&self) -> Option<ContactPointKey> {
+        self.stable_contact_key
+            .or_else(|| self.contact_point_pair.contact_key())
+    }
+
     pub(crate) fn warm_start_impulse_toward_a<Obj: ConstraintObject>(
         &self,
         object_a: &Obj,
@@ -206,14 +224,21 @@ impl ContactPointPairConstraintInfo {
     }
 }
 
+fn contact_key_occurrence_count(
+    keys: &[Option<ContactPointKey>],
+    target: ContactPointKey,
+) -> usize {
+    keys.iter()
+        .filter(|key| **key == Some(target))
+        .take(2)
+        .count()
+}
+
 impl<Obj: ConstraintObject> ContactConstraint<Obj> {
     pub fn new(obj_id_a: ID, obj_id_b: ID, contact_point_pairs: Vec<ContactPointPair>) -> Self {
         let contact_point_pair_constraint_infos = contact_point_pairs
             .into_iter()
-            .map(|v| ContactPointPairConstraintInfo {
-                contact_point_pair: v,
-                ..Default::default()
-            })
+            .map(ContactPointPairConstraintInfo::new)
             .collect();
 
         Self {
@@ -238,11 +263,72 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
     pub fn replace_contact_point_pairs(&mut self, contact_point_pairs: Vec<ContactPointPair>) {
         self.contact_point_pair_constraint_infos = contact_point_pairs
             .into_iter()
-            .map(|v| ContactPointPairConstraintInfo {
-                contact_point_pair: v,
-                ..Default::default()
-            })
+            .map(ContactPointPairConstraintInfo::new)
             .collect()
+    }
+
+    fn replace_contact_point_pairs_with_cached_impulse_transfer(
+        &mut self,
+        contact_point_pairs: Vec<ContactPointPair>,
+    ) {
+        let previous_infos = std::mem::take(&mut self.contact_point_pair_constraint_infos);
+        let previous_keys = previous_infos
+            .iter()
+            .map(ContactPointPairConstraintInfo::contact_key_for_transfer)
+            .collect::<Vec<_>>();
+        let object_centers = self.current_object_centers();
+
+        let mut next_infos = contact_point_pairs
+            .into_iter()
+            .map(ContactPointPairConstraintInfo::new)
+            .collect::<Vec<_>>();
+        let next_keys = next_infos
+            .iter()
+            .map(|next_info| self.next_contact_key_for_transfer(next_info, object_centers))
+            .collect::<Vec<_>>();
+
+        for (next_index, next_key) in next_keys.iter().enumerate() {
+            let Some(next_key) = *next_key else {
+                continue;
+            };
+
+            if contact_key_occurrence_count(&next_keys, next_key) != 1
+                || contact_key_occurrence_count(&previous_keys, next_key) != 1
+            {
+                continue;
+            }
+
+            let previous_index = previous_keys
+                .iter()
+                .position(|previous_key| *previous_key == Some(next_key))
+                .expect("unique previous key exists");
+            next_infos[next_index].stable_contact_key = Some(next_key);
+            next_infos[next_index].transfer_cached_impulses_from(&previous_infos[previous_index]);
+        }
+
+        self.contact_point_pair_constraint_infos = next_infos;
+    }
+
+    fn current_object_centers(&self) -> Option<(Point, Point)> {
+        if self.obj_a.is_null() || self.obj_b.is_null() {
+            return None;
+        }
+
+        unsafe { Some(((*self.obj_a).center_point(), (*self.obj_b).center_point())) }
+    }
+
+    fn next_contact_key_for_transfer(
+        &self,
+        next_info: &ContactPointPairConstraintInfo,
+        object_centers: Option<(Point, Point)>,
+    ) -> Option<ContactPointKey> {
+        if let Some((center_a, center_b)) = object_centers {
+            return next_info
+                .contact_point_pair
+                .contact_key_with_centers(center_a, center_b);
+        }
+
+        next_info.contact_point_pair.contact_key()
     }
 
     pub(crate) fn begin_collision_pass(&mut self) {
@@ -280,20 +366,20 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
 
     pub(crate) fn refresh_contact_point_pairs_after_warm_start(&mut self) {
         if let Some(contact_point_pairs) = self.pending_contact_point_pairs.take() {
-            self.replace_contact_point_pairs(contact_point_pairs);
+            if self.was_active_last_pass && self.is_active {
+                self.replace_contact_point_pairs_with_cached_impulse_transfer(contact_point_pairs);
+            } else {
+                self.replace_contact_point_pairs(contact_point_pairs);
+            }
         }
     }
 
     pub fn extend_contact_point_pairs(&mut self, contact_point_pairs: Vec<ContactPointPair>) {
-        self.contact_point_pair_constraint_infos
-            .extend(
-                contact_point_pairs
-                    .into_iter()
-                    .map(|v| ContactPointPairConstraintInfo {
-                        contact_point_pair: v,
-                        ..Default::default()
-                    }),
-            )
+        self.contact_point_pair_constraint_infos.extend(
+            contact_point_pairs
+                .into_iter()
+                .map(ContactPointPairConstraintInfo::new),
+        )
     }
 
     pub fn contact_point_pair_len(&self) -> usize {
@@ -436,6 +522,8 @@ impl<Obj: ConstraintObject> ContactConstraint<Obj> {
                 contact_point_pair_constraint_info.r_b = r_b;
 
                 let normal = contact_point_pair_constraint_info.normal_toward_a();
+                contact_point_pair_constraint_info.stable_contact_key =
+                    ContactPointKey::from_anchors(r_a, r_b, normal);
 
                 let inv_mass_effective =
                     compute_inv_mass_effective(&normal, (object_a, object_b), r_a, r_b);
@@ -678,8 +766,12 @@ mod tests {
     const POSITION_DAMPEN: FloatNum = 0.2;
 
     fn circle_element(center_x: FloatNum, mass: FloatNum, is_fixed: bool) -> Element<()> {
+        circle_element_at((center_x, 0.), mass, is_fixed)
+    }
+
+    fn circle_element_at(center: impl Into<Point>, mass: FloatNum, is_fixed: bool) -> Element<()> {
         ElementBuilder::new(
-            Circle::new((center_x, 0.), 1.),
+            Circle::new(center, 1.),
             MetaBuilder::new().mass(mass).is_fixed(is_fixed),
             (),
         )
@@ -693,6 +785,74 @@ mod tests {
             (-1., 0.).into(),
             CONTACT_DEPTH,
         )
+    }
+
+    fn contact_at_x(x: FloatNum) -> ContactPointPair {
+        ContactPointPair::new(
+            (x, 0.).into(),
+            (x, CONTACT_DEPTH).into(),
+            (0., -1.).into(),
+            CONTACT_DEPTH,
+        )
+    }
+
+    fn oriented_contact(
+        point_a: impl Into<Point>,
+        point_b: impl Into<Point>,
+        normal_toward_a: impl Into<Vector>,
+    ) -> ContactPointPair {
+        ContactPointPair::new(
+            point_a.into(),
+            point_b.into(),
+            normal_toward_a.into(),
+            CONTACT_DEPTH,
+        )
+    }
+
+    fn translate_element(element: &mut Element<()>, translation: impl Into<Vector>) {
+        let transform = (translation.into(), 0.).into();
+        element.transform(&transform);
+        element.apply_transform();
+    }
+
+    fn set_cached_impulse(
+        constraint: &mut ContactConstraint<Element<()>>,
+        contact_index: usize,
+        total_lambda: FloatNum,
+        total_friction_lambda: FloatNum,
+    ) {
+        let contact_info = constraint
+            .contact_point_pair_constraint_infos
+            .get_mut(contact_index)
+            .expect("contact info exists");
+        contact_info.total_lambda = total_lambda;
+        contact_info.total_friction_lambda = total_friction_lambda;
+    }
+
+    fn refresh_as_continuing_contact(
+        constraint: &mut ContactConstraint<Element<()>>,
+        contact_point_pairs: Vec<ContactPointPair>,
+    ) {
+        constraint.begin_collision_pass();
+        constraint.queue_contact_point_pairs_for_warm_started_refresh(contact_point_pairs);
+        constraint.refresh_contact_point_pairs_after_warm_start();
+    }
+
+    fn refresh_after_inactive_pass(
+        constraint: &mut ContactConstraint<Element<()>>,
+        contact_point_pairs: Vec<ContactPointPair>,
+    ) {
+        constraint.begin_collision_pass();
+        constraint.begin_collision_pass();
+        constraint.queue_contact_point_pairs_for_warm_started_refresh(contact_point_pairs);
+        constraint.refresh_contact_point_pairs_after_warm_start();
+    }
+
+    fn cached_impulses(constraint: &ContactConstraint<Element<()>>) -> Vec<(FloatNum, FloatNum)> {
+        constraint
+            .contact_pair_constraint_infos_iter()
+            .map(|info| (info.total_lambda(), info.total_friction_lambda()))
+            .collect()
     }
 
     fn solve_position_once(
@@ -903,6 +1063,187 @@ mod tests {
             solve_friction_once(FloatNum::NAN, velocity_a, 1., velocity_b),
             velocity_a,
             velocity_b,
+        );
+    }
+
+    #[test]
+    fn contact_identity_transfers_cached_impulses_for_rebuilt_single_contact() {
+        let mut constraint = ContactConstraint::new(1, 2, vec![contact_at_x(0.)]);
+        set_cached_impulse(&mut constraint, 0, 2.5, -0.75);
+
+        refresh_as_continuing_contact(&mut constraint, vec![contact_at_x(0.0004)]);
+
+        assert_eq!(cached_impulses(&constraint), vec![(2.5, -0.75)]);
+
+        let object_a = circle_element(0., 1., false);
+        let object_b = circle_element(1., 1., false);
+        let warm_start_impulse = constraint
+            .contact_pair_constraint_infos_iter()
+            .next()
+            .expect("refreshed contact exists")
+            .warm_start_impulse_toward_a(&object_a, &object_b);
+
+        assert!(
+            warm_start_impulse.is_some(),
+            "transferred cached impulse should remain usable by warm-start"
+        );
+    }
+
+    #[test]
+    fn contact_identity_transfers_after_contact_world_points_translate_with_bodies() {
+        let mut object_a = circle_element_at((0., 0.), 1., false);
+        let mut object_b = circle_element_at((0., 1.), 1., false);
+        let mut constraint = ContactConstraint::new(
+            1,
+            2,
+            vec![oriented_contact((0.25, 0.), (0.25, 0.5), (0., -1.))],
+        );
+
+        unsafe {
+            constraint.pre_solve(
+                (&mut object_a as *mut _, &mut object_b as *mut _),
+                STEP_DT,
+                &ConstraintParameters::default(),
+            );
+        }
+        set_cached_impulse(&mut constraint, 0, 2.5, -0.75);
+        translate_element(&mut object_a, (10., 3.));
+        translate_element(&mut object_b, (10., 3.));
+
+        refresh_as_continuing_contact(
+            &mut constraint,
+            vec![oriented_contact((10.2504, 3.), (10.2504, 3.5), (0., -1.))],
+        );
+
+        assert_eq!(
+            cached_impulses(&constraint),
+            vec![(2.5, -0.75)],
+            "same body anchors should inherit cached impulses after world-space translation"
+        );
+    }
+
+    #[test]
+    fn contact_identity_transfers_only_matching_impulse_when_contacts_reorder_and_drop() {
+        let mut constraint = ContactConstraint::new(1, 2, vec![contact_at_x(0.), contact_at_x(1.)]);
+        set_cached_impulse(&mut constraint, 0, 1.25, 0.25);
+        set_cached_impulse(&mut constraint, 1, 3.5, -0.5);
+
+        refresh_as_continuing_contact(
+            &mut constraint,
+            vec![contact_at_x(2.), contact_at_x(1.0004)],
+        );
+
+        assert_eq!(
+            cached_impulses(&constraint),
+            vec![(0., 0.), (3.5, -0.5)],
+            "only the rebuilt matching contact should inherit cached impulses"
+        );
+    }
+
+    #[test]
+    fn contact_identity_does_not_transfer_ambiguous_duplicate_keys() {
+        let mut constraint =
+            ContactConstraint::new(1, 2, vec![contact_at_x(0.0001), contact_at_x(0.0004)]);
+        set_cached_impulse(&mut constraint, 0, 1., 0.25);
+        set_cached_impulse(&mut constraint, 1, 2., -0.5);
+
+        refresh_as_continuing_contact(
+            &mut constraint,
+            vec![contact_at_x(0.0004), contact_at_x(0.0001)],
+        );
+
+        assert_eq!(
+            cached_impulses(&constraint),
+            vec![(0., 0.), (0., 0.)],
+            "duplicate contact identity keys are ambiguous and must not inherit cached impulses"
+        );
+    }
+
+    #[test]
+    fn contact_identity_does_not_match_non_finite_contact_to_zero_contact() {
+        let mut constraint = ContactConstraint::new(
+            1,
+            2,
+            vec![oriented_contact(
+                (FloatNum::NAN, 0.),
+                (0., CONTACT_DEPTH),
+                (0., -1.),
+            )],
+        );
+        set_cached_impulse(&mut constraint, 0, 3., 0.5);
+
+        refresh_as_continuing_contact(&mut constraint, vec![contact_at_x(0.)]);
+
+        assert_eq!(
+            cached_impulses(&constraint),
+            vec![(0., 0.)],
+            "non-finite contact identity components must not be quantized into a valid zero key"
+        );
+    }
+
+    #[test]
+    fn contact_identity_does_not_transfer_degenerate_finite_normal_keys() {
+        for degenerate_normal in [
+            (FloatNum::EPSILON * 0.5, 0.),
+            (FloatNum::MAX, FloatNum::MAX),
+        ] {
+            let mut constraint = ContactConstraint::new(
+                1,
+                2,
+                vec![oriented_contact(
+                    (0., 0.),
+                    (0., CONTACT_DEPTH),
+                    degenerate_normal,
+                )],
+            );
+            set_cached_impulse(&mut constraint, 0, 3., 0.5);
+
+            refresh_as_continuing_contact(
+                &mut constraint,
+                vec![oriented_contact(
+                    (0., 0.),
+                    (0., CONTACT_DEPTH),
+                    degenerate_normal,
+                )],
+            );
+
+            assert_eq!(
+                cached_impulses(&constraint),
+                vec![(0., 0.)],
+                "degenerate finite normal must not produce a valid transferable contact key"
+            );
+        }
+    }
+
+    #[test]
+    fn contact_identity_drops_cached_impulse_after_inactive_pass_recontact() {
+        let mut constraint = ContactConstraint::new(1, 2, vec![contact_at_x(0.)]);
+        set_cached_impulse(&mut constraint, 0, 4., 1.);
+
+        refresh_after_inactive_pass(&mut constraint, vec![contact_at_x(0.)]);
+
+        assert_eq!(
+            cached_impulses(&constraint),
+            vec![(0., 0.)],
+            "re-contact after an inactive pass must not inherit stale cached impulses"
+        );
+    }
+
+    #[test]
+    fn contact_identity_is_oriented_to_avoid_ab_impulse_sign_mismatch() {
+        let mut constraint =
+            ContactConstraint::new(1, 2, vec![oriented_contact((0., 0.), (0.5, 0.), (1., 0.))]);
+        set_cached_impulse(&mut constraint, 0, 6., 0.);
+
+        refresh_as_continuing_contact(
+            &mut constraint,
+            vec![oriented_contact((0.5, 0.), (0., 0.), (-1., 0.))],
+        );
+
+        assert_eq!(
+            cached_impulses(&constraint),
+            vec![(0., 0.)],
+            "A/B swapped geometry with flipped normal must not reuse an impulse with the wrong sign"
         );
     }
 }

@@ -925,6 +925,65 @@ pub struct ContactPointPair {
     depth: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContactPointKey {
+    anchor_a_x: i32,
+    anchor_a_y: i32,
+    anchor_b_x: i32,
+    anchor_b_y: i32,
+    normal_toward_a_x: i32,
+    normal_toward_a_y: i32,
+}
+
+const CONTACT_KEY_QUANTIZATION_SCALE: FloatNum = 1000.;
+
+fn quantize_contact_key_component(value: FloatNum) -> Option<i32> {
+    if !value.is_finite() {
+        return None;
+    }
+
+    let quantized = (value * CONTACT_KEY_QUANTIZATION_SCALE).round();
+    if quantized > i32::MAX as FloatNum {
+        Some(i32::MAX)
+    } else if quantized < i32::MIN as FloatNum {
+        Some(i32::MIN)
+    } else {
+        Some(quantized as i32)
+    }
+}
+
+impl ContactPointKey {
+    pub(crate) fn from_anchors(
+        anchor_a: Vector,
+        anchor_b: Vector,
+        normal_toward_a: Vector,
+    ) -> Option<Self> {
+        if !normal_toward_a.x().is_finite()
+            || !normal_toward_a.y().is_finite()
+            || normal_toward_a.is_zero()
+        {
+            return None;
+        }
+
+        let normal_toward_a = normal_toward_a.normalize();
+        if !normal_toward_a.x().is_finite()
+            || !normal_toward_a.y().is_finite()
+            || normal_toward_a.is_zero()
+        {
+            return None;
+        }
+
+        Some(ContactPointKey {
+            anchor_a_x: quantize_contact_key_component(anchor_a.x())?,
+            anchor_a_y: quantize_contact_key_component(anchor_a.y())?,
+            anchor_b_x: quantize_contact_key_component(anchor_b.x())?,
+            anchor_b_y: quantize_contact_key_component(anchor_b.y())?,
+            normal_toward_a_x: quantize_contact_key_component(normal_toward_a.x())?,
+            normal_toward_a_y: quantize_contact_key_component(normal_toward_a.y())?,
+        })
+    }
+}
+
 impl ContactPointPair {
     pub(crate) fn new(point_a: Point, point_b: Point, normal: Vector, depth: FloatNum) -> Self {
         let point = ((point_a.to_vector() + point_b.to_vector()) * 0.5).to_point();
@@ -936,6 +995,26 @@ impl ContactPointPair {
             normal_toward_a: normal,
             depth,
         }
+    }
+
+    pub(crate) fn contact_key(&self) -> Option<ContactPointKey> {
+        ContactPointKey::from_anchors(
+            self.point_a.to_vector(),
+            self.point_b.to_vector(),
+            self.normal_toward_a,
+        )
+    }
+
+    pub(crate) fn contact_key_with_centers(
+        &self,
+        center_a: Point,
+        center_b: Point,
+    ) -> Option<ContactPointKey> {
+        ContactPointKey::from_anchors(
+            (center_a, self.point_a).into(),
+            (center_b, self.point_b).into(),
+            self.normal_toward_a,
+        )
     }
 }
 

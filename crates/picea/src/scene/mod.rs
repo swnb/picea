@@ -1410,6 +1410,39 @@ mod tests {
     }
 
     #[test]
+    fn continuing_contact_refresh_preserves_cached_lambda_for_next_warm_start() {
+        let mut scene = Scene::width_capacity(2);
+        scene.set_gravity(|_| (0., 0.).into());
+
+        let element_a_id = push_circle_at(&mut scene, 0.);
+        let element_b_id = push_circle_at(&mut scene, 1.5);
+        set_velocity_and_angle(&mut scene, element_a_id, (8., 0.), 0.);
+        set_velocity_and_angle(&mut scene, element_b_id, (-8., 0.), 0.);
+
+        scene.tick(STEP_DT);
+
+        let id_pair = (element_a_id, element_b_id);
+        assert!(
+            cached_contact_lambda_abs_sum(&scene, id_pair) > EPSILON,
+            "first tick should leave cached impulse for the continuing manifold"
+        );
+
+        reset_circle_center_to(&mut scene, element_a_id, 0.);
+        reset_circle_center_to(&mut scene, element_b_id, 1.5);
+        set_velocity_and_angle(&mut scene, element_a_id, (0., 0.), 0.);
+        set_velocity_and_angle(&mut scene, element_b_id, (0., 0.), 0.);
+
+        scene.collision_detective();
+        scene.warm_start();
+        scene.refresh_contact_point_pairs_after_warm_start();
+
+        assert!(
+            cached_contact_lambda_abs_sum(&scene, id_pair) > EPSILON,
+            "refresh after warm-start must transfer cached impulses to rebuilt contact infos"
+        );
+    }
+
+    #[test]
     fn warm_start_skips_invalid_mass_cached_contact_impulse_without_nan() {
         for invalid_mass in [0., FloatNum::NAN] {
             let mut scene = Scene::width_capacity(2);

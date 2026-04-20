@@ -479,6 +479,39 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 最终验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 通过，7 passed；`rtk proxy cargo test -p picea --lib` 通过，65 passed；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过；`rtk git diff --check` 通过。
 - residual risk：为了匹配已存在的 local runner，Cargo 当前解析到 crates.io `wasm-bindgen 0.2.104`，因此会提示根 `wasm-bindgen v0.2.92` patch 未被使用；这是依赖解析/runner 版本兼容风险，不是 rustc warning。当前 smoke 走 Node runner，尚未增加 browser runner 覆盖；Arc edge 仍无 public constructor 覆盖真实 JS callback 流，沿用前序 helper 锁定。
 
+### M8 Stable Contact Identity And Warm-Start Transfer
+
+**目标**
+
+为 contact manifold 增加稳定 contact identity / matching，使持续接触在 contact points 重建后仍能按 contact id 转移 cached normal/friction impulses。
+
+**范围**
+
+- 为 `ContactPointPair` 增加 crate-private contact key helper。
+- 在 continuing active pair 的 pending refresh 上按 contact key 转移 `total_lambda` / `total_friction_lambda`。
+- unmatched new contact 从 0 开始；unmatched old contact 丢弃。
+- 上一 pass inactive 后 re-contact 保持 M5 行为，不继承分离前 cached lambda。
+
+**硬边界**
+
+- 不做 generation arena。
+- 不改 `ElementStore` handle 模型。
+- 不重写 broadphase / GJK / EPA。
+- 不改 solver 物理公式、friction/restitution 参数或 sleep 参数。
+- 不改 wasm API / JS 类型 / UI。
+
+**执行记录（2026-04-20，M8 implementer）**
+
+状态：M8 Stable Contact Identity And Warm-Start Transfer 已完成最小实现；未进入 solver/collision 算法重构；未 commit。
+
+- RED 证据：新增 contact identity 行为锁后，`rtk proxy cargo test -p picea contact_identity --lib` 在旧实现下 2 passed / 2 failed：单点 rebuilt contact 与多点 reorder/partial continuity 都在 refresh 后得到 `(0, 0)` cached impulses；新增 scene 行为锁后，`rtk proxy cargo test -p picea continuing_contact_refresh_preserves_cached_lambda_for_next_warm_start --lib` 在旧实现下失败，`refresh_contact_point_pairs_after_warm_start()` 把 continuing manifold 的 cached lambda 清零。
+- Code review 返工 RED：补充整体平移、duplicate key、non-finite key 行为锁后，旧 world-space/first-unmatched 实现在 `rtk proxy cargo test -p picea contact_identity --lib` 下新增 3 个失败：整体平移后 miss transfer，重复量化 key 错误继承，non-finite contact 被量化成 zero key 后错误匹配。
+- Code review 二次返工 RED：补充 degenerate finite normal 行为锁后，旧实现会把近零 normal 或巨大 finite normal normalize 成 `(0, 0)` 后仍生成 key，并错误继承 cached impulse。
+- 实现策略：`ContactPointPair` 支持 crate-private `ContactPointKey`，key 构造返回 `Option`，任一非有限组件、零法线，或 normalize 后非有限/零法线都不产生有效 key。旧 contact info 在 `pre_solve` 计算 `r_a` / `r_b` 后保存基于 body anchor 的 stable key；refresh pending contact pairs 时，如果 object pointers 可用，新 contact 用当前 object center 推导同类 anchor key。只有 old/new 两侧该 key 都唯一时才转移 `total_lambda` / `total_friction_lambda`；不转移 `real_total_lambda` / `real_total_friction_lambda`，让当前 frame 的 solver 重新累计真实求解结果。没有 object pointers 时保守 fallback 到 world geometry key。
+- 行为锁：覆盖 continuing single contact rebuilt 后 cached impulse 转移且仍可被 `warm_start_impulse_toward_a()` 使用；body/contact 世界坐标整体平移后仍按 body anchor 继承；multi-contact reorder + partial continuity 只让匹配 contact id 继承，消失 contact 不泄漏；duplicate key / non-finite key / degenerate finite normal key 保守不继承；inactive pass 后 re-contact 不继承分离前 lambda；A/B swapped geometry with flipped normal 保守不匹配，避免 impulse sign 错配。
+- GREEN 证据：`rtk proxy cargo test -p picea contact_identity --lib` 通过，8 passed；`rtk proxy cargo test -p picea continuing_contact_refresh_preserves_cached_lambda_for_next_warm_start --lib` 通过，1 passed。
+- residual risk：当前 contact key 是保守的 body-anchor/local-ish quantized geometry，不是 SAT feature id；旋转、feature drift 或 ambiguous duplicate key 会丢弃 warm-start cache，从 0 开始，而不是冒险错配。没有 object pointers 的测试/构造路径仍使用 world geometry fallback，因此不具备整体平移不变性；真实 scene continuing refresh 依赖上一轮 `pre_solve` 已写入 `r_a` / `r_b` stable key。法线翻转或 A/B 语义交换也会保守不继承，避免 A/B impulse 符号错配。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：
