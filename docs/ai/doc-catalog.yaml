@@ -43,6 +43,69 @@
   applies_to: [architecture, debugging, implementation]
   keywords: [scene, collision, constraints, shape, element, wasm, macro]
   last_reviewed: 2026-04-20
+- path: docs/architecture/README.md
+  title: Architecture Docs Index
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [architecture, diagrams, module-boundaries]
+  keywords: [architecture, diagrams, overview, runtime, collision]
+  last_reviewed: 2026-04-20
+- path: docs/architecture/system-overview.md
+  title: System Overview
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [workspace, crates, module-boundaries]
+  keywords: [workspace, crate, module, dependency-graph, ownership]
+  last_reviewed: 2026-04-20
+- path: docs/architecture/runtime-pipeline.md
+  title: Runtime Pipeline
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [scene, tick, fixed-step, runtime]
+  keywords: [scene, tick, fixed-dt, substep, pipeline]
+  last_reviewed: 2026-04-20
+- path: docs/architecture/collision-constraints.md
+  title: Collision And Constraints
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [collision, constraints, manifold, warm-start]
+  keywords: [broadphase, narrowphase, contact-key, manifold, lambda]
+  last_reviewed: 2026-04-20
+- path: docs/design/README.md
+  title: Design Docs Index
+  kind: design
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [design, roadmap, decisions]
+  keywords: [design, intent, future-work, decisions]
+  last_reviewed: 2026-04-20
+- path: docs/design/engine-design.md
+  title: Engine Design
+  kind: design
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [engine, runtime, module-design, extension-points]
+  keywords: [engine-design, goals, non-goals, ownership, invariants]
+  last_reviewed: 2026-04-20
+- path: docs/design/debug-observability-design.md
+  title: Debug Observability Design
+  kind: design
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [debugging, observability, trace, artifacts]
+  keywords: [trace, debug-render, repro, snapshot, observability]
+  last_reviewed: 2026-04-20
 - path: docs/ai/skill-candidates.md
   title: Repository Skills
   kind: doc

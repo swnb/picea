@@ -8,6 +8,8 @@
 | --- | --- | --- | --- |
 | 当前进度、最近验证、已知 warning | `docs/plans/2026-04-18-picea-physics-engine-milestones.md` | 当前 `git status` / `git log` / 验证命令输出 | `rtk proxy cargo test -p picea --lib` |
 | 模块职责、谁负责什么 | `docs/ai/repo-map.md` | 对应 `crates/picea/src/*` | `rtk proxy cargo test -p picea --lib` |
+| 架构图、运行时流程、模块边界 | `docs/architecture/README.md` | `crates/picea/src/scene/*`, `collision/*`, `constraints/*` | 先读图，再选模块测试 |
+| 设计目标、非目标、未来扩展点 | `docs/design/README.md` | 对应设计文档指向的模块 | 先确认 milestone 边界 |
 | 几何、shape、拆分、缓存 | `docs/ai/repo-map.md` | `crates/picea/src/shape/*`, `crates/picea/src/math/*` | `rtk proxy cargo test -p picea shape::concave --lib` |
 | 碰撞、broadphase、manifold、warm start | `docs/ai/repo-map.md` | `crates/picea/src/collision/*`, `crates/picea/src/constraints/*`, `crates/picea/src/scene/*` | `rtk proxy cargo test -p picea contact_identity --lib` |
 | 约束求解、position/velocity solve、sleep | `docs/ai/repo-map.md` | `crates/picea/src/constraints/*`, `crates/picea/src/scene/*`, `crates/picea/src/meta/*` | `rtk proxy cargo test -p picea --lib` |

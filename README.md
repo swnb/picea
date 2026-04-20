@@ -56,6 +56,8 @@ Before changing code, read:
 
 - `AGENTS.md` for repository rules and authority order.
 - `docs/ai/repo-map.md` for module ownership and test routing.
+- `docs/architecture/README.md` for architecture diagrams and runtime flow.
+- `docs/design/README.md` for design intent and future-facing decisions.
 - `docs/ai/index.md` for question-to-source routing.
 - `docs/ai/debug-playbook.md` when investigating bugs or regressions.
 
@@ -111,6 +113,8 @@ The debug route usually starts from one of these modules:
 This repository includes local AI routing and workflow docs:
 
 - `AGENTS.md`
+- `docs/architecture/README.md`
+- `docs/design/README.md`
 - `docs/ai/index.md`
 - `docs/ai/repo-map.md`
 - `docs/ai/doc-catalog.yaml`
