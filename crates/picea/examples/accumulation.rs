@@ -6,7 +6,6 @@ use picea::{
     scene::Scene,
     shape::{circle::Circle, concave::ConcavePolygon, polygon::RegularPolygon},
 };
-use rand::Rng;
 use std::collections::VecDeque;
 
 #[path = "../examples_common.rs"]
@@ -63,16 +62,12 @@ fn init(scene: &mut Scene, _: &mut common::Handler<()>) {
 
     scene.push_element(element);
 
-    let mut gen = rand::thread_rng();
-
     for i in 0..70 {
         for j in 0..17 {
             let x = 40. + j as FloatNum * 5.;
             let y = -300. + i as FloatNum * 5.;
 
-            let value: u8 = gen.gen();
-
-            let edge = value % 10;
+            let edge = (i * 31 + j * 17 + 7) % 10;
             let shape: Box<dyn ShapeTraitUnion> = if edge < 3 {
                 Box::new(Circle::new((x, y), 2.))
             } else {
