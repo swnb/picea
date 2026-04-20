@@ -468,6 +468,17 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea scene::tests --lib` 通过；`rtk proxy cargo test -p picea --lib` 通过；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过；`rtk git diff --check` 通过。
 - residual risk：sleep threshold 现在只覆盖进入 sleep 的 kinetic gate，尚未新增 public/runtime API 来配置 kinetic/frame 阈值；sleep 唤醒策略、NaN kinetic 行为、质量/惯量输入校验和复杂接触场景下的 sleep/wakeup 仍未扩展，本轮按硬边界未触碰。
 
+**Post-M7 wasm-bindgen smoke runner（2026-04-20，Picea wasm-bindgen smoke runner implementer）**
+
+状态：完成 M7 residual risk 的最小 wasm-bindgen runner 接入；范围限定在 `crates/picea-web` 与本计划文档；未改 core `picea`、UI 或 renderer；未 commit。
+
+- RED 证据：本机已有 `wasm-bindgen-test-runner 0.2.104` 且已安装 `wasm32-unknown-unknown` target，但旧状态下执行 `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 只输出 `no tests to run!`。原因是 wasm32 public smoke 仍是普通 `#[test]`，没有接入 wasm-bindgen test harness。
+- 版本证据：第一次使用非精确 dev-dependency 时 Cargo 解析到 `wasm-bindgen-test 0.3.68` / `wasm-bindgen 0.2.118`，runner 失败并报告 Wasm schema `0.2.118` 与本机 binary schema `0.2.104` 不匹配。没有全局安装新 CLI；最终将 `wasm-bindgen-test` 精确 pin 到 `=0.3.54`，匹配本机 runner 的 `wasm-bindgen 0.2.104` schema。
+- 实现：在 `crates/picea-web/Cargo.toml` 增加最小 dev-dependency `wasm-bindgen-test = "=0.3.54"`；将 `common.rs` 与 `wasm.rs` 中现有 `#[cfg(target_arch = "wasm32")]` public smoke 从 `#[test]` 改为 `#[wasm_bindgen_test]`。native helper tests 保持普通 `#[test]`。
+- wasm runner 结果：`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 真实执行并通过 7 个 wasm tests。
+- 最终验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 通过，7 passed；`rtk proxy cargo test -p picea --lib` 通过，65 passed；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过；`rtk git diff --check` 通过。
+- residual risk：为了匹配已存在的 local runner，Cargo 当前解析到 crates.io `wasm-bindgen 0.2.104`，因此会提示根 `wasm-bindgen v0.2.92` patch 未被使用；这是依赖解析/runner 版本兼容风险，不是 rustc warning。当前 smoke 走 Node runner，尚未增加 browser runner 覆盖；Arc edge 仍无 public constructor 覆盖真实 JS callback 流，沿用前序 helper 锁定。
+
 ## 5. Subagent 编排
 
 每个任务都按以下顺序执行：

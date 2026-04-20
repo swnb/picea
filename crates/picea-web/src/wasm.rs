@@ -861,6 +861,8 @@ mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
     #[cfg(target_arch = "wasm32")]
     use wasm_bindgen::JsCast;
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     #[cfg(target_arch = "wasm32")]
     fn invalid_web_value<T: JsCast>() -> T {
@@ -868,7 +870,7 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn try_methods_return_errors_for_invalid_js_values() {
         let scene = create_scene();
         let element_id = scene.create_rect(0., 0., 10., 10., None);
@@ -910,7 +912,7 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn legacy_methods_noop_or_zero_for_invalid_js_values() {
         let mut scene = create_scene();
         let element_id = scene.create_rect(0., 0., 10., 10., None);
@@ -1016,7 +1018,7 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn remaining_try_creation_methods_return_errors_for_invalid_input() {
         let scene = create_scene();
         let element_id = scene.create_rect(0., 0., 10., 10., None);
@@ -1060,7 +1062,7 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn point_validity_parses_invalid_point_before_short_vertex_return() {
         assert!(
             try_is_point_valid_add_into_polygon(invalid_web_value::<WebPoint>(), vec![]).is_err()
@@ -1068,7 +1070,7 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn try_get_element_vertices_errors_for_unsupported_circle_edges() {
         let mut scene = create_scene();
         let circle_id = scene.create_circle(0., 0., 1., None);
@@ -1078,7 +1080,7 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn remaining_legacy_creation_methods_keep_fallback_behavior() {
         let mut scene = create_scene();
         let element_id = scene.create_rect(0., 0., 10., 10., None);

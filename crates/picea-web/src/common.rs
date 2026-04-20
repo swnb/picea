@@ -499,6 +499,8 @@ impl JoinConstraint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn empty_meta() -> Meta {
         Meta {
@@ -585,7 +587,7 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn serialization_helpers_return_error_or_null_without_panic() {
         struct FailingSerialize;
 
