@@ -15,7 +15,7 @@ derive_builder = "0.20.0"
 js-sys = { version = "0.3.61" }
 serde = { version = "1.0.158", features = ["derive"] }
 serde-wasm-bindgen = { version = "0.6.5" }
-wasm-bindgen = { version = "0.2.84" }
+wasm-bindgen = { version = "0.2.118" }
 picea-macro-tools = { path = "../macro-tools", version = "0.1.0" }
 
 [dev-dependencies]
