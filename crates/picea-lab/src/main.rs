@@ -1,6 +1,7 @@
 use std::{env, error::Error, path::Path};
 
 mod recipes;
+mod scene_spec;
 mod viewer;
 
 use picea::{math::FloatNum, tools::observability::LabArtifacts};
@@ -29,7 +30,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         [command, output_dir, run_id, scenario, steps] if command == "capture-benchmark" => {
             let steps = steps.parse::<usize>()?;
-            let artifacts = capture_benchmark_artifacts_cli(run_id.clone(), scenario.clone(), steps)?;
+            let artifacts =
+                capture_benchmark_artifacts_cli(run_id.clone(), scenario.clone(), steps)?;
             artifacts.write_to_dir(output_dir)?;
             println!("wrote Picea Lab benchmark artifacts to {}", output_dir);
         }
@@ -57,10 +59,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
+    use crate::scene_spec::{ObjectShape, ObjectSpec, SceneTemplate, WorldSpec};
+
+    use picea::tools::observability::{capture_scene_artifacts, DebugEdge};
+
+    use super::capture_benchmark_artifacts_cli;
     use super::{capture_default_contact_artifacts, capture_recipe, RunRecipe};
-    use super::{
-        capture_benchmark_artifacts_cli,
-    };
 
     #[test]
     fn default_contact_capture_has_debug_and_perf_facts() {
@@ -135,6 +139,101 @@ mod tests {
             .to_perfetto_json()
             .expect("perfetto json serializes")
             .contains("traceEvents"));
+    }
+
+    #[test]
+    fn scene_template_builds_circle_and_box_scene() {
+        let template = SceneTemplate {
+            world: WorldSpec {
+                width: 120.0,
+                height: 80.0,
+                gravity: 0.0,
+                editor_clamp: false,
+                runtime_boundary: false,
+            },
+            objects: vec![
+                ObjectSpec {
+                    id: 1,
+                    position: [20.0, 20.0],
+                    velocity: [0.0, 0.0],
+                    is_fixed: false,
+                    shape: ObjectShape::Circle { radius: 8.0 },
+                },
+                ObjectSpec {
+                    id: 2,
+                    position: [75.0, 35.0],
+                    velocity: [0.0, 0.0],
+                    is_fixed: false,
+                    shape: ObjectShape::Box {
+                        width: 18.0,
+                        height: 12.0,
+                    },
+                },
+            ],
+        };
+
+        let scene = crate::recipes::build_scene(&template);
+        let artifacts = capture_scene_artifacts("scene-template", &scene);
+
+        assert_eq!(artifacts.final_snapshot.elements.len(), 2);
+        assert_eq!(artifacts.debug_render.shapes.len(), 2);
+        assert!(artifacts.debug_render.shapes.iter().any(|shape| {
+            shape.edges.iter().any(|edge| {
+                matches!(
+                    edge,
+                    DebugEdge::Circle { radius, .. } if (*radius - 8.0).abs() < f32::EPSILON
+                )
+            })
+        }));
+        assert!(artifacts.debug_render.shapes.iter().any(|shape| {
+            shape
+                .edges
+                .iter()
+                .filter(|edge| matches!(edge, DebugEdge::Line { .. }))
+                .count()
+                >= 4
+        }));
+    }
+
+    #[test]
+    fn runtime_boundary_prevents_object_from_falling_out_of_world() {
+        let template = SceneTemplate {
+            world: WorldSpec {
+                width: 12.0,
+                height: 12.0,
+                gravity: 24.0,
+                editor_clamp: false,
+                runtime_boundary: true,
+            },
+            objects: vec![ObjectSpec {
+                id: 1,
+                position: [6.0, 2.0],
+                velocity: [0.0, 0.0],
+                is_fixed: false,
+                shape: ObjectShape::Box {
+                    width: 2.0,
+                    height: 2.0,
+                },
+            }],
+        };
+
+        let mut scene = crate::recipes::build_scene(&template);
+        for _ in 0..240 {
+            scene.tick(crate::recipes::STEP_DT);
+        }
+        let artifacts = capture_scene_artifacts("bounded-world", &scene);
+        let dynamic_body = artifacts
+            .final_snapshot
+            .elements
+            .iter()
+            .find(|element| !element.is_fixed)
+            .expect("dynamic body exists");
+
+        assert!(
+            dynamic_body.center.y <= 11.8,
+            "body escaped world: {:?}",
+            dynamic_body
+        );
     }
 
     #[test]
