@@ -1,8 +1,9 @@
 # Repo Map
 
-仓库是一个 Rust workspace，当前三 crate：
+仓库是一个 Rust workspace，当前四个 crate：
 
 - `crates/picea`：核心 2D physics engine
+- `crates/picea-lab`：headless observability artifact CLI
 - `crates/picea-web`：wasm public API
 - `crates/macro-tools`：proc macro helpers
 
@@ -57,10 +58,10 @@
 - tests：`rtk proxy cargo test -p picea --lib`。
 
 ### `crates/picea/src/tools/*`
-- owns：调试视图、拖拽、中间件、snapshot 之类工具。
+- owns：调试视图、拖拽、中间件、snapshot、observability artifact 之类工具。
 - does_not_own：不作为 physics 核心行为来源。
 - entrypoints：`tools/mod.rs`。
-- tests：跟随 `picea --lib` / examples 验证。
+- tests：`rtk proxy cargo test -p picea tools::observability --lib`，并跟随 `picea --lib` / examples 验证。
 
 ## `crates/picea-web`
 
@@ -74,6 +75,32 @@
 - owns：JS/TS 侧可见 API、错误通道、smoke helpers。
 - does_not_own：不改 core solver 公式。
 - tests：`rtk proxy cargo test -p picea-web --lib`、`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown`。
+
+## `crates/picea-lab`
+
+### `crates/picea-lab/src/main.rs`
+- owns：Picea Lab CLI，生成/读取/比较 observability artifacts，并打开 native artifact viewer。
+- does_not_own：不实现 physics，不改 core tick 默认行为，不替代 `picea` 测试门。
+- entrypoints：`capture-contact <output-dir>`、`replay-contact <output-dir> <run-id> <second-circle-x> <steps>`、`capture-benchmark <output-dir> <run-id> <scenario> <steps>`、`diff <left-dir> <right-dir>`、`view <artifact-dir>`、`export-verification <artifact-dir> <output-md>`。
+- tests：`rtk proxy cargo test -p picea-lab`、`rtk proxy cargo run -p picea-lab -- capture-contact target/picea-lab/runs/contact-smoke`、`rtk proxy cargo run -p picea-lab -- replay-contact target/picea-lab/runs/contact-replay replay 1.5 3`、`rtk proxy cargo run -p picea-lab -- capture-benchmark target/picea-lab/runs/bench-contact bench-contact contact_refresh_transfer 2`、`rtk proxy cargo run -p picea-lab -- export-verification target/picea-lab/runs/contact-smoke target/picea-lab/runs/contact-smoke/verification.md`。
+
+### `crates/picea-lab/src/recipes.rs`
+- owns：共享 replay / benchmark recipe、场景构造和 artifact capture 入口。
+- does_not_own：不做 UI，不做文件写入路径分发，不直接承担 CLI 参数解析。
+- entrypoints：`RunRecipe`、`BenchmarkScenario`、`capture_recipe`、`capture_benchmark_artifacts_cli`。
+- tests：跟随 `rtk proxy cargo test -p picea-lab` 验证。
+
+### `crates/picea-lab/src/viewer.rs`
+- owns：artifact viewer model、filtering、verification summary export、native `egui/eframe` app shell，以及 recipe/regenerate/render controls。
+- does_not_own：不运行 physics，不直接读取 private core state，不解释截图为 correctness proof。
+- entrypoints：`ViewerModel::load_from_dir`、`ViewerModel::verification_markdown`、`run_viewer`。
+- tests：`rtk proxy cargo test -p picea-lab viewer_model_inspects_filters_and_exports_verification_summary`、`rtk proxy cargo test -p picea-lab viewer_model_can_regenerate_after_parameter_change`、`rtk proxy cargo test -p picea-lab viewer_model_supports_basic_view_navigation_and_selection`。
+
+### `crates/picea-lab/web/*`
+- owns：browser artifact viewer，读取同一套 `final_snapshot.json` / `debug_render.json` / `trace.jsonl` / `perf.json` fixture 或用户选择的 artifact 文件。
+- does_not_own：不运行 physics，不加载 wasm runtime，不复制 core simulation。
+- entrypoints：`web/index.html`，默认 fixture 在 `web/fixtures/contact-smoke/`。
+- tests：`rtk proxy cargo test -p picea-lab web_viewer_static_assets_and_fixture_are_discoverable`；浏览器验证可用 `python3 -m http.server 4177 --bind 127.0.0.1` 后打开 `http://127.0.0.1:4177/`。
 
 ## `crates/macro-tools`
 

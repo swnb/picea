@@ -26,6 +26,26 @@ const STEP_EPSILON: FloatNum = 0.000001;
 const MAX_CONSTRAINTS_TIMES: u8 = 10;
 const MAX_FIX_POSITION_ITER_TIMES: u8 = 20;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SceneTickPhase {
+    StepBegin,
+    IntegrateVelocity,
+    CollisionDetect,
+    WarmStart,
+    ContactRefresh,
+    PreSolve,
+    VelocitySolve,
+    PositionIntegrate,
+    PositionFix,
+    SleepCheck,
+    TransformSync,
+    PostSolve,
+}
+
+pub trait SceneTickObserver {
+    fn on_phase(&mut self, tick: u128, substep: u32, phase: SceneTickPhase);
+}
+
 #[derive(Default)]
 pub struct Scene<Data = ()>
 where
@@ -137,6 +157,20 @@ impl<T: Clone + Default> Scene<T> {
                 self.step_accumulator = 0.;
             }
             self.step_frame(FIXED_DELTA_TIME);
+            substeps += 1;
+        }
+    }
+
+    pub fn tick_observed(&mut self, delta_time: f32, observer: &mut impl SceneTickObserver) {
+        self.accumulate_frame_delta(delta_time);
+
+        let mut substeps = 0;
+        while self.step_accumulator >= FIXED_DELTA_TIME && substeps < MAX_SUBSTEPS_PER_TICK {
+            self.step_accumulator -= FIXED_DELTA_TIME;
+            if self.step_accumulator.abs() <= STEP_EPSILON {
+                self.step_accumulator = 0.;
+            }
+            self.step_frame_observed(FIXED_DELTA_TIME, u32::from(substeps), observer);
             substeps += 1;
         }
     }
@@ -442,6 +476,53 @@ impl<T: Clone + Default> Scene<T> {
         self.solve_position_fix_iterations();
         self.apply_sleep_state();
         self.apply_transforms();
+        self.post_solve_constraints();
+    }
+
+    fn step_frame_observed(
+        &mut self,
+        delta_time: FloatNum,
+        substep: u32,
+        observer: &mut impl SceneTickObserver,
+    ) {
+        self.frame_count += 1;
+        self.total_duration += delta_time;
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::StepBegin);
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::IntegrateVelocity);
+        self.integrate_velocity(delta_time);
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::CollisionDetect);
+        self.collision_detective();
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::WarmStart);
+        self.warm_start();
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::ContactRefresh);
+        self.refresh_contact_point_pairs_after_warm_start();
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::PreSolve);
+        unsafe {
+            self.pre_solve_constraints(delta_time);
+        }
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::VelocitySolve);
+        self.solve_velocity_constraints();
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::PositionIntegrate);
+        self.integrate_position(delta_time);
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::PositionFix);
+        self.solve_position_fix_iterations();
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::SleepCheck);
+        self.apply_sleep_state();
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::TransformSync);
+        self.apply_transforms();
+
+        observer.on_phase(self.frame_count, substep, SceneTickPhase::PostSolve);
         self.post_solve_constraints();
     }
 

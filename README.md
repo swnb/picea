@@ -2,15 +2,16 @@
 
 Picea is a work-in-progress 2D physics engine written in Rust, with a core engine crate and a wasm binding crate for JavaScript/WebAssembly consumers.
 
-The project is currently being rebuilt milestone by milestone: first making the baseline verifiable, then tightening geometry contracts, deterministic stepping, storage/handles, shape caching, collision/manifold behavior, solver realism, and wasm API hardening.
+The project is currently being rebuilt milestone by milestone: first making the baseline verifiable, then tightening geometry contracts, deterministic stepping, storage/handles, shape caching, collision/manifold behavior, solver realism, wasm API hardening, and observability tooling.
 
 ## Workspace
 
-This repository is a Rust workspace with three crates:
+This repository is a Rust workspace with four crates:
 
 | Crate | Purpose |
 | --- | --- |
 | `crates/picea` | Core 2D physics engine: scene stepping, elements, math, shapes, collision, constraints, metadata, and debug tools. |
+| `crates/picea-lab` | Headless/native/web observability tooling over saved Picea artifacts. |
 | `crates/picea-web` | wasm-bindgen public API over the core engine. |
 | `crates/macro-tools` | Internal proc macro helpers used by the engine. |
 

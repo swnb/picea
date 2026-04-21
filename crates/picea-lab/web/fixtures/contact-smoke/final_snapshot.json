@@ -1,0 +1,45 @@
+{
+  "run_id": "contact-smoke",
+  "tick": 1,
+  "frame": 1,
+  "scene_state": {
+    "element_count": 2,
+    "total_duration": 0.016666668
+  },
+  "elements": [
+    {
+      "id": 1,
+      "center": { "x": 0.0, "y": 0.0 },
+      "velocity": { "x": 0.0, "y": 0.0 },
+      "angle_velocity": 0.0,
+      "is_fixed": true,
+      "is_sleeping": false
+    },
+    {
+      "id": 2,
+      "center": { "x": 1.5, "y": 0.0 },
+      "velocity": { "x": 0.0, "y": 0.0 },
+      "angle_velocity": 0.0,
+      "is_fixed": true,
+      "is_sleeping": false
+    }
+  ],
+  "active_pairs": [{ "element_ids": [1, 2], "contact_count": 1 }],
+  "contacts": [
+    {
+      "element_ids": [1, 2],
+      "contact_index": 0,
+      "contact_id": "1-2:a=1000,0:b=-1000,0:n=-1000,0",
+      "point": { "x": 0.75, "y": 0.0 },
+      "point_a": { "x": 1.0, "y": 0.0 },
+      "point_b": { "x": 0.5, "y": 0.0 },
+      "normal_toward_a": { "x": -1.0, "y": 0.0 },
+      "depth": 0.5,
+      "cached_normal_lambda": 0.0,
+      "cached_friction_lambda": 0.0
+    }
+  ],
+  "manifolds": [
+    { "element_ids": [1, 2], "is_active": true, "contact_point_count": 1 }
+  ]
+}
