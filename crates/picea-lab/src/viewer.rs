@@ -14,7 +14,10 @@ use picea::{
 #[cfg(test)]
 use crate::recipes::capture_recipe;
 use crate::{
-    recipes::{build_scene, BenchmarkScenario, RunRecipe, STEP_DT},
+    recipes::{
+        build_example_scene, build_scene, capture_scene_run_artifacts, example_template,
+        BenchmarkScenario, ExamplePreset, RunRecipe, STEP_DT,
+    },
     scene_spec::{ObjectShape, ObjectSpec, SceneTemplate, TemplateObjectId, WorldSpec},
 };
 
@@ -28,6 +31,7 @@ pub struct ViewerModel {
     element_filter: Option<ID>,
     pair_filter: Option<[ID; 2]>,
     phase_filter: Option<LabPhase>,
+    active_example: Option<ExamplePreset>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -258,6 +262,7 @@ impl ViewerModel {
             element_filter: None,
             pair_filter: None,
             phase_filter: None,
+            active_example: None,
         }
     }
 
@@ -276,6 +281,7 @@ impl ViewerModel {
             element_filter: None,
             pair_filter: None,
             phase_filter: None,
+            active_example: None,
         }
     }
 
@@ -303,6 +309,15 @@ impl ViewerModel {
         &self.run_id
     }
 
+    pub fn active_example(&self) -> Option<ExamplePreset> {
+        self.active_example
+    }
+
+    pub fn allows_template_editing(&self) -> bool {
+        self.active_example
+            .is_none_or(|preset| example_template(preset).is_some())
+    }
+
     pub fn set_run_id(&mut self, run_id: impl Into<String>) {
         self.run_id = run_id.into();
     }
@@ -316,6 +331,9 @@ impl ViewerModel {
     }
 
     pub fn recipe_label(&self) -> &'static str {
+        if let Some(example) = self.active_example {
+            return example.label();
+        }
         match self.recipe {
             RunRecipe::ContactReplay { .. } => "contact replay",
             RunRecipe::Benchmark {
@@ -326,6 +344,7 @@ impl ViewerModel {
                 scenario: BenchmarkScenario::Circles32,
                 ..
             } => "benchmark / circles 32",
+            RunRecipe::Example { preset, .. } => preset.label(),
         }
     }
 
@@ -348,6 +367,7 @@ impl ViewerModel {
     pub fn regenerate_from_template(&mut self) -> std::io::Result<()> {
         self.scene = build_scene(self.session.template());
         self.artifacts = capture_scene_artifacts(self.run_id.clone(), &self.scene);
+        self.active_example = None;
         self.clear_filters();
         Ok(())
     }
@@ -355,6 +375,32 @@ impl ViewerModel {
     pub fn step_once(&mut self) {
         self.scene.tick(STEP_DT);
         self.artifacts = capture_scene_artifacts(self.run_id.clone(), &self.scene);
+    }
+
+    pub fn load_example_preset(
+        &mut self,
+        preset: ExamplePreset,
+        run_id: impl Into<String>,
+        steps: usize,
+    ) {
+        self.run_id = run_id.into();
+        self.recipe = RunRecipe::Example {
+            run_id: self.run_id.clone(),
+            preset,
+            steps,
+        };
+        self.scene = build_example_scene(preset);
+        self.artifacts = capture_scene_run_artifacts(self.run_id.clone(), &mut self.scene, steps);
+        let mut session = ViewerSession::new(
+            example_template(preset)
+                .unwrap_or_else(|| infer_template_from_artifacts(&self.artifacts)),
+        );
+        if example_template(preset).is_none() {
+            session.pending_tool = ViewportTool::Select;
+        }
+        self.session = session;
+        self.active_example = Some(preset);
+        self.clear_filters();
     }
 
     pub fn delete_selected_object(&mut self) -> Option<String> {
@@ -642,6 +688,8 @@ pub fn run_viewer(artifact_dir: impl AsRef<Path>) -> Result<(), Box<dyn Error>> 
 struct PiceaLabApp {
     model: ViewerModel,
     run_id_text: String,
+    example_steps_text: String,
+    selected_example: ExamplePreset,
     world_width_text: String,
     world_height_text: String,
     gravity_text: String,
@@ -654,10 +702,13 @@ impl PiceaLabApp {
     fn new(model: ViewerModel) -> Self {
         let run_id_text = model.run_id().to_owned();
         let world = model.session().template().world.clone();
+        let selected_example = model.active_example().unwrap_or(ExamplePreset::Stack);
 
         Self {
             model,
             run_id_text,
+            example_steps_text: "2".to_owned(),
+            selected_example,
             world_width_text: world.width.to_string(),
             world_height_text: world.height.to_string(),
             gravity_text: world.gravity.to_string(),
@@ -710,6 +761,18 @@ impl PiceaLabApp {
         self.model.set_run_id(self.run_id_text.trim().to_owned());
         Ok(())
     }
+
+    fn parse_example_steps(&self) -> Result<usize, String> {
+        let steps = self
+            .example_steps_text
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| "example steps must be a positive integer".to_owned())?;
+        if steps == 0 {
+            return Err("example steps must be greater than 0".to_owned());
+        }
+        Ok(steps)
+    }
 }
 
 impl eframe::App for PiceaLabApp {
@@ -741,79 +804,132 @@ impl eframe::App for PiceaLabApp {
 
                 ui.separator();
                 section_frame().show(ui, |ui| {
-                    ui.heading("Scene");
-                    ui.label("run id");
-                    ui.text_edit_singleline(&mut self.run_id_text);
-                    ui.label("world width");
-                    ui.text_edit_singleline(&mut self.world_width_text);
-                    ui.label("world height");
-                    ui.text_edit_singleline(&mut self.world_height_text);
-                    ui.label("gravity");
-                    ui.text_edit_singleline(&mut self.gravity_text);
-                    ui.checkbox(
-                        &mut self.model.session_mut().template_mut().world.editor_clamp,
-                        "editor clamp",
-                    );
-                    ui.checkbox(
-                        &mut self
-                            .model
-                            .session_mut()
-                            .template_mut()
-                            .world
-                            .runtime_boundary,
-                        "runtime boundary",
-                    );
+                    ui.heading("Examples");
+                    egui::ComboBox::from_id_salt("example-presets")
+                        .selected_text(self.selected_example.label())
+                        .show_ui(ui, |ui| {
+                            for preset in ExamplePreset::ALL {
+                                ui.selectable_value(
+                                    &mut self.selected_example,
+                                    preset,
+                                    preset.label(),
+                                );
+                            }
+                        });
+                    ui.label("steps");
+                    ui.text_edit_singleline(&mut self.example_steps_text);
+                    if ui.button("load example").clicked() {
+                        match self.parse_example_steps() {
+                            Ok(steps) => {
+                                self.model.load_example_preset(
+                                    self.selected_example,
+                                    self.run_id_text.trim().to_owned(),
+                                    steps,
+                                );
+                                self.sync_world_inputs_from_model();
+                                self.status_message =
+                                    format!("loaded example {}", self.selected_example.label());
+                            }
+                            Err(error) => {
+                                self.status_message = error;
+                            }
+                        }
+                    }
+                    if self.model.active_example().is_some() && !self.model.allows_template_editing()
+                    {
+                        ui.label(
+                            "This preset is preview-backed for now: you can inspect and run it, but template editing is disabled.",
+                        );
+                    }
+                });
 
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button("regenerate").clicked() {
-                            match self.apply_world_inputs() {
-                                Ok(()) => {
-                                    if let Err(error) = self.model.regenerate_from_template() {
-                                        self.status_message = error.to_string();
-                                    } else {
-                                        self.sync_world_inputs_from_model();
-                                        self.status_message =
-                                            "regenerated from template".to_owned();
+                ui.separator();
+                section_frame().show(ui, |ui| {
+                    ui.heading("Scene");
+                    let editing_enabled = self.model.allows_template_editing();
+                    ui.add_enabled_ui(editing_enabled, |ui| {
+                        ui.label("run id");
+                        ui.text_edit_singleline(&mut self.run_id_text);
+                        ui.label("world width");
+                        ui.text_edit_singleline(&mut self.world_width_text);
+                        ui.label("world height");
+                        ui.text_edit_singleline(&mut self.world_height_text);
+                        ui.label("gravity");
+                        ui.text_edit_singleline(&mut self.gravity_text);
+                        ui.checkbox(
+                            &mut self.model.session_mut().template_mut().world.editor_clamp,
+                            "editor clamp",
+                        );
+                        ui.checkbox(
+                            &mut self
+                                .model
+                                .session_mut()
+                                .template_mut()
+                                .world
+                                .runtime_boundary,
+                            "runtime boundary",
+                        );
+
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("regenerate").clicked() {
+                                match self.apply_world_inputs() {
+                                    Ok(()) => {
+                                        if let Err(error) = self.model.regenerate_from_template() {
+                                            self.status_message = error.to_string();
+                                        } else {
+                                            self.sync_world_inputs_from_model();
+                                            self.status_message =
+                                                "regenerated from template".to_owned();
+                                        }
+                                    }
+                                    Err(error) => {
+                                        self.status_message = error;
                                     }
                                 }
-                                Err(error) => {
-                                    self.status_message = error;
+                            }
+                            if ui.button("step once").clicked() {
+                                if self.apply_world_inputs().is_ok() {
+                                    self.model.step_once();
+                                    self.status_message = "stepped once".to_owned();
                                 }
                             }
-                        }
-                        if ui.button("step once").clicked() {
-                            if self.apply_world_inputs().is_ok() {
-                                self.model.step_once();
-                                self.status_message = "stepped once".to_owned();
+                            if ui.button("delete selected").clicked() {
+                                if let Some(message) = self.model.delete_selected_object() {
+                                    self.status_message = message;
+                                }
                             }
-                        }
-                        if ui.button("delete selected").clicked() {
-                            if let Some(message) = self.model.delete_selected_object() {
-                                self.status_message = message;
-                            }
-                        }
+                        });
                     });
+                    if !editing_enabled {
+                        ui.label("Scene controls are disabled for this preset-backed example.");
+                        if ui.button("step once").clicked() {
+                            self.model.step_once();
+                            self.status_message = "stepped once".to_owned();
+                        }
+                    }
                 });
 
                 ui.add_space(6.0);
                 section_frame().show(ui, |ui| {
                     ui.heading("Objects");
-                    ui.horizontal_wrapped(|ui| {
-                        ui.selectable_value(
-                            &mut self.model.session_mut().pending_tool,
-                            ViewportTool::Select,
-                            "Select",
-                        );
-                        ui.selectable_value(
-                            &mut self.model.session_mut().pending_tool,
-                            ViewportTool::AddCircle,
-                            "Add Circle",
-                        );
-                        ui.selectable_value(
-                            &mut self.model.session_mut().pending_tool,
-                            ViewportTool::AddBox,
-                            "Add Box",
-                        );
+                    ui.add_enabled_ui(self.model.allows_template_editing(), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.selectable_value(
+                                &mut self.model.session_mut().pending_tool,
+                                ViewportTool::Select,
+                                "Select",
+                            );
+                            ui.selectable_value(
+                                &mut self.model.session_mut().pending_tool,
+                                ViewportTool::AddCircle,
+                                "Add Circle",
+                            );
+                            ui.selectable_value(
+                                &mut self.model.session_mut().pending_tool,
+                                ViewportTool::AddBox,
+                                "Add Box",
+                            );
+                        });
                     });
                     ui.separator();
                     egui::ScrollArea::vertical()
@@ -867,7 +983,11 @@ impl eframe::App for PiceaLabApp {
                 ui.add_space(6.0);
                 section_frame().show(ui, |ui| {
                     ui.heading("Selection Inspector");
-                    if let Some(selected) = self.model.session().selected_object().cloned() {
+                    if !self.model.allows_template_editing() {
+                        ui.label(
+                            "Inspector is read-only for constraint-backed or concave preset scenes.",
+                        );
+                    } else if let Some(selected) = self.model.session().selected_object().cloned() {
                         let mut position = selected.position;
                         let mut velocity = selected.velocity;
                         let mut is_fixed = selected.is_fixed;
@@ -1729,7 +1849,9 @@ fn infer_shape_from_debug(shape: &DebugShape) -> ObjectShape {
 #[cfg(test)]
 fn recipe_run_id(recipe: &RunRecipe) -> &str {
     match recipe {
-        RunRecipe::ContactReplay { run_id, .. } | RunRecipe::Benchmark { run_id, .. } => run_id,
+        RunRecipe::ContactReplay { run_id, .. }
+        | RunRecipe::Benchmark { run_id, .. }
+        | RunRecipe::Example { run_id, .. } => run_id,
     }
 }
 
@@ -1830,6 +1952,33 @@ mod tests {
 
         assert_eq!(model.summary().element_count, 1);
         assert_eq!(model.session().template().objects.len(), 1);
+    }
+
+    #[test]
+    fn viewer_model_can_load_showcase_examples_and_marks_complex_presets_read_only() {
+        let mut model = super::ViewerModel::from_template(
+            "examples",
+            SceneTemplate {
+                world: WorldSpec {
+                    width: 120.0,
+                    height: 80.0,
+                    gravity: 0.0,
+                    editor_clamp: true,
+                    runtime_boundary: false,
+                },
+                objects: Vec::new(),
+            },
+        );
+
+        model.load_example_preset(super::ExamplePreset::Stack, "stack-showcase", 2);
+        assert_eq!(model.active_example(), Some(super::ExamplePreset::Stack));
+        assert!(model.allows_template_editing());
+        assert!(model.summary().element_count >= 10);
+
+        model.load_example_preset(super::ExamplePreset::Cloth, "cloth-showcase", 2);
+        assert_eq!(model.active_example(), Some(super::ExamplePreset::Cloth));
+        assert!(!model.allows_template_editing());
+        assert!(model.summary().element_count >= 50);
     }
 
     #[test]
