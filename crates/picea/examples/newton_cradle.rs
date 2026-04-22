@@ -4,7 +4,6 @@ use picea::{
     element::ElementBuilder,
     math::{vector::Vector, FloatNum},
     meta::MetaBuilder,
-    prelude::*,
     scene::Scene,
     shape::circle::Circle,
 };

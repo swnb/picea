@@ -5,7 +5,7 @@ use picea_macro_tools::{Deref, Shape};
 use crate::impl_shape_traits_use_deref;
 use crate::math::point::Point;
 use crate::meta::Mass;
-use crate::prelude::ComputeMomentOfInertia;
+use crate::element::ComputeMomentOfInertia;
 
 use super::Rect;
 

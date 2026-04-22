@@ -1,6 +1,6 @@
 use crate::{
     collision::{Collider, Projector, SubCollider},
-    element::{ComputeMomentOfInertia, SelfClone},
+    element::{ComputeMomentOfInertia, SelfClone, ShapeTraitUnion},
     math::{edge::Edge, point::Point, vector::Vector, FloatNum},
 };
 
@@ -108,7 +108,7 @@ impl Collider for ConcavePolygon {
 }
 
 impl SelfClone for ConcavePolygon {
-    fn self_clone(&self) -> Box<dyn crate::prelude::ShapeTraitUnion> {
+    fn self_clone(&self) -> Box<dyn ShapeTraitUnion> {
         self.clone().into()
     }
 }

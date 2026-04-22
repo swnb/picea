@@ -1,10 +1,11 @@
 use super::{vector::Vector, FloatNum};
+use serde::{Deserialize, Serialize};
 use std::{
     fmt::Display,
     ops::{Add, AddAssign, Sub, SubAssign},
 };
 
-#[derive(Clone, Debug, Copy, Default)]
+#[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
 pub struct Point<T = FloatNum>
 where
     T: Clone + Copy,

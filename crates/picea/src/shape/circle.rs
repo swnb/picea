@@ -1,4 +1,10 @@
-use crate::{math::axis::AxisDirection, prelude::*, shape::Transform};
+use crate::{
+    collision::Projector,
+    element::ComputeMomentOfInertia,
+    math::{axis::AxisDirection, edge::Edge, point::Point, vector::Vector},
+    meta::Mass,
+    shape::{CenterPoint, EdgeIterable, GeometryTransformer, NearestPoint, Transform},
+};
 use picea_macro_tools::{Fields, Shape};
 
 #[derive(Clone, Debug, Shape, Fields)]

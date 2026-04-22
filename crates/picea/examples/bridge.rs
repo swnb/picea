@@ -1,4 +1,10 @@
-use picea::{prelude::*, shape::Rect};
+use picea::{
+    constraints::JoinConstraintConfigBuilder,
+    element::ElementBuilder,
+    meta::MetaBuilder,
+    scene::Scene,
+    shape::Rect,
+};
 
 #[path = "../examples_common.rs"]
 mod common;

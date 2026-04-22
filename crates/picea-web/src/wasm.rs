@@ -1,8 +1,17 @@
 use js_sys::Function;
 
-use picea::math::edge::Edge;
-use picea::prelude::*;
 use picea::{
+    body::{BodyDesc, BodyPatch, BodyType, Pose},
+    collider::{ColliderDesc, ColliderPatch, CollisionFilter, Material, SharedShape},
+    constraints::{JoinConstraintConfig, JoinConstraintConfigBuilder},
+    debug::{DebugAabb, DebugSnapshotOptions},
+    element::{ElementBuilder, ShapeTraitUnion, ID},
+    handles::{BodyHandle, ColliderHandle, JointHandle},
+    joint::{DistanceJointDesc, JointDesc, JointPatch, WorldAnchorJointDesc},
+    math::{edge::Edge, point::Point, segment::Segment, vector::Vector, FloatNum},
+    meta::MetaBuilder,
+    pipeline::{SimulationPipeline, StepConfig},
+    query::{AabbHit, PointHit, QueryFilter, QueryPipeline, RayHit},
     scene::Scene,
     shape::{
         circle::Circle,
@@ -13,18 +22,21 @@ use picea::{
         utils::{check_is_segment_cross, is_point_inside_shape},
     },
     tools::snapshot,
+    world::{World, WorldDesc},
 };
-use std::cell::UnsafeCell;
+use serde::Deserialize;
+use std::cell::{RefCell, UnsafeCell};
 use std::panic;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
 use crate::common::{
-    js_error, parse_web_join_constraint_config, parse_web_meta, parse_web_point, parse_web_vector,
-    to_js_value_or_null, to_js_value_result, to_web_point_result, validate_circle_args,
-    validate_polygon_vertices, validate_rect_args, validate_regular_polygon_args, JoinConstraint,
-    Meta, OptionalWebJoinConstraintConfig, OptionalWebMeta, PointConstraint, Tuple2, WebMeta,
-    WebPoint, WebVector,
+    from_js_value, js_error, parse_web_join_constraint_config, parse_web_meta, parse_web_point,
+    parse_web_vector, to_js_value_or_null, to_js_value_result, to_web_point_result,
+    validate_circle_args, validate_finite_number, validate_optional_float, validate_polygon_vertices,
+    validate_positive_number, validate_rect_args, validate_regular_polygon_args, validate_tuple2,
+    JoinConstraint, Meta, OptionalWebJoinConstraintConfig, OptionalWebMeta, PointConstraint,
+    Tuple2, WebMeta, WebPoint, WebVector,
 };
 
 #[wasm_bindgen(js_name = "setPanicConsoleHook")]
@@ -61,6 +73,835 @@ fn log_unsupported_edge(context: &str, id: ID) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn log_unsupported_edge(_context: &str, _id: ID) {}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct WebWorldConfig {
+    gravity: Option<Tuple2>,
+    enable_sleep: Option<bool>,
+    step_dt: Option<FloatNum>,
+    velocity_iterations: Option<u16>,
+    position_iterations: Option<u16>,
+}
+
+impl WebWorldConfig {
+    fn validate(&self) -> Result<(), JsValue> {
+        if let Some(gravity) = &self.gravity {
+            validate_tuple2("vector", gravity).map_err(js_error)?;
+        }
+        validate_optional_float(self.step_dt.as_ref(), "world.stepDt should be a finite number")
+            .map_err(js_error)?;
+        if let Some(step_dt) = self.step_dt {
+            validate_positive_number(step_dt, "world.stepDt should be greater than 0")
+                .map_err(js_error)?;
+        }
+        Ok(())
+    }
+
+    fn world_desc(&self) -> WorldDesc {
+        let mut desc = WorldDesc::default();
+        if let Some(gravity) = self.gravity {
+            desc.gravity = gravity.into();
+        }
+        if let Some(enable_sleep) = self.enable_sleep {
+            desc.enable_sleep = enable_sleep;
+        }
+        desc
+    }
+
+    fn step_config(&self) -> StepConfig {
+        let mut config = StepConfig::default();
+        if let Some(step_dt) = self.step_dt {
+            config.dt = step_dt;
+        }
+        if let Some(iterations) = self.velocity_iterations {
+            config.velocity_iterations = iterations;
+        }
+        if let Some(iterations) = self.position_iterations {
+            config.position_iterations = iterations;
+        }
+        if let Some(enable_sleep) = self.enable_sleep {
+            config.enable_sleep = enable_sleep;
+        }
+        config
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct WebBodyDesc {
+    body_type: Option<BodyType>,
+    translation: Option<Tuple2>,
+    angle: Option<FloatNum>,
+    linear_velocity: Option<Tuple2>,
+    angular_velocity: Option<FloatNum>,
+    linear_damping: Option<FloatNum>,
+    angular_damping: Option<FloatNum>,
+    gravity_scale: Option<FloatNum>,
+    can_sleep: Option<bool>,
+    sleeping: Option<bool>,
+    user_data: Option<u64>,
+}
+
+impl WebBodyDesc {
+    fn validate(&self) -> Result<(), JsValue> {
+        if let Some(translation) = &self.translation {
+            validate_tuple2("point", translation).map_err(js_error)?;
+        }
+        if let Some(linear_velocity) = &self.linear_velocity {
+            validate_tuple2("vector", linear_velocity).map_err(js_error)?;
+        }
+        validate_optional_float(
+            self.angle.as_ref(),
+            "body.angle should be a finite number",
+        )
+        .map_err(js_error)?;
+        validate_optional_float(
+            self.angular_velocity.as_ref(),
+            "body.angularVelocity should be a finite number",
+        )
+        .map_err(js_error)?;
+        validate_optional_float(
+            self.linear_damping.as_ref(),
+            "body.linearDamping should be a finite number",
+        )
+        .map_err(js_error)?;
+        validate_optional_float(
+            self.angular_damping.as_ref(),
+            "body.angularDamping should be a finite number",
+        )
+        .map_err(js_error)?;
+        validate_optional_float(
+            self.gravity_scale.as_ref(),
+            "body.gravityScale should be a finite number",
+        )
+        .map_err(js_error)?;
+        Ok(())
+    }
+
+    fn into_core(self) -> BodyDesc {
+        let mut desc = BodyDesc::default();
+        if let Some(body_type) = self.body_type {
+            desc.body_type = body_type;
+        }
+        desc.pose = pose_from_parts(self.translation, self.angle);
+        if let Some(linear_velocity) = self.linear_velocity {
+            desc.linear_velocity = linear_velocity.into();
+        }
+        if let Some(angular_velocity) = self.angular_velocity {
+            desc.angular_velocity = angular_velocity;
+        }
+        if let Some(linear_damping) = self.linear_damping {
+            desc.linear_damping = linear_damping;
+        }
+        if let Some(angular_damping) = self.angular_damping {
+            desc.angular_damping = angular_damping;
+        }
+        if let Some(gravity_scale) = self.gravity_scale {
+            desc.gravity_scale = gravity_scale;
+        }
+        if let Some(can_sleep) = self.can_sleep {
+            desc.can_sleep = can_sleep;
+        }
+        if let Some(sleeping) = self.sleeping {
+            desc.sleeping = sleeping;
+        }
+        if let Some(user_data) = self.user_data {
+            desc.user_data = user_data;
+        }
+        desc
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct WebBodyPatch {
+    body_type: Option<BodyType>,
+    translation: Option<Tuple2>,
+    angle: Option<FloatNum>,
+    linear_velocity: Option<Tuple2>,
+    angular_velocity: Option<FloatNum>,
+    linear_damping: Option<FloatNum>,
+    angular_damping: Option<FloatNum>,
+    gravity_scale: Option<FloatNum>,
+    can_sleep: Option<bool>,
+    sleeping: Option<bool>,
+    user_data: Option<u64>,
+    wake: Option<bool>,
+}
+
+impl WebBodyPatch {
+    fn validate(&self) -> Result<(), JsValue> {
+        WebBodyDesc {
+            body_type: self.body_type,
+            translation: self.translation,
+            angle: self.angle,
+            linear_velocity: self.linear_velocity,
+            angular_velocity: self.angular_velocity,
+            linear_damping: self.linear_damping,
+            angular_damping: self.angular_damping,
+            gravity_scale: self.gravity_scale,
+            can_sleep: self.can_sleep,
+            sleeping: self.sleeping,
+            user_data: self.user_data,
+        }
+        .validate()
+    }
+
+    fn into_core(self) -> BodyPatch {
+        BodyPatch {
+            body_type: self.body_type,
+            pose: if self.translation.is_some() || self.angle.is_some() {
+                Some(pose_from_parts(self.translation, self.angle))
+            } else {
+                None
+            },
+            linear_velocity: self.linear_velocity.map(Into::into),
+            angular_velocity: self.angular_velocity,
+            linear_damping: self.linear_damping,
+            angular_damping: self.angular_damping,
+            gravity_scale: self.gravity_scale,
+            can_sleep: self.can_sleep,
+            sleeping: self.sleeping,
+            user_data: self.user_data,
+            wake: self.wake.unwrap_or(false),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct WebCollisionFilter {
+    memberships: u64,
+    collides_with: u64,
+}
+
+impl Default for WebCollisionFilter {
+    fn default() -> Self {
+        let filter = CollisionFilter::default();
+        Self {
+            memberships: filter.memberships,
+            collides_with: filter.collides_with,
+        }
+    }
+}
+
+impl From<WebCollisionFilter> for CollisionFilter {
+    fn from(value: WebCollisionFilter) -> Self {
+        Self {
+            memberships: value.memberships,
+            collides_with: value.collides_with,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct WebColliderDesc {
+    local_translation: Option<Tuple2>,
+    local_angle: Option<FloatNum>,
+    density: Option<FloatNum>,
+    material: Option<Material>,
+    filter: Option<WebCollisionFilter>,
+    is_sensor: Option<bool>,
+    user_data: Option<u64>,
+}
+
+impl WebColliderDesc {
+    fn validate(&self) -> Result<(), JsValue> {
+        if let Some(translation) = &self.local_translation {
+            validate_tuple2("point", translation).map_err(js_error)?;
+        }
+        validate_optional_float(
+            self.local_angle.as_ref(),
+            "collider.localAngle should be a finite number",
+        )
+        .map_err(js_error)?;
+        validate_optional_float(
+            self.density.as_ref(),
+            "collider.density should be a finite number",
+        )
+        .map_err(js_error)?;
+        if let Some(density) = self.density {
+            validate_positive_number(density, "collider.density should be greater than 0")
+                .map_err(js_error)?;
+        }
+        if let Some(material) = self.material {
+            validate_finite_number(material.friction, "collider.material.friction should be finite")
+                .map_err(js_error)?;
+            validate_finite_number(
+                material.restitution,
+                "collider.material.restitution should be finite",
+            )
+            .map_err(js_error)?;
+        }
+        Ok(())
+    }
+
+    fn into_core(self, shape: SharedShape) -> ColliderDesc {
+        let mut desc = ColliderDesc {
+            shape,
+            ..ColliderDesc::default()
+        };
+        desc.local_pose = pose_from_parts(self.local_translation, self.local_angle);
+        if let Some(density) = self.density {
+            desc.density = density;
+        }
+        if let Some(material) = self.material {
+            desc.material = material;
+        }
+        if let Some(filter) = self.filter {
+            desc.filter = filter.into();
+        }
+        if let Some(is_sensor) = self.is_sensor {
+            desc.is_sensor = is_sensor;
+        }
+        if let Some(user_data) = self.user_data {
+            desc.user_data = user_data;
+        }
+        desc
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct WebColliderPatch {
+    local_translation: Option<Tuple2>,
+    local_angle: Option<FloatNum>,
+    density: Option<FloatNum>,
+    material: Option<Material>,
+    filter: Option<WebCollisionFilter>,
+    is_sensor: Option<bool>,
+    user_data: Option<u64>,
+}
+
+impl WebColliderPatch {
+    fn validate(&self) -> Result<(), JsValue> {
+        WebColliderDesc {
+            local_translation: self.local_translation,
+            local_angle: self.local_angle,
+            density: self.density,
+            material: self.material,
+            filter: self.filter,
+            is_sensor: self.is_sensor,
+            user_data: self.user_data,
+        }
+        .validate()
+    }
+
+    fn into_core(self) -> ColliderPatch {
+        ColliderPatch {
+            shape: None,
+            local_pose: if self.local_translation.is_some() || self.local_angle.is_some() {
+                Some(pose_from_parts(self.local_translation, self.local_angle))
+            } else {
+                None
+            },
+            density: self.density,
+            material: self.material,
+            filter: self.filter.map(Into::into),
+            is_sensor: self.is_sensor,
+            user_data: self.user_data,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebDistanceJointDesc {
+    body_a: BodyHandle,
+    body_b: BodyHandle,
+    local_anchor_a: Tuple2,
+    local_anchor_b: Tuple2,
+    rest_length: FloatNum,
+    stiffness: FloatNum,
+    damping: FloatNum,
+    #[serde(default)]
+    user_data: u64,
+}
+
+impl WebDistanceJointDesc {
+    fn validate(&self) -> Result<(), JsValue> {
+        validate_tuple2("point", &self.local_anchor_a).map_err(js_error)?;
+        validate_tuple2("point", &self.local_anchor_b).map_err(js_error)?;
+        validate_finite_number(
+            self.rest_length,
+            "joint.restLength should be a finite number",
+        )
+        .map_err(js_error)?;
+        validate_finite_number(self.stiffness, "joint.stiffness should be a finite number")
+            .map_err(js_error)?;
+        validate_finite_number(self.damping, "joint.damping should be a finite number")
+            .map_err(js_error)?;
+        Ok(())
+    }
+
+    fn into_core(self) -> JointDesc {
+        JointDesc::Distance(DistanceJointDesc {
+            body_a: self.body_a,
+            body_b: self.body_b,
+            local_anchor_a: self.local_anchor_a.into(),
+            local_anchor_b: self.local_anchor_b.into(),
+            rest_length: self.rest_length,
+            stiffness: self.stiffness,
+            damping: self.damping,
+            user_data: self.user_data,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebWorldAnchorJointDesc {
+    body: BodyHandle,
+    local_anchor: Tuple2,
+    world_anchor: Tuple2,
+    stiffness: FloatNum,
+    damping: FloatNum,
+    #[serde(default)]
+    user_data: u64,
+}
+
+impl WebWorldAnchorJointDesc {
+    fn validate(&self) -> Result<(), JsValue> {
+        validate_tuple2("point", &self.local_anchor).map_err(js_error)?;
+        validate_tuple2("point", &self.world_anchor).map_err(js_error)?;
+        validate_finite_number(self.stiffness, "joint.stiffness should be a finite number")
+            .map_err(js_error)?;
+        validate_finite_number(self.damping, "joint.damping should be a finite number")
+            .map_err(js_error)?;
+        Ok(())
+    }
+
+    fn into_core(self) -> JointDesc {
+        JointDesc::WorldAnchor(WorldAnchorJointDesc {
+            body: self.body,
+            local_anchor: self.local_anchor.into(),
+            world_anchor: self.world_anchor.into(),
+            stiffness: self.stiffness,
+            damping: self.damping,
+            user_data: self.user_data,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct WebDebugOptions {
+    include_contacts: Option<bool>,
+    include_manifolds: Option<bool>,
+    include_primitives: Option<bool>,
+    sanitize_non_finite: Option<bool>,
+}
+
+impl From<WebDebugOptions> for DebugSnapshotOptions {
+    fn from(value: WebDebugOptions) -> Self {
+        let mut options = DebugSnapshotOptions::default();
+        if let Some(include_contacts) = value.include_contacts {
+            options.include_contacts = include_contacts;
+        }
+        if let Some(include_manifolds) = value.include_manifolds {
+            options.include_manifolds = include_manifolds;
+        }
+        if let Some(include_primitives) = value.include_primitives {
+            options.include_primitives = include_primitives;
+        }
+        if let Some(sanitize_non_finite) = value.sanitize_non_finite {
+            options.sanitize_non_finite = sanitize_non_finite;
+        }
+        options
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct WebQueryFilter {
+    body: Option<BodyHandle>,
+    exclude_body: Option<BodyHandle>,
+    collider: Option<ColliderHandle>,
+    exclude_collider: Option<ColliderHandle>,
+    interaction_filter: Option<WebCollisionFilter>,
+    include_sensors: Option<bool>,
+}
+
+impl From<WebQueryFilter> for QueryFilter {
+    fn from(value: WebQueryFilter) -> Self {
+        QueryFilter {
+            body: value.body,
+            exclude_body: value.exclude_body,
+            collider: value.collider,
+            exclude_collider: value.exclude_collider,
+            interaction_filter: value.interaction_filter.map(Into::into),
+            include_sensors: value.include_sensors.unwrap_or(false),
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebPointHit {
+    body: BodyHandle,
+    collider: ColliderHandle,
+    point: Tuple2,
+    distance_to_surface: FloatNum,
+}
+
+impl From<PointHit> for WebPointHit {
+    fn from(value: PointHit) -> Self {
+        Self {
+            body: value.body,
+            collider: value.collider,
+            point: Tuple2::from(&value.point),
+            distance_to_surface: value.distance_to_surface,
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebAabbHit {
+    body: BodyHandle,
+    collider: ColliderHandle,
+    min: Tuple2,
+    max: Tuple2,
+}
+
+impl From<AabbHit> for WebAabbHit {
+    fn from(value: AabbHit) -> Self {
+        Self {
+            body: value.body,
+            collider: value.collider,
+            min: Tuple2::from(&value.bounds.min),
+            max: Tuple2::from(&value.bounds.max),
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebRayHit {
+    body: BodyHandle,
+    collider: ColliderHandle,
+    toi: FloatNum,
+    point: Tuple2,
+    normal: Tuple2,
+}
+
+impl From<RayHit> for WebRayHit {
+    fn from(value: RayHit) -> Self {
+        Self {
+            body: value.body,
+            collider: value.collider,
+            toi: value.toi,
+            point: Tuple2::from(&value.point),
+            normal: Tuple2::from(&value.normal),
+        }
+    }
+}
+
+fn pose_from_parts(translation: Option<Tuple2>, angle: Option<FloatNum>) -> Pose {
+    let translation = translation.unwrap_or_default();
+    Pose::from_xy_angle(translation.x, translation.y, angle.unwrap_or_default())
+}
+
+fn query_filter_from_js(filter: Option<JsValue>) -> Result<QueryFilter, JsValue> {
+    match filter {
+        Some(filter) => Ok(from_js_value::<WebQueryFilter>(filter, "query filter")?.into()),
+        None => Ok(QueryFilter::default()),
+    }
+}
+
+fn debug_options_from_js(options: Option<JsValue>) -> Result<DebugSnapshotOptions, JsValue> {
+    match options {
+        Some(options) => Ok(from_js_value::<WebDebugOptions>(options, "debug options")?.into()),
+        None => Ok(DebugSnapshotOptions::default()),
+    }
+}
+
+fn collider_desc_from_js(shape: SharedShape, desc: Option<JsValue>) -> Result<ColliderDesc, JsValue> {
+    let desc = match desc {
+        Some(desc) => from_js_value::<WebColliderDesc>(desc, "collider desc")?,
+        None => WebColliderDesc::default(),
+    };
+    desc.validate()?;
+    Ok(desc.into_core(shape))
+}
+
+#[wasm_bindgen]
+pub struct WebWorld {
+    world: RefCell<World>,
+    pipeline: RefCell<SimulationPipeline>,
+    query_pipeline: RefCell<QueryPipeline>,
+}
+
+#[wasm_bindgen]
+impl WebWorld {
+    #[wasm_bindgen(js_name = "createBody")]
+    pub fn create_body(&self, desc: JsValue) -> Result<JsValue, JsValue> {
+        let desc = from_js_value::<WebBodyDesc>(desc, "body desc")?;
+        desc.validate()?;
+        let handle = self
+            .world
+            .borrow_mut()
+            .create_body(desc.into_core())
+            .map_err(world_error)?;
+        to_js_value_result(&handle, "body handle")
+    }
+
+    #[wasm_bindgen(js_name = "applyBodyPatch")]
+    pub fn apply_body_patch(&self, handle: JsValue, patch: JsValue) -> Result<(), JsValue> {
+        let handle = from_js_value::<BodyHandle>(handle, "body handle")?;
+        let patch = from_js_value::<WebBodyPatch>(patch, "body patch")?;
+        patch.validate()?;
+        self.world
+            .borrow_mut()
+            .apply_body_patch(handle, patch.into_core())
+            .map_err(world_error)?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "destroyBody")]
+    pub fn destroy_body(&self, handle: JsValue) -> Result<(), JsValue> {
+        let handle = from_js_value::<BodyHandle>(handle, "body handle")?;
+        self.world
+            .borrow_mut()
+            .destroy_body(handle)
+            .map_err(world_error)?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "createCircleCollider")]
+    pub fn create_circle_collider(
+        &self,
+        body: JsValue,
+        radius: FloatNum,
+        desc: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        validate_positive_number(radius, "circle.radius should be greater than 0")
+            .map_err(js_error)?;
+        let body = from_js_value::<BodyHandle>(body, "body handle")?;
+        let desc = collider_desc_from_js(SharedShape::circle(radius), desc)?;
+        let handle = self
+            .world
+            .borrow_mut()
+            .create_collider(body, desc)
+            .map_err(world_error)?;
+        to_js_value_result(&handle, "collider handle")
+    }
+
+    #[wasm_bindgen(js_name = "createRectCollider")]
+    pub fn create_rect_collider(
+        &self,
+        body: JsValue,
+        width: FloatNum,
+        height: FloatNum,
+        desc: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        validate_rect_args(0.0, 0.0, width, height).map_err(js_error)?;
+        let body = from_js_value::<BodyHandle>(body, "body handle")?;
+        let desc = collider_desc_from_js(SharedShape::rect(width, height), desc)?;
+        let handle = self
+            .world
+            .borrow_mut()
+            .create_collider(body, desc)
+            .map_err(world_error)?;
+        to_js_value_result(&handle, "collider handle")
+    }
+
+    #[wasm_bindgen(js_name = "createRegularPolygonCollider")]
+    pub fn create_regular_polygon_collider(
+        &self,
+        body: JsValue,
+        edge_count: f64,
+        radius: FloatNum,
+        desc: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let edge_count =
+            validate_regular_polygon_args(0.0, 0.0, edge_count, radius).map_err(js_error)?;
+        let body = from_js_value::<BodyHandle>(body, "body handle")?;
+        let desc =
+            collider_desc_from_js(SharedShape::regular_polygon(edge_count, radius), desc)?;
+        let handle = self
+            .world
+            .borrow_mut()
+            .create_collider(body, desc)
+            .map_err(world_error)?;
+        to_js_value_result(&handle, "collider handle")
+    }
+
+    #[wasm_bindgen(js_name = "createPolygonCollider")]
+    pub fn create_polygon_collider(
+        &self,
+        body: JsValue,
+        vertices: Vec<WebPoint>,
+        desc: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let vertices = vertices
+            .into_iter()
+            .map(parse_web_point)
+            .collect::<Result<Vec<Point>, JsValue>>()?;
+        validate_polygon_vertices(&vertices).map_err(js_error)?;
+        let body = from_js_value::<BodyHandle>(body, "body handle")?;
+        let desc = collider_desc_from_js(SharedShape::concave_polygon(vertices), desc)?;
+        let handle = self
+            .world
+            .borrow_mut()
+            .create_collider(body, desc)
+            .map_err(world_error)?;
+        to_js_value_result(&handle, "collider handle")
+    }
+
+    #[wasm_bindgen(js_name = "createLineCollider")]
+    pub fn create_line_collider(
+        &self,
+        body: JsValue,
+        start_point: WebPoint,
+        end_point: WebPoint,
+        desc: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let start_point = parse_web_point(start_point)?;
+        let end_point = parse_web_point(end_point)?;
+        let body = from_js_value::<BodyHandle>(body, "body handle")?;
+        let desc = collider_desc_from_js(SharedShape::segment(start_point, end_point), desc)?;
+        let handle = self
+            .world
+            .borrow_mut()
+            .create_collider(body, desc)
+            .map_err(world_error)?;
+        to_js_value_result(&handle, "collider handle")
+    }
+
+    #[wasm_bindgen(js_name = "applyColliderPatch")]
+    pub fn apply_collider_patch(&self, handle: JsValue, patch: JsValue) -> Result<(), JsValue> {
+        let handle = from_js_value::<ColliderHandle>(handle, "collider handle")?;
+        let patch = from_js_value::<WebColliderPatch>(patch, "collider patch")?;
+        patch.validate()?;
+        self.world
+            .borrow_mut()
+            .apply_collider_patch(handle, patch.into_core())
+            .map_err(world_error)?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "createDistanceJoint")]
+    pub fn create_distance_joint(&self, desc: JsValue) -> Result<JsValue, JsValue> {
+        let desc = from_js_value::<WebDistanceJointDesc>(desc, "distance joint desc")?;
+        desc.validate()?;
+        let handle = self
+            .world
+            .borrow_mut()
+            .create_joint(desc.into_core())
+            .map_err(world_error)?;
+        to_js_value_result(&handle, "joint handle")
+    }
+
+    #[wasm_bindgen(js_name = "createWorldAnchorJoint")]
+    pub fn create_world_anchor_joint(&self, desc: JsValue) -> Result<JsValue, JsValue> {
+        let desc = from_js_value::<WebWorldAnchorJointDesc>(desc, "world anchor joint desc")?;
+        desc.validate()?;
+        let handle = self
+            .world
+            .borrow_mut()
+            .create_joint(desc.into_core())
+            .map_err(world_error)?;
+        to_js_value_result(&handle, "joint handle")
+    }
+
+    #[wasm_bindgen(js_name = "step")]
+    pub fn step(&self) -> Result<JsValue, JsValue> {
+        let mut pipeline = self.pipeline.borrow_mut();
+        let mut world = self.world.borrow_mut();
+        let report = pipeline.step(&mut *world);
+        to_js_value_result(&report, "step report")
+    }
+
+    #[wasm_bindgen(js_name = "debugSnapshot")]
+    pub fn debug_snapshot(&self, options: Option<JsValue>) -> Result<JsValue, JsValue> {
+        let options = debug_options_from_js(options)?;
+        let snapshot = self.world.borrow().debug_snapshot(&options);
+        to_js_value_result(&snapshot, "debug snapshot")
+    }
+
+    #[wasm_bindgen(js_name = "syncQueryPipeline")]
+    pub fn sync_query_pipeline(&self) {
+        self.ensure_query_revision();
+    }
+
+    #[wasm_bindgen(js_name = "intersectPoint")]
+    pub fn intersect_point(
+        &self,
+        point: WebPoint,
+        filter: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let point = parse_web_point(point)?;
+        let filter = query_filter_from_js(filter)?;
+        self.ensure_query_revision();
+        let hits = self
+            .query_pipeline
+            .borrow()
+            .intersect_point(point, filter)
+            .into_iter()
+            .map(WebPointHit::from)
+            .collect::<Vec<_>>();
+        to_js_value_result(&hits, "point hits")
+    }
+
+    #[wasm_bindgen(js_name = "intersectAabb")]
+    pub fn intersect_aabb(
+        &self,
+        min: WebPoint,
+        max: WebPoint,
+        filter: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let min = parse_web_point(min)?;
+        let max = parse_web_point(max)?;
+        let filter = query_filter_from_js(filter)?;
+        self.ensure_query_revision();
+        let hits = self
+            .query_pipeline
+            .borrow()
+            .intersect_aabb(DebugAabb::new(min, max), filter)
+            .into_iter()
+            .map(WebAabbHit::from)
+            .collect::<Vec<_>>();
+        to_js_value_result(&hits, "aabb hits")
+    }
+
+    #[wasm_bindgen(js_name = "castRay")]
+    pub fn cast_ray(
+        &self,
+        origin: WebPoint,
+        direction: WebVector,
+        max_toi: FloatNum,
+        filter: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        validate_positive_number(max_toi, "ray.maxToi should be greater than 0")
+            .map_err(js_error)?;
+        let origin = parse_web_point(origin)?;
+        let direction = parse_web_vector(direction)?;
+        let filter = query_filter_from_js(filter)?;
+        self.ensure_query_revision();
+        let hit = self
+            .query_pipeline
+            .borrow()
+            .cast_ray(origin, direction, max_toi, filter)
+            .map(WebRayHit::from);
+        to_js_value_result(&hit, "ray hit")
+    }
+
+    fn ensure_query_revision(&self) {
+        let world = self.world.borrow();
+        let world_revision = world.revision();
+        let mut query_pipeline = self.query_pipeline.borrow_mut();
+        if query_pipeline.revision() != Some(world_revision) {
+            query_pipeline.sync(&*world);
+        }
+    }
+}
+
+fn world_error(error: picea::world::WorldError) -> JsValue {
+    js_error(error.to_string())
+}
 
 #[wasm_bindgen]
 pub struct WebScene {
@@ -636,8 +1477,7 @@ impl WebScene {
         let constraint_config = parse_web_join_constraint_config(constraint_config)?;
         let constraint_config_builder: JoinConstraintConfigBuilder = (&constraint_config).into();
 
-        let constraint_config: picea::prelude::JoinConstraintConfig =
-            constraint_config_builder.into();
+        let constraint_config: JoinConstraintConfig = constraint_config_builder.into();
 
         self.get_scene_mut()
             .create_point_constraint(
@@ -701,8 +1541,7 @@ impl WebScene {
         let constraint_config = parse_web_join_constraint_config(constraint_config)?;
         let constraint_config_builder: JoinConstraintConfigBuilder = (&constraint_config).into();
 
-        let constraint_config: picea::prelude::JoinConstraintConfig =
-            constraint_config_builder.into();
+        let constraint_config: JoinConstraintConfig = constraint_config_builder.into();
 
         self.get_scene_mut()
             .create_join_constraint(
@@ -855,9 +1694,28 @@ pub fn create_scene() -> WebScene {
     }
 }
 
+#[wasm_bindgen(js_name = "createWorld")]
+pub fn create_world(config: Option<JsValue>) -> Result<WebWorld, JsValue> {
+    let config = match config {
+        Some(config) => from_js_value::<WebWorldConfig>(config, "world config")?,
+        None => WebWorldConfig::default(),
+    };
+    config.validate()?;
+
+    Ok(WebWorld {
+        world: RefCell::new(World::new(config.world_desc())),
+        pipeline: RefCell::new(SimulationPipeline::new(config.step_config())),
+        query_pipeline: RefCell::new(QueryPipeline::new()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use picea::debug::DebugSnapshot;
+    use picea::pipeline::StepReport;
+    use serde::{Deserialize, Serialize};
+    use serde_wasm_bindgen::{from_value, to_value};
     use std::panic::{catch_unwind, AssertUnwindSafe};
     #[cfg(target_arch = "wasm32")]
     use wasm_bindgen::JsCast;
@@ -971,6 +1829,145 @@ mod tests {
             ignore_callback_error("test callback", Err(JsValue::UNDEFINED));
         }))
         .is_ok());
+    }
+
+    fn js_value<T>(value: &T) -> JsValue
+    where
+        T: Serialize + ?Sized,
+    {
+        to_value(value).expect("test value should serialize into JsValue")
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[cfg_attr(not(target_arch = "wasm32"), ignore)]
+    #[wasm_bindgen_test]
+    fn web_world_supports_body_collider_step_snapshot_and_query() {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct WorldConfig {
+            gravity: Tuple2,
+            step_dt: FloatNum,
+        }
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct BodyConfig {
+            body_type: &'static str,
+            translation: Tuple2,
+            linear_velocity: Tuple2,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PointHit {
+            body: BodyHandle,
+            collider: ColliderHandle,
+            point: Tuple2,
+            distance_to_surface: FloatNum,
+        }
+
+        let world = create_world(Some(js_value(&WorldConfig {
+            gravity: Tuple2 { x: 0.0, y: 0.0 },
+            step_dt: 1.0 / 60.0,
+        })))
+        .expect("new WebWorld should be created");
+
+        let body = world
+            .create_body(js_value(&BodyConfig {
+                body_type: "dynamic",
+                translation: Tuple2 { x: 2.0, y: 3.0 },
+                linear_velocity: Tuple2 { x: 1.0, y: 0.0 },
+            }))
+            .expect("body should be created");
+        world
+            .create_circle_collider(body.clone(), 1.5, None)
+            .expect("circle collider should be created");
+
+        let report: StepReport =
+            from_value(world.step().expect("step report should serialize"))
+                .expect("step report should deserialize");
+        assert_eq!(report.step_index, 1);
+        assert_eq!(report.stats.body_count, 1);
+        assert_eq!(report.stats.collider_count, 1);
+
+        let snapshot: DebugSnapshot =
+            from_value(world.debug_snapshot(None).expect("snapshot should serialize"))
+                .expect("snapshot should deserialize");
+        assert_eq!(snapshot.bodies.len(), 1);
+        assert_eq!(snapshot.colliders.len(), 1);
+        assert_eq!(snapshot.bodies[0].transform.translation.x(), 2.0 + (1.0 / 60.0));
+
+        world.sync_query_pipeline();
+        let point: WebPoint = JsValue::from(Tuple2 { x: 2.0, y: 3.0 }).into();
+        let hits: Vec<PointHit> = from_value(
+            world
+                .intersect_point(point, None)
+                .expect("query hits should serialize"),
+        )
+        .expect("query hits should deserialize");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].body, from_value(body).expect("body handle should round-trip"));
+        assert_eq!(hits[0].point.x, 2.0);
+        assert_eq!(hits[0].distance_to_surface, 1.5);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[cfg_attr(not(target_arch = "wasm32"), ignore)]
+    #[wasm_bindgen_test]
+    fn web_world_supports_joint_creation_on_new_api() {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct BodyConfig {
+            body_type: &'static str,
+            translation: Tuple2,
+        }
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct DistanceJointConfig {
+            body_a: BodyHandle,
+            body_b: BodyHandle,
+            local_anchor_a: Tuple2,
+            local_anchor_b: Tuple2,
+            rest_length: FloatNum,
+            stiffness: FloatNum,
+            damping: FloatNum,
+        }
+
+        let world = create_world(None).expect("new WebWorld should be created");
+        let body_a = world
+            .create_body(js_value(&BodyConfig {
+                body_type: "dynamic",
+                translation: Tuple2 { x: 0.0, y: 0.0 },
+            }))
+            .expect("body a should be created");
+        let body_b = world
+            .create_body(js_value(&BodyConfig {
+                body_type: "dynamic",
+                translation: Tuple2 { x: 2.0, y: 0.0 },
+            }))
+            .expect("body b should be created");
+        let body_a_handle: BodyHandle =
+            from_value(body_a.clone()).expect("body a handle should deserialize");
+        let body_b_handle: BodyHandle =
+            from_value(body_b.clone()).expect("body b handle should deserialize");
+
+        world
+            .create_distance_joint(js_value(&DistanceJointConfig {
+                body_a: body_a_handle,
+                body_b: body_b_handle,
+                local_anchor_a: Tuple2 { x: 0.0, y: 0.0 },
+                local_anchor_b: Tuple2 { x: 0.0, y: 0.0 },
+                rest_length: 2.0,
+                stiffness: 1.0,
+                damping: 0.0,
+            }))
+            .expect("distance joint should be created");
+
+        let snapshot: DebugSnapshot =
+            from_value(world.debug_snapshot(None).expect("snapshot should serialize"))
+                .expect("snapshot should deserialize");
+        assert_eq!(snapshot.joints.len(), 1);
     }
 
     #[test]

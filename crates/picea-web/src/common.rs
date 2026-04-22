@@ -1,15 +1,21 @@
 use std::{cell::UnsafeCell, rc::Rc};
 
-use picea::{prelude::*, scene::Scene};
-use picea_macro_tools::wasm_config;
+use picea::{
+    constraints::{JoinConstraintConfig as CoreJoinConstraintConfig, JoinConstraintConfigBuilder},
+    element::ID,
+    math::{point::Point, vector::Vector, FloatNum},
+    meta::{Meta as CoreMeta, MetaBuilder},
+    scene::Scene,
+};
 use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 
 pub(crate) const MAX_REGULAR_POLYGON_EDGE_COUNT: usize = 1024;
 
 #[wasm_bindgen]
-#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default)]
 pub struct Tuple2 {
     pub x: FloatNum,
     pub y: FloatNum,
@@ -87,12 +93,21 @@ pub(crate) fn js_error(message: impl AsRef<str>) -> JsValue {
     JsValue::from_str(message.as_ref())
 }
 
+pub(crate) fn from_js_value<T>(value: JsValue, label: &str) -> Result<T, JsValue>
+where
+    T: DeserializeOwned,
+{
+    serde_wasm_bindgen::from_value(value)
+        .map_err(|_| js_error(format!("{label} should be a valid object")))
+}
+
 pub(crate) fn to_js_value_result<T>(value: &T, label: &str) -> Result<JsValue, JsValue>
 where
     T: Serialize + ?Sized,
 {
-    serde_wasm_bindgen::to_value(value)
-        .map_err(|_| js_error(format!("failed to serialize {label}")))
+    value
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|error| js_error(format!("failed to serialize {label}: {error}")))
 }
 
 pub(crate) fn to_js_value_or_null<T>(value: &T) -> JsValue
@@ -197,7 +212,7 @@ fn parse_regular_polygon_edge_count(edge_count: f64) -> Result<usize, &'static s
     Ok(edge_count as usize)
 }
 
-fn validate_tuple2(label: &'static str, value: &Tuple2) -> Result<(), &'static str> {
+pub(crate) fn validate_tuple2(label: &'static str, value: &Tuple2) -> Result<(), &'static str> {
     if value.x.is_finite() && value.y.is_finite() {
         return Ok(());
     }
@@ -209,7 +224,7 @@ fn validate_tuple2(label: &'static str, value: &Tuple2) -> Result<(), &'static s
     }
 }
 
-fn validate_finite_number<T: Into<f64>>(
+pub(crate) fn validate_finite_number<T: Into<f64>>(
     value: T,
     error_message: &'static str,
 ) -> Result<(), &'static str> {
@@ -221,7 +236,7 @@ fn validate_finite_number<T: Into<f64>>(
     Ok(())
 }
 
-fn validate_positive_number(
+pub(crate) fn validate_positive_number(
     value: FloatNum,
     error_message: &'static str,
 ) -> Result<(), &'static str> {
@@ -233,7 +248,7 @@ fn validate_positive_number(
     Ok(())
 }
 
-fn validate_optional_float(
+pub(crate) fn validate_optional_float(
     value: Option<&FloatNum>,
     error_message: &'static str,
 ) -> Result<(), &'static str> {
@@ -245,13 +260,13 @@ fn validate_optional_float(
 }
 
 fn validate_meta(meta: &Meta) -> Result<(), &'static str> {
-    validate_optional_float(meta.mass().as_ref(), "meta.mass should be a finite number")?;
+    validate_optional_float(meta.mass(), "meta.mass should be a finite number")?;
     validate_optional_float(
-        meta.factor_friction().as_ref(),
+        meta.factor_friction(),
         "meta.factorFriction should be a finite number",
     )?;
     validate_optional_float(
-        meta.factor_restitution().as_ref(),
+        meta.factor_restitution(),
         "meta.factorRestitution should be a finite number",
     )?;
 
@@ -264,15 +279,15 @@ fn validate_meta(meta: &Meta) -> Result<(), &'static str> {
 
 fn validate_join_constraint_config(config: &JoinConstraintConfig) -> Result<(), &'static str> {
     validate_optional_float(
-        config.distance().as_ref(),
+        config.distance(),
         "constraint.distance should be a finite number",
     )?;
     validate_optional_float(
-        config.damping_ratio().as_ref(),
+        config.damping_ratio(),
         "constraint.dampingRatio should be a finite number",
     )?;
     validate_optional_float(
-        config.frequency().as_ref(),
+        config.frequency(),
         "constraint.frequency should be a finite number",
     )?;
 
@@ -285,35 +300,156 @@ fn validate_join_constraint_config(config: &JoinConstraintConfig) -> Result<(), 
     Ok(())
 }
 
-#[wasm_config(bind = Meta)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Meta {
-    #[default = 1.0]
-    pub mass: FloatNum,
-    #[default = true]
-    pub is_fixed: bool,
-    pub is_transparent: bool,
-    pub velocity: Tuple2,
-    #[default = 0.2]
-    pub factor_friction: FloatNum,
-    #[default = 1.]
-    pub factor_restitution: FloatNum,
+    pub mass: Option<FloatNum>,
+    pub is_fixed: Option<bool>,
+    pub is_transparent: Option<bool>,
+    pub velocity: Option<Tuple2>,
+    pub factor_friction: Option<FloatNum>,
+    pub factor_restitution: Option<FloatNum>,
 }
 
-#[derive(Clone)]
-#[wasm_config(bind = JoinConstraintConfig)]
+impl Default for Meta {
+    fn default() -> Self {
+        Self {
+            mass: Some(1.0),
+            is_fixed: Some(true),
+            is_transparent: Some(false),
+            velocity: Some(Tuple2::default()),
+            factor_friction: Some(0.2),
+            factor_restitution: Some(1.0),
+        }
+    }
+}
+
+impl Meta {
+    pub fn mass(&self) -> Option<&FloatNum> {
+        self.mass.as_ref()
+    }
+
+    pub fn is_fixed(&self) -> Option<&bool> {
+        self.is_fixed.as_ref()
+    }
+
+    pub fn is_transparent(&self) -> Option<&bool> {
+        self.is_transparent.as_ref()
+    }
+
+    pub fn velocity(&self) -> Option<&Tuple2> {
+        self.velocity.as_ref()
+    }
+
+    pub fn factor_friction(&self) -> Option<&FloatNum> {
+        self.factor_friction.as_ref()
+    }
+
+    pub fn factor_restitution(&self) -> Option<&FloatNum> {
+        self.factor_restitution.as_ref()
+    }
+}
+
+impl From<&CoreMeta> for Meta {
+    fn from(target: &CoreMeta) -> Self {
+        Self {
+            mass: Some(target.mass()),
+            is_fixed: Some(target.is_fixed()),
+            is_transparent: Some(target.is_transparent()),
+            velocity: Some(Tuple2::from(target.velocity())),
+            factor_friction: Some(target.factor_friction()),
+            factor_restitution: Some(target.factor_restitution()),
+        }
+    }
+}
+
+impl From<&Meta> for MetaBuilder {
+    fn from(target: &Meta) -> Self {
+        let mut builder = MetaBuilder::new();
+        if let Some(mass) = target.mass {
+            builder = builder.mass(mass);
+        }
+        if let Some(is_fixed) = target.is_fixed {
+            builder = builder.is_fixed(is_fixed);
+        }
+        if let Some(is_transparent) = target.is_transparent {
+            builder = builder.is_transparent(is_transparent);
+        }
+        if let Some(velocity) = target.velocity {
+            builder = builder.velocity((velocity.x, velocity.y));
+        }
+        if let Some(factor_friction) = target.factor_friction {
+            builder = builder.factor_friction(factor_friction);
+        }
+        if let Some(factor_restitution) = target.factor_restitution {
+            builder = builder.factor_restitution(factor_restitution);
+        }
+        builder
+    }
+}
+
+impl TryInto<Meta> for OptionalWebMeta {
+    type Error = &'static str;
+
+    fn try_into(self) -> Result<Meta, Self::Error> {
+        let value: JsValue = self.into();
+        from_value(value).map_err(|_| "value of Meta is not valid")
+    }
+}
+
+impl From<&Meta> for WebMeta {
+    fn from(target: &Meta) -> Self {
+        serde_wasm_bindgen::to_value(target).unwrap().into()
+    }
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "Meta")]
+    pub type WebMeta;
+
+    #[wasm_bindgen(typescript_type = "MetaPartial")]
+    pub type OptionalWebMeta;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct JoinConstraintConfig {
-    #[default = 0.]
-    pub distance: FloatNum,
-    #[default = 1.]
-    pub damping_ratio: FloatNum,
-    #[default = 0.5]
-    pub frequency: FloatNum,
-    #[default = false]
-    pub hard: bool,
+    pub distance: Option<FloatNum>,
+    pub damping_ratio: Option<FloatNum>,
+    pub frequency: Option<FloatNum>,
+    pub hard: Option<bool>,
+}
+
+impl Default for JoinConstraintConfig {
+    fn default() -> Self {
+        Self {
+            distance: Some(0.0),
+            damping_ratio: Some(1.0),
+            frequency: Some(0.5),
+            hard: Some(false),
+        }
+    }
 }
 
 impl JoinConstraintConfig {
-    fn assign(&self, config: &mut picea::prelude::JoinConstraintConfig) {
+    pub fn distance(&self) -> Option<&FloatNum> {
+        self.distance.as_ref()
+    }
+
+    pub fn damping_ratio(&self) -> Option<&FloatNum> {
+        self.damping_ratio.as_ref()
+    }
+
+    pub fn frequency(&self) -> Option<&FloatNum> {
+        self.frequency.as_ref()
+    }
+
+    pub fn hard(&self) -> Option<&bool> {
+        self.hard.as_ref()
+    }
+
+    fn assign(&self, config: &mut CoreJoinConstraintConfig) {
         if let Some(v) = self.hard {
             *config.hard_mut() = v;
         }
@@ -327,6 +463,60 @@ impl JoinConstraintConfig {
             *config.frequency_mut() = v;
         }
     }
+}
+
+impl From<&CoreJoinConstraintConfig> for JoinConstraintConfig {
+    fn from(target: &CoreJoinConstraintConfig) -> Self {
+        Self {
+            distance: Some(target.distance()),
+            damping_ratio: Some(target.damping_ratio()),
+            frequency: Some(target.frequency()),
+            hard: Some(target.hard()),
+        }
+    }
+}
+
+impl From<&JoinConstraintConfig> for JoinConstraintConfigBuilder {
+    fn from(target: &JoinConstraintConfig) -> Self {
+        let mut builder = JoinConstraintConfigBuilder::new();
+        if let Some(distance) = target.distance {
+            builder = builder.distance(distance);
+        }
+        if let Some(damping_ratio) = target.damping_ratio {
+            builder = builder.damping_ratio(damping_ratio);
+        }
+        if let Some(frequency) = target.frequency {
+            builder = builder.frequency(frequency);
+        }
+        if let Some(hard) = target.hard {
+            builder = builder.hard(hard);
+        }
+        builder
+    }
+}
+
+impl TryInto<JoinConstraintConfig> for OptionalWebJoinConstraintConfig {
+    type Error = &'static str;
+
+    fn try_into(self) -> Result<JoinConstraintConfig, Self::Error> {
+        let value: JsValue = self.into();
+        from_value(value).map_err(|_| "value of JoinConstraintConfig is not valid")
+    }
+}
+
+impl From<&JoinConstraintConfig> for WebJoinConstraintConfig {
+    fn from(target: &JoinConstraintConfig) -> Self {
+        serde_wasm_bindgen::to_value(target).unwrap().into()
+    }
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "JoinConstraintConfig")]
+    pub type WebJoinConstraintConfig;
+
+    #[wasm_bindgen(typescript_type = "JoinConstraintConfigPartial")]
+    pub type OptionalWebJoinConstraintConfig;
 }
 
 #[wasm_bindgen]

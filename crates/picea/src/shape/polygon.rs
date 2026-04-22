@@ -8,9 +8,8 @@ use picea_macro_tools::{Deref, Shape};
 use crate::{
     element::ComputeMomentOfInertia,
     impl_shape_traits_use_deref,
-    math::{pi, tau},
+    math::{pi, point::Point, tau, vector::Vector, FloatNum},
     meta::Mass,
-    prelude::*,
 };
 
 use super::{

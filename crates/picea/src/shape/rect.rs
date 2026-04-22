@@ -2,7 +2,12 @@ use std::ops::{Deref, DerefMut};
 
 use picea_macro_tools::{Deref, Fields, Shape};
 
-use crate::{element::ComputeMomentOfInertia, impl_shape_traits_use_deref, meta::Mass, prelude::*};
+use crate::{
+    element::ComputeMomentOfInertia,
+    impl_shape_traits_use_deref,
+    math::{point::Point, vector::Vector},
+    meta::Mass,
+};
 
 use super::polygon::ConstPolygon;
 
