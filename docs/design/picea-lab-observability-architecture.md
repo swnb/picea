@@ -277,6 +277,8 @@ Acceptance:
 - can filter by element and pair
 - can export a human-readable `verification.md` summary
 
+> Historical note: `picea-lab` and its related benchmark/viewer surface were removed from the workspace during the `World`-centric refactor. This document is retained only as an archived design reference.
+
 ### L4 Benchmark and Perfetto Export
 
 Expand `crates/picea/benches/physics_scenarios.rs` with scenario families from the architecture refactor requirements and export optional Chrome JSON traces.

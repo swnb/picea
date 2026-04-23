@@ -1,0 +1,28 @@
+error[E0599]: no method named `normalize` found for struct `picea::prelude::Vector` in the current scope
+ --> tests/ui/math_legacy_api/legacy_vector_methods.rs:6:20
+  |
+6 |     let _ = vector.normalize();
+  |                    ^^^^^^^^^
+  |
+help: there is a method `normalized` with a similar name
+  |
+6 |     let _ = vector.normalized();
+  |                             +
+
+error[E0599]: no method named `abs` found for struct `picea::prelude::Vector` in the current scope
+ --> tests/ui/math_legacy_api/legacy_vector_methods.rs:7:20
+  |
+7 |     let _ = vector.abs();
+  |                    ^^^ method not found in `picea::prelude::Vector`
+
+error[E0599]: no method named `affine_transformation_rotate` found for struct `picea::prelude::Vector` in the current scope
+ --> tests/ui/math_legacy_api/legacy_vector_methods.rs:8:20
+  |
+8 |     let _ = vector.affine_transformation_rotate(1.0);
+  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `picea::prelude::Vector`
+
+error[E0599]: no method named `affine_transformation_rotate_self` found for struct `picea::prelude::Vector` in the current scope
+ --> tests/ui/math_legacy_api/legacy_vector_methods.rs:9:12
+  |
+9 |     vector.affine_transformation_rotate_self(1.0);
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `picea::prelude::Vector`

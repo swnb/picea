@@ -1,5 +1,7 @@
 # Runtime Pipeline
 
+> Historical note: this document describes the removed `Scene::tick` pipeline. The current core runtime is `World` + `SimulationPipeline`; use current code as source of truth.
+
 The runtime entrypoint is `Scene::tick(delta_time)`. Public callers can pass arbitrary frame deltas; the scene internally advances the simulation using a fixed step.
 
 ## Fixed-Step Tick
@@ -76,4 +78,3 @@ Current runtime observability is mostly tests and public query methods. Future d
 - sleep/wakeup state transitions
 
 See `docs/ai/debug-artifacts.md` for the recommended debug artifact shape.
-

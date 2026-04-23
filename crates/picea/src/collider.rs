@@ -6,6 +6,7 @@ use crate::{
     body::Pose,
     handles::{BodyHandle, ColliderHandle},
     math::{point::Point, vector::Vector, FloatNum},
+    world::ValidationError,
 };
 
 /// Basic material parameters consumed by simulation, queries, and debug output.
@@ -113,7 +114,7 @@ impl SharedShape {
     pub(crate) fn contains_point(&self, pose: Pose, point: Point) -> bool {
         let local_point = pose.inverse_transform_point(point);
         match self {
-            Self::Circle { radius } => local_point.to_vector().abs() <= *radius,
+            Self::Circle { radius } => Vector::from(local_point).length() <= *radius,
             Self::Rect { half_extents } => {
                 local_point.x().abs() <= half_extents.x()
                     && local_point.y().abs() <= half_extents.y()
@@ -159,9 +160,8 @@ impl SharedShape {
                 (0..sides)
                     .map(|index| {
                         let angle = (index as FloatNum) * crate::math::tau() / sides as FloatNum;
-                        let vector =
-                            Vector::new(0.0, *radius).affine_transformation_rotate(angle);
-                        vector.to_point()
+                        let vector = Vector::new(0.0, *radius).rotated(angle);
+                        Point::from(vector)
                     })
                     .collect()
             }
@@ -170,6 +170,103 @@ impl SharedShape {
             }
             Self::Segment { start, end } => vec![*start, *end],
         }
+    }
+
+    pub(crate) fn validate(&self, field_scope: &'static str) -> Result<(), ValidationError> {
+        match self {
+            Self::Circle { radius } => {
+                if !radius.is_finite() || *radius < 0.0 {
+                    return Err(match field_scope {
+                        "patch" => ValidationError::ColliderPatch {
+                            field: "shape.radius",
+                        },
+                        _ => ValidationError::ColliderDesc {
+                            field: "shape.radius",
+                        },
+                    });
+                }
+            }
+            Self::Rect { half_extents } => {
+                if !half_extents.x().is_finite()
+                    || !half_extents.y().is_finite()
+                    || half_extents.x() < 0.0
+                    || half_extents.y() < 0.0
+                {
+                    return Err(match field_scope {
+                        "patch" => ValidationError::ColliderPatch {
+                            field: "shape.half_extents",
+                        },
+                        _ => ValidationError::ColliderDesc {
+                            field: "shape.half_extents",
+                        },
+                    });
+                }
+            }
+            Self::RegularPolygon { sides, radius } => {
+                if *sides < 3 {
+                    return Err(match field_scope {
+                        "patch" => ValidationError::ColliderPatch {
+                            field: "shape.sides",
+                        },
+                        _ => ValidationError::ColliderDesc {
+                            field: "shape.sides",
+                        },
+                    });
+                }
+                if !radius.is_finite() || *radius < 0.0 {
+                    return Err(match field_scope {
+                        "patch" => ValidationError::ColliderPatch {
+                            field: "shape.radius",
+                        },
+                        _ => ValidationError::ColliderDesc {
+                            field: "shape.radius",
+                        },
+                    });
+                }
+            }
+            Self::ConvexPolygon { vertices } | Self::ConcavePolygon { vertices } => {
+                if vertices.len() < 3 {
+                    return Err(match field_scope {
+                        "patch" => ValidationError::ColliderPatch {
+                            field: "shape.vertices",
+                        },
+                        _ => ValidationError::ColliderDesc {
+                            field: "shape.vertices",
+                        },
+                    });
+                }
+                if vertices
+                    .iter()
+                    .any(|point| !point.x().is_finite() || !point.y().is_finite())
+                {
+                    return Err(match field_scope {
+                        "patch" => ValidationError::ColliderPatch {
+                            field: "shape.vertices",
+                        },
+                        _ => ValidationError::ColliderDesc {
+                            field: "shape.vertices",
+                        },
+                    });
+                }
+            }
+            Self::Segment { start, end } => {
+                if !start.x().is_finite()
+                    || !start.y().is_finite()
+                    || !end.x().is_finite()
+                    || !end.y().is_finite()
+                {
+                    return Err(match field_scope {
+                        "patch" => ValidationError::ColliderPatch {
+                            field: "shape.segment",
+                        },
+                        _ => ValidationError::ColliderDesc {
+                            field: "shape.segment",
+                        },
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -206,6 +303,41 @@ impl Default for ColliderDesc {
     }
 }
 
+impl ColliderDesc {
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+        self.shape.validate("desc")?;
+        if !self.local_pose.translation().x().is_finite() {
+            return Err(ValidationError::ColliderDesc {
+                field: "local_pose.translation.x",
+            });
+        }
+        if !self.local_pose.translation().y().is_finite() {
+            return Err(ValidationError::ColliderDesc {
+                field: "local_pose.translation.y",
+            });
+        }
+        if !self.local_pose.angle().is_finite() {
+            return Err(ValidationError::ColliderDesc {
+                field: "local_pose.angle",
+            });
+        }
+        if !self.density.is_finite() || self.density < 0.0 {
+            return Err(ValidationError::ColliderDesc { field: "density" });
+        }
+        if !self.material.friction.is_finite() || self.material.friction < 0.0 {
+            return Err(ValidationError::ColliderDesc {
+                field: "material.friction",
+            });
+        }
+        if !self.material.restitution.is_finite() || self.material.restitution < 0.0 {
+            return Err(ValidationError::ColliderDesc {
+                field: "material.restitution",
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Partial update applied to an existing collider.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ColliderPatch {
@@ -223,6 +355,46 @@ pub struct ColliderPatch {
     pub is_sensor: Option<bool>,
     /// Replaces the user payload when present.
     pub user_data: Option<u64>,
+}
+
+impl ColliderPatch {
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(shape) = &self.shape {
+            shape.validate("patch")?;
+        }
+        if let Some(local_pose) = self.local_pose {
+            if !local_pose.translation().x().is_finite() {
+                return Err(ValidationError::ColliderPatch {
+                    field: "local_pose.translation.x",
+                });
+            }
+            if !local_pose.translation().y().is_finite() {
+                return Err(ValidationError::ColliderPatch {
+                    field: "local_pose.translation.y",
+                });
+            }
+            if !local_pose.angle().is_finite() {
+                return Err(ValidationError::ColliderPatch {
+                    field: "local_pose.angle",
+                });
+            }
+        }
+        if self
+            .density
+            .is_some_and(|density| !density.is_finite() || density < 0.0)
+        {
+            return Err(ValidationError::ColliderPatch { field: "density" });
+        }
+        if self.material.is_some_and(|material| {
+            !material.friction.is_finite()
+                || material.friction < 0.0
+                || !material.restitution.is_finite()
+                || material.restitution < 0.0
+        }) {
+            return Err(ValidationError::ColliderPatch { field: "material" });
+        }
+        Ok(())
+    }
 }
 
 /// Read-only collider snapshot resolved from a world handle.
@@ -425,7 +597,7 @@ fn point_in_polygon(point: Point, polygon: &[Point]) -> bool {
 fn point_on_segment(point: Point, start: Point, end: Point) -> bool {
     let ab: Vector = (start, end).into();
     let ap: Vector = (start, point).into();
-    let cross = (ab ^ ap).abs();
+    let cross = ab.cross(ap).abs();
     if cross > 1e-4 {
         return false;
     }

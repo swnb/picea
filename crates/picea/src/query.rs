@@ -298,7 +298,7 @@ fn point_distance_to_shape(point: Point, shape: &DebugShape) -> Option<FloatNum>
     match shape {
         DebugShape::Circle { center, radius } => {
             let radius = sanitize_scalar(*radius).max(0.0);
-            let distance = (point - *center).abs();
+            let distance = (point - *center).length();
             (distance <= radius + FloatNum::EPSILON).then_some((radius - distance).max(0.0))
         }
         DebugShape::Polygon { vertices } => contains_point_polygon(vertices, point)
@@ -343,14 +343,14 @@ fn ray_cast_circle(
     radius: FloatNum,
 ) -> Option<(FloatNum, Point, Vector)> {
     let radius = sanitize_scalar(radius).max(0.0);
-    let a = direction * direction;
+    let a = direction.dot(direction);
     if a <= FloatNum::EPSILON {
         return None;
     }
 
     let offset = origin - center;
-    let b = 2.0 * (offset * direction);
-    let c = (offset * offset) - radius * radius;
+    let b = 2.0 * offset.dot(direction);
+    let c = offset.dot(offset) - radius * radius;
     let discriminant = b * b - 4.0 * a * c;
     if discriminant < 0.0 {
         return None;
@@ -368,7 +368,7 @@ fn ray_cast_circle(
         .min_by(|lhs, rhs| lhs.total_cmp(rhs))?;
 
     let point = origin + direction * toi;
-    let normal = (point - center).normalize();
+    let normal = (point - center).normalized();
     Some((toi, point, normal))
 }
 
@@ -395,8 +395,8 @@ fn ray_cast_polygon(
         }
 
         let edge_vector = edge.1 - edge.0;
-        let mut normal = Vector::new(edge_vector.y(), -edge_vector.x()).normalize();
-        if (normal * direction) > 0.0 {
+        let mut normal = edge_vector.perp().normalized();
+        if normal.dot(direction) > 0.0 {
             normal = -normal;
         }
 
@@ -424,8 +424,8 @@ fn ray_cast_segment(
     }
 
     let edge = end - start;
-    let mut normal = Vector::new(edge.y(), -edge.x()).normalize();
-    if (normal * direction) > 0.0 {
+    let mut normal = edge.perp().normalized();
+    if normal.dot(direction) > 0.0 {
         normal = -normal;
     }
     Some((toi, point, normal))
@@ -519,15 +519,15 @@ fn distance_to_polygon_edges(point: Point, vertices: &[Point]) -> FloatNum {
 
 fn distance_point_to_segment(point: Point, start: Point, end: Point) -> FloatNum {
     let edge = end - start;
-    let edge_length_squared = edge * edge;
+    let edge_length_squared = edge.dot(edge);
     if edge_length_squared <= FloatNum::EPSILON {
-        return (point - start).abs();
+        return (point - start).length();
     }
 
     let from_start = point - start;
-    let projection = ((from_start * edge) / edge_length_squared).clamp(0.0, 1.0);
+    let projection = (from_start.dot(edge) / edge_length_squared).clamp(0.0, 1.0);
     let closest = start + edge * projection;
-    (point - closest).abs()
+    (point - closest).length()
 }
 
 fn ray_segment_intersection(
@@ -537,14 +537,14 @@ fn ray_segment_intersection(
     end: Point,
 ) -> Option<(FloatNum, Point)> {
     let edge = end - start;
-    let denominator = direction ^ edge;
+    let denominator = direction.cross(edge);
     if denominator.abs() <= FloatNum::EPSILON {
         return None;
     }
 
     let offset = start - origin;
-    let ray_t = (offset ^ edge) / denominator;
-    let segment_t = (offset ^ direction) / denominator;
+    let ray_t = offset.cross(edge) / denominator;
+    let segment_t = offset.cross(direction) / denominator;
     if ray_t < 0.0 || !(0.0..=1.0).contains(&segment_t) {
         return None;
     }

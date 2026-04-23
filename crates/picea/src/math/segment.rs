@@ -1,83 +1,62 @@
-use std::{
-    mem,
-    ops::{Add, Neg, Sub},
-};
+use std::mem;
 
-use super::{point::Point, vector::Vector, FloatNum};
+use super::{point::Point, vector::Vector};
 
-pub type Axis<T> = Segment<T>;
+pub type Axis = Segment;
 
-#[derive(Clone)]
-pub struct Segment<T: Clone + Copy = FloatNum> {
-    start_point: Point<T>,
-    end_point: Point<T>,
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Segment {
+    start_point: Point,
+    end_point: Point,
 }
 
-impl<T: Clone + Copy> Segment<T> {
-    pub fn new(start_point: Point<T>, end_point: Point<T>) -> Self {
+impl Segment {
+    pub const fn new(start_point: Point, end_point: Point) -> Self {
         Self {
             start_point,
             end_point,
         }
     }
 
-    pub fn start_point(&self) -> &Point<T> {
+    pub fn start_point(&self) -> &Point {
         &self.start_point
     }
 
-    pub fn start_point_mut(&mut self) -> &mut Point<T> {
+    pub fn start_point_mut(&mut self) -> &mut Point {
         &mut self.start_point
     }
 
-    pub fn end_point(&self) -> &Point<T> {
+    pub fn end_point(&self) -> &Point {
         &self.end_point
     }
 
-    pub fn end_point_mut(&mut self) -> &mut Point<T> {
+    pub fn end_point_mut(&mut self) -> &mut Point {
         &mut self.end_point
     }
 
-    pub fn flip(&self) -> Segment<T> {
-        (self.end_point, self.start_point).into()
+    pub fn flip(&self) -> Self {
+        Self::new(self.end_point, self.start_point)
     }
 
     pub fn flip_mut(&mut self) {
         mem::swap(&mut self.end_point, &mut self.start_point);
     }
 
-    pub fn ends(&self) -> (&Point<T>, &Point<T>) {
+    pub fn ends(&self) -> (&Point, &Point) {
         (&self.start_point, &self.end_point)
     }
 
-    pub fn ends_mut(&mut self) -> (&mut Point<T>, &mut Point<T>) {
+    pub fn ends_mut(&mut self) -> (&mut Point, &mut Point) {
         (&mut self.start_point, &mut self.end_point)
     }
-}
 
-impl<T: Clone + Copy> Segment<T>
-where
-    T: Neg<Output = T> + Sub<Output = T>,
-{
-    pub fn to_vector(&self) -> Vector<T> {
-        (self.start_point, self.end_point).into()
+    pub fn direction(&self) -> Vector {
+        Vector::from((self.start_point, self.end_point))
     }
 }
 
-impl<T: Clone + Copy> From<(Point<T>, Point<T>)> for Segment<T> {
-    fn from((start_point, end_point): (Point<T>, Point<T>)) -> Self {
-        Segment {
-            start_point,
-            end_point,
-        }
-    }
-}
-
-impl<T> Add<&Vector<T>> for &Segment<T>
-where
-    T: Add<Output = T> + Clone + Copy,
-{
-    type Output = Segment<T>;
-    fn add(self, rhs: &Vector<T>) -> Self::Output {
-        Segment::new(self.start_point + rhs, self.end_point + rhs)
+impl From<(Point, Point)> for Segment {
+    fn from((start_point, end_point): (Point, Point)) -> Self {
+        Self::new(start_point, end_point)
     }
 }

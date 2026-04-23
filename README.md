@@ -1,18 +1,14 @@
 # Picea
 
-Picea is a work-in-progress 2D physics engine written in Rust, with a core engine crate and a wasm binding crate for JavaScript/WebAssembly consumers.
-
-The project is currently being rebuilt milestone by milestone: first making the baseline verifiable, then tightening geometry contracts, deterministic stepping, storage/handles, shape caching, collision/manifold behavior, solver realism, wasm API hardening, and observability tooling.
+Picea is a work-in-progress 2D physics engine written in Rust. The repository now centers on the `World`-based core crate plus an internal proc-macro helper crate.
 
 ## Workspace
 
-This repository is a Rust workspace with four crates:
+This repository is a Rust workspace with two crates:
 
 | Crate | Purpose |
 | --- | --- |
-| `crates/picea` | Core 2D physics engine: scene stepping, elements, math, shapes, collision, constraints, metadata, and debug tools. |
-| `crates/picea-lab` | Headless/native/web observability tooling over saved Picea artifacts. |
-| `crates/picea-web` | wasm-bindgen public API over the core engine. |
+| `crates/picea` | Core 2D physics engine centered on the `World` API, query/debug read models, and internal pipeline/solver modules. |
 | `crates/macro-tools` | Internal proc macro helpers used by the engine. |
 
 ## Quick Start
@@ -21,24 +17,6 @@ Run the core library tests:
 
 ```bash
 cargo test -p picea --lib
-```
-
-Build all examples without running their windows:
-
-```bash
-cargo test -p picea --examples --no-run
-```
-
-Run one example:
-
-```bash
-cargo run -p picea --example ground
-```
-
-Run wasm API tests:
-
-```bash
-cargo test -p picea-web --lib
 ```
 
 Run macro helper tests:
@@ -77,20 +55,13 @@ Use the milestone plan as the source of truth. These are the common gates used a
 
 ```bash
 cargo test -p picea --lib
-cargo test -p picea --examples --no-run
 cargo test -p picea-macro-tools
-cargo test -p picea-web --lib
-cargo test --workspace --all-targets --no-run -- -D warnings
+cargo test --workspace --all-targets --no-run
 ```
 
 Codex/agent sessions in this repository should prefix these commands with `rtk proxy`; see `AGENTS.md`.
 
-For wasm smoke tests, use the wasm-bindgen runner when it is installed and version-compatible:
-
-```bash
-CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
-  cargo test -p picea-web --lib --target wasm32-unknown-unknown
-```
+`--no-run` is currently treated as a compile gate. It does not guarantee warning-clean output by itself; use dedicated warning cleanup when that is part of the goal.
 
 ## Debugging
 
@@ -103,11 +74,9 @@ Start with:
 
 The debug route usually starts from one of these modules:
 
-- `crates/picea/src/scene/mod.rs` for tick order, fixed-step behavior, callbacks, sleep/wakeup.
-- `crates/picea/src/collision/mod.rs` for broadphase, narrowphase, contact pairs, and contact keys.
-- `crates/picea/src/constraints/` for contact/join/point solving, warm start, lambda, effective mass.
-- `crates/picea/src/shape/` for local/world geometry, convex/concave decomposition, projections, and shape cache behavior.
-- `crates/picea-web/src/` for JS/Rust boundary and wasm public API issues.
+- `crates/picea/src/world.rs` and `crates/picea/src/world/*` for authoritative state ownership and lifecycle APIs.
+- `crates/picea/src/pipeline/*` and `crates/picea/src/solver/*` for stepping orchestration and internal solve phases.
+- `crates/picea/src/query.rs` and `crates/picea/src/debug.rs` for stable read-side behavior.
 
 ## AI Context
 

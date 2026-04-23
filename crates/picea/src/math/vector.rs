@@ -2,497 +2,238 @@ use super::{point::Point, segment::Segment, FloatNum};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Display,
-    ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Shr, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
 };
 
-#[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
-pub struct Vector<T = FloatNum>
-where
-    T: Clone + Copy,
-{
-    pub(super) x: T,
-    pub(super) y: T,
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct Vector {
+    pub(super) x: FloatNum,
+    pub(super) y: FloatNum,
 }
 
-impl<T> Display for Vector<T>
-where
-    T: Display + Copy + Display,
-{
+impl Display for Vector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!("{{ x: {}, y: {} }}", self.x, self.y))
     }
 }
 
-impl<T: Clone + Copy> Vector<T> {
+impl PartialEq for Vector {
+    fn eq(&self, other: &Self) -> bool {
+        (self.x() - other.x()).abs() < FloatNum::EPSILON
+            && (self.y() - other.y()).abs() < FloatNum::EPSILON
+    }
+}
+
+impl Vector {
     #[inline]
-    pub const fn new(x: T, y: T) -> Self {
+    pub const fn new(x: FloatNum, y: FloatNum) -> Self {
         Self { x, y }
     }
 
     #[inline]
-    pub fn clone_from(&mut self, other: &Self) {
-        self.x = other.x;
-        self.y = other.y;
-    }
-
-    #[inline]
-    pub fn x(&self) -> T {
+    pub fn x(&self) -> FloatNum {
         self.x
     }
 
     #[inline]
-    pub fn set_x(&mut self, mut reducer: impl FnMut(T) -> T) {
-        self.x = reducer(self.x);
-    }
-
-    #[inline]
-    pub fn y(&self) -> T {
+    pub fn y(&self) -> FloatNum {
         self.y
     }
 
     #[inline]
-    pub fn set_y(&mut self, mut reducer: impl FnMut(T) -> T) {
-        self.y = reducer(self.y);
+    pub fn length(&self) -> FloatNum {
+        self.x.hypot(self.y)
     }
 
     #[inline]
-    pub fn to_point(&self) -> Point<T> {
-        (self.x, self.y).into()
+    pub fn length_squared(&self) -> FloatNum {
+        self.dot(*self)
     }
-}
 
-macro_rules! impl_vector {
-    ($($T:ident),*) => {
-        $(
-            impl PartialEq for Vector<$T> {
-                fn eq(&self, other: &Self) -> bool {
-                    (self.x() - other.x()).abs() < $T::EPSILON
-                        && (self.y() - other.y()).abs() < $T::EPSILON
-                }
-            }
-
-            impl Vector<$T> {
-                #[inline]
-                pub fn abs(&self) -> $T {
-                    self.x.hypot(self.y)
-                }
-
-                pub fn normalize(&self) -> Vector<$T> {
-                    let abs = self.abs();
-                    // Degenerate vectors have no stable direction; keep them finite by
-                    // collapsing zero, near-zero, and non-finite inputs to zero.
-                    if !abs.is_finite() || abs <= $T::EPSILON {
-                        return (0., 0.).into();
-                    }
-                    let shrink = abs.recip();
-                    (self.x() * shrink, self.y() * shrink).into()
-                }
-
-                #[inline]
-                pub fn rad(&self, vector: &Vector<$T>) -> $T {
-                    vector.y.atan2(vector.x) - self.y.atan2(self.x)
-                }
-
-                #[inline]
-                pub fn affine_transformation_rotate(&self, rad: $T) -> Vector<$T> {
-                    let c = rad.cos();
-                    let s = rad.sin();
-                    // clockwise
-                    let new_x = self.y * s + self.x * c;
-                    let new_y = self.y * c - self.x * s;
-                    (new_x, new_y).into()
-                }
-
-                #[inline]
-                pub fn affine_transformation_rotate_self(&mut self, rad: $T) {
-                    let c = rad.cos();
-                    let s = rad.sin();
-                    let new_x = self.y * s + self.x * c;
-                    let new_y = self.y * c - self.x * s;
-                    self.x = new_x;
-                    self.y = new_y;
-                }
-
-                #[inline]
-                pub fn is_zero(&self) -> bool {
-                    self.x == 0. && self.y == 0.
-                }
-
-                #[inline]
-                pub fn set_zero(&mut self) {
-                    self.x = 0.;
-                    self.y = 0.;
-                }
-            }
-        )*
-    };
-}
-
-impl_vector![f32, f64];
-
-impl<T> From<(T, T)> for Vector<T>
-where
-    T: Clone + Copy,
-{
-    fn from((x, y): (T, T)) -> Self {
-        Self { x, y }
+    #[inline]
+    pub fn dot(&self, other: Vector) -> FloatNum {
+        self.x * other.x + self.y * other.y
     }
-}
 
-impl<T: Clone + Copy> From<[T; 2]> for Vector<T> {
-    fn from([x, y]: [T; 2]) -> Self {
-        Self { x, y }
+    #[inline]
+    pub fn cross(&self, other: Vector) -> FloatNum {
+        self.x * other.y - self.y * other.x
     }
-}
 
-impl<T: Clone + Copy> From<&Segment<T>> for Vector<T>
-where
-    T: Neg<Output = T> + Sub<Output = T>,
-{
-    fn from(segment: &Segment<T>) -> Self {
-        (*segment.start_point(), *segment.end_point()).into()
+    #[inline]
+    pub fn perp(&self) -> Self {
+        Self::new(self.y, -self.x)
     }
-}
 
-impl<T> From<(Point<T>, Point<T>)> for Vector<T>
-where
-    T: Clone + Copy + Neg<Output = T> + Sub<Output = T>,
-{
-    fn from((p1, p2): (Point<T>, Point<T>)) -> Self {
-        let x = p2.x() - p1.x();
-        let y = p2.y() - p1.y();
-        (x, y).into()
+    #[inline]
+    pub fn normalized(&self) -> Self {
+        self.normalized_or_zero()
     }
-}
 
-impl<T> From<(&Point<T>, &Point<T>)> for Vector<T>
-where
-    T: Clone + Copy + Neg<Output = T> + Sub<Output = T>,
-{
-    fn from((p1, p2): (&Point<T>, &Point<T>)) -> Self {
-        let x = p2.x() - p1.x();
-        let y = p2.y() - p1.y();
-        (x, y).into()
+    pub fn normalized_or_zero(&self) -> Self {
+        let length = self.length();
+        // Degenerate vectors have no stable direction; keep them finite by
+        // collapsing zero, near-zero, and non-finite inputs to zero.
+        if !length.is_finite() || length <= FloatNum::EPSILON {
+            return Self::default();
+        }
+
+        *self / length
     }
-}
 
-impl<T> Add<&Vector<T>> for Vector<T>
-where
-    T: Clone + Copy + Add<Output = T>,
-{
-    type Output = Self;
-    fn add(self, rhs: &Vector<T>) -> Self::Output {
-        let new_x = self.x + rhs.x;
-        let new_y = self.y + rhs.y;
-        (new_x, new_y).into()
-    }
-}
-
-impl<T> Add<Vector<T>> for Vector<T>
-where
-    T: Clone + Copy + Add<Output = T>,
-{
-    type Output = Self;
-    fn add(self, rhs: Vector<T>) -> Self::Output {
-        let new_x = self.x + rhs.x;
-        let new_y = self.y + rhs.y;
-        (new_x, new_y).into()
-    }
-}
-
-impl<T> AddAssign<&Vector<T>> for Vector<T>
-where
-    T: Clone + Copy + AddAssign<T>,
-{
-    fn add_assign(&mut self, rhs: &Vector<T>) {
-        self.x += rhs.x;
-        self.y += rhs.y;
-    }
-}
-
-impl<T> AddAssign<Vector<T>> for Vector<T>
-where
-    T: Clone + Copy + AddAssign<T>,
-{
-    fn add_assign(&mut self, rhs: Vector<T>) {
-        self.x += rhs.x;
-        self.y += rhs.y;
-    }
-}
-
-impl<T: Clone + Copy> Mul<Vector<T>> for Vector<T>
-where
-    T: Mul<Output = T> + Add<Output = T>,
-{
-    type Output = T;
-    fn mul(self, rhs: Vector<T>) -> Self::Output {
-        (self.x * rhs.x) + (self.y * rhs.y)
-    }
-}
-
-impl<T: Clone + Copy> Mul<&Vector<T>> for &Vector<T>
-where
-    T: Mul<Output = T> + Add<Output = T>,
-{
-    type Output = T;
-    fn mul(self, rhs: &Vector<T>) -> Self::Output {
-        (self.x * rhs.x) + (self.y * rhs.y)
-    }
-}
-
-impl<T> MulAssign<Vector<T>> for Vector<T>
-where
-    T: Clone + Copy + MulAssign<T>,
-{
-    fn mul_assign(&mut self, rhs: Vector<T>) {
-        self.x *= rhs.x;
-        self.y *= rhs.y;
-    }
-}
-
-impl<T> Neg for Vector<T>
-where
-    T: Clone + Copy + Neg<Output = T>,
-{
-    type Output = Self;
-    fn neg(self) -> Self::Output {
-        (-self.x, -self.y).into()
-    }
-}
-
-impl<T> Sub<&Vector<T>> for Vector<T>
-where
-    T: Clone + Copy + Sub<Output = T>,
-{
-    type Output = Self;
-    fn sub(self, rhs: &Vector<T>) -> Self::Output {
-        let new_x = self.x - rhs.x;
-        let new_y = self.y - rhs.y;
-        (new_x, new_y).into()
-    }
-}
-
-impl<T> Sub<Vector<T>> for Vector<T>
-where
-    T: Clone + Copy + Sub<Output = T>,
-{
-    type Output = Self;
-    fn sub(self, rhs: Vector<T>) -> Self::Output {
-        let new_x = self.x - rhs.x;
-        let new_y = self.y - rhs.y;
-        (new_x, new_y).into()
-    }
-}
-
-impl<T> SubAssign<&Vector<T>> for Vector<T>
-where
-    T: Clone + Copy + SubAssign<T>,
-{
-    fn sub_assign(&mut self, rhs: &Vector<T>) {
-        self.x -= rhs.x;
-        self.y -= rhs.y;
-    }
-}
-
-impl<T> SubAssign<Vector<T>> for Vector<T>
-where
-    T: Clone + Copy + SubAssign<T>,
-{
-    fn sub_assign(&mut self, rhs: Vector<T>) {
-        self.x -= rhs.x;
-        self.y -= rhs.y;
-    }
-}
-
-impl<T> Mul<T> for Vector<T>
-where
-    T: Mul<Output = T> + Clone + Copy,
-{
-    type Output = Vector<T>;
-    fn mul(self, rhs: T) -> Self::Output {
-        let new_x = self.x * rhs;
-        let new_y = self.y * rhs;
-        (new_x, new_y).into()
-    }
-}
-
-impl<T> MulAssign<T> for Vector<T>
-where
-    T: Clone + Copy + MulAssign<T>,
-{
-    fn mul_assign(&mut self, rhs: T) {
-        self.x *= rhs;
-        self.y *= rhs;
-    }
-}
-
-impl<T> Div<&T> for Vector<T>
-where
-    T: Div<Output = T> + Clone + Copy,
-{
-    type Output = Vector<T>;
-    fn div(self, rhs: &T) -> Self::Output {
-        let new_x = self.x / *rhs;
-        let new_y = self.y / *rhs;
-        (new_x, new_y).into()
-    }
-}
-
-impl<T> Div<T> for Vector<T>
-where
-    T: Div<Output = T> + Clone + Copy,
-{
-    type Output = Vector<T>;
-    fn div(self, rhs: T) -> Self::Output {
-        let new_x = self.x / rhs;
-        let new_y = self.y / rhs;
-        (new_x, new_y).into()
-    }
-}
-
-impl<T> DivAssign<&T> for Vector<T>
-where
-    T: Clone + Copy + DivAssign<T>,
-{
-    fn div_assign(&mut self, rhs: &T) {
-        self.x /= *rhs;
-        self.y /= *rhs;
-    }
-}
-
-impl<T> DivAssign<T> for Vector<T>
-where
-    T: Clone + Copy + DivAssign<T>,
-{
-    fn div_assign(&mut self, rhs: T) {
-        self.x /= rhs;
-        self.y /= rhs;
-    }
-}
-
-impl<T: Clone + Copy> Not for Vector<T>
-where
-    T: Neg<Output = T>,
-{
-    type Output = Self;
-    fn not(self) -> Self::Output {
-        Self {
-            x: self.y,
-            y: -self.x,
+    #[inline]
+    pub fn project_onto(&self, axis: Vector) -> FloatNum {
+        let axis_length = axis.length();
+        if !axis_length.is_finite() || axis_length <= FloatNum::EPSILON {
+            0.0
+        } else {
+            self.dot(axis) / axis_length
         }
     }
+
+    #[inline]
+    pub fn rotated(&self, radians: FloatNum) -> Self {
+        let cos = radians.cos();
+        let sin = radians.sin();
+        let new_x = self.y * sin + self.x * cos;
+        let new_y = self.y * cos - self.x * sin;
+        Self::new(new_x, new_y)
+    }
 }
 
-impl<T> From<Vector<T>> for (T, T)
-where
-    T: Clone + Copy,
-{
-    fn from(value: Vector<T>) -> Self {
+impl From<(FloatNum, FloatNum)> for Vector {
+    fn from((x, y): (FloatNum, FloatNum)) -> Self {
+        Self::new(x, y)
+    }
+}
+
+impl From<[FloatNum; 2]> for Vector {
+    fn from([x, y]: [FloatNum; 2]) -> Self {
+        Self::new(x, y)
+    }
+}
+
+impl From<Point> for Vector {
+    fn from(point: Point) -> Self {
+        Self::new(point.x(), point.y())
+    }
+}
+
+impl From<&Point> for Vector {
+    fn from(point: &Point) -> Self {
+        Self::new(point.x(), point.y())
+    }
+}
+
+impl From<Segment> for Vector {
+    fn from(segment: Segment) -> Self {
+        segment.direction()
+    }
+}
+
+impl From<&Segment> for Vector {
+    fn from(segment: &Segment) -> Self {
+        segment.direction()
+    }
+}
+
+impl From<(Point, Point)> for Vector {
+    fn from((p1, p2): (Point, Point)) -> Self {
+        Self::new(p2.x() - p1.x(), p2.y() - p1.y())
+    }
+}
+
+impl From<(&Point, &Point)> for Vector {
+    fn from((p1, p2): (&Point, &Point)) -> Self {
+        Self::new(p2.x() - p1.x(), p2.y() - p1.y())
+    }
+}
+
+impl From<Vector> for (FloatNum, FloatNum) {
+    fn from(value: Vector) -> Self {
         (value.x, value.y)
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Vector3<T: Clone + Copy = FloatNum> {
-    x: T,
-    y: T,
-    z: T,
-}
-
-impl<T: Clone + Copy> Vector3<T> {
-    pub fn x(&self) -> T {
-        self.x
-    }
-
-    pub fn y(&self) -> T {
-        self.y
-    }
-
-    pub fn z(&self) -> T {
-        self.z
-    }
-}
-
-impl From<Vector> for Vector3<f32> {
-    fn from(value: Vector) -> Self {
-        Self {
-            x: value.x,
-            y: value.y,
-            z: 0.,
-        }
-    }
-}
-
-impl From<Vector<f64>> for Vector3<f64> {
-    fn from(value: Vector<f64>) -> Self {
-        Self {
-            x: value.x,
-            y: value.y,
-            z: 0.,
-        }
-    }
-}
-
-impl<T: Clone + Copy> From<(T, T, T)> for Vector3<T> {
-    fn from((x, y, z): (T, T, T)) -> Self {
-        Self { x, y, z }
-    }
-}
-
-// 获取向量的叉乘大小, 只有 z 方向的
-impl<T: Clone + Copy> BitXor<Self> for Vector<T>
-where
-    T: Mul<T, Output = T> + Sub<T, Output = T>,
-    Self: Into<Vector3<T>>,
-{
-    type Output = T;
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        let lhs: Vector3<T> = self.into();
-        (lhs ^ rhs.into()).z()
-    }
-}
-
-impl<T: Clone + Copy> BitXor<Self> for Vector3<T>
-where
-    T: Mul<T, Output = T> + Sub<T, Output = T>,
-{
+impl Add<Vector> for Vector {
     type Output = Self;
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        let Self {
-            x: x1,
-            y: y1,
-            z: z1,
-        } = self;
 
-        let Self {
-            x: x2,
-            y: y2,
-            z: z2,
-        } = rhs;
-
-        let x = y1 * z2 - z1 * y2;
-        let y = z1 * x2 - x1 * z2;
-        let z = x1 * y2 - y1 * x2;
-        Self { x, y, z }
+    fn add(self, rhs: Vector) -> Self::Output {
+        Self::new(self.x + rhs.x, self.y + rhs.y)
     }
 }
 
-impl<T: Clone + Copy> From<Vector3<T>> for Vector<T> {
-    fn from(value: Vector3<T>) -> Self {
-        Self {
-            x: value.x,
-            y: value.y,
-        }
+impl Add<&Vector> for Vector {
+    type Output = Self;
+
+    fn add(self, rhs: &Vector) -> Self::Output {
+        self + *rhs
     }
 }
 
-impl<T: Clone + Copy> Mul for Vector3<T>
-where
-    T: Mul<T, Output = T> + Add<T, Output = T>,
-{
-    type Output = T;
-    fn mul(self, rhs: Self) -> Self::Output {
-        (self.x() * rhs.x()) + (self.y() * rhs.y()) + (self.z() * rhs.z())
+impl AddAssign<Vector> for Vector {
+    fn add_assign(&mut self, rhs: Vector) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+    }
+}
+
+impl AddAssign<&Vector> for Vector {
+    fn add_assign(&mut self, rhs: &Vector) {
+        *self += *rhs;
+    }
+}
+
+impl Sub<Vector> for Vector {
+    type Output = Self;
+
+    fn sub(self, rhs: Vector) -> Self::Output {
+        Self::new(self.x - rhs.x, self.y - rhs.y)
+    }
+}
+
+impl Sub<&Vector> for Vector {
+    type Output = Self;
+
+    fn sub(self, rhs: &Vector) -> Self::Output {
+        self - *rhs
+    }
+}
+
+impl SubAssign<Vector> for Vector {
+    fn sub_assign(&mut self, rhs: Vector) {
+        self.x -= rhs.x;
+        self.y -= rhs.y;
+    }
+}
+
+impl SubAssign<&Vector> for Vector {
+    fn sub_assign(&mut self, rhs: &Vector) {
+        *self -= *rhs;
+    }
+}
+
+impl Mul<FloatNum> for Vector {
+    type Output = Self;
+
+    fn mul(self, rhs: FloatNum) -> Self::Output {
+        Self::new(self.x * rhs, self.y * rhs)
+    }
+}
+
+impl Div<FloatNum> for Vector {
+    type Output = Self;
+
+    fn div(self, rhs: FloatNum) -> Self::Output {
+        Self::new(self.x / rhs, self.y / rhs)
+    }
+}
+
+impl Neg for Vector {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self::new(-self.x, -self.y)
     }
 }
 
@@ -501,76 +242,35 @@ mod tests {
     use super::Vector;
 
     #[test]
-    fn normalize_returns_zero_for_degenerate_f32_vectors() {
+    fn normalized_or_zero_returns_zero_for_degenerate_vectors() {
         let vectors = [
-            Vector::<f32>::new(0., 0.),
-            Vector::<f32>::new(f32::MIN_POSITIVE * f32::EPSILON, 0.),
+            Vector::new(0.0, 0.0),
+            Vector::new(f32::MIN_POSITIVE * f32::EPSILON, 0.0),
         ];
 
         for vector in vectors {
-            let normalized = vector.normalize();
+            let normalized = vector.normalized_or_zero();
             assert!(normalized.x().is_finite());
             assert!(normalized.y().is_finite());
-            assert_eq!(normalized, Vector::new(0., 0.));
+            assert_eq!(normalized, Vector::new(0.0, 0.0));
         }
     }
 
     #[test]
-    fn normalize_returns_zero_for_degenerate_f64_vectors() {
-        let vectors = [
-            Vector::<f64>::new(0., 0.),
-            Vector::<f64>::new(f64::MIN_POSITIVE * f64::EPSILON, 0.),
-        ];
+    fn normalized_preserves_regular_vectors() {
+        let normalized = Vector::new(3.0, 4.0).normalized();
 
-        for vector in vectors {
-            let normalized = vector.normalize();
-            assert!(normalized.x().is_finite());
-            assert!(normalized.y().is_finite());
-            assert_eq!(normalized, Vector::new(0., 0.));
-        }
-    }
-
-    #[test]
-    fn normalize_preserves_regular_vectors() {
-        let normalized = Vector::<f32>::new(3., 4.).normalize();
-
-        assert!((normalized.abs() - 1.).abs() <= f32::EPSILON);
+        assert!((normalized.length() - 1.0).abs() <= f32::EPSILON);
         assert_eq!(normalized, Vector::new(0.6, 0.8));
     }
 
     #[test]
     fn projection_onto_degenerate_vector_returns_zero() {
-        let vector = Vector::<f32>::new(3., 4.);
-        let zero = Vector::<f32>::new(0., 0.);
-        let tiny = Vector::<f32>::new(f32::MIN_POSITIVE * f32::EPSILON, 0.);
+        let vector = Vector::new(3.0, 4.0);
+        let zero = Vector::new(0.0, 0.0);
+        let tiny = Vector::new(f32::MIN_POSITIVE * f32::EPSILON, 0.0);
 
-        assert_eq!(vector >> zero, 0.);
-        assert_eq!(&vector >> &zero, 0.);
-        assert_eq!(vector >> tiny, 0.);
-    }
-}
-
-#[inline]
-fn project_vector_on_vector(lhs: &Vector, rhs: &Vector) -> f32 {
-    let rhs_abs = rhs.abs();
-    // Projection onto a degenerate axis has no meaningful signed length.
-    if !rhs_abs.is_finite() || rhs_abs <= f32::EPSILON {
-        0.
-    } else {
-        lhs * rhs * rhs_abs.recip()
-    }
-}
-
-impl Shr<Vector> for Vector {
-    type Output = f32;
-    fn shr(self, rhs: Vector) -> Self::Output {
-        project_vector_on_vector(&self, &rhs)
-    }
-}
-
-impl Shr<&Vector> for &Vector {
-    type Output = f32;
-    fn shr(self, rhs: &Vector) -> Self::Output {
-        project_vector_on_vector(self, rhs)
+        assert_eq!(vector.project_onto(zero), 0.0);
+        assert_eq!(vector.project_onto(tiny), 0.0);
     }
 }

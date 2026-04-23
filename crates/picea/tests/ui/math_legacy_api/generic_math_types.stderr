@@ -1,0 +1,41 @@
+error[E0107]: struct takes 0 generic arguments but 1 generic argument was supplied
+ --> tests/ui/math_legacy_api/generic_math_types.rs:4:18
+  |
+4 |     let _point = Point::<f64>::new(0.0, 0.0);
+  |                  ^^^^^------- help: remove the unnecessary generics
+  |                  |
+  |                  expected 0 generic arguments
+  |
+note: struct defined here, with 0 generic parameters
+ --> src/math/point.rs
+  |
+  | pub struct Point {
+  |            ^^^^^
+
+error[E0107]: struct takes 0 generic arguments but 1 generic argument was supplied
+ --> tests/ui/math_legacy_api/generic_math_types.rs:5:19
+  |
+5 |     let _vector = Vector::<f64>::new(1.0, 0.0);
+  |                   ^^^^^^------- help: remove the unnecessary generics
+  |                   |
+  |                   expected 0 generic arguments
+  |
+note: struct defined here, with 0 generic parameters
+ --> src/math/vector.rs
+  |
+  | pub struct Vector {
+  |            ^^^^^^
+
+error[E0107]: struct takes 0 generic arguments but 1 generic argument was supplied
+ --> tests/ui/math_legacy_api/generic_math_types.rs:6:20
+  |
+6 |     let _segment = Segment::<f64>::new(Point::new(0.0, 0.0), Point::new(1.0, 0.0));
+  |                    ^^^^^^^------- help: remove the unnecessary generics
+  |                    |
+  |                    expected 0 generic arguments
+  |
+note: struct defined here, with 0 generic parameters
+ --> src/math/segment.rs
+  |
+  | pub struct Segment {
+  |            ^^^^^^^

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     handles::{BodyHandle, ColliderHandle, JointHandle},
     math::{point::Point, vector::Vector, FloatNum},
+    world::ValidationError,
 };
 
 /// World-space position and rotation for bodies and colliders.
@@ -30,7 +31,7 @@ impl Pose {
 
     /// Returns the pose translation as a point.
     pub fn point(&self) -> Point {
-        self.translation.to_point()
+        self.translation.into()
     }
 
     /// Returns the pose rotation in radians.
@@ -40,7 +41,7 @@ impl Pose {
 
     /// Composes `other` onto this pose, producing a world-space transform.
     pub fn compose(&self, other: Pose) -> Pose {
-        let rotated = other.translation.affine_transformation_rotate(self.angle);
+        let rotated = other.translation.rotated(self.angle);
         Self {
             translation: self.translation + rotated,
             angle: self.angle + other.angle,
@@ -49,14 +50,14 @@ impl Pose {
 
     /// Transforms a local-space point into world space.
     pub fn transform_point(&self, point: Point) -> Point {
-        let rotated = point.to_vector().affine_transformation_rotate(self.angle);
+        let rotated = Vector::from(point).rotated(self.angle);
         self.point() + rotated
     }
 
     /// Transforms a world-space point into this pose's local space.
     pub fn inverse_transform_point(&self, point: Point) -> Point {
         let local = point - self.point();
-        local.affine_transformation_rotate(-self.angle).to_point()
+        Point::from(local.rotated(-self.angle))
     }
 }
 
@@ -133,33 +134,51 @@ impl Default for BodyDesc {
 }
 
 impl BodyDesc {
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
         if !self.pose.translation().x().is_finite() {
-            return Err("pose.translation.x");
+            return Err(ValidationError::BodyDesc {
+                field: "pose.translation.x",
+            });
         }
         if !self.pose.translation().y().is_finite() {
-            return Err("pose.translation.y");
+            return Err(ValidationError::BodyDesc {
+                field: "pose.translation.y",
+            });
         }
         if !self.pose.angle().is_finite() {
-            return Err("pose.angle");
+            return Err(ValidationError::BodyDesc {
+                field: "pose.angle",
+            });
         }
         if !self.linear_velocity.x().is_finite() {
-            return Err("linear_velocity.x");
+            return Err(ValidationError::BodyDesc {
+                field: "linear_velocity.x",
+            });
         }
         if !self.linear_velocity.y().is_finite() {
-            return Err("linear_velocity.y");
+            return Err(ValidationError::BodyDesc {
+                field: "linear_velocity.y",
+            });
         }
         if !self.angular_velocity.is_finite() {
-            return Err("angular_velocity");
+            return Err(ValidationError::BodyDesc {
+                field: "angular_velocity",
+            });
         }
-        if !self.linear_damping.is_finite() {
-            return Err("linear_damping");
+        if !self.linear_damping.is_finite() || self.linear_damping < 0.0 {
+            return Err(ValidationError::BodyDesc {
+                field: "linear_damping",
+            });
         }
-        if !self.angular_damping.is_finite() {
-            return Err("angular_damping");
+        if !self.angular_damping.is_finite() || self.angular_damping < 0.0 {
+            return Err(ValidationError::BodyDesc {
+                field: "angular_damping",
+            });
         }
         if !self.gravity_scale.is_finite() {
-            return Err("gravity_scale");
+            return Err(ValidationError::BodyDesc {
+                field: "gravity_scale",
+            });
         }
         Ok(())
     }
@@ -193,49 +212,67 @@ pub struct BodyPatch {
 }
 
 impl BodyPatch {
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
         if let Some(pose) = self.pose {
             if !pose.translation().x().is_finite() {
-                return Err("pose.translation.x");
+                return Err(ValidationError::BodyPatch {
+                    field: "pose.translation.x",
+                });
             }
             if !pose.translation().y().is_finite() {
-                return Err("pose.translation.y");
+                return Err(ValidationError::BodyPatch {
+                    field: "pose.translation.y",
+                });
             }
             if !pose.angle().is_finite() {
-                return Err("pose.angle");
+                return Err(ValidationError::BodyPatch {
+                    field: "pose.angle",
+                });
             }
         }
         if let Some(linear_velocity) = self.linear_velocity {
             if !linear_velocity.x().is_finite() {
-                return Err("linear_velocity.x");
+                return Err(ValidationError::BodyPatch {
+                    field: "linear_velocity.x",
+                });
             }
             if !linear_velocity.y().is_finite() {
-                return Err("linear_velocity.y");
+                return Err(ValidationError::BodyPatch {
+                    field: "linear_velocity.y",
+                });
             }
         }
         if self
             .angular_velocity
             .is_some_and(|angular_velocity| !angular_velocity.is_finite())
         {
-            return Err("angular_velocity");
+            return Err(ValidationError::BodyPatch {
+                field: "angular_velocity",
+            });
         }
         if self
             .linear_damping
-            .is_some_and(|linear_damping| !linear_damping.is_finite())
+            .is_some_and(|linear_damping| !linear_damping.is_finite() || linear_damping < 0.0)
         {
-            return Err("linear_damping");
+            return Err(ValidationError::BodyPatch {
+                field: "linear_damping",
+            });
         }
         if self
             .angular_damping
-            .is_some_and(|angular_damping| !angular_damping.is_finite())
+            .is_some_and(|angular_damping| !angular_damping.is_finite() || angular_damping < 0.0)
         {
-            return Err("angular_damping");
+            return Err(ValidationError::BodyPatch {
+                field: "angular_damping",
+            });
         }
         if self
             .gravity_scale
             .is_some_and(|gravity_scale| !gravity_scale.is_finite())
         {
-            return Err("gravity_scale");
+            return Err(ValidationError::BodyPatch {
+                field: "gravity_scale",
+            });
         }
         Ok(())
     }

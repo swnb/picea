@@ -39,6 +39,15 @@ pub struct SleepEvent {
     pub is_sleeping: bool,
 }
 
+/// Explicit notice that the pipeline detected and contained non-finite math.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NumericsWarningEvent {
+    /// Broad pipeline phase that detected the invalid numeric value.
+    pub phase: String,
+    /// Short stable reason string for downstream debugging.
+    pub detail: String,
+}
+
 /// Stable event stream returned by `SimulationPipeline::step`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WorldEvent {
@@ -50,6 +59,8 @@ pub enum WorldEvent {
     ContactEnded(ContactEvent),
     /// A body entered or left the sleeping state.
     SleepChanged(SleepEvent),
+    /// The step detected and contained a non-finite intermediate value.
+    NumericsWarning(NumericsWarningEvent),
     /// A body was created in the authoritative world state.
     BodyCreated { body: BodyHandle },
     /// A body was removed from the authoritative world state.
@@ -63,7 +74,7 @@ pub enum WorldEvent {
 #[cfg(test)]
 mod tests {
     use crate::{
-        events::{ContactEvent, SleepEvent, WorldEvent},
+        events::{ContactEvent, NumericsWarningEvent, SleepEvent, WorldEvent},
         handles::{BodyHandle, ColliderHandle, ContactId, JointHandle, ManifoldId},
         math::{point::Point, vector::Vector},
     };
@@ -85,12 +96,17 @@ mod tests {
             body: BodyHandle::from_raw_parts(9, 0),
             is_sleeping: true,
         };
+        let numerics = NumericsWarningEvent {
+            phase: "integrate".into(),
+            detail: "body_state".into(),
+        };
 
         let events = [
             WorldEvent::ContactStarted(contact),
             WorldEvent::ContactPersisted(contact),
             WorldEvent::ContactEnded(contact),
             WorldEvent::SleepChanged(sleep),
+            WorldEvent::NumericsWarning(numerics.clone()),
             WorldEvent::BodyCreated {
                 body: BodyHandle::from_raw_parts(10, 0),
             },
@@ -109,9 +125,18 @@ mod tests {
         assert!(matches!(&events[1], WorldEvent::ContactPersisted(event) if event == &contact));
         assert!(matches!(&events[2], WorldEvent::ContactEnded(event) if event == &contact));
         assert!(matches!(&events[3], WorldEvent::SleepChanged(event) if event == &sleep));
-        assert!(matches!(&events[4], WorldEvent::BodyCreated { body } if *body == BodyHandle::from_raw_parts(10, 0)));
-        assert!(matches!(&events[5], WorldEvent::BodyRemoved { body } if *body == BodyHandle::from_raw_parts(11, 0)));
-        assert!(matches!(&events[6], WorldEvent::JointCreated { joint } if *joint == JointHandle::from_raw_parts(12, 0)));
-        assert!(matches!(&events[7], WorldEvent::JointRemoved { joint } if *joint == JointHandle::from_raw_parts(13, 0)));
+        assert!(matches!(&events[4], WorldEvent::NumericsWarning(event) if event == &numerics));
+        assert!(
+            matches!(&events[5], WorldEvent::BodyCreated { body } if *body == BodyHandle::from_raw_parts(10, 0))
+        );
+        assert!(
+            matches!(&events[6], WorldEvent::BodyRemoved { body } if *body == BodyHandle::from_raw_parts(11, 0))
+        );
+        assert!(
+            matches!(&events[7], WorldEvent::JointCreated { joint } if *joint == JointHandle::from_raw_parts(12, 0))
+        );
+        assert!(
+            matches!(&events[8], WorldEvent::JointRemoved { joint } if *joint == JointHandle::from_raw_parts(13, 0))
+        );
     }
 }

@@ -660,7 +660,8 @@ impl DebugSnapshot {
             meta: DebugMeta {
                 revision: Some(report.map_or_else(|| world.revision(), |report| report.revision)),
                 dt: report.map_or_else(|| world.last_step_dt(), |report| report.dt),
-                simulated_time: report.map_or_else(|| world.simulated_time(), |report| report.simulated_time),
+                simulated_time: report
+                    .map_or_else(|| world.simulated_time(), |report| report.simulated_time),
                 gravity: world.desc().gravity,
             },
             stats: DebugStats {
@@ -818,8 +819,8 @@ fn build_debug_primitives(
     }
 
     for contact in contacts {
-        let direction = if contact.normal.abs() > FloatNum::EPSILON {
-            contact.normal.normalize() * contact.depth.abs().max(0.25)
+        let direction = if contact.normal.length() > FloatNum::EPSILON {
+            contact.normal.normalized() * contact.depth.abs().max(0.25)
         } else {
             Vector::new(0.0, 0.0)
         };
@@ -876,8 +877,8 @@ fn debug_shape_from_shared_shape(shape: &SharedShape, world_pose: Pose) -> Debug
                 .map(|index| {
                     let angle =
                         (index as FloatNum) * crate::math::tau() / (*sides).max(3) as FloatNum;
-                    let vector = Vector::new(0.0, *radius).affine_transformation_rotate(angle);
-                    transform_point(vector.to_point(), world_pose)
+                    let vector = Vector::new(0.0, *radius).rotated(angle);
+                    transform_point(vector.into(), world_pose)
                 })
                 .collect(),
         },

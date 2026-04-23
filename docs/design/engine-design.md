@@ -1,5 +1,7 @@
 # Engine Design
 
+> Historical note: this document still describes the removed `Scene`/`ElementBuilder`/`picea-web` architecture. The current implementation is centered on `World`, `SimulationPipeline`, and stable read-side APIs.
+
 Picea is moving from a prototype physics engine toward a verifiable and maintainable 2D rigid-body engine. The current design favors deterministic behavior, explicit module ownership, and testable incremental milestones.
 
 ## Goals
@@ -75,4 +77,3 @@ wasm users interact through `WebScene` and generated wasm-bindgen exports. The w
 - Storage mutation invalidates contact manifolds to avoid stale element pointers.
 - wasm public APIs should not panic on invalid JS input; `try*` methods should return errors.
 - Documentation and tests must identify residual risk when behavior is intentionally conservative.
-

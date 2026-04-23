@@ -19,17 +19,7 @@ impl Not for AxisDirection {
     }
 }
 
-impl From<AxisDirection> for Vector<f32> {
-    fn from(axis: AxisDirection) -> Self {
-        use AxisDirection::*;
-        match axis {
-            X => (1., 0.).into(),
-            Y => (0., 1.).into(),
-        }
-    }
-}
-
-impl From<AxisDirection> for Vector<f64> {
+impl From<AxisDirection> for Vector {
     fn from(axis: AxisDirection) -> Self {
         use AxisDirection::*;
         match axis {

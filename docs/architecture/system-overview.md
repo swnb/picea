@@ -1,84 +1,64 @@
 # System Overview
 
-Picea is a Rust workspace for a 2D physics engine. The core engine is in `crates/picea`; `crates/picea-web` exposes a wasm-bindgen API over the core; `crates/macro-tools` provides internal proc macro helpers.
+Picea is a Rust workspace for a 2D physics engine. The core engine is in `crates/picea`; `crates/macro-tools` provides internal proc macro helpers.
 
 ## Workspace Diagram
 
 ```mermaid
 flowchart LR
-    RustUser["Rust user / examples"] --> Core["crates/picea"]
-    JsUser["JS / WASM user"] --> Web["crates/picea-web"]
-    Web --> Core
+    RustUser["Rust user"] --> Core["crates/picea"]
     Macro["crates/macro-tools"] --> Core
-    Macro --> Web
 
     subgraph CoreModules["crates/picea modules"]
-        Scene["scene"]
-        Element["element"]
+        World["world"]
+        Pipeline["pipeline"]
+        Solver["solver"]
         Math["math"]
-        Shape["shape"]
-        Collision["collision"]
-        Constraints["constraints"]
-        Meta["meta"]
-        Tools["tools"]
+        Query["query"]
+        Debug["debug"]
     end
 
-    Core --> Scene
-    Core --> Element
+    Core --> World
+    Core --> Pipeline
+    Core --> Solver
     Core --> Math
-    Core --> Shape
-    Core --> Collision
-    Core --> Constraints
-    Core --> Meta
-    Core --> Tools
+    Core --> Query
+    Core --> Debug
 ```
 
 ## Crate Boundaries
 
 | Crate | Owns | Does Not Own |
 | --- | --- | --- |
-| `crates/picea` | Physics runtime, data model, math, shapes, collision, constraints, debug helpers. | wasm public API and JS/TS error shape. |
-| `crates/picea-web` | wasm-bindgen facade, JS input validation, legacy fallback methods, `try*` Result methods, TypeScript section. | Core physics formulas, collision algorithms, solver policy. |
+| `crates/picea` | World-centric physics runtime, math, stepping pipeline, query/debug facts. | GUI, wasm facade, or separate artifact tooling. |
 | `crates/macro-tools` | Internal derive/attribute helpers used by the Rust crates. | Runtime behavior or physics semantics. |
 
 ## Core Module Ownership
 
 | Module | Owns | Main Entry |
 | --- | --- | --- |
-| `scene` | `Scene`, fixed-step ticking, constraint orchestration, callbacks, sleep/wakeup, contact manifold refresh timing. | `crates/picea/src/scene/mod.rs` |
-| `element` | Body/shape/meta/data container, IDs, storage, pair mutable lookup. | `crates/picea/src/element/mod.rs`, `element/store.rs` |
+| `world` | `World` lifecycle surface, retained state, handles, revisioned store/runtime facts. | `crates/picea/src/world.rs`, `world/*` |
+| `pipeline` | `SimulationPipeline` and explicit step orchestration. | `crates/picea/src/pipeline.rs`, `pipeline/*` |
+| `solver` | Internal solve helpers for the world path. | `crates/picea/src/solver/*` |
 | `math` | Numeric types and operations: `Point`, `Vector`, `Segment`, `Matrix`, axis helpers. | `crates/picea/src/math/mod.rs` |
-| `shape` | Shape traits, circles/polygons, convex/concave geometry, local/world transform sync. | `crates/picea/src/shape/mod.rs` |
-| `collision` | Projection traits, AABB generation, broadphase candidates, narrowphase dispatch, contact point pairs, contact keys. | `crates/picea/src/collision/mod.rs` |
-| `constraints` | Contact/join/point constraints, warm start, effective mass, velocity solve, position correction. | `crates/picea/src/constraints/mod.rs` |
-| `meta` | Mass, transform, velocity, kinetic state, force metadata. | `crates/picea/src/meta/mod.rs` |
-| `tools` | Debug and helper tools outside the core physics contract. | `crates/picea/src/tools/mod.rs` |
+| `query` | Stable spatial queries over debug/world facts. | `crates/picea/src/query.rs` |
+| `debug` | Stable debug snapshot and structured read model. | `crates/picea/src/debug.rs` |
 
 ## Dependency Shape
 
 ```mermaid
 flowchart TD
-    Scene --> ElementStore["element::store"]
-    Scene --> Context["scene::context"]
-    Scene --> ContactManifold["constraints::contact_manifold"]
-    Scene --> PointJoin["constraints::point / join"]
-    Scene --> CollisionDetect["collision"]
-    ElementStore --> Element
-    Element --> Shape
-    Element --> Meta
-    Shape --> Math
-    CollisionDetect --> ShapeTraits["Projector / Collider / SubCollider"]
-    CollisionDetect --> ContactPair["ContactPointPair / ContactPointKey"]
-    ContactManifold --> ContactConstraint["constraints::contact"]
-    ContactConstraint --> Meta
-    ContactConstraint --> Math
+    Pipeline --> World
+    Pipeline --> Solver
+    World --> Math
+    Debug --> World
+    Query --> Debug
+    Solver --> Math
 ```
 
 ## Current Architectural Principles
 
-- Runtime truth lives in `Scene` and its owned stores.
-- wasm is a facade over core behavior, not a second physics implementation.
-- Shape geometry owns local/world transform semantics; collision consumes shape projections and sub-colliders.
-- Collision finds candidate contacts; constraints solve impulses and position correction.
+- Runtime truth lives in `World` and its retained facts.
+- External consumers should read through `DebugSnapshot` and `QueryPipeline`, not private internals.
+- Math types are concrete `f32` and use named algebra instead of legacy operator tricks.
 - Milestone changes should stay inside the current module boundary unless the milestone explicitly expands scope.
-

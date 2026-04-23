@@ -1,7 +1,9 @@
 use picea::prelude::{
-    BodyDesc, BodyPatch, BodyType, ColliderDesc, JointDesc, Pose, SharedShape, SimulationPipeline,
-    StepConfig, World, WorldAnchorJointDesc, WorldDesc, WorldError, WorldEvent,
+    BodyDesc, BodyPatch, BodyType, ColliderDesc, ColliderPatch, DistanceJointDesc,
+    DistanceJointPatch, JointDesc, JointPatch, Pose, SharedShape, SimulationPipeline, StepConfig,
+    World, WorldAnchorJointDesc, WorldAnchorJointPatch, WorldDesc, WorldError, WorldEvent,
 };
+use picea::world::{HandleError, TopologyError, ValidationError};
 
 #[test]
 fn body_inputs_must_be_finite_before_world_state_mutates() {
@@ -16,9 +18,9 @@ fn body_inputs_must_be_finite_before_world_state_mutates() {
         .expect_err("non-finite creation inputs must be rejected");
     assert!(matches!(
         create_error,
-        WorldError::InvalidBodyDesc {
+        WorldError::Validation(ValidationError::BodyDesc {
             field: "pose.translation.x",
-        }
+        })
     ));
     assert_eq!(
         world.revision(),
@@ -42,14 +44,143 @@ fn body_inputs_must_be_finite_before_world_state_mutates() {
         .expect_err("non-finite patch inputs must be rejected");
     assert!(matches!(
         patch_error,
-        WorldError::InvalidBodyPatch {
+        WorldError::Validation(ValidationError::BodyPatch {
             field: "gravity_scale",
-        }
+        })
     ));
     assert_eq!(
         world.revision(),
         patch_revision,
         "rejected patches must not bump world revision"
+    );
+}
+
+#[test]
+fn collider_and_joint_inputs_are_validated_before_revision_bump() {
+    let mut world = World::new(WorldDesc::default());
+    let body_a = world
+        .create_body(BodyDesc::default())
+        .expect("body should be created");
+    let body_b = world
+        .create_body(BodyDesc::default())
+        .expect("body should be created");
+
+    let create_revision = world.revision();
+    let create_collider_error = world
+        .create_collider(
+            body_a,
+            ColliderDesc {
+                density: f32::INFINITY,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect_err("non-finite collider inputs must be rejected");
+    assert!(matches!(
+        create_collider_error,
+        WorldError::Validation(ValidationError::ColliderDesc { field: "density" })
+    ));
+    assert_eq!(
+        world.revision(),
+        create_revision,
+        "rejected collider descriptors must not bump the world revision"
+    );
+
+    let collider = world
+        .create_collider(body_a, ColliderDesc::default())
+        .expect("finite collider should be created");
+    let collider_patch_revision = world.revision();
+    let collider_patch_error = world
+        .apply_collider_patch(
+            collider,
+            ColliderPatch {
+                density: Some(-1.0),
+                ..ColliderPatch::default()
+            },
+        )
+        .expect_err("negative collider patch density must be rejected");
+    assert!(matches!(
+        collider_patch_error,
+        WorldError::Validation(ValidationError::ColliderPatch { field: "density" })
+    ));
+    assert_eq!(
+        world.revision(),
+        collider_patch_revision,
+        "rejected collider patches must not bump the world revision"
+    );
+
+    let same_body_revision = world.revision();
+    let same_body_error = world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a,
+            body_b: body_a,
+            ..DistanceJointDesc::default()
+        }))
+        .expect_err("same-body distance joints must be rejected");
+    assert!(matches!(
+        same_body_error,
+        WorldError::Topology(TopologyError::SameBodyJointPair { .. })
+    ));
+    assert_eq!(
+        world.revision(),
+        same_body_revision,
+        "topology rejection must not bump the world revision"
+    );
+
+    let joint = world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a,
+            body_b,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("finite distance joint should be created");
+    let joint_patch_revision = world.revision();
+    let joint_patch_error = world
+        .apply_joint_patch(
+            joint,
+            JointPatch::Distance(DistanceJointPatch {
+                rest_length: Some(f32::NAN),
+                ..DistanceJointPatch::default()
+            }),
+        )
+        .expect_err("non-finite joint patches must be rejected");
+    assert!(matches!(
+        joint_patch_error,
+        WorldError::Validation(ValidationError::JointPatch {
+            field: "rest_length",
+        })
+    ));
+    assert_eq!(
+        world.revision(),
+        joint_patch_revision,
+        "rejected joint patches must not bump the world revision"
+    );
+
+    let world_anchor_joint = world
+        .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+            body: body_a,
+            ..WorldAnchorJointDesc::default()
+        }))
+        .expect("world-anchor joint should be created");
+    let world_anchor_patch_revision = world.revision();
+    let world_anchor_patch_error = world
+        .apply_joint_patch(
+            world_anchor_joint,
+            JointPatch::WorldAnchor(WorldAnchorJointPatch {
+                world_anchor: Some((f32::INFINITY, 0.0).into()),
+                ..WorldAnchorJointPatch::default()
+            }),
+        )
+        .expect_err("non-finite world-anchor patches must be rejected");
+    assert!(matches!(
+        world_anchor_patch_error,
+        WorldError::Validation(ValidationError::JointPatch {
+            field: "world_anchor.x",
+        })
+    ));
+    assert_eq!(
+        world.revision(),
+        world_anchor_patch_revision,
+        "rejected world-anchor patches must not bump the world revision"
     );
 }
 
@@ -84,25 +215,62 @@ fn stale_reads_are_explicit_instead_of_collapsing_into_absence() {
 
     assert!(matches!(
         world.try_body(body_a),
-        Err(WorldError::StaleBodyHandle { .. })
+        Err(WorldError::Handle(HandleError::StaleBody { .. }))
     ));
     assert!(matches!(
         world.try_collider(collider),
-        Err(WorldError::StaleColliderHandle { .. })
+        Err(WorldError::Handle(HandleError::StaleCollider { .. }))
     ));
     assert!(matches!(
         world.try_joint(joint),
-        Err(WorldError::StaleJointHandle { .. })
+        Err(WorldError::Handle(HandleError::StaleJoint { .. }))
     ));
     assert!(matches!(
         world.try_colliders_for_body(body_a),
-        Err(WorldError::StaleBodyHandle { .. })
+        Err(WorldError::Handle(HandleError::StaleBody { .. }))
     ));
     assert!(world
         .try_body(body_b)
         .expect("live handles should still resolve")
         .handle()
         .is_valid());
+}
+
+#[test]
+fn step_emits_numeric_warnings_without_committing_non_finite_body_state() {
+    let mut world = World::new(WorldDesc {
+        gravity: (f32::NAN, 0.0).into(),
+        enable_sleep: false,
+    });
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+
+    let mut pipeline = SimulationPipeline::new(StepConfig::default());
+    let report = pipeline.step(&mut world);
+
+    assert!(
+        report.stats.numeric_warnings > 0,
+        "non-finite intermediates should be surfaced as warnings"
+    );
+    assert!(report.events.iter().any(|event| {
+        matches!(event, WorldEvent::NumericsWarning(warning) if warning.phase == "integrate")
+    }));
+
+    let body = world
+        .try_body(body)
+        .expect("body should remain addressable");
+    assert!(
+        body.pose().translation().x().is_finite()
+            && body.pose().translation().y().is_finite()
+            && body.linear_velocity().x().is_finite()
+            && body.linear_velocity().y().is_finite(),
+        "explicit numerics handling should prevent NaN state from leaking into retained world facts"
+    );
 }
 
 #[test]

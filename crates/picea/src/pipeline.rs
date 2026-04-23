@@ -4,13 +4,15 @@
 //! cadence/configuration, while the concrete world owns state mutation,
 //! contact generation, and event production.
 
+pub(crate) mod contacts;
+pub(crate) mod integrate;
+pub(crate) mod joints;
+pub(crate) mod sleep;
+pub(crate) mod step;
+
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    events::WorldEvent,
-    handles::WorldRevision,
-    math::FloatNum,
-};
+use crate::{events::WorldEvent, handles::WorldRevision, math::FloatNum};
 
 const DEFAULT_STEP_DT: FloatNum = 1.0 / 60.0;
 const DEFAULT_VELOCITY_ITERATIONS: u16 = 10;
@@ -63,6 +65,8 @@ pub struct StepStats {
     pub position_iterations: u16,
     /// Number of sleep-state transitions observed during the step.
     pub sleep_transition_count: usize,
+    /// Number of internal non-finite situations detected and contained.
+    pub numeric_warnings: usize,
 }
 
 /// Result of exactly one `SimulationPipeline::step` call.
@@ -292,6 +296,9 @@ mod tests {
         assert_eq!(first.step_index, 1);
         assert_eq!(second.step_index, 2);
         assert_eq!(first.simulated_time, f64::from(StepConfig::default().dt));
-        assert_eq!(second.simulated_time, f64::from(StepConfig::default().dt) * 2.0);
+        assert_eq!(
+            second.simulated_time,
+            f64::from(StepConfig::default().dt) * 2.0
+        );
     }
 }

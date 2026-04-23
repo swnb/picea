@@ -2,6 +2,7 @@ use picea::prelude::{
     BodyDesc, BodyPatch, BodyType, ColliderDesc, CollisionFilter, DistanceJointDesc, JointDesc,
     Material, Pose, SharedShape, World, WorldAnchorJointDesc, WorldDesc, WorldError,
 };
+use picea::world::HandleError;
 
 #[test]
 fn body_handles_invalidate_after_destroy_and_recreate() {
@@ -15,12 +16,12 @@ fn body_handles_invalidate_after_destroy_and_recreate() {
     world.destroy_body(body).expect("body can be destroyed");
     assert!(matches!(
         world.destroy_body(body),
-        Err(WorldError::StaleBodyHandle { .. })
+        Err(WorldError::Handle(HandleError::StaleBody { .. }))
     ));
     assert!(
         matches!(
             world.try_body(body),
-            Err(WorldError::StaleBodyHandle { .. })
+            Err(WorldError::Handle(HandleError::StaleBody { .. }))
         ),
         "destroyed body should stop resolve through explicit read path"
     );
@@ -161,10 +162,10 @@ fn destroying_a_body_cascades_attached_colliders_and_joints() {
 
     assert!(matches!(
         world.try_collider(collider),
-        Err(WorldError::StaleColliderHandle { .. })
+        Err(WorldError::Handle(HandleError::StaleCollider { .. }))
     ));
     assert!(matches!(
         world.try_joint(joint),
-        Err(WorldError::StaleJointHandle { .. })
+        Err(WorldError::Handle(HandleError::StaleJoint { .. }))
     ));
 }

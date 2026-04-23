@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     handles::{BodyHandle, JointHandle},
     math::{point::Point, FloatNum},
+    world::ValidationError,
 };
 
 /// Descriptor for a distance-preserving joint between two bodies.
@@ -100,6 +101,13 @@ impl JointDesc {
             Self::WorldAnchor(_) => JointKind::WorldAnchor,
         }
     }
+
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+        match self {
+            Self::Distance(desc) => desc.validate(),
+            Self::WorldAnchor(desc) => desc.validate(),
+        }
+    }
 }
 
 /// Partial update for a distance joint.
@@ -141,6 +149,22 @@ pub enum JointPatch {
     Distance(DistanceJointPatch),
     /// Partial update for a world-anchor joint.
     WorldAnchor(WorldAnchorJointPatch),
+}
+
+impl JointPatch {
+    pub(crate) fn kind(&self) -> JointKind {
+        match self {
+            Self::Distance(_) => JointKind::Distance,
+            Self::WorldAnchor(_) => JointKind::WorldAnchor,
+        }
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+        match self {
+            Self::Distance(patch) => patch.validate(),
+            Self::WorldAnchor(patch) => patch.validate(),
+        }
+    }
 }
 
 /// Read-only joint snapshot resolved from a world handle.
@@ -240,5 +264,143 @@ impl JointRecord {
             handle,
             desc: self.desc.clone(),
         }
+    }
+}
+
+impl DistanceJointDesc {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if !self.local_anchor_a.x().is_finite() || !self.local_anchor_a.y().is_finite() {
+            return Err(ValidationError::JointDesc {
+                field: "local_anchor_a",
+            });
+        }
+        if !self.local_anchor_b.x().is_finite() || !self.local_anchor_b.y().is_finite() {
+            return Err(ValidationError::JointDesc {
+                field: "local_anchor_b",
+            });
+        }
+        if !self.rest_length.is_finite() || self.rest_length < 0.0 {
+            return Err(ValidationError::JointDesc {
+                field: "rest_length",
+            });
+        }
+        if !self.stiffness.is_finite() || self.stiffness < 0.0 {
+            return Err(ValidationError::JointDesc { field: "stiffness" });
+        }
+        if !self.damping.is_finite() || self.damping < 0.0 {
+            return Err(ValidationError::JointDesc { field: "damping" });
+        }
+        Ok(())
+    }
+}
+
+impl WorldAnchorJointDesc {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if !self.local_anchor.x().is_finite() || !self.local_anchor.y().is_finite() {
+            return Err(ValidationError::JointDesc {
+                field: "local_anchor",
+            });
+        }
+        if !self.world_anchor.x().is_finite() {
+            return Err(ValidationError::JointDesc {
+                field: "world_anchor.x",
+            });
+        }
+        if !self.world_anchor.y().is_finite() {
+            return Err(ValidationError::JointDesc {
+                field: "world_anchor.y",
+            });
+        }
+        if !self.stiffness.is_finite() || self.stiffness < 0.0 {
+            return Err(ValidationError::JointDesc { field: "stiffness" });
+        }
+        if !self.damping.is_finite() || self.damping < 0.0 {
+            return Err(ValidationError::JointDesc { field: "damping" });
+        }
+        Ok(())
+    }
+}
+
+impl DistanceJointPatch {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self
+            .local_anchor_a
+            .is_some_and(|value| !value.x().is_finite() || !value.y().is_finite())
+        {
+            return Err(ValidationError::JointPatch {
+                field: "local_anchor_a",
+            });
+        }
+        if self
+            .local_anchor_b
+            .is_some_and(|value| !value.x().is_finite() || !value.y().is_finite())
+        {
+            return Err(ValidationError::JointPatch {
+                field: "local_anchor_b",
+            });
+        }
+        if self
+            .rest_length
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err(ValidationError::JointPatch {
+                field: "rest_length",
+            });
+        }
+        if self
+            .stiffness
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err(ValidationError::JointPatch { field: "stiffness" });
+        }
+        if self
+            .damping
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err(ValidationError::JointPatch { field: "damping" });
+        }
+        Ok(())
+    }
+}
+
+impl WorldAnchorJointPatch {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self
+            .local_anchor
+            .is_some_and(|value| !value.x().is_finite() || !value.y().is_finite())
+        {
+            return Err(ValidationError::JointPatch {
+                field: "local_anchor",
+            });
+        }
+        if self
+            .world_anchor
+            .is_some_and(|value| !value.x().is_finite())
+        {
+            return Err(ValidationError::JointPatch {
+                field: "world_anchor.x",
+            });
+        }
+        if self
+            .world_anchor
+            .is_some_and(|value| !value.y().is_finite())
+        {
+            return Err(ValidationError::JointPatch {
+                field: "world_anchor.y",
+            });
+        }
+        if self
+            .stiffness
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err(ValidationError::JointPatch { field: "stiffness" });
+        }
+        if self
+            .damping
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err(ValidationError::JointPatch { field: "damping" });
+        }
+        Ok(())
     }
 }

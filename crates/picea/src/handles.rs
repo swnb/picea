@@ -64,7 +64,10 @@ define_handle!(
     JointHandle,
     "Opaque identifier for a joint owned by a [`World`](crate::world::World)."
 );
-define_handle!(ContactId, "Opaque identifier for a contact in debug and event streams.");
+define_handle!(
+    ContactId,
+    "Opaque identifier for a contact in debug and event streams."
+);
 define_handle!(
     ManifoldId,
     "Opaque identifier for a contact manifold in debug and event streams."

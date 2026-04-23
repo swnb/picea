@@ -7,10 +7,9 @@ Read these documents when you need to understand how the repository is structure
 ## Documents
 
 - `system-overview.md`: workspace, crate boundaries, core module ownership, and high-level dependency graph.
-- `runtime-pipeline.md`: `Scene::tick` fixed-step pipeline and frame/substep flow.
-- `collision-constraints.md`: broadphase, narrowphase, contact manifold lifecycle, warm start, and solver flow.
+- `runtime-pipeline.md`: archived `Scene::tick` runtime pipeline from the removed legacy engine path.
+- `collision-constraints.md`: archived collision/constraint architecture from the removed legacy engine path.
 
 ## Authority
 
 Architecture docs describe the intended and observed structure at the time they were written. When these docs conflict with current code or test output, trust the current code and update the docs in the same change.
-

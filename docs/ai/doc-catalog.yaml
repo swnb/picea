@@ -25,24 +25,6 @@
   applies_to: [core, crate, scene, collision, constraints, shape]
   keywords: [readme, core-crate, modules, tests, examples]
   last_reviewed: 2026-04-20
-- path: crates/picea-web/README.md
-  title: Picea Web Crate Entry
-  kind: readme
-  authority: medium
-  status: active
-  owner: picea-web
-  applies_to: [wasm, api, javascript, typescript, validation]
-  keywords: [readme, wasm-crate, createScene, try-methods, wasm-bindgen]
-  last_reviewed: 2026-04-21
-- path: crates/picea-lab/README.md
-  title: Picea Lab Crate Entry
-  kind: readme
-  authority: medium
-  status: active
-  owner: picea-lab
-  applies_to: [observability, replay, diff, viewer, web]
-  keywords: [readme, picea-lab, replay, diff, view, export-verification]
-  last_reviewed: 2026-04-21
 - path: crates/macro-tools/README.md
   title: Macro Tools Crate Entry
   kind: readme
@@ -133,15 +115,6 @@
   applies_to: [debugging, observability, trace, artifacts]
   keywords: [trace, debug-render, repro, snapshot, observability]
   last_reviewed: 2026-04-20
-- path: docs/design/picea-lab-observability-architecture.md
-  title: Picea Lab Observability Architecture
-  kind: design
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [visualization, debugging, observability, replay, benchmark, performance]
-  keywords: [picea-lab, debug-render, trace-jsonl, perfetto, criterion, egui, replay]
-  last_reviewed: 2026-04-20
 - path: docs/design/architecture-refactor-requirements.md
   title: Architecture Refactor Requirements
   kind: design
@@ -222,123 +195,6 @@
   owner: picea-core
   applies_to: [core, architecture]
   keywords: [lib, prelude, module-entry]
-  last_reviewed: 2026-04-20
-- path: crates/picea/src/scene/mod.rs
-  title: Scene orchestration
-  kind: code
-  authority: high
-  status: active
-  owner: picea-core
-  applies_to: [scene, tick, sleep]
-  keywords: [pipeline, callback, sleep, step]
-  last_reviewed: 2026-04-20
-- path: crates/picea/src/collision/mod.rs
-  title: Collision pipeline
-  kind: code
-  authority: high
-  status: active
-  owner: picea-core
-  applies_to: [collision, warm-start, manifold]
-  keywords: [broadphase, narrowphase, aabb, contact]
-  last_reviewed: 2026-04-20
-- path: crates/picea/src/constraints/mod.rs
-  title: Constraint solvers
-  kind: code
-  authority: high
-  status: active
-  owner: picea-core
-  applies_to: [solver, contact, join, point]
-  keywords: [effective-mass, friction, restitution, warm-start]
-  last_reviewed: 2026-04-20
-- path: crates/picea/src/tools/mod.rs
-  title: Debug and helper tools
-  kind: code
-  authority: medium
-  status: active
-  owner: picea-core
-  applies_to: [debugging, visualization, snapshot, helper-tools]
-  keywords: [collision-view, drag, snapshot, debug-tools, observability]
-  last_reviewed: 2026-04-20
-- path: crates/picea/src/tools/observability.rs
-  title: Lab observability artifacts
-  kind: code
-  authority: medium
-  status: active
-  owner: picea-core
-  applies_to: [observability, debug-artifacts, snapshot, debug-render, perf]
-  keywords: [lab-artifacts, trace-jsonl, final-snapshot, debug-render, perf-summary]
-  last_reviewed: 2026-04-20
-- path: crates/picea-lab/src/main.rs
-  title: Picea Lab headless CLI
-  kind: code
-  authority: medium
-  status: active
-  owner: picea-lab
-  applies_to: [observability, debug-artifacts, replay, viewer, cli]
-  keywords: [picea-lab, capture-contact, replay-contact, capture-benchmark, artifact-diff, view, export-verification]
-  last_reviewed: 2026-04-20
-- path: crates/picea-lab/src/recipes.rs
-  title: Picea Lab shared recipes
-  kind: code
-  authority: medium
-  status: active
-  owner: picea-lab
-  applies_to: [observability, replay, benchmark, scenario]
-  keywords: [run-recipe, benchmark-scenario, capture-recipe, replay, benchmark]
-  last_reviewed: 2026-04-21
-- path: crates/picea-lab/src/viewer.rs
-  title: Picea Lab native viewer
-  kind: code
-  authority: medium
-  status: active
-  owner: picea-lab
-  applies_to: [viewer, visualization, debug-artifacts, verification]
-  keywords: [egui, eframe, viewer-model, filters, verification-markdown]
-  last_reviewed: 2026-04-20
-- path: crates/picea-lab/web/index.html
-  title: Picea Lab web viewer
-  kind: code
-  authority: medium
-  status: active
-  owner: picea-lab
-  applies_to: [viewer, visualization, debug-artifacts, web]
-  keywords: [web-viewer, canvas, artifact-fixture, final-snapshot, debug-render]
-  last_reviewed: 2026-04-20
-- path: crates/picea/benches/physics_scenarios.rs
-  title: Physics Scenario Benchmarks
-  kind: benchmark
-  authority: medium
-  status: active
-  owner: picea-core
-  applies_to: [benchmark, contact-manager, manifold, warm-start, step, collision]
-  keywords: [criterion, manifold, contact-refresh-transfer, circles, broadphase, picea-lab]
-  last_reviewed: 2026-04-20
-- path: crates/picea/src/shape/mod.rs
-  title: Shape system
-  kind: code
-  authority: high
-  status: active
-  owner: picea-core
-  applies_to: [shape, geometry, cache]
-  keywords: [local-space, convex, concave, aabb]
-  last_reviewed: 2026-04-20
-- path: crates/picea/src/element/mod.rs
-  title: Element model
-  kind: code
-  authority: high
-  status: active
-  owner: picea-core
-  applies_to: [storage, handle, element]
-  keywords: [id, store, clone, query]
-  last_reviewed: 2026-04-20
-- path: crates/picea-web/src/lib.rs
-  title: Picea wasm API
-  kind: code
-  authority: high
-  status: active
-  owner: picea-web
-  applies_to: [wasm, api, ts]
-  keywords: [wasm-bindgen, typescript, smoke, js]
   last_reviewed: 2026-04-20
 - path: crates/macro-tools/src/lib.rs
   title: Proc macro helpers

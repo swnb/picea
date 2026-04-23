@@ -5,19 +5,13 @@ use std::{
     ops::{Add, AddAssign, Sub, SubAssign},
 };
 
-#[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
-pub struct Point<T = FloatNum>
-where
-    T: Clone + Copy,
-{
-    pub(crate) x: T,
-    pub(crate) y: T,
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct Point {
+    pub(crate) x: FloatNum,
+    pub(crate) y: FloatNum,
 }
 
-impl<T> Display for Point<T>
-where
-    T: Clone + Copy + Display,
-{
+impl Display for Point {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!("{{ x: {}, y: {} }}", self.x, self.y))
     }
@@ -25,202 +19,136 @@ where
 
 impl PartialEq for Point {
     fn eq(&self, other: &Self) -> bool {
-        ((self.x() - other.x()).abs() < f32::EPSILON)
-            && ((self.y() - other.y()).abs() < f32::EPSILON)
+        (self.x() - other.x()).abs() < FloatNum::EPSILON
+            && (self.y() - other.y()).abs() < FloatNum::EPSILON
     }
 }
 
-impl<T> Point<T>
-where
-    T: Clone + Copy,
-{
+impl Point {
     #[inline]
-    pub fn new(x: T, y: T) -> Self {
+    pub const fn new(x: FloatNum, y: FloatNum) -> Self {
         Self { x, y }
     }
 
     #[inline]
-    pub fn x(&self) -> T {
+    pub fn x(&self) -> FloatNum {
         self.x
     }
 
     #[inline]
-    pub fn y(&self) -> T {
+    pub fn y(&self) -> FloatNum {
         self.y
     }
+}
 
-    #[inline]
-    pub fn set_x(&mut self, x_reducer: impl FnOnce(T) -> T) {
-        self.x = x_reducer(self.x)
-    }
-
-    #[inline]
-    pub fn set_y(&mut self, y_reducer: impl FnOnce(T) -> T) {
-        self.y = y_reducer(self.y)
-    }
-
-    #[inline]
-    pub fn to_vector(self) -> Vector<T> {
-        Vector {
-            x: self.x,
-            y: self.y,
-        }
-    }
-
-    #[inline]
-    pub fn clone_from(&mut self, other: &Self) {
-        self.x = other.x;
-        self.y = other.y;
+impl From<(FloatNum, FloatNum)> for Point {
+    fn from((x, y): (FloatNum, FloatNum)) -> Self {
+        Self { x, y }
     }
 }
 
-impl<T> From<(T, T)> for Point<T>
-where
-    T: Clone + Copy,
-{
-    fn from((x, y): (T, T)) -> Self {
-        Point { x, y }
+impl From<[FloatNum; 2]> for Point {
+    fn from([x, y]: [FloatNum; 2]) -> Self {
+        Self { x, y }
     }
 }
 
-impl<T> From<[T; 2]> for Point<T>
-where
-    T: Clone + Copy,
-{
-    fn from([x, y]: [T; 2]) -> Self {
-        Point { x, y }
-    }
-}
-
-impl<T> From<Point<T>> for (T, T)
-where
-    T: Clone + Copy,
-{
-    fn from(point: Point<T>) -> Self {
+impl From<Point> for (FloatNum, FloatNum) {
+    fn from(point: Point) -> Self {
         (point.x, point.y)
     }
 }
 
-impl<T> Add<&Vector<T>> for Point<T>
-where
-    T: Clone + Copy + Add<Output = T>,
-{
+impl From<Vector> for Point {
+    fn from(vector: Vector) -> Self {
+        Self::new(vector.x(), vector.y())
+    }
+}
+
+impl From<&Vector> for Point {
+    fn from(vector: &Vector) -> Self {
+        Self::new(vector.x(), vector.y())
+    }
+}
+
+impl Add<Vector> for Point {
     type Output = Self;
-    fn add(self, rhs: &Vector<T>) -> Self::Output {
-        let new_x = self.x + rhs.x;
-        let new_y = self.y + rhs.y;
-        (new_x, new_y).into()
+
+    fn add(self, rhs: Vector) -> Self::Output {
+        Self::new(self.x + rhs.x(), self.y + rhs.y())
     }
 }
 
-impl<T> Add<&Vector<T>> for &Point<T>
-where
-    T: Clone + Copy + Add<Output = T>,
-{
-    type Output = Point<T>;
-    fn add(self, rhs: &Vector<T>) -> Self::Output {
-        let new_x = self.x + rhs.x;
-        let new_y = self.y + rhs.y;
-        (new_x, new_y).into()
-    }
-}
-
-impl<T> Add<Vector<T>> for Point<T>
-where
-    T: Clone + Copy + Add<Output = T>,
-{
+impl Add<&Vector> for Point {
     type Output = Self;
-    fn add(self, rhs: Vector<T>) -> Self::Output {
-        let new_x = self.x + rhs.x;
-        let new_y = self.y + rhs.y;
-        (new_x, new_y).into()
+
+    fn add(self, rhs: &Vector) -> Self::Output {
+        self + *rhs
     }
 }
 
-impl<T> AddAssign<&Vector<T>> for Point<T>
-where
-    T: Clone + Copy + Add<Output = T> + AddAssign<T>,
-{
-    fn add_assign(&mut self, rhs: &Vector<T>) {
-        self.set_x(|x| x + rhs.x);
-        self.set_y(|y| y + rhs.y);
+impl Add<&Vector> for &Point {
+    type Output = Point;
+
+    fn add(self, rhs: &Vector) -> Self::Output {
+        *self + *rhs
     }
 }
 
-impl<T> AddAssign<Vector<T>> for Point<T>
-where
-    T: Clone + Copy + Add<Output = T> + AddAssign<T>,
-{
-    fn add_assign(&mut self, rhs: Vector<T>) {
-        self.set_x(|x| x + rhs.x);
-        self.set_y(|y| y + rhs.y);
+impl AddAssign<Vector> for Point {
+    fn add_assign(&mut self, rhs: Vector) {
+        self.x += rhs.x();
+        self.y += rhs.y();
     }
 }
 
-impl<T> Sub<&Vector<T>> for Point<T>
-where
-    T: Clone + Copy + Sub<Output = T>,
-{
+impl AddAssign<&Vector> for Point {
+    fn add_assign(&mut self, rhs: &Vector) {
+        *self += *rhs;
+    }
+}
+
+impl Sub<Vector> for Point {
     type Output = Self;
-    fn sub(self, rhs: &Vector<T>) -> Self::Output {
-        let new_x = self.x - rhs.x;
-        let new_y = self.y - rhs.y;
-        (new_x, new_y).into()
+
+    fn sub(self, rhs: Vector) -> Self::Output {
+        Self::new(self.x - rhs.x(), self.y - rhs.y())
     }
 }
 
-impl<T> Sub<Vector<T>> for Point<T>
-where
-    T: Clone + Copy + Sub<Output = T>,
-{
+impl Sub<&Vector> for Point {
     type Output = Self;
-    fn sub(self, rhs: Vector<T>) -> Self::Output {
-        let new_x = self.x - rhs.x;
-        let new_y = self.y - rhs.y;
-        (new_x, new_y).into()
+
+    fn sub(self, rhs: &Vector) -> Self::Output {
+        self - *rhs
     }
 }
 
-impl<T> Sub<Point<T>> for Point<T>
-where
-    T: Clone + Copy + Sub<Output = T>,
-{
-    type Output = Vector<T>;
-    fn sub(self, rhs: Point<T>) -> Self::Output {
-        let new_x = self.x - rhs.x;
-        let new_y = self.y - rhs.y;
-        (new_x, new_y).into()
+impl SubAssign<Vector> for Point {
+    fn sub_assign(&mut self, rhs: Vector) {
+        self.x -= rhs.x();
+        self.y -= rhs.y();
     }
 }
 
-impl<T> Sub<&Point<T>> for Point<T>
-where
-    T: Clone + Copy + Sub<Output = T>,
-{
-    type Output = Vector<T>;
-    fn sub(self, rhs: &Point<T>) -> Self::Output {
-        let new_x = self.x - rhs.x;
-        let new_y = self.y - rhs.y;
-        (new_x, new_y).into()
+impl SubAssign<&Vector> for Point {
+    fn sub_assign(&mut self, rhs: &Vector) {
+        *self -= *rhs;
     }
 }
 
-impl<T> SubAssign<&Vector<T>> for Point<T>
-where
-    T: Clone + Copy + Sub<Output = T> + SubAssign<T>,
-{
-    fn sub_assign(&mut self, rhs: &Vector<T>) {
-        self.set_x(|x| x - rhs.x);
-        self.set_y(|y| y - rhs.y);
+impl Sub<Point> for Point {
+    type Output = Vector;
+
+    fn sub(self, rhs: Point) -> Self::Output {
+        Vector::new(self.x - rhs.x, self.y - rhs.y)
     }
 }
 
-impl<T> SubAssign<Vector<T>> for Point<T>
-where
-    T: Clone + Copy + Sub<Output = T> + SubAssign<T>,
-{
-    fn sub_assign(&mut self, rhs: Vector<T>) {
-        self.set_x(|x| x - rhs.x);
-        self.set_y(|y| y - rhs.y);
+impl Sub<&Point> for Point {
+    type Output = Vector;
+
+    fn sub(self, rhs: &Point) -> Self::Output {
+        self - *rhs
     }
 }
