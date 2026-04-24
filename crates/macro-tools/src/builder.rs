@@ -10,6 +10,9 @@ pub fn macro_builder(input: DeriveInput) -> TokenStream {
 }
 
 fn expand_builder(input: DeriveInput) -> Result<TokenStream2> {
+    // The reset API keeps builder configuration local to fields. A struct-level
+    // `#[builder(...)]` would look like a global policy but currently has no
+    // supported semantics, so reject it instead of silently ignoring it.
     if let Some(attr) = input
         .attrs
         .iter()
@@ -74,8 +77,13 @@ fn expand_builder(input: DeriveInput) -> Result<TokenStream2> {
 
 #[derive(Clone)]
 enum FieldMode {
+    // Required fields are stored as `Option<T>` and become a build-time error
+    // when unset.
     Required,
+    // Defaults are emitted directly into `build()`, which keeps expressions lazy:
+    // they are evaluated only if the caller did not set the field.
     Default(Expr),
+    // Skipped fields have no setter but still use the same lazy default path.
     Skip(Expr),
 }
 
@@ -108,6 +116,8 @@ impl BuilderField {
         let ty = &self.ty;
 
         match self.mode {
+            // A skipped field is intentionally not configurable through the
+            // generated builder. Use `default = expr` to document how it is set.
             FieldMode::Skip(_) => None,
             FieldMode::Required => Some(quote! {
                 pub fn #ident(mut self, value: impl ::core::convert::Into<#ty>) -> Self {
@@ -140,6 +150,9 @@ impl BuilderField {
             }
             FieldMode::Default(expr) | FieldMode::Skip(expr) => {
                 quote! {
+                    // Keep default expressions in the final build step so
+                    // expensive or stateful defaults are not evaluated when a
+                    // caller supplies an explicit value.
                     #ident: match self.#ident {
                         ::core::option::Option::Some(value) => value,
                         ::core::option::Option::None => #expr,
@@ -161,6 +174,8 @@ fn parse_builder_field(field: &Field) -> Result<BuilderField> {
     })?;
 
     if ident == "new" || ident == "build" {
+        // The generated builder reserves these method names. Rejecting field
+        // collisions is clearer than generating an unusable builder API.
         return Err(syn::Error::new(
             ident.span(),
             format!(
@@ -177,6 +192,8 @@ fn parse_builder_field(field: &Field) -> Result<BuilderField> {
         .iter()
         .filter(|attr| attr.path().is_ident("builder"))
     {
+        // `parse_nested_meta` gives precise spans for unsupported options while
+        // still allowing expression defaults such as `default = Vec::new()`.
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("skip") {
                 if skip {

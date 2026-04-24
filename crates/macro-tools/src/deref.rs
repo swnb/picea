@@ -13,6 +13,8 @@ enum DerefOption {
 
 impl Parse for DerefOption {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        // `mut` is the only option because plain `#[deref]` already covers the
+        // read-only case. Keeping the grammar exact avoids future ambiguity.
         if input.peek(Token![mut]) {
             input.parse::<Token![mut]>()?;
             return Ok(Self::Mut);
@@ -59,7 +61,8 @@ pub fn macro_deref(input: DeriveInput) -> TokenStream {
         .into();
     };
 
-    // Keep the target-field scan explicit so diagnostics stay tied to the user's field.
+    // Keep the target-field scan explicit so diagnostics stay tied to the
+    // user's field instead of pointing only at the enclosing struct.
     let mut deref_fields = Vec::new();
     let mut errors: Option<syn::Error> = None;
 
@@ -149,6 +152,8 @@ fn parse_deref_config(
     let mut config = None;
     let mut errors: Option<syn::Error> = None;
 
+    // Accumulate malformed/duplicate attributes on one field. This mirrors the
+    // derive's "exactly one target" rule without losing parser diagnostics.
     for attr in attrs.iter().filter(|attr| attr.path().is_ident("deref")) {
         match parse_deref_attr(attr) {
             Ok(parsed) => {
@@ -184,6 +189,9 @@ fn parse_deref_config(
 
 fn parse_deref_attr(attr: &Attribute) -> syn::Result<DerefConfig> {
     match &attr.meta {
+        // `#[deref]` means read-only forwarding. Mutable forwarding must be an
+        // explicit opt-in because it exposes interior mutation through the
+        // wrapper's public API.
         Meta::Path(_) => Ok(DerefConfig::default()),
         Meta::List(list) => {
             let mut config = DerefConfig::default();
@@ -198,6 +206,8 @@ fn parse_deref_attr(attr: &Attribute) -> syn::Result<DerefConfig> {
             }
 
             if options.trailing_punct() {
+                // Reject `#[deref(mut,)]` so there is only one accepted spelling
+                // for mutable forwarding in diagnostics and docs.
                 return Err(syn::Error::new(
                     list.span(),
                     "`#[deref(...)]` only supports the exact form `#[deref(mut)]`",

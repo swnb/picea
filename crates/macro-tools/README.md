@@ -2,7 +2,23 @@
 
 `crates/macro-tools` is a standalone proc-macro crate in the Picea workspace. It is verified independently and is not currently part of `crates/picea`'s direct dependency graph.
 
-It currently contains derive helpers such as `Accessors`, `Builder`, and `Deref`.
+It currently exposes three derive helpers:
+
+- `Accessors`: generate explicit field access methods.
+- `Builder`: generate a small companion builder type.
+- `Deref`: forward `Deref` and optional `DerefMut` to one field.
+
+The crate is intentionally narrow after the reset. Historical `Fields`, `Shape`, `wasm_config`, `r`, `w`, `shared`, and reducer behavior is not retained as a compatibility layer.
+
+## Validation
+
+Run the crate-local test suite with:
+
+```sh
+rtk proxy cargo test -p picea-macro-tools
+```
+
+The suite includes `trybuild` fixtures for both accepted macro forms and compile-fail diagnostics.
 
 ## Accessors
 
@@ -41,16 +57,23 @@ assert_eq!(meta.field_a(), "updated!");
 
 Struct-level `#[accessor(...)]` settings provide defaults, and field-level `#[accessor(...)]` settings override them.
 
-Supported accessor options in the current crate include:
+Generated method names:
 
-- `get`
-- `get(copy)`
-- `get(clone)`
-- `set`
-- `set(into)`
-- `mut`
-- `vis(...)`
-- `skip`
+| Option | Generated method | Return or argument |
+| --- | --- | --- |
+| `get` | `field()` | `&T` |
+| `get(copy)` | `field()` | `T`; the field type must be `Copy` |
+| `get(clone)` | `field()` | `T`; the field type must be `Clone` |
+| `mut` | `field_mut()` | `&mut T` |
+| `set` | `set_field(value)` | accepts `T` |
+| `set(into)` | `set_field(value)` | accepts `impl Into<T>` |
+
+Additional options:
+
+| Option | Meaning |
+| --- | --- |
+| `vis(...)` | Overrides generated method visibility, for example `vis(pub(crate))`. |
+| `skip` | Field-only. Generates no accessor methods for that field. Cannot be combined with any other accessor option. |
 
 Visibility follows the struct by default, and `vis(...)` lets you override it per struct or field.
 
@@ -76,11 +99,18 @@ mod private {
     }
 }
 
-/// follow code will not compile
+/// The following code will not compile:
 let mut meta = private::Meta::new();
 
 meta.set_field_a(String::new()); // function `set_field_a` is private
 ```
+
+Current limitations:
+
+- Only named-field structs are supported.
+- Enums, tuple structs, and unit structs are rejected.
+- Legacy `#[r]`, `#[w]`, `#[shared]`, and reducer options are rejected.
+- `get(copy)` and `get(clone)` do not add trait bounds for you. If the field type is not `Copy` or `Clone`, the generated implementation fails with the normal Rust type error at the field access.
 
 ## Builder
 
@@ -108,13 +138,30 @@ assert_eq!(settings.profile, "stable");
 assert!(settings.cached.is_empty());
 ```
 
-Supported builder options in the current crate include:
+Generated API:
 
-- `default`
-- `default = ...`
-- `skip` (requires `default` or `default = ...`)
+| Generated item | Meaning |
+| --- | --- |
+| `SettingsBuilder` | Builder type named by appending `Builder` to the source struct. |
+| `SettingsBuilder::new()` | Creates a builder with every field unset. |
+| `builder.field(value)` | Chainable setter for required and defaulted fields. Setters accept `impl Into<FieldType>`. |
+| `builder.build()` | Returns `Ok(Settings)` or `Err("missing field: field_name")`. |
 
-`Builder` currently supports named structs and generates setters that accept `Into<FieldType>`.
+Supported builder options:
+
+| Option | Meaning |
+| --- | --- |
+| `default` | Use `Default::default()` if the field was not set. |
+| `default = ...` | Use the given expression if the field was not set. The expression is evaluated during `build()`, not during `new()`. |
+| `skip` | Do not generate a setter. Must be paired with `default` or `default = ...`. |
+
+Current limitations:
+
+- Only named-field structs are supported.
+- Struct-level `#[builder(...)]` attributes are rejected.
+- The derive does not generate `Default` for the original struct or for the builder type.
+- Fields named `new` or `build` are rejected because they collide with generated methods.
+- The old `shared` behavior is removed.
 
 ## Deref
 
@@ -141,8 +188,16 @@ assert_eq!(wrapper.as_slice(), &[1, 2, 3]);
 assert_eq!(wrapper.label, "meta");
 ```
 
-Current `Deref` rules:
+Generated API:
+
+| Attribute | Generated impls |
+| --- | --- |
+| `#[deref]` | `impl core::ops::Deref<Target = FieldType>` |
+| `#[deref(mut)]` | `impl core::ops::Deref<Target = FieldType>` and `impl core::ops::DerefMut` |
+
+Current rules:
 
 - mark exactly one named field with `#[deref]` or `#[deref(mut)]`
 - `#[deref(mut)]` is the only supported option form
 - tuple structs, unit structs, and enums are rejected
+- duplicate `#[deref]` attributes, empty `#[deref()]`, and multiple target fields are rejected

@@ -23,6 +23,8 @@ enum SetterMode {
 
 #[derive(Clone, Default)]
 struct AccessorConfig {
+    // `None` means "inherit from struct-level defaults" for field configs and
+    // "do not generate this method family" for the merged config.
     getter: Option<GetterMode>,
     setter: Option<SetterMode>,
     mutable: bool,
@@ -40,6 +42,8 @@ enum AccessorOption {
 
 impl Parse for AccessorOption {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        // `mut` is a Rust keyword, so it cannot be parsed through the ordinary
+        // identifier path used by the other accessor options.
         if input.peek(Token![mut]) {
             input.parse::<Token![mut]>()?;
             return Ok(Self::Mut);
@@ -136,6 +140,9 @@ pub fn macro_accessors(input: DeriveInput) -> TokenStream {
             return quote!();
         }
 
+        // Generated methods default to the struct visibility. This keeps
+        // private structs private while allowing public structs to publish
+        // accessors without repeating `vis(pub)` on every field.
         let method_vis = field_config
             .visibility
             .clone()
@@ -213,8 +220,12 @@ pub fn macro_accessors(input: DeriveInput) -> TokenStream {
 
 fn merge_configs(defaults: &AccessorConfig, field: &AccessorConfig) -> AccessorConfig {
     AccessorConfig {
+        // Getter/setter mode is single-choice: a field option replaces the
+        // struct default instead of adding another method with the same name.
         getter: field.getter.or(defaults.getter),
         setter: field.setter.or(defaults.setter),
+        // `mut` is additive so a struct-level opt-in can enable all fields, and
+        // a field-level opt-in can enable only one field.
         mutable: defaults.mutable || field.mutable,
         visibility: field
             .visibility
@@ -228,6 +239,8 @@ fn parse_accessor_config(attrs: &[Attribute], allow_skip: bool) -> syn::Result<A
     let mut config = AccessorConfig::default();
     let mut errors: Option<syn::Error> = None;
 
+    // Combine all attribute errors instead of returning early, so one compile
+    // run can point at every malformed accessor annotation on the item.
     for attr in attrs.iter().filter(|attr| attr.path().is_ident("accessor")) {
         let result = parse_accessor_meta_list(attr, &mut config, allow_skip);
 
@@ -246,6 +259,9 @@ fn parse_accessor_config(attrs: &[Attribute], allow_skip: bool) -> syn::Result<A
             || config.mutable
             || config.visibility.is_some())
     {
+        // `skip` is intentionally terminal. Allowing `skip, vis(...)` or
+        // `skip, get` would make the field contract ambiguous and can hide
+        // refactor mistakes.
         let error = syn::Error::new(
             attrs[0].span(),
             "`skip` cannot be combined with other accessor options",

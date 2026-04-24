@@ -9,7 +9,7 @@ repository = "https://github.com/swnb/picea"
 # documentation = ""
 categories = ["picea", "macros"]
 description = """
-macro tools for picea
+standalone derive helpers for named-field Rust structs
 """
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
