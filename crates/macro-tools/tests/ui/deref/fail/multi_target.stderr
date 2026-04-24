@@ -1,0 +1,5 @@
+error: only one named field can be marked with `#[deref]`
+ --> tests/ui/deref/fail/multi_target.rs:8:5
+  |
+8 |     second: String,
+  |     ^^^^^^

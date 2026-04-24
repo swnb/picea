@@ -1,0 +1,5 @@
+error: expected `#[deref]` or `#[deref(mut)]`
+ --> tests/ui/deref/fail/name_value.rs:5:7
+  |
+5 |     #[deref = "mut"]
+  |       ^^^^^^^^^^^^^

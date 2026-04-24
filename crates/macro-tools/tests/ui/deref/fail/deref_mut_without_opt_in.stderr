@@ -1,0 +1,7 @@
+error[E0596]: cannot borrow data in dereference of `Wrapper` as mutable
+  --> tests/ui/deref/fail/deref_mut_without_opt_in.rs:17:5
+   |
+17 |     wrapper.push(3);
+   |     ^^^^^^^ cannot borrow as mutable
+   |
+   = help: trait `DerefMut` is required to modify through a dereference, but it is not implemented for `Wrapper`

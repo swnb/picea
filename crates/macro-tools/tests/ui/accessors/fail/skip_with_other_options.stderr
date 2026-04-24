@@ -1,0 +1,5 @@
+error: `skip` cannot be combined with other accessor options
+ --> tests/ui/accessors/fail/skip_with_other_options.rs:5:5
+  |
+5 |     #[accessor(get, skip)]
+  |     ^^^^^^^^^^^^^^^^^^^^^^

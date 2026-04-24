@@ -1,0 +1,5 @@
+error: `build` is reserved by Builder; rename the field to avoid colliding with generated methods
+ --> tests/ui/builder/fail/reserved_build.rs:5:5
+  |
+5 |     build: String,
+  |     ^^^^^

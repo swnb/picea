@@ -1,0 +1,5 @@
+error: unsupported builder option
+ --> tests/ui/builder/fail/unsupported_option.rs:5:15
+  |
+5 |     #[builder(shared)]
+  |               ^^^^^^

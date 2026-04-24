@@ -1,0 +1,5 @@
+error: empty `#[deref()]` is invalid; use `#[deref]` or `#[deref(mut)]`
+ --> tests/ui/deref/fail/empty_args.rs:5:7
+  |
+5 |     #[deref()]
+  |       ^^^^^^^

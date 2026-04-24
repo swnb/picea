@@ -1,0 +1,5 @@
+error: Builder can only be derived for structs with named fields
+ --> tests/ui/builder/fail/tuple_struct.rs:4:8
+  |
+4 | struct Meta(String);
+  |        ^^^^

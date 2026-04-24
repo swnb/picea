@@ -1,0 +1,5 @@
+error: duplicate `mut` in `#[deref(...)]`
+ --> tests/ui/deref/fail/duplicate_mut.rs:5:5
+  |
+5 |     #[deref(mut, mut)]
+  |     ^^^^^^^^^^^^^^^^^^

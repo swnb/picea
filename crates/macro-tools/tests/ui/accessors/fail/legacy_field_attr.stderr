@@ -1,0 +1,5 @@
+error: cannot find attribute `field` in this scope
+ --> tests/ui/accessors/fail/legacy_field_attr.rs:5:7
+  |
+5 |     #[field(get)]
+  |       ^^^^^

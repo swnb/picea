@@ -1,116 +1,148 @@
 # Macro Tools
 
-contain some useful macro tools;
+`crates/macro-tools` is a standalone proc-macro crate in the Picea workspace. It is verified independently and is not currently part of `crates/picea`'s direct dependency graph.
 
-## Field
+It currently contains derive helpers such as `Accessors`, `Builder`, and `Deref`.
 
-create field read and write method for field
+## Accessors
 
-for example
-
-create read field for Meta;
+`Accessors` derives getter/setter helpers for named struct fields.
 
 ```rust
-    #[derive(Fields)]
-    #[r]
-    struct Meta {
-        field_a: String,
-        field_b: i32,
-    }
+use picea_macro_tools::Accessors;
 
-    let meta = Meta {
-        field_a: String::new(),
-        field_b: 3,
-    };
+#[derive(Accessors)]
+#[accessor(get, set, vis(pub(crate)))]
+struct Meta {
+    #[accessor(set(into), mut)]
+    field_a: String,
+    #[accessor(get(copy))]
+    field_b: i32,
+    #[accessor(get(clone))]
+    field_c: String,
+    #[accessor(skip)]
+    hidden: bool,
+}
 
-    let field_a: &String = meta.field_a();
-    let field_b: i32 = meta.field_b();
+let mut meta = Meta {
+    field_a: String::new(),
+    field_b: 3,
+    field_c: String::from("payload"),
+    hidden: true,
+};
+
+assert_eq!(meta.field_a(), "");
+assert_eq!(meta.field_b(), 3);
+assert_eq!(meta.field_c(), "payload");
+meta.set_field_a("updated");
+meta.field_a_mut().push('!');
+assert_eq!(meta.field_a(), "updated!");
 ```
 
-create common write field for struct
+Struct-level `#[accessor(...)]` settings provide defaults, and field-level `#[accessor(...)]` settings override them.
 
-```rust
-    #[derive(Fields)]
-    #[w]
-    struct Meta {
-        field_a: String,
-        field_b: i32,
-    }
+Supported accessor options in the current crate include:
 
-    let mut meta = Meta {
-        field_a: String::new(),
-        field_b: 3,
-    };
+- `get`
+- `get(copy)`
+- `get(clone)`
+- `set`
+- `set(into)`
+- `mut`
+- `vis(...)`
+- `skip`
 
-    let field_a_mut: &mut String = meta.field_a_mut();
-    let field_b_mut: &mut i32 = meta.field_b_mut();
-```
-
-custom write field for struct with reducer: `impl FnOnce(Type) -> Type`
-
-```rust
-    #[derive(Fields)]
-    #[r]
-    struct Meta {
-        #[w(reducer)]
-        field_a: String,
-        field_b: i32,
-    }
-
-    let mut meta = Meta {
-        field_a: String::new(),
-        field_b: 3,
-    };
-
-    let field_b = meta.field_b();
-
-    meta.set_field_a(|field_a| field_a + &field_b.to_string());
-```
-
-custom write field for struct with `set`
-
-```rust
-    #[derive(Fields)]
-    #[r]
-    struct Meta {
-        #[w(set)]
-        field_a: String,
-        field_b: i32,
-    }
-
-    let mut meta = Meta {
-        field_a: String::new(),
-        field_b: 3,
-    };
-
-    let field_b = meta.field_b();
-
-    meta.set_field_a(meta.field_a().clone() + &field_b.to_string());
-```
-
-visibility of Fields
-
-if struct is defined as `pub` then all field method will be `pub`
-
-if struct is defined as `private` then all field method will be `private`
-
-or custom `vis` for field method
+Visibility follows the struct by default, and `vis(...)` lets you override it per struct or field.
 
 ```rust
 mod private {
-    use picea_macro_tools::Fields;
+    use picea_macro_tools::Accessors;
 
-    #[derive(Fields)]
-    #[r]
+    #[derive(Accessors)]
+    #[accessor(get)]
     pub struct Meta {
-        #[w(set, vis(pub(self)))]
+        #[accessor(set, vis(pub(self)))]
         field_a: String,
         field_b: i32,
+    }
+
+    impl Meta {
+        pub fn new() -> Self {
+            Self {
+                field_a: String::new(),
+                field_b: 3,
+            }
+        }
     }
 }
 
 /// follow code will not compile
 let mut meta = private::Meta::new();
 
-meta.set_field_a(""); // function `set_field_a` is private
+meta.set_field_a(String::new()); // function `set_field_a` is private
 ```
+
+## Builder
+
+`Builder` derives a `StructNameBuilder` with `new()`, setter methods, and `build() -> Result<StructName, &'static str>`.
+
+```rust
+use picea_macro_tools::Builder;
+
+#[derive(Debug, PartialEq, Builder)]
+struct Settings {
+    name: String,
+    #[builder(default)]
+    retries: usize,
+    #[builder(default = String::from("stable"))]
+    profile: String,
+    #[builder(skip, default = Vec::new())]
+    cached: Vec<String>,
+}
+
+let settings = SettingsBuilder::new().name("picea").build().unwrap();
+
+assert_eq!(settings.name, "picea");
+assert_eq!(settings.retries, 0);
+assert_eq!(settings.profile, "stable");
+assert!(settings.cached.is_empty());
+```
+
+Supported builder options in the current crate include:
+
+- `default`
+- `default = ...`
+- `skip` (requires `default` or `default = ...`)
+
+`Builder` currently supports named structs and generates setters that accept `Into<FieldType>`.
+
+## Deref
+
+`Deref` derives `core::ops::Deref` for exactly one named field. Use `#[deref(mut)]` when the wrapper should also implement `DerefMut`.
+
+```rust
+use picea_macro_tools::Deref;
+
+#[derive(Deref)]
+struct Wrapper {
+    #[deref(mut)]
+    value: Vec<i32>,
+    label: &'static str,
+}
+
+let mut wrapper = Wrapper {
+    value: vec![1, 2],
+    label: "meta",
+};
+
+wrapper.push(3);
+
+assert_eq!(wrapper.as_slice(), &[1, 2, 3]);
+assert_eq!(wrapper.label, "meta");
+```
+
+Current `Deref` rules:
+
+- mark exactly one named field with `#[deref]` or `#[deref(mut)]`
+- `#[deref(mut)]` is the only supported option form
+- tuple structs, unit structs, and enums are rejected

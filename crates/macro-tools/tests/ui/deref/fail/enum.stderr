@@ -1,0 +1,5 @@
+error: Deref can only be derived for structs with named fields
+ --> tests/ui/deref/fail/enum.rs:4:6
+  |
+4 | enum Wrapper {
+  |      ^^^^^^^

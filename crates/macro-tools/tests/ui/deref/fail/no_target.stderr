@@ -1,0 +1,5 @@
+error: mark exactly one named field with `#[deref]` or `#[deref(mut)]`
+ --> tests/ui/deref/fail/no_target.rs:4:8
+  |
+4 | struct Wrapper {
+  |        ^^^^^^^

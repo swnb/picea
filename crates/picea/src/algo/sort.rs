@@ -3,6 +3,7 @@ use std::{
     ops::{Bound, Deref, DerefMut, Index, RangeBounds},
 };
 
+#[allow(dead_code)]
 struct SortableCollectionWrapper<'a, T>(&'a mut T)
 where
     T: SortableCollection + ?Sized;
@@ -28,6 +29,7 @@ where
 }
 
 // private method
+#[allow(dead_code)]
 impl<'a, T> SortableCollectionWrapper<'a, T>
 where
     T: SortableCollection + ?Sized,
@@ -89,6 +91,7 @@ where
 }
 
 // any collection impl this trait can be sort
+#[allow(dead_code)]
 pub(crate) trait SortableCollection: Index<usize, Output = Self::Item> {
     type Item;
 
@@ -122,8 +125,10 @@ pub(crate) trait SortableCollection: Index<usize, Output = Self::Item> {
     }
 }
 
+#[allow(dead_code)]
 struct RangeBoundsToIndex<R>(R);
 
+#[allow(dead_code)]
 impl<R> RangeBoundsToIndex<R>
 where
     R: RangeBounds<usize>,

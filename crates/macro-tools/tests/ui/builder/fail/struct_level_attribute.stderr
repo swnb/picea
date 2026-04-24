@@ -1,0 +1,5 @@
+error: builder attributes are only supported on fields
+ --> tests/ui/builder/fail/struct_level_attribute.rs:4:1
+  |
+4 | #[builder(default)]
+  | ^^^^^^^^^^^^^^^^^^^

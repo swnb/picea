@@ -1,0 +1,5 @@
+error: Accessors can only be derived for structs with named fields
+ --> tests/ui/accessors/fail/tuple_struct.rs:4:8
+  |
+4 | struct Meta(#[accessor(get)] String);
+  |        ^^^^

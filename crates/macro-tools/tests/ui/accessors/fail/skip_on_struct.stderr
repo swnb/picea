@@ -1,0 +1,5 @@
+error: `skip` is only allowed on fields
+ --> tests/ui/accessors/fail/skip_on_struct.rs:4:1
+  |
+4 | #[accessor(skip)]
+  | ^^^^^^^^^^^^^^^^^

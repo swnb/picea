@@ -1,0 +1,5 @@
+error: unsupported accessor option
+ --> tests/ui/accessors/fail/reducer_option.rs:5:16
+  |
+5 |     #[accessor(reducer)]
+  |                ^^^^^^^

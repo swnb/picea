@@ -13,45 +13,45 @@
   authority: medium
   status: active
   owner: project
-  applies_to: [onboarding, usage, workspace, validation]
-  keywords: [readme, quick-start, workspace, examples, tests]
-  last_reviewed: 2026-04-20
+  applies_to: [onboarding, current-routing, usage, workspace, validation, dependency-graph]
+  keywords: [readme, quick-start, routing, lib-surface, workspace, dependency-graph, tests]
+  last_reviewed: 2026-04-23
 - path: crates/picea/README.md
   title: Picea Core Crate Entry
   kind: readme
   authority: medium
   status: active
   owner: picea-core
-  applies_to: [core, crate, scene, collision, constraints, shape]
-  keywords: [readme, core-crate, modules, tests, examples]
-  last_reviewed: 2026-04-20
+  applies_to: [core, crate, world, body, collider, joint, pipeline, query, debug]
+  keywords: [readme, core-crate, world, modules, tests, examples]
+  last_reviewed: 2026-04-23
 - path: crates/macro-tools/README.md
   title: Macro Tools Crate Entry
   kind: readme
   authority: medium
   status: active
   owner: macro-tools
-  applies_to: [proc-macro, fields, builder, derive]
-  keywords: [readme, macro-tools, fields, builder, derive]
-  last_reviewed: 2026-04-21
+  applies_to: [proc-macro, workspace, standalone, accessors, builder, deref]
+  keywords: [readme, macro-tools, proc-macro, standalone, accessors, builder, deref]
+  last_reviewed: 2026-04-23
 - path: docs/ai/index.md
   title: AI Route Index
   kind: doc
   authority: high
   status: active
   owner: ai-context
-  applies_to: [all, triage, routing]
-  keywords: [route, questions, module, verification, docs]
-  last_reviewed: 2026-04-20
+  applies_to: [all, triage, routing, current-facts]
+  keywords: [route, questions, module, current-facts, dependency-graph, verification, docs]
+  last_reviewed: 2026-04-23
 - path: docs/ai/repo-map.md
   title: Repo Map
   kind: doc
   authority: high
   status: active
   owner: ai-context
-  applies_to: [architecture, debugging, implementation]
-  keywords: [scene, collision, constraints, shape, element, wasm, macro]
-  last_reviewed: 2026-04-20
+  applies_to: [architecture, debugging, implementation, workspace, public-modules]
+  keywords: [algo, body, collider, debug, events, handles, joint, world, pipeline, query, solver, math, dependency-graph]
+  last_reviewed: 2026-04-23
 - path: docs/architecture/README.md
   title: Architecture Docs Index
   kind: architecture
@@ -67,27 +67,27 @@
   authority: high
   status: active
   owner: architecture
-  applies_to: [workspace, crates, module-boundaries]
-  keywords: [workspace, crate, module, dependency-graph, ownership]
-  last_reviewed: 2026-04-20
+  applies_to: [workspace, crates, module-boundaries, public-modules]
+  keywords: [workspace, crate, algo, body, collider, events, handles, joint, module, dependency-graph, proc-macro]
+  last_reviewed: 2026-04-23
 - path: docs/architecture/runtime-pipeline.md
-  title: Runtime Pipeline
+  title: Legacy Scene Runtime Pipeline
   kind: architecture
   authority: high
-  status: active
+  status: archived
   owner: architecture
-  applies_to: [scene, tick, fixed-step, runtime]
-  keywords: [scene, tick, fixed-dt, substep, pipeline]
-  last_reviewed: 2026-04-20
+  applies_to: [archive, legacy-scene, fixed-step-history, runtime]
+  keywords: [archive, scene, tick, fixed-dt, substep, pipeline]
+  last_reviewed: 2026-04-23
 - path: docs/architecture/collision-constraints.md
-  title: Collision And Constraints
+  title: Legacy Collision And Constraints
   kind: architecture
   authority: high
-  status: active
+  status: archived
   owner: architecture
-  applies_to: [collision, constraints, manifold, warm-start]
-  keywords: [broadphase, narrowphase, contact-key, manifold, lambda]
-  last_reviewed: 2026-04-20
+  applies_to: [archive, legacy-scene, collision, constraints, manifold, warm-start]
+  keywords: [archive, scene, broadphase, narrowphase, contact-key, manifold, lambda]
+  last_reviewed: 2026-04-23
 - path: docs/design/README.md
   title: Design Docs Index
   kind: design
@@ -179,29 +179,29 @@
   keywords: [eval, benchmark, routing, pass-criteria, expected-sources]
   last_reviewed: 2026-04-20
 - path: docs/plans/2026-04-18-picea-physics-engine-milestones.md
-  title: Picea Physics Engine Milestones
+  title: Picea Physics Engine Milestones Archive
   kind: plan
   authority: high
-  status: active
+  status: archived
   owner: supervisor
-  applies_to: [milestone, scope, acceptance]
-  keywords: [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9]
-  last_reviewed: 2026-04-20
+  applies_to: [milestone, scope, acceptance, archive, history]
+  keywords: [archive, milestone, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, scene-history, wasm-history]
+  last_reviewed: 2026-04-23
 - path: crates/picea/src/lib.rs
   title: Picea core entrypoint
   kind: code
   authority: high
   status: active
   owner: picea-core
-  applies_to: [core, architecture]
-  keywords: [lib, prelude, module-entry]
-  last_reviewed: 2026-04-20
+  applies_to: [core, architecture, public-modules, prelude]
+  keywords: [lib, prelude, algo, body, collider, debug, events, handles, joint, math, pipeline, query, world]
+  last_reviewed: 2026-04-23
 - path: crates/macro-tools/src/lib.rs
   title: Proc macro helpers
   kind: code
   authority: medium
   status: active
   owner: macro-tools
-  applies_to: [proc-macro, derive, builder]
-  keywords: [syn, quote, derive, attribute]
-  last_reviewed: 2026-04-20
+  applies_to: [proc-macro, accessors, builder, deref]
+  keywords: [syn, quote, accessors, builder, deref]
+  last_reviewed: 2026-04-23

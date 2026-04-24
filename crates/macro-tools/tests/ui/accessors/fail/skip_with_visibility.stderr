@@ -1,0 +1,5 @@
+error: `skip` cannot be combined with other accessor options
+ --> tests/ui/accessors/fail/skip_with_visibility.rs:5:5
+  |
+5 |     #[accessor(skip, vis(pub(crate)))]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

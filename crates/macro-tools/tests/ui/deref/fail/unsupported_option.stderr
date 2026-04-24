@@ -1,0 +1,5 @@
+error: unsupported deref option, expected `mut`
+ --> tests/ui/deref/fail/unsupported_option.rs:5:13
+  |
+5 |     #[deref(clone)]
+  |             ^^^^^

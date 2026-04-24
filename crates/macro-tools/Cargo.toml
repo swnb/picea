@@ -17,5 +17,8 @@ macro tools for picea
 quote = "1.0.35"
 syn = { version = "2.0.55", features = ["full"] }
 
+[dev-dependencies]
+trybuild = "1.0.96"
+
 [lib]
 proc-macro = true

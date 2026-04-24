@@ -1,0 +1,18 @@
+error[E0599]: no method named `name` found for unit type `()` in the current scope
+  --> tests/ui/accessors/fail/chained_setter.rs:14:50
+   |
+14 |     let _ = meta.set_name(String::from("world")).name();
+   |             ----                                 ^^^^
+   |             |
+   |             method `name` is available on `&mut Meta`
+   |
+note: method `set_name` modifies its receiver in-place
+  --> tests/ui/accessors/fail/chained_setter.rs:14:18
+   |
+14 |     let _ = meta.set_name(String::from("world")).name();
+   |                  ^^^^^^^^ this call modifies `meta` in-place
+help: there is a method `ne` with a similar name, but with different arguments
+  --> $RUST/core/src/cmp.rs
+   |
+   |     fn ne(&self, other: &Rhs) -> bool {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

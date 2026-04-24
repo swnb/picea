@@ -1,0 +1,5 @@
+error: `#[builder(skip)]` requires `#[builder(default)]` or `#[builder(default = ...)]`
+ --> tests/ui/builder/fail/skip_without_default.rs:6:5
+  |
+6 |     hidden: String,
+  |     ^^^^^^

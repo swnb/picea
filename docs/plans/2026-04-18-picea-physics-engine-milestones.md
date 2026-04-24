@@ -1,10 +1,15 @@
 # Picea Physics Engine Milestones
 
+> 归档提示（2026-04-23）：
+> - 本文混合了仍可参考的 milestone 边界与大量历史执行记录。
+> - 凡出现 `Scene` / `Context` / scene-path、`picea-web`、wasm gate、旧 examples 编译叙述，均代表当时仓库状态，是归档快照，不是当前默认路由或验证目标。
+> - 当前工作先以实时仓库事实、`crates/picea/src/lib.rs`、`docs/ai/repo-map.md`、`docs/architecture/system-overview.md` 和最新验证输出为准；只有任务明确需要 milestone 边界或历史背景时才回看本文。
+>
 > 日期：2026-04-18
 >
-> 本文是 supervisor 决策归档，不是实现任务。当前轮次只记录方向、范围、验收门和 subagent 编排；不得修改代码。
+> 本文是 supervisor 决策归档，不是当前实现路由。它记录当时的方向、范围、验收门和 subagent 编排；不得把已移除路径的 gate 直接当作当前事实。
 
-## 1. 背景与目标
+## 1. 背景与目标（2026-04-18 归档快照）
 
 Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element、shape、collision、constraint、wasm 绑定等基础模块，但本地基线仍处在不稳定状态：测试和 examples 编译没有形成可持续的红绿闭环，几何、碰撞、求解器、storage 和 wasm API 也有明显的热路径与正确性风险。
 
@@ -20,9 +25,11 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 任何“为了推进而降级”的路线都不接受；红灯必须归因、收敛、修复或明确标注为当前本地状态下失败。
 - 文档、测试和代码结论都必须绑定当前仓库证据，避免泛泛而谈的物理引擎建议。
 
-## 3. 当前基线结论
+## 3. 当时基线结论（2026-04-18 归档快照）
 
-当前本地状态是红的，不能把后续重构建立在“默认可用”的假设上。
+2026-04-18 当时本地状态是红的，不能把后续重构建立在“默认可用”的假设上。
+
+说明（2026-04-23）：下文历史记录中的 `rtk proxy cargo test -p picea-macro-tools` 保留当时的 workspace 验证事实；它表示对独立 proc-macro crate 的单独验证，不表示当前 `crates/picea` 仍直接依赖 `picea-macro-tools`。当前依赖关系以实时仓库事实、`crates/picea/Cargo.toml` 和验证命令输出为准。
 
 - `rtk proxy cargo test`：失败。原因之一是 examples 访问私有 `Context.constraint_parameters`，例如 examples 直接写 `scene.context_mut().constraint_parameters...`，而 `Context` 中该字段不是 public。
 - `rtk proxy cargo test -p picea --lib`：当前本地状态下失败。`shape::utils::tests::test_split_concave_polygon1` 会触发 `crates/picea/src/shape/utils.rs:462` 的 `unreachable!` panic；同时 `crates/picea/src/shape/utils.rs` 当前 dirty，必须把该结果标注为“当前本地状态下失败”，不能直接归因到干净主干。
@@ -31,9 +38,11 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 
 2026-04-18 M0 implementer 更新：上述红色状态已在当前工作区通过 M0 最小修复收敛；最终验证门见 M0 执行记录。既有 warning 与 `picea-web --lib` 0 tests 状态仍保留为后续 milestone 风险，不在 M0 扩范围处理。
 
-## 4. Milestones
+## 4. Milestones（含历史执行记录）
 
 ### M0 Verifiable Baseline
+
+> 归档提示：本节里的 `Context`、旧 examples 编译路径、`picea-web` / wasm gate 都是当时仓库状态记录，不是当前默认验证清单。
 
 **目标**
 
@@ -455,7 +464,7 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - RED 证据：先新增 `constraints::point::tests` 行为锁后，`rtk proxy cargo test -p picea point::tests --lib` 在旧实现上失败 2 条：`mass = 0` dynamic body 与 `mass = NaN` dynamic body 都产生 `{ x: NaN, y: NaN }` velocity；同组 `hard_point_with_very_small_finite_denominator_solves` 在旧实现下通过，用于防止后续修复误用 EPS cutoff。
 - 实现：`PointConstraint::reset_params` 改用 fixed-aware `effective_inv_mass()` / `effective_inv_moment_of_inertia()` 计算 effective mass；`PointConstraint::solve` 在取倒数前检查 `soft_part + mass_effective` 必须 finite 且 `> 0`，并对非有限 lambda no-op。join 的 denominator guard 提到 `constraints/mod.rs` 共享，保持 contact/join/point 的策略一致：只拒绝 non-finite 或 `<= 0`，不拒绝有限极小正数。
 - GREEN 证据：`rtk proxy cargo test -p picea point::tests --lib` 通过，3 passed；`rtk proxy cargo test -p picea --lib` 通过，63 passed。
-- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 在当时记录为 workspace compile gate 通过。归档说明：`-- -D warnings` 会传给测试二进制而不是 rustc，本条历史记录不应被解读为“warning-clean 证明”。
 - residual risk：invalid mass 仍是在 solver 层保守 no-op，没有提升到 `MetaBuilder::mass()` / public API 输入校验；PointConstraint 仍未新增 soft constraint invalid-mass 专项测试、diagnostic event 或错误返回；极端有限 denominator 仍可能产生非常大的 impulse，当前只按 contact/join 策略允许求解并用 lambda finite guard 防 NaN/inf。
 
 **Post-M7 sleep threshold hardening（2026-04-20，Picea sleep-mode kinetic threshold implementer）**
@@ -465,7 +474,7 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - RED 证据：先新增 `scene::tests` 行为锁后，`rtk proxy cargo test -p picea sleep_mode_ --lib` 在旧实现上失败 1 条：`sleep_mode_keeps_high_kinetic_element_awake_even_when_motion_thresholds_hold` 中，高质量低速度元素满足既有速度/位移/角速度静止阈值，但 kinetic energy 高于极低 `max_enter_sleep_kinetic`，旧逻辑仍在帧数阈值后进入 sleep；同组低 kinetic 正向边界测试通过。
 - 实现：`Scene::apply_sleep_state` 在既有 sleep 进入条件中追加 `element.meta().compute_kinetic_energy() <= max_enter_sleep_kinetic`，不重写 sleep 计数、唤醒或 silent 逻辑；为测试配置阈值仅新增 `#[cfg(test)]` 的 `Context::set_max_enter_sleep_kinetic_for_test` helper，不开放 wasm/public runtime API。
 - GREEN 证据：`rtk proxy cargo test -p picea sleep_mode_ --lib` 通过，2 passed；`rtk proxy cargo test -p picea scene::tests --lib` 通过，17 passed；`rtk proxy cargo test -p picea --lib` 通过，65 passed。
-- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea scene::tests --lib` 通过；`rtk proxy cargo test -p picea --lib` 通过；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过；`rtk git diff --check` 通过。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea scene::tests --lib` 通过；`rtk proxy cargo test -p picea --lib` 通过；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 在当时记录为 workspace compile gate 通过。归档说明：`-- -D warnings` 会传给测试二进制而不是 rustc，本条历史记录不应被解读为“warning-clean 证明”；`rtk git diff --check` 通过。
 - residual risk：sleep threshold 现在只覆盖进入 sleep 的 kinetic gate，尚未新增 public/runtime API 来配置 kinetic/frame 阈值；sleep 唤醒策略、NaN kinetic 行为、质量/惯量输入校验和复杂接触场景下的 sleep/wakeup 仍未扩展，本轮按硬边界未触碰。
 
 **Post-M7 wasm-bindgen smoke runner（2026-04-20，Picea wasm-bindgen smoke runner implementer）**
@@ -476,7 +485,7 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - 版本证据：第一次使用非精确 dev-dependency 时 Cargo 解析到 `wasm-bindgen-test 0.3.68` / `wasm-bindgen 0.2.118`，runner 失败并报告 Wasm schema `0.2.118` 与本机 binary schema `0.2.104` 不匹配。没有全局安装新 CLI；最终将 `wasm-bindgen-test` 精确 pin 到 `=0.3.54`，匹配本机 runner 的 `wasm-bindgen 0.2.104` schema。
 - 实现：在 `crates/picea-web/Cargo.toml` 增加最小 dev-dependency `wasm-bindgen-test = "=0.3.54"`；将 `common.rs` 与 `wasm.rs` 中现有 `#[cfg(target_arch = "wasm32")]` public smoke 从 `#[test]` 改为 `#[wasm_bindgen_test]`。native helper tests 保持普通 `#[test]`。
 - wasm runner 结果：`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 真实执行并通过 7 个 wasm tests。
-- 最终验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 通过，7 passed；`rtk proxy cargo test -p picea --lib` 通过，65 passed；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过；`rtk git diff --check` 通过。
+- 最终验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 通过，7 passed；`rtk proxy cargo test -p picea --lib` 通过，65 passed；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 在当时记录为 workspace compile gate 通过。归档说明：`-- -D warnings` 会传给测试二进制而不是 rustc，本条历史记录不应被解读为“warning-clean 证明”；`rtk git diff --check` 通过。
 - residual risk：为了匹配已存在的 local runner，Cargo 当前解析到 crates.io `wasm-bindgen 0.2.104`，因此会提示根 `wasm-bindgen v0.2.92` patch 未被使用；这是依赖解析/runner 版本兼容风险，不是 rustc warning。当前 smoke 走 Node runner，尚未增加 browser runner 覆盖；Arc edge 仍无 public constructor 覆盖真实 JS callback 流，沿用前序 helper 锁定。
 
 **Post-M7 wasm-bindgen 0.2.118 对齐（2026-04-20，dependency follow-up）**
@@ -486,7 +495,7 @@ Picea 当前是一个 2D 刚体物理引擎雏形，已经具备 scene、element
 - RED 证据：`crates/picea-web/Cargo.toml` 已将直接依赖升级到 `wasm-bindgen = "0.2.118"`，但 dev-dependency 仍 pin 在 `wasm-bindgen-test = "=0.3.54"`；`rtk proxy cargo test -p picea --lib` 和 `rtk proxy cargo test -p picea-web --lib` 均在 Cargo 依赖解析阶段失败，因为 `wasm-bindgen-test 0.3.54` 绑定 `wasm-bindgen = 0.2.104`。
 - 修复：将 `wasm-bindgen-test` 精确 pin 到 `=0.3.68`，并执行 `rtk proxy cargo update -p wasm-bindgen-test --precise 0.3.68`；Cargo 解析到 `wasm-bindgen 0.2.118`、`wasm-bindgen-test 0.3.68`、`wasm-bindgen-test-shared 0.2.118`。
 - runner 修复：本机 `wasm-bindgen-test-runner` 仍是 `0.2.104`，wasm smoke 首次失败于 schema `0.2.118` vs binary schema `0.2.104`；按工具提示执行 `rtk proxy cargo install -f wasm-bindgen-cli --version 0.2.118` 后，`wasm-bindgen-test-runner --version` 为 `0.2.118`。
-- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，74 passed；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 通过；`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 通过，7 passed。
+- 验证结果：`rtk proxy cargo fmt --all --check` 通过；`rtk proxy cargo test -p picea --lib` 通过，74 passed；`rtk proxy cargo test -p picea-web --lib` 通过，7 passed；`rtk proxy cargo test -p picea --examples --no-run` 通过；`rtk proxy cargo test -p picea-macro-tools` 通过，6 passed；`rtk proxy cargo test --workspace --all-targets --no-run -- -D warnings` 在当时记录为 workspace compile gate 通过。归档说明：`-- -D warnings` 会传给测试二进制而不是 rustc，本条历史记录不应被解读为“warning-clean 证明”；`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner rtk proxy cargo test -p picea-web --lib --target wasm32-unknown-unknown` 通过，7 passed。
 - residual risk：当前验证依赖本机已安装 `wasm-bindgen-test-runner 0.2.118`；其他机器如果仍是旧 runner，需要同步更新 wasm-bindgen CLI。Cargo.lock 当前仍按仓库既有策略忽略，不作为提交产物。
 
 ### M8 Stable Contact Identity And Warm-Start Transfer

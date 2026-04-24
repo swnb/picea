@@ -207,6 +207,7 @@ impl World {
             })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn body_records(&self) -> impl Iterator<Item = (BodyHandle, &BodyRecord)> + '_ {
         self.bodies.iter().enumerate().filter_map(|(index, slot)| {
             slot.value.as_ref().map(|record| {

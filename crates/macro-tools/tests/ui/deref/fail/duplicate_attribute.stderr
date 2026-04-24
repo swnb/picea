@@ -1,0 +1,5 @@
+error: duplicate `#[deref]` attribute on field
+ --> tests/ui/deref/fail/duplicate_attribute.rs:7:5
+  |
+7 |     value: String,
+  |     ^^^^^
