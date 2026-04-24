@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  background: #111418;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 1080px;
+  overflow: hidden;
+  background: #111418;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+canvas {
+  image-rendering: auto;
+}
+
+@layer components {
+  .tab-trigger {
+    @apply inline-flex h-7 items-center rounded-md px-2.5 text-xs font-medium text-lab-muted outline-none transition-colors hover:bg-white/[0.07] hover:text-lab-text data-[state=active]:bg-lab-accent/15 data-[state=active]:text-lab-text;
+  }
+}

@@ -4,9 +4,10 @@
 
 `docs/plans/2026-04-18-picea-physics-engine-milestones.md` 只用于当前仍有效的 milestone 边界或历史归档；其中旧 `Scene` / `Context` / `picea-web` / wasm 叙述不代表当前默认路由。
 
-仓库是一个 Rust workspace，当前两个 crate：
+仓库是一个 Rust workspace，当前三类 crate / 工具入口：
 
 - `crates/picea`：核心 2D physics engine
+- `crates/picea-lab`：本地 C/S 模拟器、场景 runner、artifact capture、HTTP/SSE server，以及 `web/` React Canvas workbench
 - `crates/macro-tools`：独立 proc-macro crate；在 workspace 内单独验证，当前不在 `crates/picea` 的直接依赖图上
 
 ## `crates/picea`
@@ -38,6 +39,24 @@
 - does_not_own：不作为 public crate-root surface 暴露，不承担路由入口职责。
 - entrypoints：`solver/mod.rs`、`solver/body_state.rs`。
 - tests：跟随 `rtk proxy cargo test -p picea --lib --tests`。
+
+## `crates/picea-lab`
+
+### `crates/picea-lab/src/lib.rs`
+- owns：lab crate 模块边界和公共重导出；保持 core wrapper，而不是 physics runtime。
+- does_not_own：不修改 `crates/picea` core API，不持有浏览器 UI 代码。
+- entrypoints：`artifact`、`scenario`、`server`、`cli`、`error`。
+- tests：`rtk proxy cargo test -p picea-lab`。
+
+### Current `crates/picea-lab` module map
+
+| Module | Owns | Does Not Own | Entry Points | Tests |
+| --- | --- | --- | --- | --- |
+| `scenario` | 内置 deterministic 场景、reset-time overrides、`RunConfig`。 | 不读写 artifacts，不持有 live session 状态。 | `crates/picea-lab/src/scenario.rs` | `rtk proxy cargo test -p picea-lab` |
+| `artifact` | headless runner、`manifest.json` / `frames.jsonl` / `debug_render.json` / `final_snapshot.json` / `perf.json` 写入。 | 不直接服务 HTTP，不把 target 路径暴露给 UI。 | `crates/picea-lab/src/artifact.rs` | `rtk proxy cargo test -p picea-lab --test artifact_run` |
+| `server` | 本地 HTTP + SSE protocol、session 状态、artifact 下载。 | 不热改正在积分的 world；reset 通过 runner 重建。 | `crates/picea-lab/src/server.rs` | `rtk proxy cargo test -p picea-lab --test server_routes` |
+| `cli` | `picea-lab list`、`run`、`serve` 命令。 | 不拥有 artifact schema 或 scenario 构建细节。 | `crates/picea-lab/src/cli.rs`, `main.rs` | `rtk proxy cargo test -p picea-lab` |
+| `web` | React + Canvas 2D workbench, hierarchy, inspector, timeline, overlays。 | 不运行 physics，不替代 Rust artifact schema。 | `crates/picea-lab/web/src/*` | `npm run build` from `crates/picea-lab/web` |
 
 ## `crates/macro-tools`
 

@@ -1,6 +1,6 @@
 # System Overview
 
-Picea is a Rust workspace for a 2D physics engine. The current core dependency graph centers on `crates/picea`; `crates/macro-tools` is a standalone proc-macro crate in the workspace and is verified separately.
+Picea is a Rust workspace for a 2D physics engine. The current core dependency graph centers on `crates/picea`; `crates/picea-lab` is a local simulator/tooling wrapper, and `crates/macro-tools` is a standalone proc-macro crate verified separately.
 
 Current routing should start from live repo facts: `crates/picea/src/lib.rs`, Cargo manifests, and fresh verification output. Archived `Scene` / `Context` / `picea-web` / wasm notes in the milestone archive or legacy architecture docs are historical only.
 
@@ -10,7 +10,10 @@ Current routing should start from live repo facts: `crates/picea/src/lib.rs`, Ca
 flowchart LR
     RustUser["Rust user"] --> Core["crates/picea"]
     WorkspaceChecks["workspace validation"] --> Core
+    WorkspaceChecks --> Lab["crates/picea-lab"]
     WorkspaceChecks --> Macro["crates/macro-tools"]
+    Lab --> Core
+    Lab --> Web["picea-lab/web"]
 
     subgraph CoreModules["crates/picea modules"]
         Algo["algo"]
@@ -48,6 +51,7 @@ The public crate-root module list above comes directly from `crates/picea/src/li
 | Crate | Owns | Does Not Own |
 | --- | --- | --- |
 | `crates/picea` | World-centric physics runtime, math, stepping pipeline, query/debug facts. | GUI, wasm facade, or separate artifact tooling. |
+| `crates/picea-lab` | Local C/S simulator wrapper: scenarios, artifact capture, HTTP/SSE sessions, CLI, and React Canvas workbench. | Core physics semantics or private world/pipeline state. |
 | `crates/macro-tools` | Standalone proc-macro helpers crate in the workspace for derives such as `Accessors`, `Builder`, and `Deref`. | Runtime behavior, physics semantics, or the current `crates/picea` dependency graph. |
 
 ## Core Module Ownership

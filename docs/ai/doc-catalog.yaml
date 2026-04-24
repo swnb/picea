@@ -214,6 +214,24 @@
   applies_to: [core, architecture, public-modules, prelude]
   keywords: [lib, prelude, algo, body, collider, debug, events, handles, joint, math, pipeline, query, world]
   last_reviewed: 2026-04-23
+- path: crates/picea-lab/src/lib.rs
+  title: Picea Lab crate entrypoint
+  kind: code
+  authority: medium
+  status: active
+  owner: picea-lab
+  applies_to: [lab, simulator, artifacts, server, cli, scenarios]
+  keywords: [picea-lab, artifact, scenario, server, sse, cli, viewer]
+  last_reviewed: 2026-04-24
+- path: crates/picea-lab/web/src/App.tsx
+  title: Picea Lab web workbench
+  kind: code
+  authority: medium
+  status: active
+  owner: picea-lab
+  applies_to: [lab, viewer, react, canvas, inspector, timeline]
+  keywords: [react, canvas, tailwind, workbench, hierarchy, inspector, timeline]
+  last_reviewed: 2026-04-24
 - path: crates/macro-tools/src/lib.rs
   title: Proc macro helpers
   kind: code

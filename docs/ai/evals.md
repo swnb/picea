@@ -16,7 +16,7 @@
 
 1. **当前 Picea workspace 有哪些 crate？哪个 crate 是物理核心？**
    - Expected sources: `docs/ai/repo-map.md`, root `Cargo.toml`, `crates/*/Cargo.toml`
-   - Pass criteria: 正确指出当前 workspace 是 `crates/picea` 和 `crates/macro-tools`；`crates/picea` 是 World-centric core；不要把旧 `picea-web` 当成当前 crate。
+   - Pass criteria: 正确指出当前 workspace 包含 `crates/picea`、`crates/picea-lab`、`crates/macro-tools`；`crates/picea` 是 World-centric core；`picea-lab` 是 wrapper/tooling；不要把旧 `picea-web` 当成当前 crate。
 
 2. **当前核心运行入口是什么？**
    - Expected sources: `docs/ai/repo-map.md`, `crates/picea/src/lib.rs`, `crates/picea/src/pipeline.rs`

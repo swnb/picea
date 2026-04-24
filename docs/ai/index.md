@@ -10,16 +10,17 @@
 | --- | --- | --- | --- |
 | 当前公共 crate surface、模块入口、测试落点 | `docs/ai/repo-map.md` | `crates/picea/src/lib.rs`, 对应 `crates/picea/src/*` | `rtk proxy cargo test -p picea --lib` |
 | 当前进度、最近验证、已知 warning | `README.md` | 当前 `git status` / `git log` / 验证命令输出 | `rtk proxy cargo test -p picea --lib --no-run` |
-| 当前 crate 依赖图、`macro-tools` 是否仍被 core 直接依赖 | `docs/ai/repo-map.md` | `crates/picea/Cargo.toml`, `Cargo.toml`, `crates/macro-tools/Cargo.toml` | `rtk proxy cargo tree -p picea` |
+| 当前 crate 依赖图、`picea-lab` / `macro-tools` 是否仍被 core 直接依赖 | `docs/ai/repo-map.md` | `Cargo.toml`, `crates/*/Cargo.toml` | `rtk proxy cargo tree -p picea` |
 | 模块职责、谁负责什么 | `docs/ai/repo-map.md` | 对应 `crates/picea/src/*` | `rtk proxy cargo test -p picea --lib` |
 | 架构图、当前 crate/module 边界 | `docs/architecture/system-overview.md` | `crates/picea/src/lib.rs`, `world/*`, `pipeline/*`, `solver/*` | 先读图，再选模块测试 |
 | 设计目标、非目标、未来扩展点 | `docs/design/README.md` | 对应设计文档指向的模块 | 先确认 milestone 边界 |
 | 稳定 world API、debug snapshot、query | `docs/ai/repo-map.md` | `crates/picea/src/world/*`, `debug.rs`, `query.rs` | `rtk proxy cargo test -p picea --test world_step_review_regressions` |
 | 数学类型与新 algebra API | `docs/ai/repo-map.md` | `crates/picea/src/math/*` | `rtk proxy cargo test -p picea --test math_api_compile_fail` |
 | proc macro、`Accessors`/`Builder`/`Deref` helper（独立 workspace crate） | `docs/ai/repo-map.md` | `crates/macro-tools/src/*` | `rtk proxy cargo test -p picea-macro-tools` |
+| C/S simulator、artifact schema、HTTP/SSE server、React Canvas workbench | `docs/ai/repo-map.md`, `docs/design/picea-lab-observability-architecture.md` | `crates/picea-lab/src/*`, `crates/picea-lab/web/src/*` | `rtk proxy cargo test -p picea-lab`; `npm run build` in `crates/picea-lab/web` |
 | milestone 范围、当前仍有效的硬边界（仅当任务明确引用 milestone） | `docs/plans/2026-04-18-picea-physics-engine-milestones.md` | 对应仍存在的代码模块 | 先读计划，再选仍存在的 gate |
 | 旧 `Scene` / `Context` / `picea-web` / wasm gate 历史（归档） | `docs/plans/2026-04-18-picea-physics-engine-milestones.md` | 仅用于历史背景，不做当前 routing | 不作为当前默认验证目标 |
-| 只想确认入口文件 | `docs/ai/repo-map.md` | `crates/picea/src/lib.rs`, `crates/macro-tools/src/lib.rs` | `rtk rg --files crates docs` |
+| 只想确认入口文件 | `docs/ai/repo-map.md` | `crates/picea/src/lib.rs`, `crates/picea-lab/src/lib.rs`, `crates/macro-tools/src/lib.rs` | `rtk rg --files crates docs` |
 
 ## 读法
 
@@ -27,5 +28,5 @@
 - 如果是 bug 或回归，先确认当前 git/HEAD/验证输出，再按 `repo-map.md` 找模块和测试。
 - 如果只是当前模块、依赖图或验证问题，不要先读 milestone 计划；先看 live repo facts 和 `repo-map.md` / `system-overview.md`。
 - 如果是新功能或结构调整，先确认 live repo facts，再在任务明确是 milestone work 时回 milestone 计划确认边界。
-- 如果是在确认当前依赖图，先看 `crates/picea/Cargo.toml` 和 `rtk proxy cargo tree -p picea`；不要把 milestone 历史 gate 直接读成当前 core 依赖关系。
+- 如果是在确认当前依赖图，先看 `Cargo.toml` / `crates/*/Cargo.toml` 和 `rtk proxy cargo tree -p picea`；不要把 workspace 成员直接读成 core runtime 依赖。
 - 如果是新 core 行为问题，优先查 `world/*`、`pipeline/*`、`solver/*`，当前以 `World` + `SimulationPipeline` 路径为准；旧 `Scene` narrative 只在归档里保留。

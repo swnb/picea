@@ -1,14 +1,15 @@
 # Picea
 
-Picea is a work-in-progress 2D physics engine written in Rust. The repository now centers on the `World`-based core crate. `crates/macro-tools` remains a standalone proc-macro crate in the workspace and is verified separately; it is not part of `crates/picea`'s current direct dependency graph.
+Picea is a work-in-progress 2D physics engine written in Rust. The repository now centers on the `World`-based core crate. `crates/picea-lab` is a local C/S simulator wrapper for scenarios, artifacts, and visualization. `crates/macro-tools` remains a standalone proc-macro crate in the workspace and is verified separately; neither lab nor macro tooling is part of `crates/picea`'s core runtime dependency graph.
 
 ## Workspace
 
-This repository is a Rust workspace with two crates:
+This repository is a Rust workspace with three crate families:
 
 | Crate | Purpose |
 | --- | --- |
 | `crates/picea` | Core 2D physics engine centered on the `World` API, query/debug read models, and internal pipeline/solver modules. |
+| `crates/picea-lab` | Local C/S simulator tooling: deterministic scenarios, artifact capture, HTTP/SSE server, CLI, and the React Canvas workbench under `crates/picea-lab/web`. |
 | `crates/macro-tools` | Standalone proc-macro crate in the workspace for derive helpers such as `Accessors`, `Builder`, and `Deref`, validated separately from the current `crates/picea` dependency graph. |
 
 ## Quick Start
@@ -23,6 +24,12 @@ Run the standalone proc-macro crate tests:
 
 ```bash
 cargo test -p picea-macro-tools
+```
+
+Run the local simulator crate tests:
+
+```bash
+cargo test -p picea-lab
 ```
 
 ## Development Workflow
@@ -70,6 +77,7 @@ These are the common workspace gates used across the current repository:
 
 ```bash
 cargo test -p picea --lib
+cargo test -p picea-lab
 cargo test -p picea-macro-tools
 cargo test --workspace --all-targets --no-run
 ```

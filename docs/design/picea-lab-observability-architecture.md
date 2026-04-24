@@ -2,7 +2,7 @@
 
 > Date: 2026-04-24
 >
-> Status: active target design. No `picea-lab` crate, viewer, or benchmark harness exists in the current workspace yet.
+> Status: active target design. The first `crates/picea-lab` C/S simulator slice exists with artifacts, HTTP/SSE, and a React Canvas workbench; benchmark harness work is still future scope.
 
 Picea Lab is the proposed toolchain for visualization, reproducible artifacts, and performance measurement around the current `World` + `SimulationPipeline` core.
 
@@ -38,15 +38,15 @@ The core engine should expose facts. The lab should capture, render, compare, an
 - viewer-specific layout
 - browser or native app packaging
 
-## Recommended First Slice
+## First Slice
 
-Start artifact-first, not UI-first.
+The first landed slice is artifact-first with a local C/S viewer layered on top.
 
-1. Add a headless scenario runner outside the core hot path.
-2. Run deterministic scenarios through `World` and `SimulationPipeline`.
-3. Export readable artifacts under `target/picea-lab/runs/<run_id>/`.
-4. Add a minimal viewer that reads artifacts and does not run physics.
-5. Add Criterion benchmarks only after scenario names and counters are stable.
+1. Headless scenario runner lives outside the core hot path.
+2. Deterministic scenarios run through `World` and `SimulationPipeline`.
+3. Readable artifacts are exported under `target/picea-lab/runs/<run_id>/`.
+4. The web workbench reads live/session artifact facts and does not run physics.
+5. Criterion benchmarks should still wait until scenario names and counters are stable.
 
 This lets visualization and benchmarks share the same scenario definitions.
 
@@ -54,17 +54,17 @@ This lets visualization and benchmarks share the same scenario definitions.
 
 | File | Purpose |
 | --- | --- |
+| `manifest.json` | Run metadata, scenario id, frame count, final state hash, and artifact list. |
 | `frames.jsonl` | One record per captured step, with step index, events, counters, and selected snapshot facts. |
 | `debug_render.json` | Shape outlines, AABBs, contact points, normals, sleep labels, and optional broadphase candidate lines. |
 | `final_snapshot.json` | Final `DebugSnapshot` for deterministic comparison. |
 | `perf.json` | Scenario metadata, counters, timing summary, and state hash. |
-| `trace.perfetto.json` | Optional timeline export for Perfetto or Chrome trace viewers. |
 
 JSON/JSONL should be canonical for the first slice because it is easy to diff, attach to bug reports, and inspect in code review. Binary replay can come later if schemas stabilize.
 
 ## Viewer Choice
 
-The first viewer should be small and artifact-only:
+The first viewer should stay small and artifact/session-fact driven:
 
 - draw shapes and AABBs;
 - draw contact points and normals;
