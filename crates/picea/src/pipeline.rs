@@ -4,9 +4,11 @@
 //! cadence/configuration, while the concrete world owns state mutation,
 //! contact generation, and event production.
 
+pub(crate) mod broadphase;
 pub(crate) mod contacts;
 pub(crate) mod integrate;
 pub(crate) mod joints;
+pub(crate) mod narrowphase;
 pub(crate) mod sleep;
 pub(crate) mod step;
 

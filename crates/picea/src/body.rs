@@ -396,6 +396,7 @@ pub(crate) struct BodyRecord {
     pub(crate) gravity_scale: FloatNum,
     pub(crate) can_sleep: bool,
     pub(crate) sleeping: bool,
+    pub(crate) sleep_idle_time: FloatNum,
     pub(crate) user_data: u64,
     pub(crate) colliders: Vec<ColliderHandle>,
     pub(crate) joints: Vec<JointHandle>,
@@ -413,6 +414,7 @@ impl BodyRecord {
             gravity_scale: desc.gravity_scale,
             can_sleep: desc.can_sleep,
             sleeping: desc.sleeping,
+            sleep_idle_time: 0.0,
             user_data: desc.user_data,
             colliders: Vec::new(),
             joints: Vec::new(),
@@ -451,6 +453,16 @@ impl BodyRecord {
         }
         if let Some(user_data) = patch.user_data {
             self.user_data = user_data;
+        }
+        if patch.body_type.is_some()
+            || patch.pose.is_some()
+            || patch.linear_velocity.is_some()
+            || patch.angular_velocity.is_some()
+            || patch.can_sleep == Some(false)
+            || patch.sleeping == Some(false)
+            || patch.wake
+        {
+            self.sleep_idle_time = 0.0;
         }
         if patch.wake {
             self.sleeping = false;
@@ -499,6 +511,7 @@ impl BodyRecord {
             self.linear_velocity = Vector::default();
             self.angular_velocity = 0.0;
             self.sleeping = false;
+            self.sleep_idle_time = 0.0;
         }
     }
 }

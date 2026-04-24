@@ -329,24 +329,24 @@ fn simulation_step_emits_lifecycle_and_contact_events_with_nonzero_stats() {
         .expect("joint should be created");
 
     let mut pipeline = SimulationPipeline::new(StepConfig::default());
-    let report = pipeline.step(&mut world);
+    let first_report = pipeline.step(&mut world);
 
     assert!(
-        report.stats.contact_count > 0,
+        first_report.stats.contact_count > 0,
         "overlapping colliders must contribute contact stats"
     );
     assert!(
-        report.stats.manifold_count > 0,
+        first_report.stats.manifold_count > 0,
         "active contacts must also surface manifolds"
     );
-    assert!(report
+    assert!(first_report
         .events
         .iter()
         .any(|event| matches!(event, WorldEvent::BodyCreated { body } if *body == ground)));
-    assert!(report.events.iter().any(
+    assert!(first_report.events.iter().any(
         |event| matches!(event, WorldEvent::JointCreated { joint } if *joint == anchor_joint)
     ));
-    assert!(report.events.iter().any(|event| {
+    assert!(first_report.events.iter().any(|event| {
         matches!(
             event,
             WorldEvent::ContactStarted(contact)
@@ -356,13 +356,107 @@ fn simulation_step_emits_lifecycle_and_contact_events_with_nonzero_stats() {
                         && contact.collider_b == ground_collider)
         )
     }));
-    assert!(report.events.iter().any(|event| {
-        matches!(
-            event,
-            WorldEvent::SleepChanged(sleep)
-                if sleep.body == sleeper && sleep.is_sleeping
+
+    let sleeper_eventually_slept = (0..40).any(|_| {
+        pipeline.step(&mut world).events.iter().any(|event| {
+            matches!(
+                event,
+                WorldEvent::SleepChanged(sleep)
+                    if sleep.body == sleeper && sleep.is_sleeping
+            )
+        })
+    });
+    assert!(
+        sleeper_eventually_slept,
+        "sleep events should still emit after the stability window"
+    );
+}
+
+#[test]
+fn circle_contacts_keep_normals_toward_ordered_body_after_collider_slot_reuse() {
+    let mut world = World::new(WorldDesc {
+        gravity: (0.0, 0.0).into(),
+        enable_sleep: false,
+    });
+    let temp_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("temporary body should be created");
+    let recycled_slot_collider = world
+        .create_collider(
+            temp_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                ..ColliderDesc::default()
+            },
         )
-    }));
+        .expect("temporary collider should be created");
+    world
+        .destroy_collider(recycled_slot_collider)
+        .expect("collider slot should be reusable");
+
+    let left_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("left body should be created");
+    let left_collider = world
+        .create_collider(
+            left_body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("left collider should reuse the old slot generation");
+    let right_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(1.5, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("right body should be created");
+    let right_collider = world
+        .create_collider(
+            right_body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("right collider should be created after the recycled slot");
+
+    assert!(
+        right_collider < left_collider,
+        "generation bits should make handle order diverge from live snapshot order"
+    );
+
+    let mut pipeline = SimulationPipeline::new(StepConfig::default());
+    let report = pipeline.step(&mut world);
+    let contact = report
+        .events
+        .iter()
+        .find_map(|event| match event {
+            WorldEvent::ContactStarted(contact)
+                if contact.collider_a == right_collider && contact.collider_b == left_collider =>
+            {
+                Some(contact)
+            }
+            _ => None,
+        })
+        .expect("overlapping circles should emit an ordered contact");
+
+    assert_eq!(contact.body_a, right_body);
+    assert_eq!(contact.body_b, left_body);
+    assert!(
+        contact.normal.x() > 0.0 && contact.normal.y().abs() <= f32::EPSILON,
+        "normal should point toward ordered body_a even when handle order diverges; got {:?}",
+        contact.normal
+    );
 }
 
 #[test]

@@ -30,10 +30,12 @@ impl World {
             match record.body_type {
                 BodyType::Static => {
                     record.sleeping = false;
+                    record.sleep_idle_time = 0.0;
                 }
                 BodyType::Dynamic => {
                     if !(config.enable_sleep && enable_sleep) {
                         record.sleeping = false;
+                        record.sleep_idle_time = 0.0;
                     }
                     if record.sleeping {
                         continue;
@@ -60,6 +62,7 @@ impl World {
                         });
                         record.linear_velocity = Vector::default();
                         record.angular_velocity = 0.0;
+                        record.sleep_idle_time = 0.0;
                         continue;
                     }
 
@@ -69,6 +72,7 @@ impl World {
                 }
                 BodyType::Kinematic => {
                     record.sleeping = false;
+                    record.sleep_idle_time = 0.0;
                     let pose = translated_pose(
                         record.pose,
                         record.linear_velocity * config.dt,

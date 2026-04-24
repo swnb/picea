@@ -1,0 +1,317 @@
+use picea::prelude::*;
+
+const DT: f32 = 1.0 / 60.0;
+
+fn fixed_step_config() -> StepConfig {
+    StepConfig {
+        dt: DT,
+        ..StepConfig::default()
+    }
+}
+
+fn no_gravity_world() -> World {
+    World::new(WorldDesc {
+        gravity: Vector::default(),
+        ..WorldDesc::default()
+    })
+}
+
+fn create_body(
+    world: &mut World,
+    body_type: BodyType,
+    x: f32,
+    y: f32,
+    linear_velocity: Vector,
+) -> BodyHandle {
+    world
+        .create_body(BodyDesc {
+            body_type,
+            pose: Pose::from_xy_angle(x, y, 0.0),
+            linear_velocity,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("body should be created")
+}
+
+fn attach_shape(
+    world: &mut World,
+    body: BodyHandle,
+    shape: SharedShape,
+    material: Material,
+) -> ColliderHandle {
+    world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape,
+                material,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created")
+}
+
+fn step_world(world: &mut World, steps: usize) -> StepReport {
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    let mut report = StepReport::default();
+    for _ in 0..steps {
+        report = pipeline.step(world);
+    }
+    report
+}
+
+fn body_velocity(world: &World, body: BodyHandle) -> Vector {
+    world
+        .try_body(body)
+        .expect("body should still exist")
+        .linear_velocity()
+}
+
+fn body_position(world: &World, body: BodyHandle) -> Vector {
+    world
+        .try_body(body)
+        .expect("body should still exist")
+        .pose()
+        .translation()
+}
+
+#[test]
+fn circles_with_overlapping_aabbs_but_separated_geometry_do_not_contact() {
+    // Physical behavior: broadphase AABB overlap should be followed by shape-level narrowing.
+    // Two diagonal circles can have overlapping AABBs while their actual circle geometry is
+    // separated, so the narrowphase must reject that broadphase-only false positive.
+    let mut world = no_gravity_world();
+    let first = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let second = create_body(&mut world, BodyType::Static, 1.5, 1.5, Vector::default());
+    attach_shape(
+        &mut world,
+        first,
+        SharedShape::circle(1.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        second,
+        SharedShape::circle(1.0),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+
+    assert_eq!(
+        report.stats.contact_count, 0,
+        "circle-circle narrowphase should reject diagonal AABB-only false positives"
+    );
+}
+
+#[test]
+fn restitution_changes_post_impact_bounce_velocity() {
+    // Physical behavior: a dynamic body with restitution should rebound from static geometry.
+    let mut world = no_gravity_world();
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let ball = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        -2.0,
+        Vector::new(0.0, 6.0),
+    );
+    attach_shape(
+        &mut world,
+        floor,
+        SharedShape::rect(10.0, 1.0),
+        Material {
+            restitution: 1.0,
+            friction: 0.0,
+        },
+    );
+    attach_shape(
+        &mut world,
+        ball,
+        SharedShape::circle(0.5),
+        Material {
+            restitution: 1.0,
+            friction: 0.0,
+        },
+    );
+
+    step_world(&mut world, 30);
+
+    let velocity = body_velocity(&world, ball);
+    assert!(
+        velocity.y() < -3.0,
+        "elastic impact should reverse vertical velocity; got {velocity:?}"
+    );
+}
+
+#[test]
+fn friction_changes_tangential_sliding_speed() {
+    // Physical behavior: lower friction should preserve more tangential velocity than high
+    // friction while sliding on the same surface.
+    fn sliding_speed_after_contact(friction: f32) -> f32 {
+        let mut world = no_gravity_world();
+        let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+        let slider = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            0.0,
+            -0.45,
+            Vector::new(4.0, 0.0),
+        );
+        let material = Material {
+            friction,
+            restitution: 0.0,
+        };
+        attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+        attach_shape(&mut world, slider, SharedShape::circle(0.5), material);
+
+        step_world(&mut world, 10);
+
+        body_velocity(&world, slider).x().abs()
+    }
+
+    let low_friction_speed = sliding_speed_after_contact(0.0);
+    let high_friction_speed = sliding_speed_after_contact(1.0);
+
+    assert!(
+        low_friction_speed > high_friction_speed + 1.0,
+        "low friction should retain more sliding speed; low={low_friction_speed}, high={high_friction_speed}"
+    );
+}
+
+#[test]
+fn separating_overlap_does_not_apply_friction_impulse() {
+    // Physical behavior: geometric overlap alone should not remove tangential velocity when the
+    // bodies are already moving apart along the contact normal.
+    let mut world = no_gravity_world();
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let slider = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        -0.45,
+        Vector::new(4.0, -1.0),
+    );
+    let material = Material {
+        friction: 1.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+    attach_shape(&mut world, slider, SharedShape::circle(0.5), material);
+
+    step_world(&mut world, 1);
+
+    let velocity = body_velocity(&world, slider);
+    assert!(
+        velocity.x() > 3.5,
+        "separating contact should preserve tangential speed; got {velocity:?}"
+    );
+}
+
+#[test]
+fn contact_position_correction_preserves_spin_without_angular_solver() {
+    // Physical behavior: until angular contact impulses are implemented, a zero-friction contact
+    // should at least avoid deleting existing angular velocity as a side effect.
+    let mut world = no_gravity_world();
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let spinner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, -0.45, 0.0),
+            angular_velocity: 5.0,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("spinner should be created");
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+    attach_shape(&mut world, spinner, SharedShape::circle(0.5), material);
+
+    step_world(&mut world, 1);
+
+    let angular_velocity = world
+        .try_body(spinner)
+        .expect("spinner should still exist")
+        .angular_velocity();
+    assert!(
+        (angular_velocity - 5.0).abs() < f32::EPSILON,
+        "contact correction should not silently clear angular velocity; got {angular_velocity}"
+    );
+}
+
+#[test]
+fn sleep_requires_a_stability_window_before_a_body_sleeps() {
+    // Physical behavior: sleeping should require sustained low motion over a stability window,
+    // so bodies do not sleep after one quiet frame and miss near-future wake interactions.
+    let mut world = no_gravity_world();
+    let body = create_body(&mut world, BodyType::Dynamic, 0.0, 0.0, Vector::default());
+    world
+        .apply_body_patch(
+            body,
+            BodyPatch {
+                can_sleep: Some(true),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body patch should apply");
+
+    step_world(&mut world, 1);
+
+    assert!(
+        !world.try_body(body).expect("body should exist").sleeping(),
+        "a single quiet step should not be enough to put a dynamic body to sleep"
+    );
+
+    step_world(&mut world, 31);
+
+    assert!(
+        world.try_body(body).expect("body should exist").sleeping(),
+        "a body should sleep after remaining quiet for the stability window"
+    );
+}
+
+#[test]
+#[ignore = "known-red physics realism baseline: continuous collision detection is not implemented"]
+fn fast_small_body_does_not_tunnel_through_thin_wall() {
+    // Physical behavior: CCD should sweep fast bodies between poses and stop at the first time
+    // of impact. Current implementation is expected to fail because collision is sampled only
+    // after integration, so the circle tunnels completely through the thin wall.
+    let mut world = no_gravity_world();
+    let wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let bullet = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.0,
+        0.0,
+        Vector::new(200.0, 0.0),
+    );
+    attach_shape(
+        &mut world,
+        wall,
+        SharedShape::rect(0.1, 10.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        bullet,
+        SharedShape::circle(0.05),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let position = body_position(&world, bullet);
+
+    assert!(
+        report.stats.contact_count > 0,
+        "CCD should report the swept contact with the wall"
+    );
+    assert!(
+        position.x() <= -0.05,
+        "CCD should keep the bullet on the pre-impact side of the wall; x={}",
+        position.x()
+    );
+}

@@ -31,7 +31,7 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         &mut numeric_warnings,
     );
     let (contact_events, contact_count, manifold_count) =
-        crate::pipeline::contacts::run_contact_phases(world, &mut awake_bodies);
+        crate::pipeline::contacts::run_contact_phases(world, config, &mut awake_bodies);
     events.extend(contact_events);
     let (sleep_events, sleep_transition_count, active_body_count) =
         crate::pipeline::sleep::refresh_sleep_phase(

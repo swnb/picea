@@ -2,7 +2,7 @@
 
 > Date: 2026-04-20
 >
-> Status: direction archive. This document records the next architecture refactor target, acceptance shape, example coverage, and performance benchmark policy. It is not an implementation plan.
+> Status: archived legacy `Scene`-path design. This document is retained for historical context only. Current work should route through `docs/design/engine-design.md`, `docs/design/physics-engine-upgrade-technical-plan.md`, and live `World` + `SimulationPipeline` code.
 
 ## 1. Why This Document Exists
 

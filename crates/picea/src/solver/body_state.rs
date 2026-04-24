@@ -60,6 +60,7 @@ impl World {
         record.linear_velocity = Vector::default();
         record.angular_velocity = 0.0;
         record.sleeping = false;
+        record.sleep_idle_time = 0.0;
         awake_bodies.insert(body);
     }
 }

@@ -4,9 +4,14 @@ use crate::{
     body::BodyType,
     events::{SleepEvent, WorldEvent},
     handles::BodyHandle,
+    math::FloatNum,
     pipeline::StepConfig,
     world::World,
 };
+
+const SLEEP_STABILITY_SECONDS: FloatNum = 0.5;
+const SLEEP_LINEAR_THRESHOLD: FloatNum = 0.0001;
+const SLEEP_ANGULAR_THRESHOLD: FloatNum = 0.0001;
 
 pub(crate) fn refresh_sleep_phase(
     world: &mut World,
@@ -39,15 +44,31 @@ impl World {
             match record.body_type {
                 BodyType::Static => {
                     record.sleeping = false;
+                    record.sleep_idle_time = 0.0;
                 }
                 BodyType::Dynamic => {
                     if awake_bodies.contains(&handle) {
                         record.sleeping = false;
+                        record.sleep_idle_time = 0.0;
                     } else if config.enable_sleep && enable_sleep && record.can_sleep {
-                        record.sleeping = record.linear_velocity.length() < 0.0001
-                            && record.angular_velocity.abs() < 0.0001;
+                        let low_motion = record.linear_velocity.length() < SLEEP_LINEAR_THRESHOLD
+                            && record.angular_velocity.abs() < SLEEP_ANGULAR_THRESHOLD;
+                        if low_motion {
+                            if was_sleeping {
+                                record.sleep_idle_time = SLEEP_STABILITY_SECONDS;
+                                record.sleeping = true;
+                            } else {
+                                record.sleep_idle_time = (record.sleep_idle_time + config.dt)
+                                    .min(SLEEP_STABILITY_SECONDS);
+                                record.sleeping = record.sleep_idle_time >= SLEEP_STABILITY_SECONDS;
+                            }
+                        } else {
+                            record.sleeping = false;
+                            record.sleep_idle_time = 0.0;
+                        }
                     } else {
                         record.sleeping = false;
+                        record.sleep_idle_time = 0.0;
                     }
 
                     if !record.sleeping {
@@ -63,6 +84,7 @@ impl World {
                 }
                 BodyType::Kinematic => {
                     record.sleeping = false;
+                    record.sleep_idle_time = 0.0;
                     active_body_count += 1;
                 }
             }
