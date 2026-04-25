@@ -57,6 +57,22 @@ pub struct StepStats {
     pub joint_count: usize,
     /// Number of active bodies processed during the step.
     pub active_body_count: usize,
+    /// Number of broadphase candidate pairs considered during the step.
+    pub broadphase_candidate_count: usize,
+    /// Number of broadphase proxy insert/remove/reinsert updates during the step.
+    pub broadphase_update_count: usize,
+    /// Number of stale broadphase proxies dropped because their collider handle disappeared.
+    pub broadphase_stale_proxy_drop_count: usize,
+    /// Number of broadphase candidates dropped because both colliders belong to one body.
+    pub broadphase_same_body_drop_count: usize,
+    /// Number of broadphase candidates dropped by collision filters.
+    pub broadphase_filter_drop_count: usize,
+    /// Number of broadphase candidates rejected by narrowphase geometry.
+    pub broadphase_narrowphase_drop_count: usize,
+    /// Number of broadphase tree rebuilds used to restore a bounded tree depth.
+    pub broadphase_rebuild_count: usize,
+    /// Current broadphase tree depth after proxy synchronization.
+    pub broadphase_tree_depth: usize,
     /// Number of active contacts emitted during the step.
     pub contact_count: usize,
     /// Number of active manifolds after refresh.

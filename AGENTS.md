@@ -17,13 +17,15 @@
 ## 权威顺序
 
 1. 当前工作区事实和验证命令输出。
-2. `docs/plans/2026-04-18-picea-physics-engine-milestones.md` 的 milestone 边界和验收门。
+2. `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md` 的当前 milestone 边界和验收门。
 3. `docs/ai/repo-map.md` 与 `docs/ai/doc-catalog.yaml` 的路由信息。
 4. `README.md` / crate README 这类入口说明。
+5. `docs/plans/2026-04-18-picea-physics-engine-milestones.md` 的归档执行历史。
 
 ## 先看哪里
 
-- 进度、已完成 milestone、验收门：`docs/plans/2026-04-18-picea-physics-engine-milestones.md`
+- 当前生产化 milestone 目标、验收方法、执行顺序：`docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`
+- 归档 milestone 历史、已完成记录：`docs/plans/2026-04-18-picea-physics-engine-milestones.md`
 - 模块职责、入口、测试命令：`docs/ai/repo-map.md`
 - 任务分流和问题类型路由：`docs/ai/index.md`
 - 文档清单和权责：`docs/ai/doc-catalog.yaml`

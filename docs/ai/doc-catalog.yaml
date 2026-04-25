@@ -96,7 +96,7 @@
   owner: architecture
   applies_to: [design, roadmap, decisions]
   keywords: [design, intent, future-work, decisions]
-  last_reviewed: 2026-04-24
+  last_reviewed: 2026-04-25
 - path: docs/design/engine-design.md
   title: Engine Design
   kind: design
@@ -105,7 +105,7 @@
   owner: architecture
   applies_to: [engine, runtime, module-design, extension-points]
   keywords: [world, simulation-pipeline, debug-snapshot, goals, non-goals, ownership, invariants]
-  last_reviewed: 2026-04-24
+  last_reviewed: 2026-04-25
 - path: docs/design/physics-engine-upgrade-technical-plan.md
   title: Physics Engine Upgrade Technical Plan
   kind: design
@@ -205,6 +205,15 @@
   applies_to: [milestone, scope, acceptance, archive, history]
   keywords: [archive, milestone, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, scene-history, wasm-history]
   last_reviewed: 2026-04-23
+- path: docs/plans/2026-04-25-picea-physics-engine-production-milestones.md
+  title: Picea Physics Engine Production Milestones
+  kind: plan
+  authority: high
+  status: active
+  owner: supervisor
+  applies_to: [milestone, scope, acceptance, productionization, physics-upgrade]
+  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, worldrecipe, picea-lab, observability, benchmarks]
+  last_reviewed: 2026-04-25
 - path: crates/picea/src/lib.rs
   title: Picea core entrypoint
   kind: code

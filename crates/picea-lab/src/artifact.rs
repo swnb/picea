@@ -107,6 +107,14 @@ pub struct DebugRenderFrame {
     pub frame_index: usize,
     pub body_count: usize,
     pub collider_count: usize,
+    pub broadphase_candidate_count: usize,
+    pub broadphase_update_count: usize,
+    pub broadphase_stale_proxy_drop_count: usize,
+    pub broadphase_same_body_drop_count: usize,
+    pub broadphase_filter_drop_count: usize,
+    pub broadphase_narrowphase_drop_count: usize,
+    pub broadphase_rebuild_count: usize,
+    pub broadphase_tree_depth: usize,
     pub contact_count: usize,
     pub world_bounds: Option<DebugAabb>,
     pub bodies: Vec<DebugBody>,
@@ -220,6 +228,23 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     frame_index: frame.frame_index,
                     body_count: frame.snapshot.bodies.len(),
                     collider_count: frame.snapshot.colliders.len(),
+                    broadphase_candidate_count: frame.snapshot.stats.broadphase_candidate_count,
+                    broadphase_update_count: frame.snapshot.stats.broadphase_update_count,
+                    broadphase_stale_proxy_drop_count: frame
+                        .snapshot
+                        .stats
+                        .broadphase_stale_proxy_drop_count,
+                    broadphase_same_body_drop_count: frame
+                        .snapshot
+                        .stats
+                        .broadphase_same_body_drop_count,
+                    broadphase_filter_drop_count: frame.snapshot.stats.broadphase_filter_drop_count,
+                    broadphase_narrowphase_drop_count: frame
+                        .snapshot
+                        .stats
+                        .broadphase_narrowphase_drop_count,
+                    broadphase_rebuild_count: frame.snapshot.stats.broadphase_rebuild_count,
+                    broadphase_tree_depth: frame.snapshot.stats.broadphase_tree_depth,
                     contact_count: frame.snapshot.contacts.len(),
                     world_bounds: frame.snapshot.world_bounds(),
                     bodies: frame.snapshot.bodies.clone(),
@@ -227,15 +252,10 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     contacts: frame.snapshot.contacts.clone(),
                     // These names are intentionally explicit so the viewer does
                     // not present first-slice placeholders as measured facts.
-                    unmeasured: [
-                        "broadphase_candidates",
-                        "contact_impulses",
-                        "forces",
-                        "torques",
-                    ]
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect(),
+                    unmeasured: ["contact_impulses", "forces", "torques"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
                 })
                 .collect(),
         },

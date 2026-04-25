@@ -15,7 +15,7 @@ use crate::{
     handles::{BodyHandle, ColliderHandle, JointHandle, WorldRevision},
     joint::JointRecord,
     math::{vector::Vector, FloatNum},
-    pipeline::{SimulationWorld, StepConfig, StepOutcome, StepStats},
+    pipeline::{broadphase::Broadphase, SimulationWorld, StepConfig, StepOutcome, StepStats},
 };
 
 use contact_state::{ContactKey, ContactRecord};
@@ -59,6 +59,7 @@ pub struct World {
     pending_events: Vec<WorldEvent>,
     #[allow(dead_code)]
     last_step_events: Vec<WorldEvent>,
+    broadphase: Broadphase,
     active_contacts: BTreeMap<ContactKey, ContactRecord>,
     next_contact_raw: u32,
     next_manifold_raw: u32,

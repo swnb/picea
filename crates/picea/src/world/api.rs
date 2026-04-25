@@ -30,6 +30,7 @@ impl World {
             simulated_time: 0.0,
             pending_events: Vec::new(),
             last_step_events: Vec::new(),
+            broadphase: Default::default(),
             active_contacts: Default::default(),
             next_contact_raw: 0,
             next_manifold_raw: 0,

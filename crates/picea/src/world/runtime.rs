@@ -1,7 +1,10 @@
 use crate::{
     events::WorldEvent,
     math::FloatNum,
-    pipeline::{StepConfig, StepOutcome, StepStats},
+    pipeline::{
+        broadphase::{BroadphaseOutput, ColliderProxy},
+        StepConfig, StepOutcome, StepStats,
+    },
     world::World,
 };
 
@@ -24,6 +27,10 @@ impl World {
 
     pub(crate) fn take_pending_events(&mut self) -> Vec<WorldEvent> {
         std::mem::take(&mut self.pending_events)
+    }
+
+    pub(crate) fn update_broadphase(&mut self, proxies: &[ColliderProxy]) -> BroadphaseOutput {
+        self.broadphase.update(proxies)
     }
 
     pub(crate) fn commit_step(

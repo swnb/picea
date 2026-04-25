@@ -2,7 +2,7 @@
 
 所有问题先看实时仓库事实：当前 `git status` / `HEAD` / 验证命令输出、Cargo manifests，以及 `crates/picea/src/lib.rs`。文档只负责路由。
 
-`docs/plans/2026-04-18-picea-physics-engine-milestones.md` 只在任务明确需要 milestone 边界或历史背景时再看；其中旧 `Scene` / `Context` / `picea-web` / wasm 叙述是归档，不是当前默认验证目标。
+`docs/plans/2026-04-25-picea-physics-engine-production-milestones.md` 是当前生产化 milestone 执行规划。`docs/plans/2026-04-18-picea-physics-engine-milestones.md` 只在任务明确需要历史背景时再看；其中旧 `Scene` / `Context` / `picea-web` / wasm 叙述是归档，不是当前默认验证目标。
 
 ## 问题类型 -> 去哪里看
 
@@ -18,7 +18,8 @@
 | 数学类型与新 algebra API | `docs/ai/repo-map.md` | `crates/picea/src/math/*` | `rtk proxy cargo test -p picea --test math_api_compile_fail` |
 | proc macro、`Accessors`/`Builder`/`Deref` helper（独立 workspace crate） | `docs/ai/repo-map.md` | `crates/macro-tools/src/*` | `rtk proxy cargo test -p picea-macro-tools` |
 | C/S simulator、artifact schema、HTTP/SSE server、React Canvas workbench | `docs/ai/repo-map.md`, `docs/design/picea-lab-observability-architecture.md` | `crates/picea-lab/src/*`, `crates/picea-lab/web/src/*` | `rtk proxy cargo test -p picea-lab`; `npm run build` in `crates/picea-lab/web` |
-| milestone 范围、当前仍有效的硬边界（仅当任务明确引用 milestone） | `docs/plans/2026-04-18-picea-physics-engine-milestones.md` | 对应仍存在的代码模块 | 先读计划，再选仍存在的 gate |
+| 当前生产化 milestone 范围、目标、验收方法 | `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md` | 对应仍存在的代码模块 | 先读计划，再选对应 targeted gate |
+| 旧 milestone 执行历史和归档记录 | `docs/plans/2026-04-18-picea-physics-engine-milestones.md` | 仅用于历史背景，不做当前 routing | 不作为当前默认验证目标 |
 | 旧 `Scene` / `Context` / `picea-web` / wasm gate 历史（归档） | `docs/plans/2026-04-18-picea-physics-engine-milestones.md` | 仅用于历史背景，不做当前 routing | 不作为当前默认验证目标 |
 | 只想确认入口文件 | `docs/ai/repo-map.md` | `crates/picea/src/lib.rs`, `crates/picea-lab/src/lib.rs`, `crates/macro-tools/src/lib.rs` | `rtk rg --files crates docs` |
 

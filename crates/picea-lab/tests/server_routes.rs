@@ -35,7 +35,12 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             .iter()
             .map(|scenario| scenario["id"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        vec!["falling_box_contact", "stack_4", "joint_anchor"]
+        vec![
+            "falling_box_contact",
+            "stack_4",
+            "joint_anchor",
+            "broadphase_sparse",
+        ]
     );
 
     let created = app

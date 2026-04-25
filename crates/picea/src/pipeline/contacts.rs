@@ -7,7 +7,7 @@ use crate::{
     handles::{BodyHandle, ColliderHandle},
     math::{point::Point, vector::Vector, FloatNum},
     pipeline::{
-        broadphase::{ColliderProxy, DynamicAabbTree},
+        broadphase::{BroadphaseStats, ColliderProxy},
         narrowphase::contact_from_shapes,
         StepConfig,
     },
@@ -54,14 +54,22 @@ pub(crate) fn run_contact_phases(
     world: &mut World,
     config: &StepConfig,
     awake_bodies: &mut BTreeSet<BodyHandle>,
-) -> (Vec<WorldEvent>, usize, usize) {
+) -> (Vec<WorldEvent>, usize, usize, BroadphaseStats) {
     let contacts = world.collect_contact_observations();
-    world.resolve_contacts(&contacts, config.dt, awake_bodies);
-    world.refresh_contact_events(contacts)
+    let broadphase_stats = contacts.broadphase_stats;
+    world.resolve_contacts(&contacts.observations, config.dt, awake_bodies);
+    let (events, contact_count, manifold_count) =
+        world.refresh_contact_events(contacts.observations);
+    (events, contact_count, manifold_count, broadphase_stats)
+}
+
+struct ContactPhaseObservations {
+    observations: Vec<ContactObservation>,
+    broadphase_stats: BroadphaseStats,
 }
 
 impl World {
-    fn collect_contact_observations(&self) -> Vec<ContactObservation> {
+    fn collect_contact_observations(&mut self) -> ContactPhaseObservations {
         let colliders = self.live_collider_snapshots();
         let proxies = colliders
             .iter()
@@ -70,13 +78,18 @@ impl World {
                 aabb: collider.aabb,
             })
             .collect::<Vec<_>>();
-        let candidate_pairs = DynamicAabbTree::from_proxies(&proxies).candidate_pairs();
+        let mut broadphase = self.update_broadphase(&proxies);
         let mut observations = Vec::new();
 
-        for (index, other_index) in candidate_pairs {
+        for (index, other_index) in broadphase.candidate_pairs {
             let collider_a = &colliders[index];
             let collider_b = &colliders[other_index];
-            if collider_a.body == collider_b.body || !collider_a.filter.allows(&collider_b.filter) {
+            if collider_a.body == collider_b.body {
+                broadphase.stats.same_body_drop_count += 1;
+                continue;
+            }
+            if !collider_a.filter.allows(&collider_b.filter) {
+                broadphase.stats.filter_drop_count += 1;
                 continue;
             }
             let Some(contact) = contact_from_shapes(
@@ -87,6 +100,7 @@ impl World {
                 collider_b.world_pose,
                 collider_b.aabb,
             ) else {
+                broadphase.stats.narrowphase_drop_count += 1;
                 continue;
             };
 
@@ -123,7 +137,10 @@ impl World {
             });
         }
 
-        observations
+        ContactPhaseObservations {
+            observations,
+            broadphase_stats: broadphase.stats,
+        }
     }
 
     fn resolve_contacts(

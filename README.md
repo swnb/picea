@@ -39,13 +39,18 @@ Start with current repo facts, not archived milestone notes:
 1. Confirm current `git status`, `HEAD`, and recent verification output.
 2. Read `crates/picea/src/lib.rs` for the current public crate-root surface.
 3. Use `docs/ai/repo-map.md`, `docs/ai/index.md`, and `docs/architecture/system-overview.md` to route into the current modules.
-4. Consult `docs/plans/2026-04-18-picea-physics-engine-milestones.md` only when the task explicitly needs a still-relevant milestone boundary or archived execution history.
+4. Consult `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md` for current production milestone scope and acceptance methods.
+5. Consult `docs/plans/2026-04-18-picea-physics-engine-milestones.md` only when the task explicitly needs archived execution history.
 
-For active milestone boundaries and archived execution history, see:
+For current production milestone scope and acceptance methods, see:
+
+- `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`
+
+For archived execution history, see:
 
 - `docs/plans/2026-04-18-picea-physics-engine-milestones.md`
 
-That plan mixes still-useful milestone boundaries with archived execution records from removed `Scene`/`Context` paths and old `picea-web` / wasm gates. Treat those removed-path entries as historical notes, not default current routing or validation targets.
+The archived plan mixes old milestone boundaries with execution records from removed `Scene`/`Context` paths and old `picea-web` / wasm gates. Treat those removed-path entries as historical notes, not default current routing or validation targets.
 
 Before changing code, read:
 

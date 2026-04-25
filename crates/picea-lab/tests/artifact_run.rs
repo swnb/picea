@@ -1,8 +1,8 @@
 use std::fs;
 
 use picea_lab::{
-    run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact, RunConfig, RunManifest,
-    ScenarioId,
+    run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact, FrameRecord, RunConfig,
+    RunManifest, ScenarioId,
 };
 
 #[test]
@@ -95,7 +95,84 @@ fn run_writes_expected_artifacts_and_keeps_state_hash_deterministic() {
         first_frame
             .unmeasured
             .iter()
-            .any(|fact| fact == "broadphase_candidates"),
-        "unmeasured counters must be explicit instead of presented as real values"
+            .all(|fact| fact != "broadphase_candidates"),
+        "broadphase counters should be measured in M1 artifacts"
+    );
+}
+
+#[test]
+fn broadphase_scenario_artifacts_capture_candidate_and_tree_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::BroadphaseSparse,
+            frame_count: 2,
+            run_id: Some("broadphase-facts".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("broadphase run should write artifacts");
+
+    let first = run.frames.first().expect("first frame should exist");
+    assert_eq!(first.stats.broadphase_candidate_count, 1);
+    assert_eq!(first.stats.broadphase_update_count, 5);
+    assert_eq!(first.stats.broadphase_stale_proxy_drop_count, 0);
+    assert_eq!(first.stats.broadphase_same_body_drop_count, 0);
+    assert_eq!(first.stats.broadphase_filter_drop_count, 0);
+    assert_eq!(first.stats.broadphase_narrowphase_drop_count, 0);
+    assert!(first.stats.broadphase_tree_depth > 0);
+    assert_eq!(
+        first.snapshot.stats.broadphase_candidate_count,
+        first.stats.broadphase_candidate_count
+    );
+    assert_eq!(
+        first.snapshot.stats.broadphase_tree_depth,
+        first.stats.broadphase_tree_depth
+    );
+
+    let second = run.frames.get(1).expect("second frame should exist");
+    assert_eq!(second.stats.broadphase_candidate_count, 1);
+    assert_eq!(second.stats.broadphase_update_count, 0);
+    assert_eq!(second.stats.broadphase_stale_proxy_drop_count, 0);
+    assert_eq!(second.stats.broadphase_same_body_drop_count, 0);
+    assert_eq!(second.stats.broadphase_filter_drop_count, 0);
+    assert_eq!(second.stats.broadphase_narrowphase_drop_count, 0);
+
+    let frame_lines = fs::read_to_string(run.path.join(ArtifactFile::Frames.file_name()))
+        .expect("frames should be readable");
+    let decoded_first: FrameRecord = serde_json::from_str(
+        frame_lines
+            .lines()
+            .next()
+            .expect("frames should include the first line"),
+    )
+    .expect("frame line should match schema");
+    assert_eq!(decoded_first.stats.broadphase_candidate_count, 1);
+
+    let render: DebugRenderArtifact = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable"),
+    )
+    .expect("debug render should match schema");
+    let render_first = render
+        .frames
+        .first()
+        .expect("debug render should include broadphase frame facts");
+    assert_eq!(render_first.broadphase_candidate_count, 1);
+    assert_eq!(render_first.broadphase_stale_proxy_drop_count, 0);
+    assert_eq!(render_first.broadphase_filter_drop_count, 0);
+    assert_eq!(
+        render_first.broadphase_tree_depth,
+        first.stats.broadphase_tree_depth
+    );
+    assert!(
+        render_first
+            .unmeasured
+            .iter()
+            .all(|fact| fact != "broadphase_candidates"),
+        "debug render should no longer mark broadphase candidates as unmeasured"
     );
 }

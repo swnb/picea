@@ -1,9 +1,83 @@
+use std::collections::BTreeSet;
+
 use crate::{collider::ShapeAabb, handles::ColliderHandle, math::FloatNum};
+
+const FAT_AABB_MIN_MARGIN: FloatNum = 0.1;
+const FAT_AABB_EXTENT_RATIO: FloatNum = 0.1;
+const MIN_REBUILD_LEAF_COUNT: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ColliderProxy {
     pub(crate) handle: ColliderHandle,
     pub(crate) aabb: ShapeAabb,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct BroadphaseStats {
+    pub(crate) candidate_count: usize,
+    pub(crate) update_count: usize,
+    pub(crate) stale_proxy_drop_count: usize,
+    pub(crate) same_body_drop_count: usize,
+    pub(crate) filter_drop_count: usize,
+    pub(crate) narrowphase_drop_count: usize,
+    pub(crate) rebuild_count: usize,
+    pub(crate) tree_depth: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct BroadphaseOutput {
+    pub(crate) candidate_pairs: Vec<(usize, usize)>,
+    pub(crate) stats: BroadphaseStats,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Broadphase {
+    tree: DynamicAabbTree,
+}
+
+impl Broadphase {
+    pub(crate) fn update(&mut self, proxies: &[ColliderProxy]) -> BroadphaseOutput {
+        let live_handles = proxies
+            .iter()
+            .map(|proxy| proxy.handle)
+            .collect::<BTreeSet<_>>();
+        let mut update_count = 0;
+        let mut stale_proxy_drop_count = 0;
+
+        for stale in self.tree.handles() {
+            if !live_handles.contains(&stale) && self.tree.remove_proxy(stale) {
+                update_count += 1;
+                stale_proxy_drop_count += 1;
+            }
+        }
+
+        for (proxy_index, proxy) in proxies.iter().copied().enumerate() {
+            if self.tree.update_proxy(proxy_index, proxy) {
+                update_count += 1;
+            }
+        }
+
+        let mut rebuild_count = 0;
+        if self.tree.needs_rebuild() || self.tree.needs_compaction() {
+            self.tree.rebuild_balanced_from_proxies(proxies);
+            rebuild_count = 1;
+        }
+
+        let candidate_pairs = self.tree.candidate_pairs();
+        BroadphaseOutput {
+            stats: BroadphaseStats {
+                candidate_count: candidate_pairs.len(),
+                update_count,
+                stale_proxy_drop_count,
+                same_body_drop_count: 0,
+                filter_drop_count: 0,
+                narrowphase_drop_count: 0,
+                rebuild_count,
+                tree_depth: self.tree.depth(),
+            },
+            candidate_pairs,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -24,6 +98,7 @@ struct TreeNode {
 }
 
 impl DynamicAabbTree {
+    #[cfg(test)]
     pub(crate) fn from_proxies(proxies: &[ColliderProxy]) -> Self {
         let mut tree = Self::default();
         for (proxy_index, proxy) in proxies.iter().enumerate() {
@@ -57,6 +132,152 @@ impl DynamicAabbTree {
         // generation bits participate in `Ord`.
         pairs.sort_unstable();
         pairs
+    }
+
+    fn handles(&self) -> Vec<ColliderHandle> {
+        self.leaves
+            .iter()
+            .filter_map(|&leaf_index| {
+                self.nodes
+                    .get(leaf_index)
+                    .and_then(|node| node.proxy_index.map(|_| node.handle))
+            })
+            .collect()
+    }
+
+    fn update_proxy(&mut self, proxy_index: usize, proxy: ColliderProxy) -> bool {
+        let Some(leaf_index) = self.find_leaf(proxy.handle) else {
+            let fat_proxy = ColliderProxy {
+                handle: proxy.handle,
+                aabb: fatten_aabb(proxy.aabb),
+            };
+            self.insert_leaf(proxy_index, fat_proxy);
+            return true;
+        };
+
+        self.nodes[leaf_index].proxy_index = Some(proxy_index);
+        if aabb_contains(self.nodes[leaf_index].aabb, proxy.aabb) {
+            return false;
+        }
+
+        self.remove_leaf(leaf_index);
+        self.insert_leaf(
+            proxy_index,
+            ColliderProxy {
+                handle: proxy.handle,
+                aabb: fatten_aabb(proxy.aabb),
+            },
+        );
+        true
+    }
+
+    fn remove_proxy(&mut self, handle: ColliderHandle) -> bool {
+        let Some(leaf_index) = self.find_leaf(handle) else {
+            return false;
+        };
+        self.remove_leaf(leaf_index);
+        true
+    }
+
+    fn find_leaf(&self, handle: ColliderHandle) -> Option<usize> {
+        self.leaves.iter().copied().find(|&leaf_index| {
+            self.nodes[leaf_index].proxy_index.is_some() && self.nodes[leaf_index].handle == handle
+        })
+    }
+
+    fn depth(&self) -> usize {
+        fn node_depth(nodes: &[TreeNode], index: usize) -> usize {
+            let node = &nodes[index];
+            if node.is_leaf() {
+                return 1;
+            }
+            let left = node.left.map(|child| node_depth(nodes, child)).unwrap_or(0);
+            let right = node
+                .right
+                .map(|child| node_depth(nodes, child))
+                .unwrap_or(0);
+            1 + left.max(right)
+        }
+
+        self.root
+            .map(|root| node_depth(&self.nodes, root))
+            .unwrap_or_default()
+    }
+
+    fn needs_rebuild(&self) -> bool {
+        let leaf_count = self.leaves.len();
+        leaf_count >= MIN_REBUILD_LEAF_COUNT && self.depth() > balanced_depth_budget(leaf_count)
+    }
+
+    fn needs_compaction(&self) -> bool {
+        let leaf_count = self.leaves.len();
+        let compact_node_budget = leaf_count.saturating_mul(4).saturating_add(1);
+        self.nodes.len() > compact_node_budget
+    }
+
+    fn rebuild_balanced_from_proxies(&mut self, proxies: &[ColliderProxy]) {
+        let mut entries = proxies
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(proxy_index, proxy)| {
+                (
+                    proxy_index,
+                    ColliderProxy {
+                        handle: proxy.handle,
+                        aabb: fatten_aabb(proxy.aabb),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+
+        self.nodes.clear();
+        self.root = None;
+        self.leaves.clear();
+        self.root = self.build_balanced_subtree(&mut entries);
+    }
+
+    fn build_balanced_subtree(&mut self, entries: &mut [(usize, ColliderProxy)]) -> Option<usize> {
+        match entries.len() {
+            0 => None,
+            1 => {
+                let (proxy_index, proxy) = entries[0];
+                let leaf_index = self.nodes.len();
+                self.nodes.push(TreeNode {
+                    aabb: proxy.aabb,
+                    parent: None,
+                    left: None,
+                    right: None,
+                    proxy_index: Some(proxy_index),
+                    handle: proxy.handle,
+                });
+                self.leaves.push(leaf_index);
+                Some(leaf_index)
+            }
+            _ => {
+                sort_entries_for_balanced_split(entries);
+                let split = entries.len() / 2;
+                let (left_entries, right_entries) = entries.split_at_mut(split);
+                let left = self
+                    .build_balanced_subtree(left_entries)
+                    .expect("left balanced broadphase subtree must be non-empty");
+                let right = self
+                    .build_balanced_subtree(right_entries)
+                    .expect("right balanced broadphase subtree must be non-empty");
+                let parent_index = self.nodes.len();
+                self.nodes.push(TreeNode {
+                    aabb: aabb_union(self.nodes[left].aabb, self.nodes[right].aabb),
+                    parent: None,
+                    left: Some(left),
+                    right: Some(right),
+                    proxy_index: None,
+                    handle: self.nodes[left].handle.min(self.nodes[right].handle),
+                });
+                self.nodes[left].parent = Some(parent_index);
+                self.nodes[right].parent = Some(parent_index);
+                Some(parent_index)
+            }
+        }
     }
 
     fn insert_leaf(&mut self, proxy_index: usize, proxy: ColliderProxy) {
@@ -102,6 +323,50 @@ impl DynamicAabbTree {
         }
 
         self.refit_ancestors(Some(parent_index));
+    }
+
+    fn remove_leaf(&mut self, leaf_index: usize) {
+        if self.root == Some(leaf_index) {
+            self.root = None;
+            self.leaves.retain(|&index| index != leaf_index);
+            self.nodes[leaf_index].parent = None;
+            self.nodes[leaf_index].proxy_index = None;
+            return;
+        }
+
+        let Some(parent_index) = self.nodes[leaf_index].parent else {
+            return;
+        };
+        let sibling_index = if self.nodes[parent_index].left == Some(leaf_index) {
+            self.nodes[parent_index]
+                .right
+                .expect("removed broadphase leaf must have a sibling")
+        } else {
+            self.nodes[parent_index]
+                .left
+                .expect("removed broadphase leaf must have a sibling")
+        };
+        let grandparent = self.nodes[parent_index].parent;
+
+        if let Some(grandparent_index) = grandparent {
+            if self.nodes[grandparent_index].left == Some(parent_index) {
+                self.nodes[grandparent_index].left = Some(sibling_index);
+            } else {
+                self.nodes[grandparent_index].right = Some(sibling_index);
+            }
+            self.nodes[sibling_index].parent = Some(grandparent_index);
+            self.refit_ancestors(Some(grandparent_index));
+        } else {
+            self.root = Some(sibling_index);
+            self.nodes[sibling_index].parent = None;
+        }
+
+        self.leaves.retain(|&index| index != leaf_index);
+        self.nodes[leaf_index].parent = None;
+        self.nodes[leaf_index].proxy_index = None;
+        self.nodes[parent_index].parent = None;
+        self.nodes[parent_index].left = None;
+        self.nodes[parent_index].right = None;
     }
 
     fn choose_sibling(&self, leaf_aabb: ShapeAabb, mut current: usize) -> usize {
@@ -180,11 +445,74 @@ fn aabb_union(a: ShapeAabb, b: ShapeAabb) -> ShapeAabb {
     }
 }
 
+fn fatten_aabb(aabb: ShapeAabb) -> ShapeAabb {
+    let width = (aabb.max.x() - aabb.min.x()).abs();
+    let height = (aabb.max.y() - aabb.min.y()).abs();
+    // A fat AABB is a broadphase cache box. As long as the true shape AABB
+    // remains inside it, the tree can skip remove/reinsert for small motion.
+    let margin_x = (width * FAT_AABB_EXTENT_RATIO).max(FAT_AABB_MIN_MARGIN);
+    let margin_y = (height * FAT_AABB_EXTENT_RATIO).max(FAT_AABB_MIN_MARGIN);
+    ShapeAabb {
+        min: (aabb.min.x() - margin_x, aabb.min.y() - margin_y).into(),
+        max: (aabb.max.x() + margin_x, aabb.max.y() + margin_y).into(),
+    }
+}
+
+fn balanced_depth_budget(leaf_count: usize) -> usize {
+    let balanced_leaf_depth =
+        usize::BITS as usize - leaf_count.saturating_sub(1).leading_zeros() as usize;
+    balanced_leaf_depth + 2
+}
+
+fn sort_entries_for_balanced_split(entries: &mut [(usize, ColliderProxy)]) {
+    let (min_x, max_x, min_y, max_y) = entries.iter().fold(
+        (
+            FloatNum::INFINITY,
+            FloatNum::NEG_INFINITY,
+            FloatNum::INFINITY,
+            FloatNum::NEG_INFINITY,
+        ),
+        |(min_x, max_x, min_y, max_y), (_, proxy)| {
+            let center_x = (proxy.aabb.min.x() + proxy.aabb.max.x()) * 0.5;
+            let center_y = (proxy.aabb.min.y() + proxy.aabb.max.y()) * 0.5;
+            (
+                min_x.min(center_x),
+                max_x.max(center_x),
+                min_y.min(center_y),
+                max_y.max(center_y),
+            )
+        },
+    );
+    let split_on_x = (max_x - min_x) >= (max_y - min_y);
+    entries.sort_by(|(left_index, left), (right_index, right)| {
+        let left_center = if split_on_x {
+            (left.aabb.min.x() + left.aabb.max.x()) * 0.5
+        } else {
+            (left.aabb.min.y() + left.aabb.max.y()) * 0.5
+        };
+        let right_center = if split_on_x {
+            (right.aabb.min.x() + right.aabb.max.x()) * 0.5
+        } else {
+            (right.aabb.min.y() + right.aabb.max.y()) * 0.5
+        };
+        left_center
+            .total_cmp(&right_center)
+            .then_with(|| left_index.cmp(right_index))
+    });
+}
+
 fn union_perimeter(a: ShapeAabb, b: ShapeAabb) -> FloatNum {
     let union = aabb_union(a, b);
     let width = (union.max.x() - union.min.x()).max(0.0);
     let height = (union.max.y() - union.min.y()).max(0.0);
     2.0 * (width + height)
+}
+
+fn aabb_contains(outer: ShapeAabb, inner: ShapeAabb) -> bool {
+    outer.min.x() <= inner.min.x()
+        && outer.min.y() <= inner.min.y()
+        && outer.max.x() >= inner.max.x()
+        && outer.max.y() >= inner.max.y()
 }
 
 fn aabb_overlaps(a: ShapeAabb, b: ShapeAabb) -> bool {
@@ -226,6 +554,103 @@ mod tests {
 
     fn candidate_pairs(proxies: &[ColliderProxy]) -> Vec<(usize, usize)> {
         DynamicAabbTree::from_proxies(proxies).candidate_pairs()
+    }
+
+    #[test]
+    fn persistent_broadphase_skips_tree_update_for_motion_inside_fat_aabb() {
+        let mut broadphase = Broadphase::default();
+        let first = broadphase.update(&[
+            proxy(0, aabb(0.0, 0.0, 1.0, 1.0)),
+            proxy(1, aabb(4.0, 0.0, 5.0, 1.0)),
+        ]);
+        assert_eq!(first.stats.update_count, 2);
+        assert_eq!(first.stats.candidate_count, 0);
+        assert!(first.stats.tree_depth >= 1);
+
+        let contained_motion = broadphase.update(&[
+            proxy(0, aabb(0.03, 0.0, 1.03, 1.0)),
+            proxy(1, aabb(4.0, 0.0, 5.0, 1.0)),
+        ]);
+        assert_eq!(contained_motion.stats.update_count, 0);
+        assert_eq!(contained_motion.stats.candidate_count, 0);
+
+        let outside_fat_aabb = broadphase.update(&[
+            proxy(0, aabb(0.5, 0.0, 1.5, 1.0)),
+            proxy(1, aabb(4.0, 0.0, 5.0, 1.0)),
+        ]);
+        assert_eq!(outside_fat_aabb.stats.update_count, 1);
+    }
+
+    #[test]
+    fn persistent_broadphase_removes_stale_and_recycled_proxy_handles() {
+        let mut broadphase = Broadphase::default();
+        let old_handle = handle_with_generation(0, 0);
+        let recycled_handle = handle_with_generation(0, 1);
+        let stable_handle = handle(1);
+
+        let initial = broadphase.update(&[
+            proxy_with_handle(old_handle, aabb(0.0, 0.0, 2.0, 2.0)),
+            proxy_with_handle(stable_handle, aabb(1.0, 0.0, 3.0, 2.0)),
+        ]);
+        assert_eq!(initial.candidate_pairs, vec![(0, 1)]);
+
+        let removed =
+            broadphase.update(&[proxy_with_handle(stable_handle, aabb(1.0, 0.0, 3.0, 2.0))]);
+        assert!(removed.candidate_pairs.is_empty());
+        assert_eq!(removed.stats.update_count, 1);
+        assert_eq!(removed.stats.stale_proxy_drop_count, 1);
+
+        let reinserted = broadphase.update(&[
+            proxy_with_handle(recycled_handle, aabb(10.0, 0.0, 11.0, 1.0)),
+            proxy_with_handle(stable_handle, aabb(1.0, 0.0, 3.0, 2.0)),
+        ]);
+        assert!(reinserted.candidate_pairs.is_empty());
+        assert_eq!(reinserted.stats.update_count, 1);
+    }
+
+    #[test]
+    fn persistent_broadphase_rebuilds_when_tree_depth_exceeds_budget() {
+        let mut broadphase = Broadphase::default();
+        let proxies = (0..32)
+            .map(|index| {
+                let x = index as f32 * 2.0;
+                proxy(index, aabb(x, 0.0, x + 1.0, 1.0))
+            })
+            .collect::<Vec<_>>();
+
+        let output = broadphase.update(&proxies);
+
+        assert_eq!(output.stats.candidate_count, 0);
+        assert_eq!(output.stats.rebuild_count, 1);
+        assert!(
+            output.stats.tree_depth <= balanced_depth_budget(proxies.len()),
+            "rebuild should cap tree depth; got {}",
+            output.stats.tree_depth
+        );
+    }
+
+    #[test]
+    fn persistent_broadphase_compacts_small_scene_tombstones_after_churn() {
+        let mut broadphase = Broadphase::default();
+        let stable = proxy(1, aabb(10.0, 0.0, 11.0, 1.0));
+        let mut saw_compaction = false;
+
+        for step in 0..24 {
+            let x = step as f32;
+            let output = broadphase.update(&[proxy(0, aabb(x, 0.0, x + 1.0, 1.0)), stable]);
+            saw_compaction |= output.stats.rebuild_count > 0;
+        }
+
+        assert!(
+            saw_compaction,
+            "small scenes should eventually compact tombstones"
+        );
+        assert!(
+            broadphase.tree.nodes.len() <= broadphase.tree.leaves.len() * 4 + 1,
+            "compaction should bound retained nodes; nodes={}, leaves={}",
+            broadphase.tree.nodes.len(),
+            broadphase.tree.leaves.len()
+        );
     }
 
     #[test]

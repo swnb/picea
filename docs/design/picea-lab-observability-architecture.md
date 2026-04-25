@@ -70,7 +70,8 @@ The first viewer should stay small and artifact/session-fact driven:
 - draw contact points and normals;
 - show sleeping bodies differently;
 - expose a step/timeline selector;
-- show counters from `StepStats` and future broadphase/narrowphase counters.
+- show counters from `StepStats`, including current broadphase candidate,
+  update, tree-depth, rebuild, and candidate-drop-reason counters.
 
 A static HTML Canvas viewer is the fastest first step. It avoids adding a heavy UI dependency before the artifact model is proven.
 
@@ -105,6 +106,9 @@ Minimum counters:
 - body count
 - collider count
 - broadphase candidate count
+- broadphase update count
+- broadphase tree depth
+- broadphase candidate reject reason counts
 - narrowphase contact count
 - manifold count
 - sleep transition count
@@ -113,7 +117,6 @@ Minimum counters:
 
 Later counters:
 
-- candidate reject reason counts
 - contact feature-key transfers and drops
 - solver iterations used
 - normal/tangent impulse ranges

@@ -17,7 +17,8 @@ The bias is ease of use first, with performance designed into the internal layou
 
 Picea's current `World` path has a clean lifecycle API and useful tests, but it is still below top production engines in several physics areas:
 
-- broadphase was effectively all-pairs before this upgrade slice;
+- broadphase now has persistent dynamic-tree proxies, fat AABBs, bounded
+  rebuild/compaction, and debug counters, but still lacks benchmark baselines;
 - narrowphase only had AABB-style overlap for most contact generation;
 - contact solving was positional and did not model mass, friction, restitution, warm-starting, or stable manifolds deeply enough;
 - sleeping lacked a stability window and island-level wake reasoning;
@@ -37,8 +38,11 @@ Why:
 
 Tradeoff:
 
-- First implementation may rebuild from live proxies per step, as done in the current slice, to lock behavior without a lifetime-heavy proxy store.
-- The production target is a persistent dynamic tree with proxy IDs stored on collider records, fat AABBs, incremental moves, and optional rebuild metrics.
+- The first production milestone keeps proxy storage internal to `World` rather
+  than exposing broadphase proxy IDs through the public API.
+- The persistent tree now uses fat AABBs, incremental moves, stale cleanup,
+  deterministic rebuild/compaction, and step/debug metrics. Ray/AABB/region
+  query reuse is still a future step once query semantics are tightened.
 
 Sources:
 
@@ -169,7 +173,9 @@ Performance work should follow data flow:
 
 This implementation slice intentionally stops short of a full production solver. It adds:
 
-- an internal dynamic AABB tree candidate pass;
+- a persistent internal dynamic AABB tree candidate pass with fat AABBs,
+  stale-proxy cleanup, bounded compaction/rebuild, deterministic pair order,
+  and broadphase debug counters;
 - circle-circle narrowphase rejection of AABB-only false positives;
 - first restitution/friction velocity response so material values affect motion;
 - body-level sleep stability window;
@@ -177,7 +183,6 @@ This implementation slice intentionally stops short of a full production solver.
 
 Remaining high-risk work:
 
-- persistent broadphase proxy storage;
 - SAT + clipping manifolds;
 - full sequential impulse solver with effective mass and warm-start;
 - island sleep and wake reason reporting;

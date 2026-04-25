@@ -22,16 +22,23 @@ pub enum ScenarioId {
     #[serde(rename = "stack_4")]
     Stack4,
     JointAnchor,
+    BroadphaseSparse,
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 3] = [Self::FallingBoxContact, Self::Stack4, Self::JointAnchor];
+    pub const ALL: [Self; 4] = [
+        Self::FallingBoxContact,
+        Self::Stack4,
+        Self::JointAnchor,
+        Self::BroadphaseSparse,
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::FallingBoxContact => "falling_box_contact",
             Self::Stack4 => "stack_4",
             Self::JointAnchor => "joint_anchor",
+            Self::BroadphaseSparse => "broadphase_sparse",
         }
     }
 }
@@ -50,6 +57,7 @@ impl FromStr for ScenarioId {
             "falling_box_contact" => Ok(Self::FallingBoxContact),
             "stack_4" => Ok(Self::Stack4),
             "joint_anchor" => Ok(Self::JointAnchor),
+            "broadphase_sparse" => Ok(Self::BroadphaseSparse),
             other => Err(LabError::UnknownScenario(other.to_owned())),
         }
     }
@@ -72,11 +80,15 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::FallingBoxContact => "Falling box contact",
                 ScenarioId::Stack4 => "Four box stack",
                 ScenarioId::JointAnchor => "World anchor joint",
+                ScenarioId::BroadphaseSparse => "Sparse broadphase",
             },
             description: match id {
                 ScenarioId::FallingBoxContact => "A dynamic box falling into static floor contact.",
                 ScenarioId::Stack4 => "Four dynamic boxes stacked above a static floor.",
                 ScenarioId::JointAnchor => "A body constrained toward a fixed world-space anchor.",
+                ScenarioId::BroadphaseSparse => {
+                    "Five static boxes with exactly one broadphase overlap."
+                }
             },
         })
         .collect()
@@ -169,6 +181,17 @@ pub(crate) fn build_scenario(
                     ..WorldAnchorJointDesc::default()
                 }))
                 .map_err(|error| LabError::World(error.to_string()))?;
+        }
+        ScenarioId::BroadphaseSparse => {
+            world = World::new(WorldDesc {
+                gravity: Vector::default(),
+                enable_sleep: false,
+            });
+            add_box(&mut world, BodyType::Static, 0.0, 0.0, 1.0, 1.0)?;
+            add_box(&mut world, BodyType::Static, 0.75, 0.0, 1.0, 1.0)?;
+            add_box(&mut world, BodyType::Static, 5.0, 0.0, 1.0, 1.0)?;
+            add_box(&mut world, BodyType::Static, 10.0, 0.0, 1.0, 1.0)?;
+            add_box(&mut world, BodyType::Static, 15.0, 0.0, 1.0, 1.0)?;
         }
     }
 

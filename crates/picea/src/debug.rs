@@ -167,6 +167,20 @@ pub struct DebugStats {
     pub active_joint_count: usize,
     /// Number of broadphase candidates considered in the last step.
     pub broadphase_candidate_count: usize,
+    /// Number of broadphase proxy insert/remove/reinsert updates in the last step.
+    pub broadphase_update_count: usize,
+    /// Number of stale broadphase proxies dropped in the last step.
+    pub broadphase_stale_proxy_drop_count: usize,
+    /// Number of broadphase candidates dropped because both colliders belong to one body.
+    pub broadphase_same_body_drop_count: usize,
+    /// Number of broadphase candidates dropped by collision filters.
+    pub broadphase_filter_drop_count: usize,
+    /// Number of broadphase candidates rejected by narrowphase geometry.
+    pub broadphase_narrowphase_drop_count: usize,
+    /// Number of broadphase tree rebuilds in the last step.
+    pub broadphase_rebuild_count: usize,
+    /// Broadphase tree depth after the last step.
+    pub broadphase_tree_depth: usize,
     /// Number of contacts in the last step.
     pub contact_count: usize,
     /// Number of active manifolds in the last step.
@@ -669,7 +683,14 @@ impl DebugSnapshot {
                 active_body_count: stats.body_count.max(bodies.len()),
                 active_collider_count: stats.collider_count.max(colliders.len()),
                 active_joint_count: stats.joint_count.max(joints.len()),
-                broadphase_candidate_count: 0,
+                broadphase_candidate_count: stats.broadphase_candidate_count,
+                broadphase_update_count: stats.broadphase_update_count,
+                broadphase_stale_proxy_drop_count: stats.broadphase_stale_proxy_drop_count,
+                broadphase_same_body_drop_count: stats.broadphase_same_body_drop_count,
+                broadphase_filter_drop_count: stats.broadphase_filter_drop_count,
+                broadphase_narrowphase_drop_count: stats.broadphase_narrowphase_drop_count,
+                broadphase_rebuild_count: stats.broadphase_rebuild_count,
+                broadphase_tree_depth: stats.broadphase_tree_depth,
                 contact_count: stats.contact_count.max(contacts.len()),
                 manifold_count: stats.manifold_count.max(manifolds.len()),
                 ..DebugStats::default()

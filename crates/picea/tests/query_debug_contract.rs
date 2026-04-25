@@ -2,8 +2,12 @@ use picea::math::{point::Point, vector::Vector};
 use picea::prelude::{
     BodyDesc, BodyType, ColliderDesc, CollisionFilter, ContactEvent, ContactId, DebugSnapshot,
     DebugSnapshotOptions, ManifoldId, Material, Pose, QueryFilter, QueryPipeline, SharedShape,
-    StepReport, StepStats, World, WorldDesc, WorldEvent,
+    SimulationPipeline, StepConfig, StepReport, StepStats, World, WorldDesc, WorldEvent,
 };
+
+fn step_once(world: &mut World) -> StepReport {
+    SimulationPipeline::new(StepConfig::default()).step(world)
+}
 
 #[test]
 fn debug_snapshot_defaults_to_empty_stable_fact_layers() {
@@ -93,6 +97,14 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
             body_count: 2,
             collider_count: 2,
             active_body_count: 2,
+            broadphase_candidate_count: 4,
+            broadphase_update_count: 2,
+            broadphase_stale_proxy_drop_count: 1,
+            broadphase_same_body_drop_count: 1,
+            broadphase_filter_drop_count: 1,
+            broadphase_narrowphase_drop_count: 1,
+            broadphase_rebuild_count: 1,
+            broadphase_tree_depth: 3,
             contact_count: 1,
             manifold_count: 1,
             ..StepStats::default()
@@ -119,6 +131,14 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
     assert_eq!(snapshot.meta.dt, report.dt);
     assert_eq!(snapshot.meta.simulated_time, report.simulated_time);
     assert_eq!(snapshot.stats.step_index, report.step_index);
+    assert_eq!(snapshot.stats.broadphase_candidate_count, 4);
+    assert_eq!(snapshot.stats.broadphase_update_count, 2);
+    assert_eq!(snapshot.stats.broadphase_stale_proxy_drop_count, 1);
+    assert_eq!(snapshot.stats.broadphase_same_body_drop_count, 1);
+    assert_eq!(snapshot.stats.broadphase_filter_drop_count, 1);
+    assert_eq!(snapshot.stats.broadphase_narrowphase_drop_count, 1);
+    assert_eq!(snapshot.stats.broadphase_rebuild_count, 1);
+    assert_eq!(snapshot.stats.broadphase_tree_depth, 3);
     assert_eq!(snapshot.contacts.len(), 1);
     assert_eq!(snapshot.manifolds.len(), 1);
     assert!(!snapshot.primitives.is_empty());
@@ -136,6 +156,91 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
     assert_eq!(
         snapshot.manifolds[0].contact_ids,
         vec![ContactId::default()]
+    );
+}
+
+#[test]
+fn broadphase_drop_reason_facts_explain_candidate_filtering() {
+    let mut same_body_world = World::new(WorldDesc::default());
+    let body = same_body_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    for x in [0.0, 0.25] {
+        same_body_world
+            .create_collider(
+                body,
+                ColliderDesc {
+                    shape: SharedShape::rect(1.0, 1.0),
+                    local_pose: Pose::from_xy_angle(x, 0.0, 0.0),
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("collider should be created");
+    }
+    let same_body_report = step_once(&mut same_body_world);
+    assert_eq!(same_body_report.stats.broadphase_candidate_count, 1);
+    assert_eq!(same_body_report.stats.broadphase_same_body_drop_count, 1);
+
+    let mut filtered_world = World::new(WorldDesc::default());
+    let first = filtered_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("first body should be created");
+    let second = filtered_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("second body should be created");
+    let blocked_filter = CollisionFilter {
+        memberships: 0b0001,
+        collides_with: 0b0010,
+    };
+    for body in [first, second] {
+        filtered_world
+            .create_collider(
+                body,
+                ColliderDesc {
+                    shape: SharedShape::rect(1.0, 1.0),
+                    filter: blocked_filter,
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("collider should be created");
+    }
+    let filtered_report = step_once(&mut filtered_world);
+    assert_eq!(filtered_report.stats.broadphase_candidate_count, 1);
+    assert_eq!(filtered_report.stats.broadphase_filter_drop_count, 1);
+
+    let mut narrowphase_world = World::new(WorldDesc::default());
+    for (x, y) in [(0.0, 0.0), (1.5, 1.5)] {
+        let body = narrowphase_world
+            .create_body(BodyDesc {
+                body_type: BodyType::Static,
+                pose: Pose::from_xy_angle(x, y, 0.0),
+                ..BodyDesc::default()
+            })
+            .expect("body should be created");
+        narrowphase_world
+            .create_collider(
+                body,
+                ColliderDesc {
+                    shape: SharedShape::circle(1.0),
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("collider should be created");
+    }
+    let narrowphase_report = step_once(&mut narrowphase_world);
+    assert_eq!(narrowphase_report.stats.broadphase_candidate_count, 1);
+    assert_eq!(
+        narrowphase_report.stats.broadphase_narrowphase_drop_count,
+        1
     );
 }
 
