@@ -366,6 +366,24 @@ pub struct DebugContact {
     /// Warm-start tangent impulse transferred from the previous step, or zero when not trusted.
     #[serde(default)]
     pub tangent_impulse: FloatNum,
+    /// Final normal impulse accumulated by the current step's contact solver.
+    #[serde(default)]
+    pub solver_normal_impulse: FloatNum,
+    /// Final tangent impulse accumulated by the current step's contact solver.
+    #[serde(default)]
+    pub solver_tangent_impulse: FloatNum,
+    /// Whether the normal row tried to go below zero and was clamped.
+    #[serde(default)]
+    pub normal_impulse_clamped: bool,
+    /// Whether the tangent row hit the Coulomb friction clamp.
+    #[serde(default)]
+    pub tangent_impulse_clamped: bool,
+    /// Closing-speed threshold below which restitution is suppressed.
+    #[serde(default)]
+    pub restitution_velocity_threshold: FloatNum,
+    /// Whether restitution contributed bounce bias for this contact row.
+    #[serde(default)]
+    pub restitution_applied: bool,
 }
 
 impl DebugContact {
@@ -382,6 +400,12 @@ impl DebugContact {
             warm_start_reason: self.warm_start_reason,
             normal_impulse: sanitize_scalar(self.normal_impulse),
             tangent_impulse: sanitize_scalar(self.tangent_impulse),
+            solver_normal_impulse: sanitize_scalar(self.solver_normal_impulse),
+            solver_tangent_impulse: sanitize_scalar(self.solver_tangent_impulse),
+            normal_impulse_clamped: self.normal_impulse_clamped,
+            tangent_impulse_clamped: self.tangent_impulse_clamped,
+            restitution_velocity_threshold: sanitize_scalar(self.restitution_velocity_threshold),
+            restitution_applied: self.restitution_applied,
         }
     }
 }
@@ -870,6 +894,12 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             warm_start_reason: event.warm_start_reason,
             normal_impulse: event.warm_start_normal_impulse,
             tangent_impulse: event.warm_start_tangent_impulse,
+            solver_normal_impulse: event.solver_normal_impulse,
+            solver_tangent_impulse: event.solver_tangent_impulse,
+            normal_impulse_clamped: event.normal_impulse_clamped,
+            tangent_impulse_clamped: event.tangent_impulse_clamped,
+            restitution_velocity_threshold: event.restitution_velocity_threshold,
+            restitution_applied: event.restitution_applied,
         };
         contacts.push(contact);
 

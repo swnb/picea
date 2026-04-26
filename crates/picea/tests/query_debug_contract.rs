@@ -130,6 +130,12 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
             warm_start_reason: WarmStartCacheReason::Hit,
             warm_start_normal_impulse: 1.25,
             warm_start_tangent_impulse: -0.5,
+            solver_normal_impulse: 1.5,
+            solver_tangent_impulse: -0.25,
+            normal_impulse_clamped: false,
+            tangent_impulse_clamped: true,
+            restitution_velocity_threshold: 1.75,
+            restitution_applied: true,
         })],
     };
 
@@ -186,6 +192,12 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
     );
     assert_eq!(snapshot.contacts[0].normal_impulse, 1.25);
     assert_eq!(snapshot.contacts[0].tangent_impulse, -0.5);
+    assert_eq!(snapshot.contacts[0].solver_normal_impulse, 1.5);
+    assert_eq!(snapshot.contacts[0].solver_tangent_impulse, -0.25);
+    assert!(!snapshot.contacts[0].normal_impulse_clamped);
+    assert!(snapshot.contacts[0].tangent_impulse_clamped);
+    assert_eq!(snapshot.contacts[0].restitution_velocity_threshold, 1.75);
+    assert!(snapshot.contacts[0].restitution_applied);
     assert_eq!(
         snapshot.manifolds[0].contact_ids,
         vec![ContactId::default()]
@@ -281,6 +293,12 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "warm_start_reason",
             "warm_start_normal_impulse",
             "warm_start_tangent_impulse",
+            "solver_normal_impulse",
+            "solver_tangent_impulse",
+            "normal_impulse_clamped",
+            "tangent_impulse_clamped",
+            "restitution_velocity_threshold",
+            "restitution_applied",
         ],
     );
     let contact: ContactEvent =
@@ -291,6 +309,12 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     );
     assert_eq!(contact.warm_start_normal_impulse, 0.0);
     assert_eq!(contact.warm_start_tangent_impulse, 0.0);
+    assert_eq!(contact.solver_normal_impulse, 0.0);
+    assert_eq!(contact.solver_tangent_impulse, 0.0);
+    assert!(!contact.normal_impulse_clamped);
+    assert!(!contact.tangent_impulse_clamped);
+    assert_eq!(contact.restitution_velocity_threshold, 0.0);
+    assert!(!contact.restitution_applied);
 
     let mut stats_value =
         serde_json::to_value(StepStats::default()).expect("step stats should serialize");
@@ -336,12 +360,28 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
         warm_start_reason: WarmStartCacheReason::Hit,
         normal_impulse: 1.0,
         tangent_impulse: -1.0,
+        solver_normal_impulse: 1.5,
+        solver_tangent_impulse: -0.25,
+        normal_impulse_clamped: false,
+        tangent_impulse_clamped: true,
+        restitution_velocity_threshold: 1.75,
+        restitution_applied: true,
     };
     let mut debug_contact_value =
         serde_json::to_value(debug_contact).expect("debug contact should serialize");
     remove_json_fields(
         &mut debug_contact_value,
-        &["warm_start_reason", "normal_impulse", "tangent_impulse"],
+        &[
+            "warm_start_reason",
+            "normal_impulse",
+            "tangent_impulse",
+            "solver_normal_impulse",
+            "solver_tangent_impulse",
+            "normal_impulse_clamped",
+            "tangent_impulse_clamped",
+            "restitution_velocity_threshold",
+            "restitution_applied",
+        ],
     );
     let decoded_debug_contact: DebugContact = serde_json::from_value(debug_contact_value)
         .expect("older debug contact should deserialize");
@@ -351,6 +391,12 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     );
     assert_eq!(decoded_debug_contact.normal_impulse, 0.0);
     assert_eq!(decoded_debug_contact.tangent_impulse, 0.0);
+    assert_eq!(decoded_debug_contact.solver_normal_impulse, 0.0);
+    assert_eq!(decoded_debug_contact.solver_tangent_impulse, 0.0);
+    assert!(!decoded_debug_contact.normal_impulse_clamped);
+    assert!(!decoded_debug_contact.tangent_impulse_clamped);
+    assert_eq!(decoded_debug_contact.restitution_velocity_threshold, 0.0);
+    assert!(!decoded_debug_contact.restitution_applied);
 
     let debug_manifold = DebugManifold {
         id: ManifoldId::default(),

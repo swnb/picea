@@ -64,7 +64,11 @@ fn attach_shape_with_density(
 }
 
 fn step_world(world: &mut World, steps: usize) -> StepReport {
-    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    step_world_with_config(world, fixed_step_config(), steps)
+}
+
+fn step_world_with_config(world: &mut World, config: StepConfig, steps: usize) -> StepReport {
+    let mut pipeline = SimulationPipeline::new(config);
     let mut report = StepReport::default();
     for _ in 0..steps {
         report = pipeline.step(world);
@@ -85,6 +89,13 @@ fn body_position(world: &World, body: BodyHandle) -> Vector {
         .expect("body should still exist")
         .pose()
         .translation()
+}
+
+fn body_angular_velocity(world: &World, body: BodyHandle) -> f32 {
+    world
+        .try_body(body)
+        .expect("body should still exist")
+        .angular_velocity()
 }
 
 fn active_contact_events(report: &StepReport) -> Vec<ContactEvent> {
@@ -248,6 +259,67 @@ fn warm_start_cache_transfers_cached_impulse_after_trustworthy_match() {
         "the second step should transfer the first step's cached normal impulse: {second_contact:?}"
     );
     assert_eq!(second.stats.warm_start_hit_count, 1);
+}
+
+#[test]
+fn solver_impulse_facts_zero_when_warm_start_hit_has_no_solvable_row() {
+    let mut world = no_gravity_world();
+    let moving = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -0.2,
+        0.0,
+        Vector::new(1.0, 0.0),
+    );
+    let wall = create_body(&mut world, BodyType::Static, 0.2, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        moving,
+        SharedShape::circle(1.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        wall,
+        SharedShape::circle(1.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    let first_contact = active_contact_events(&first)
+        .into_iter()
+        .next()
+        .expect("first step should solve one dynamic contact");
+    assert!(
+        first_contact.solver_normal_impulse > 0.0,
+        "first contact should solve and cache a normal impulse: {first_contact:?}"
+    );
+    world
+        .apply_body_patch(
+            moving,
+            BodyPatch {
+                body_type: Some(BodyType::Static),
+                pose: Some(Pose::from_xy_angle(-0.2, 0.0, 0.0)),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body should become static while preserving the contact feature");
+
+    let second = pipeline.step(&mut world);
+    let second_contact = active_contact_events(&second)
+        .into_iter()
+        .next()
+        .expect("second step should still report the static contact");
+
+    assert_eq!(second_contact.warm_start_reason, WarmStartCacheReason::Hit);
+    assert!(
+        second_contact.warm_start_normal_impulse > 0.0,
+        "warm-start facts should still describe the transferred cache: {second_contact:?}"
+    );
+    assert_eq!(second_contact.solver_normal_impulse, 0.0);
+    assert_eq!(second_contact.solver_tangent_impulse, 0.0);
 }
 
 #[test]
@@ -776,7 +848,233 @@ fn friction_changes_tangential_sliding_speed() {
 }
 
 #[test]
-fn collider_density_changes_interim_contact_velocity_response_through_inverse_mass() {
+fn sequential_impulse_solves_all_manifold_rows_for_stacked_contact() {
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: false,
+    });
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let box_body = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        -0.45,
+        Vector::new(0.0, 3.0),
+    );
+    let material = Material {
+        friction: 0.4,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+    attach_shape(&mut world, box_body, SharedShape::rect(1.0, 1.0), material);
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 12,
+            position_iterations: 6,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let contacts = active_contact_events(&report);
+
+    assert!(
+        contacts.len() >= 2,
+        "face contact should expose multiple manifold rows: {contacts:?}"
+    );
+    assert!(
+        contacts
+            .iter()
+            .all(|contact| contact.solver_normal_impulse >= 0.0),
+        "normal impulses must be non-negative on every contact row: {contacts:?}"
+    );
+    assert!(
+        contacts
+            .iter()
+            .filter(|contact| contact.solver_normal_impulse > 1.0e-4)
+            .count()
+            >= 2,
+        "M5 must solve all non-sensor rows instead of only the deepest row per pair: {contacts:?}"
+    );
+    assert!(
+        body_velocity(&world, box_body).y() <= 0.25,
+        "velocity iterations should remove most closing speed; velocity={:?}",
+        body_velocity(&world, box_body)
+    );
+}
+
+#[test]
+fn tangent_impulse_is_clamped_by_coulomb_friction_budget() {
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: false,
+    });
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let slider = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        -0.45,
+        Vector::new(12.0, 3.0),
+    );
+    let material = Material {
+        friction: 0.25,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+    attach_shape(&mut world, slider, SharedShape::circle(0.5), material);
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 10,
+            position_iterations: 4,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .max_by(|a, b| {
+            a.solver_tangent_impulse
+                .abs()
+                .partial_cmp(&b.solver_tangent_impulse.abs())
+                .unwrap()
+        })
+        .expect("slider should contact the floor");
+    let friction_budget = material.friction * contact.solver_normal_impulse;
+
+    assert!(
+        contact.solver_normal_impulse > 0.0,
+        "normal impulse should create a Coulomb friction budget: {contact:?}"
+    );
+    assert!(
+        contact.solver_tangent_impulse.abs() <= friction_budget + 1.0e-4,
+        "tangent impulse must stay inside +/-mu * normal impulse; budget={friction_budget}, contact={contact:?}"
+    );
+    assert!(
+        contact.tangent_impulse_clamped,
+        "large tangential speed should hit the Coulomb clamp: {contact:?}"
+    );
+}
+
+#[test]
+fn restitution_uses_configurable_velocity_threshold() {
+    fn impact(speed: f32, threshold: f32) -> (Vector, ContactEvent) {
+        let mut world = World::new(WorldDesc {
+            gravity: Vector::default(),
+            enable_sleep: false,
+        });
+        let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+        let ball = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            0.0,
+            -0.45,
+            Vector::new(0.0, speed),
+        );
+        let material = Material {
+            friction: 0.0,
+            restitution: 1.0,
+        };
+        attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+        attach_shape(&mut world, ball, SharedShape::circle(0.5), material);
+
+        let report = step_world_with_config(
+            &mut world,
+            StepConfig {
+                restitution_velocity_threshold: threshold,
+                velocity_iterations: 8,
+                position_iterations: 3,
+                ..fixed_step_config()
+            },
+            1,
+        );
+        let contact = active_contact_events(&report)
+            .into_iter()
+            .next()
+            .expect("impact should emit contact facts");
+        (body_velocity(&world, ball), contact)
+    }
+
+    let (slow_velocity, slow_contact) = impact(1.0, 2.0);
+    let (fast_velocity, fast_contact) = impact(4.0, 2.0);
+
+    assert!(
+        !slow_contact.restitution_applied,
+        "low-speed impact should be below the configured bounce threshold: {slow_contact:?}"
+    );
+    assert_eq!(slow_contact.restitution_velocity_threshold, 2.0);
+    assert!(
+        slow_velocity.y() >= -0.1,
+        "low-speed contact should not bounce upward; velocity={slow_velocity:?}"
+    );
+    assert!(
+        fast_contact.restitution_applied,
+        "fast impact should apply restitution above the configured threshold: {fast_contact:?}"
+    );
+    assert_eq!(fast_contact.restitution_velocity_threshold, 2.0);
+    assert!(
+        fast_velocity.y() < -2.5,
+        "elastic impact should reverse enough speed above threshold; velocity={fast_velocity:?}"
+    );
+}
+
+#[test]
+fn off_center_contact_produces_angular_velocity() {
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: false,
+    });
+    let obstacle = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let striking_box = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-0.8, -0.35, 0.0),
+            linear_velocity: Vector::new(4.0, 0.0),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("striking box should be created");
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, obstacle, SharedShape::circle(0.5), material);
+    attach_shape(
+        &mut world,
+        striking_box,
+        SharedShape::rect(1.0, 1.0),
+        material,
+    );
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 10,
+            position_iterations: 4,
+            ..fixed_step_config()
+        },
+        1,
+    );
+
+    assert!(
+        active_contact_events(&report)
+            .iter()
+            .any(|contact| contact.solver_normal_impulse > 0.0),
+        "off-center impact should solve a normal impulse: {:?}",
+        active_contact_events(&report)
+    );
+    assert!(
+        body_angular_velocity(&world, striking_box) < -0.1,
+        "off-center rightward impact above the body's center should produce clockwise spin; angular_velocity={}",
+        body_angular_velocity(&world, striking_box)
+    );
+}
+
+#[test]
+fn collider_density_changes_sequential_impulse_response_through_inverse_mass() {
     fn post_contact_velocity(left_density: f32, right_density: f32) -> (Vector, Vector, f32, f32) {
         let mut world = no_gravity_world();
         let left = create_body(
@@ -884,9 +1182,9 @@ fn separating_overlap_does_not_apply_friction_impulse() {
 }
 
 #[test]
-fn contact_position_correction_preserves_spin_without_angular_solver() {
-    // Physical behavior: until angular contact impulses are implemented, a zero-friction contact
-    // should at least avoid deleting existing angular velocity as a side effect.
+fn contact_position_correction_preserves_spin_after_velocity_solve() {
+    // Physical behavior: residual position correction must not delete angular velocity written
+    // by the velocity solver or authored on the body before the step.
     let mut world = no_gravity_world();
     let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
     let spinner = world

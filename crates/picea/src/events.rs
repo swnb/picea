@@ -110,6 +110,24 @@ pub struct ContactEvent {
     /// Previous tangent impulse transferred into this step, or zero when not trusted.
     #[serde(default)]
     pub warm_start_tangent_impulse: FloatNum,
+    /// Final normal impulse accumulated by the current step's contact solver.
+    #[serde(default)]
+    pub solver_normal_impulse: FloatNum,
+    /// Final tangent impulse accumulated by the current step's contact solver.
+    #[serde(default)]
+    pub solver_tangent_impulse: FloatNum,
+    /// Whether the normal row tried to go below zero and was clamped.
+    #[serde(default)]
+    pub normal_impulse_clamped: bool,
+    /// Whether the tangent row hit the Coulomb friction clamp.
+    #[serde(default)]
+    pub tangent_impulse_clamped: bool,
+    /// Closing-speed threshold below which restitution is suppressed.
+    #[serde(default)]
+    pub restitution_velocity_threshold: FloatNum,
+    /// Whether restitution contributed bounce bias for this contact row.
+    #[serde(default)]
+    pub restitution_applied: bool,
 }
 
 /// Sleep or wake transitions for a body.
@@ -183,6 +201,12 @@ mod tests {
             warm_start_reason: WarmStartCacheReason::Hit,
             warm_start_normal_impulse: 1.0,
             warm_start_tangent_impulse: -0.25,
+            solver_normal_impulse: 1.25,
+            solver_tangent_impulse: -0.125,
+            normal_impulse_clamped: false,
+            tangent_impulse_clamped: true,
+            restitution_velocity_threshold: 1.0,
+            restitution_applied: true,
         };
         let sleep = SleepEvent {
             body: BodyHandle::from_raw_parts(9, 0),

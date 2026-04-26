@@ -101,6 +101,12 @@ export type DebugContact = {
     | "dropped_invalid_impulse";
   normal_impulse: number;
   tangent_impulse: number;
+  solver_normal_impulse?: number;
+  solver_tangent_impulse?: number;
+  normal_impulse_clamped?: boolean;
+  tangent_impulse_clamped?: boolean;
+  restitution_velocity_threshold?: number;
+  restitution_applied?: boolean;
 };
 
 export type DebugManifold = {

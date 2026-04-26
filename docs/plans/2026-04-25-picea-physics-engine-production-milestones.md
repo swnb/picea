@@ -225,9 +225,10 @@ rtk proxy cargo test -p picea --test physics_realism_acceptance
 - Static and kinematic bodies retain density-derived `mass` / `inertia` facts
   but expose zero `inverse_mass` / `inverse_inertia`; dynamic bodies expose
   positive inverses only when derived values are positive.
-- The interim contact velocity response now reads body inverse mass from
-  `MassProperties`; angular response, effective mass rows, warm-starting, and
-  sequential impulses remain out of scope for M4/M5.
+- At M3 completion, the interim contact velocity response read body inverse
+  mass from `MassProperties`; angular response, effective mass rows,
+  warm-starting, and sequential impulses were intentionally deferred to later
+  solver milestones.
 - Review follow-up closed the mutation-order edge cases: derived non-finite
   mass facts are rejected before collider create, patch, or destroy mutates
   authoritative world state.
@@ -310,6 +311,25 @@ rtk proxy cargo test -p picea-lab
 ```
 
 ## M5 Sequential Impulse Solver
+
+> Status: completed 2026-04-26.
+>
+> Completion notes: contact resolution now builds solver rows for every
+> non-sensor contact point instead of keeping only the deepest point per collider
+> pair. The velocity solve uses per-row effective mass with inverse mass and
+> inverse inertia, applies trusted warm-start impulses before configured velocity
+> iterations, clamps accumulated normal impulses to be non-negative, clamps
+> tangent impulses by the Coulomb friction budget, and applies restitution only
+> when closing speed exceeds `StepConfig::restitution_velocity_threshold`.
+> Residual position correction is driven by configured position iterations and
+> no longer overwrites solved linear or angular velocities. `ContactEvent`,
+> `DebugSnapshot`, and `picea-lab` artifacts expose solver normal/tangent
+> impulse facts, clamp state, restitution threshold decisions, and warm-start
+> usage; the lab stack artifact keeps contact impulses measured for inspection.
+>
+> Residual risk: this is still a single-world contact solver without island
+> compaction or island-level sleeping. CCD, generic convex fallback, benchmark
+> thresholds, and island wake/sleep semantics remain later milestones.
 
 ### Goal
 

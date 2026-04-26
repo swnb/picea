@@ -19,6 +19,11 @@ use crate::{events::WorldEvent, handles::WorldRevision, math::FloatNum};
 const DEFAULT_STEP_DT: FloatNum = 1.0 / 60.0;
 const DEFAULT_VELOCITY_ITERATIONS: u16 = 10;
 const DEFAULT_POSITION_ITERATIONS: u16 = 20;
+const DEFAULT_RESTITUTION_VELOCITY_THRESHOLD: FloatNum = 1.0;
+
+const fn default_restitution_velocity_threshold() -> FloatNum {
+    DEFAULT_RESTITUTION_VELOCITY_THRESHOLD
+}
 
 /// Stable step configuration owned by the simulation pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -29,6 +34,9 @@ pub struct StepConfig {
     pub velocity_iterations: u16,
     /// Number of position solver iterations requested from the world.
     pub position_iterations: u16,
+    /// Closing speed below which contact restitution is treated as resting contact.
+    #[serde(default = "default_restitution_velocity_threshold")]
+    pub restitution_velocity_threshold: FloatNum,
     /// Enables or disables world sleep evaluation for this step.
     pub enable_sleep: bool,
 }
@@ -39,6 +47,7 @@ impl Default for StepConfig {
             dt: DEFAULT_STEP_DT,
             velocity_iterations: DEFAULT_VELOCITY_ITERATIONS,
             position_iterations: DEFAULT_POSITION_ITERATIONS,
+            restitution_velocity_threshold: DEFAULT_RESTITUTION_VELOCITY_THRESHOLD,
             enable_sleep: true,
         }
     }
@@ -190,6 +199,11 @@ fn validate_step_config(config: &StepConfig) {
         config.dt.is_finite() && config.dt > 0.0,
         "step dt must be finite and positive"
     );
+    assert!(
+        config.restitution_velocity_threshold.is_finite()
+            && config.restitution_velocity_threshold >= 0.0,
+        "restitution velocity threshold must be finite and non-negative"
+    );
 }
 
 #[cfg(test)]
@@ -234,6 +248,7 @@ mod tests {
         assert_eq!(config.dt, 1.0 / 60.0);
         assert_eq!(config.velocity_iterations, 10);
         assert_eq!(config.position_iterations, 20);
+        assert_eq!(config.restitution_velocity_threshold, 1.0);
         assert!(config.enable_sleep);
     }
 
@@ -247,6 +262,22 @@ mod tests {
 
             let result = catch_unwind(|| SimulationPipeline::new(config));
             assert!(result.is_err(), "expected dt {dt:?} to be rejected");
+        }
+    }
+
+    #[test]
+    fn new_rejects_negative_or_non_finite_restitution_threshold() {
+        for threshold in [-0.1, f32::NAN, f32::INFINITY] {
+            let config = StepConfig {
+                restitution_velocity_threshold: threshold,
+                ..StepConfig::default()
+            };
+
+            let result = catch_unwind(|| SimulationPipeline::new(config));
+            assert!(
+                result.is_err(),
+                "expected restitution threshold {threshold:?} to be rejected"
+            );
         }
     }
 
@@ -267,6 +298,12 @@ mod tests {
             warm_start_reason: WarmStartCacheReason::Hit,
             warm_start_normal_impulse: 1.0,
             warm_start_tangent_impulse: 0.25,
+            solver_normal_impulse: 1.25,
+            solver_tangent_impulse: 0.125,
+            normal_impulse_clamped: false,
+            tangent_impulse_clamped: true,
+            restitution_velocity_threshold: 2.0,
+            restitution_applied: true,
         });
         let sleep_changed = WorldEvent::SleepChanged(SleepEvent {
             body: BodyHandle::from_raw_parts(2, 0),
@@ -277,6 +314,7 @@ mod tests {
             dt: 1.0 / 120.0,
             velocity_iterations: 6,
             position_iterations: 4,
+            restitution_velocity_threshold: 2.0,
             enable_sleep: false,
         });
         let mut world = FakeWorld::with_outcomes([StepOutcome {

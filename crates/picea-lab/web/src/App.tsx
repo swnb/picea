@@ -637,6 +637,11 @@ function EntityInspector({
           <Fact label="warm-start" value={selected.entity.warm_start_reason ?? "miss_no_previous"} />
           <Fact label="warm-start normal" value={selected.entity.normal_impulse.toFixed(4)} />
           <Fact label="warm-start tangent" value={selected.entity.tangent_impulse.toFixed(4)} />
+          <Fact label="solver normal" value={(selected.entity.solver_normal_impulse ?? 0).toFixed(4)} />
+          <Fact label="solver tangent" value={(selected.entity.solver_tangent_impulse ?? 0).toFixed(4)} />
+          <Fact label="normal clamped" value={String(selected.entity.normal_impulse_clamped ?? false)} />
+          <Fact label="tangent clamped" value={String(selected.entity.tangent_impulse_clamped ?? false)} />
+          <Fact label="restitution" value={selected.entity.restitution_applied ? "applied" : "suppressed"} />
         </>
       )}
       {selected.kind === "joint" && (

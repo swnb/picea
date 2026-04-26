@@ -67,6 +67,12 @@ function makeFallingBoxFrames(frameCount: number): FrameRecord[] {
             warm_start_reason: hasTouched ? "hit" : "miss_no_previous",
             normal_impulse: 0,
             tangent_impulse: 0,
+            solver_normal_impulse: touching ? 1.2 : 0,
+            solver_tangent_impulse: 0.15,
+            normal_impulse_clamped: false,
+            tangent_impulse_clamped: true,
+            restitution_velocity_threshold: 1,
+            restitution_applied: false,
           },
         ]
       : [];

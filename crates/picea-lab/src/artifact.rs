@@ -261,9 +261,9 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     colliders: frame.snapshot.colliders.clone(),
                     contacts: frame.snapshot.contacts.clone(),
                     manifolds: frame.snapshot.manifolds.clone(),
-                    // Warm-start cache transfers are measured above; full M5
-                    // solver impulses are still intentionally unmeasured.
-                    unmeasured: ["contact_impulses", "forces", "torques"]
+                    // M5 exposes contact solver impulses; force/torque accumulation is still
+                    // outside the lab artifact contract.
+                    unmeasured: ["forces", "torques"]
                         .into_iter()
                         .map(str::to_owned)
                         .collect(),

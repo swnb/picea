@@ -293,6 +293,80 @@ fn warm_start_artifacts_capture_per_step_manifold_cache_facts() {
         render_second.manifolds[0].warm_start_hit_count,
         second.stats.contact_count
     );
+    assert!(
+        render_second
+            .unmeasured
+            .iter()
+            .all(|fact| fact != "contact_impulses"),
+        "M5 artifacts should stop marking contact impulses as unmeasured"
+    );
+}
+
+#[test]
+fn stack_artifacts_capture_solver_impulse_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::Stack4,
+            frame_count: 20,
+            run_id: Some("m5-stack-impulses".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("stack run should write artifacts");
+    let debug_render_json =
+        fs::read_to_string(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable");
+    for field in [
+        "solver_normal_impulse",
+        "solver_tangent_impulse",
+        "normal_impulse_clamped",
+        "tangent_impulse_clamped",
+        "restitution_velocity_threshold",
+        "restitution_applied",
+    ] {
+        assert!(
+            debug_render_json.contains(field),
+            "debug render JSON should export M5 solver field `{field}`"
+        );
+    }
+    let render: DebugRenderArtifact =
+        serde_json::from_str(&debug_render_json).expect("debug render should match schema");
+
+    let solver_contact = render
+        .frames
+        .iter()
+        .flat_map(|frame| frame.contacts.iter())
+        .find(|contact| contact.solver_normal_impulse > 0.0)
+        .expect("stack artifacts should include non-zero contact solver impulses");
+    assert!(
+        solver_contact.solver_tangent_impulse.abs()
+            <= solver_contact.solver_normal_impulse + 1.0e-4,
+        "solver tangent impulse should stay bounded by the normal impulse in artifacts"
+    );
+    assert_eq!(solver_contact.restitution_velocity_threshold, 1.0);
+    assert!(
+        !solver_contact.restitution_applied,
+        "default stack contacts should not bounce without restitution material"
+    );
+    assert!(
+        render
+            .frames
+            .iter()
+            .flat_map(|frame| frame.bodies.iter())
+            .any(|body| !body.sleeping),
+        "stack artifacts should expose body sleep state for M5/M6 inspection"
+    );
+    assert!(
+        render.frames.iter().all(|frame| frame
+            .unmeasured
+            .iter()
+            .all(|fact| fact != "contact_impulses")),
+        "M5 stack artifacts should stop marking contact impulses as unmeasured"
+    );
 }
 
 #[test]
