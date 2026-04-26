@@ -189,6 +189,13 @@ function body(
     handle,
     body_type: bodyType,
     transform: { translation, rotation: 0 },
+    mass_properties: {
+      mass: bodyType === "dynamic" ? 1 : 0,
+      inverse_mass: bodyType === "dynamic" ? 1 : 0,
+      local_center_of_mass: { x: 0, y: 0 },
+      inertia: bodyType === "dynamic" ? 1 : 0,
+      inverse_inertia: bodyType === "dynamic" ? 1 : 0,
+    },
     linear_velocity: linearVelocity,
     angular_velocity: 0,
     sleeping: false,

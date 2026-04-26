@@ -35,6 +35,13 @@ export type DebugBody = {
     translation: Vec2;
     rotation: number;
   };
+  mass_properties: {
+    mass: number;
+    inverse_mass: number;
+    local_center_of_mass: Vec2;
+    inertia: number;
+    inverse_inertia: number;
+  };
   linear_velocity: Vec2;
   angular_velocity: number;
   sleeping: boolean;

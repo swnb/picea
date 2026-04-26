@@ -214,6 +214,44 @@ rtk proxy cargo test -p picea --test core_model_world
 rtk proxy cargo test -p picea --test physics_realism_acceptance
 ```
 
+### Completion Notes
+
+- Completed in the current workspace at `HEAD=6a8c3e1` without starting M4.
+- Added public `MassProperties` facts on `BodyView` and debug snapshots, with
+  `picea-lab` artifact and web inspector propagation.
+- Collider density now contributes to mass for circles, rectangles, segments,
+  regular polygons, convex polygons, and simple concave polygon loops; sensors
+  still contribute mass because sensor status only controls contact response.
+- Static and kinematic bodies retain density-derived `mass` / `inertia` facts
+  but expose zero `inverse_mass` / `inverse_inertia`; dynamic bodies expose
+  positive inverses only when derived values are positive.
+- The interim contact velocity response now reads body inverse mass from
+  `MassProperties`; angular response, effective mass rows, warm-starting, and
+  sequential impulses remain out of scope for M4/M5.
+- Review follow-up closed the mutation-order edge cases: derived non-finite
+  mass facts are rejected before collider create, patch, or destroy mutates
+  authoritative world state.
+
+Residual risks:
+
+- Polygon mass formulas assume a simple, non-self-intersecting loop; there is
+  no full polygon self-intersection validator yet.
+- Inertia is computed and exported but not consumed by angular contact solving
+  until later solver milestones.
+
+Verified gates:
+
+```bash
+rtk proxy cargo fmt --all --check
+rtk proxy cargo test -p picea --lib
+rtk proxy cargo test -p picea --tests
+rtk proxy cargo test -p picea-lab
+rtk proxy cargo test -p picea --test physics_realism_acceptance
+cd crates/picea-lab/web && rtk proxy npm run build
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
 ## M4 Persistent Contact And Warm-Start Cache
 
 ### Goal

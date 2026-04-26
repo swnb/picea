@@ -146,6 +146,14 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
     assert_eq!(snapshot.manifolds.len(), 1);
     assert!(!snapshot.primitives.is_empty());
 
+    let body = snapshot
+        .bodies
+        .iter()
+        .find(|body| body.handle == body_a)
+        .expect("snapshot should contain body mass properties");
+    assert!((body.mass_properties.mass - 2.5 * std::f32::consts::PI).abs() <= 1e-4);
+    assert!(body.mass_properties.inverse_mass > 0.0);
+
     let collider = snapshot
         .colliders
         .iter()

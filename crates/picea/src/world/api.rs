@@ -1,10 +1,11 @@
 use crate::{
-    body::{BodyDesc, BodyPatch, BodyRecord, BodyView},
-    collider::{ColliderDesc, ColliderPatch, ColliderRecord, ColliderView},
+    body::{BodyDesc, BodyPatch, BodyRecord, BodyView, MassProperties},
+    collider::{ColliderDesc, ColliderPatch, ColliderRecord, ColliderView, SharedShape},
     debug::{DebugSnapshot, DebugSnapshotOptions},
     events::WorldEvent,
     handles::{BodyHandle, ColliderHandle, JointHandle, WorldRevision},
     joint::{JointDesc, JointKind, JointPatch, JointRecord, JointView},
+    math::{point::Point, vector::Vector, FloatNum},
     world::World,
 };
 
@@ -96,7 +97,19 @@ impl World {
         desc: ColliderDesc,
     ) -> Result<ColliderHandle, WorldError> {
         desc.validate().map_err(WorldError::Validation)?;
-        self.body_record(body)?;
+        let body_type = self.body_record(body)?.body_type;
+        let mass_properties = self.compute_body_mass_properties(
+            body,
+            body_type,
+            Some(ProspectiveColliderMass {
+                replaced: None,
+                shape: &desc.shape,
+                local_pose: desc.local_pose,
+                density: desc.density,
+                field_scope: "desc",
+            }),
+            None,
+        )?;
         let handle = allocate_slot(
             &mut self.colliders,
             &mut self.free_colliders,
@@ -104,6 +117,8 @@ impl World {
             ColliderRecord::from_desc(body, desc),
         );
         self.body_record_mut(body)?.attach_collider(handle);
+        self.body_record_mut(body)?
+            .set_mass_properties(mass_properties);
         self.bump_revision();
         Ok(handle)
     }
@@ -166,7 +181,16 @@ impl World {
         patch: BodyPatch,
     ) -> Result<(), WorldError> {
         patch.validate().map_err(WorldError::Validation)?;
+        let mass_properties = if let Some(body_type) = patch.body_type {
+            Some(self.compute_body_mass_properties(handle, body_type, None, None)?)
+        } else {
+            None
+        };
         self.body_record_mut(handle)?.apply_patch(patch);
+        if let Some(mass_properties) = mass_properties {
+            self.body_record_mut(handle)?
+                .set_mass_properties(mass_properties);
+        }
         self.bump_revision();
         Ok(())
     }
@@ -178,7 +202,38 @@ impl World {
         patch: ColliderPatch,
     ) -> Result<(), WorldError> {
         patch.validate().map_err(WorldError::Validation)?;
+        let mass_inputs_changed =
+            patch.shape.is_some() || patch.local_pose.is_some() || patch.density.is_some();
+        let (body, mass_properties) = {
+            let collider = self.collider_record(handle)?;
+            let body = collider.body;
+            let mass_properties = if mass_inputs_changed {
+                let body_type = self.body_record(body)?.body_type;
+                let shape = patch.shape.as_ref().unwrap_or(&collider.shape);
+                let local_pose = patch.local_pose.unwrap_or(collider.local_pose);
+                let density = patch.density.unwrap_or(collider.density);
+                Some(self.compute_body_mass_properties(
+                    body,
+                    body_type,
+                    Some(ProspectiveColliderMass {
+                        replaced: Some(handle),
+                        shape,
+                        local_pose,
+                        density,
+                        field_scope: "patch",
+                    }),
+                    None,
+                )?)
+            } else {
+                None
+            };
+            (body, mass_properties)
+        };
         self.collider_record_mut(handle)?.apply_patch(patch);
+        if let Some(mass_properties) = mass_properties {
+            self.body_record_mut(body)?
+                .set_mass_properties(mass_properties);
+        }
         self.bump_revision();
         Ok(())
     }
@@ -288,6 +343,9 @@ impl World {
 
     fn destroy_collider_internal(&mut self, handle: ColliderHandle) -> Result<(), WorldError> {
         let body = self.collider_record(handle)?.body;
+        let body_type = self.body_record(body)?.body_type;
+        let mass_properties =
+            self.compute_body_mass_properties(body, body_type, None, Some(handle))?;
         remove_slot(
             &mut self.colliders,
             &mut self.free_colliders,
@@ -296,6 +354,8 @@ impl World {
             super::stale_collider_error(handle),
         )?;
         self.body_record_mut(body)?.detach_collider(handle);
+        self.body_record_mut(body)?
+            .set_mass_properties(mass_properties);
         Ok(())
     }
 
@@ -320,5 +380,195 @@ impl World {
 
     pub(crate) fn bump_revision(&mut self) {
         self.revision = self.revision.next();
+    }
+
+    fn compute_body_mass_properties(
+        &self,
+        body: BodyHandle,
+        body_type: crate::body::BodyType,
+        prospective: Option<ProspectiveColliderMass<'_>>,
+        excluded: Option<ColliderHandle>,
+    ) -> Result<MassProperties, WorldError> {
+        let colliders = {
+            let record = self.body_record(body)?;
+            record.colliders.clone()
+        };
+        let aggregate_field_scope = prospective
+            .as_ref()
+            .map(|prospective| prospective.field_scope)
+            .unwrap_or("desc");
+        let mut contributions = Vec::new();
+        for handle in colliders {
+            if excluded == Some(handle) {
+                continue;
+            }
+            if prospective
+                .as_ref()
+                .and_then(|prospective| prospective.replaced)
+                == Some(handle)
+            {
+                continue;
+            }
+            let collider = self.collider_record(handle)?;
+            let mass_properties = collider
+                .shape
+                .validate_mass_properties(collider.density, collider.local_pose, "desc")
+                .map_err(WorldError::Validation)?;
+            if mass_properties.mass > 0.0 {
+                contributions.push(mass_properties);
+            }
+        }
+        if let Some(prospective) = prospective {
+            let mass_properties = prospective
+                .shape
+                .validate_mass_properties(
+                    prospective.density,
+                    prospective.local_pose,
+                    prospective.field_scope,
+                )
+                .map_err(WorldError::Validation)?;
+            if mass_properties.mass > 0.0 {
+                contributions.push(mass_properties);
+            }
+        }
+        let mass_properties =
+            aggregate_mass_properties(&contributions, body_type).ok_or_else(|| {
+                WorldError::Validation(collider_mass_properties_error(aggregate_field_scope))
+            })?;
+        Ok(mass_properties)
+    }
+}
+
+struct ProspectiveColliderMass<'a> {
+    replaced: Option<ColliderHandle>,
+    shape: &'a SharedShape,
+    local_pose: crate::body::Pose,
+    density: FloatNum,
+    field_scope: &'static str,
+}
+
+fn aggregate_mass_properties(
+    contributions: &[MassProperties],
+    body_type: crate::body::BodyType,
+) -> Option<MassProperties> {
+    let total_mass = contributions
+        .iter()
+        .map(|mass_properties| mass_properties.mass)
+        .sum::<FloatNum>();
+    if total_mass <= 0.0 {
+        return Some(MassProperties::default().with_body_type(body_type));
+    }
+    if !total_mass.is_finite() {
+        return None;
+    }
+
+    let weighted_center = contributions
+        .iter()
+        .fold(Vector::default(), |sum, mass_properties| {
+            sum + Vector::from(mass_properties.local_center_of_mass) * mass_properties.mass
+        });
+    let local_center_of_mass = Point::from(weighted_center / total_mass);
+    if !local_center_of_mass.x().is_finite() || !local_center_of_mass.y().is_finite() {
+        return None;
+    }
+    let center_vector = Vector::from(local_center_of_mass);
+    let inertia = contributions
+        .iter()
+        .map(|mass_properties| {
+            let offset = Vector::from(mass_properties.local_center_of_mass) - center_vector;
+            // Parallel-axis aggregation moves each collider inertia from its own centroid to the
+            // final body center of mass before summing.
+            mass_properties.inertia + mass_properties.mass * offset.length_squared()
+        })
+        .sum::<FloatNum>();
+
+    let mass_properties = MassProperties {
+        mass: total_mass,
+        local_center_of_mass,
+        inertia,
+        ..MassProperties::default()
+    }
+    .with_body_type(body_type);
+    mass_properties
+        .is_finite_non_negative()
+        .then_some(mass_properties)
+}
+
+fn collider_mass_properties_error(field_scope: &'static str) -> crate::world::ValidationError {
+    match field_scope {
+        "patch" => crate::world::ValidationError::ColliderPatch {
+            field: "mass_properties",
+        },
+        _ => crate::world::ValidationError::ColliderDesc {
+            field: "mass_properties",
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::ValidationError;
+
+    #[test]
+    fn destroy_collider_validates_remaining_mass_before_mutating_slots() {
+        let mut world = World::new(WorldDesc::default());
+        let body = world
+            .create_body(BodyDesc::default())
+            .expect("body should be created");
+        let target = world
+            .create_collider(body, ColliderDesc::default())
+            .expect("target collider should be created");
+        let survivor = world
+            .create_collider(body, ColliderDesc::default())
+            .expect("survivor collider should be created");
+        let revision = world.revision();
+        let original_mass = world
+            .body(body)
+            .expect("body should resolve")
+            .mass_properties();
+
+        // This simulates a pre-existing invalid retained collider so the test can
+        // lock the destroy path's ordering: validation must happen before remove_slot.
+        world
+            .collider_record_mut(survivor)
+            .expect("survivor collider should resolve")
+            .shape = SharedShape::circle(1.0e20);
+
+        let error = world
+            .destroy_collider(target)
+            .expect_err("destroy must reject invalid remaining mass before mutation");
+
+        assert!(matches!(
+            error,
+            WorldError::Validation(ValidationError::ColliderDesc {
+                field: "mass_properties",
+            })
+        ));
+        assert_eq!(
+            world.revision(),
+            revision,
+            "rejected destroy must not bump world revision"
+        );
+        assert!(
+            world.collider(target).is_ok(),
+            "rejected destroy must not remove the requested collider"
+        );
+        assert_eq!(
+            world
+                .colliders_for_body(body)
+                .expect("body should still resolve")
+                .count(),
+            2,
+            "rejected destroy must preserve the body collider list"
+        );
+        assert_eq!(
+            world
+                .body(body)
+                .expect("body should still resolve")
+                .mass_properties(),
+            original_mass,
+            "rejected destroy must preserve authoritative mass facts"
+        );
     }
 }

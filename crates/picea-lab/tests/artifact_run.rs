@@ -92,6 +92,14 @@ fn run_writes_expected_artifacts_and_keeps_state_hash_deterministic() {
         "viewer render facts should include body and collider layers"
     );
     assert!(
+        first
+            .frames
+            .iter()
+            .flat_map(|frame| frame.snapshot.bodies.iter())
+            .any(|body| body.mass_properties.mass > 0.0),
+        "artifacts should carry density-derived body mass properties"
+    );
+    assert!(
         first_frame
             .unmeasured
             .iter()

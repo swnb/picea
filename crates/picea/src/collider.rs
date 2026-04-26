@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    body::Pose,
+    body::{MassProperties, Pose},
     handles::{BodyHandle, ColliderHandle},
     math::{point::Point, vector::Vector, FloatNum},
     world::ValidationError,
@@ -137,6 +137,67 @@ impl SharedShape {
         }
     }
 
+    pub(crate) fn mass_properties(
+        &self,
+        density: FloatNum,
+        local_pose: Pose,
+    ) -> Option<MassProperties> {
+        if density == 0.0 {
+            return Some(MassProperties::default());
+        }
+
+        let local = match self {
+            Self::Circle { radius } => {
+                let mass = density * std::f32::consts::PI * radius * radius;
+                // A solid disk has half its mass times radius squared as centroid inertia.
+                MassProperties {
+                    mass,
+                    local_center_of_mass: Point::default(),
+                    inertia: 0.5 * mass * radius * radius,
+                    ..MassProperties::default()
+                }
+            }
+            Self::Rect { half_extents } => {
+                let width = half_extents.x() * 2.0;
+                let height = half_extents.y() * 2.0;
+                let mass = density * width * height;
+                MassProperties {
+                    mass,
+                    local_center_of_mass: Point::default(),
+                    inertia: mass * (width * width + height * height) / 12.0,
+                    ..MassProperties::default()
+                }
+            }
+            Self::RegularPolygon { .. } => {
+                polygon_mass_properties(&self.local_vertices(), density)?
+            }
+            Self::ConvexPolygon { vertices } | Self::ConcavePolygon { vertices } => {
+                polygon_mass_properties(vertices, density)?
+            }
+            Self::Segment { .. } => MassProperties::default(),
+        };
+
+        Some(MassProperties {
+            local_center_of_mass: local_pose.transform_point(local.local_center_of_mass),
+            ..local
+        })
+    }
+
+    pub(crate) fn validate_mass_properties(
+        &self,
+        density: FloatNum,
+        local_pose: Pose,
+        field_scope: &'static str,
+    ) -> Result<MassProperties, ValidationError> {
+        let mass_properties = self
+            .mass_properties(density, local_pose)
+            .ok_or_else(|| collider_mass_properties_error(field_scope))?;
+        if !mass_properties.is_finite_non_negative() {
+            return Err(collider_mass_properties_error(field_scope));
+        }
+        Ok(mass_properties)
+    }
+
     #[allow(dead_code)]
     pub(crate) fn world_vertices(&self, pose: Pose) -> Vec<Point> {
         self.local_vertices()
@@ -213,7 +274,7 @@ impl SharedShape {
                         },
                     });
                 }
-                if !radius.is_finite() || *radius < 0.0 {
+                if !radius.is_finite() || *radius <= 0.0 {
                     return Err(match field_scope {
                         "patch" => ValidationError::ColliderPatch {
                             field: "shape.radius",
@@ -226,6 +287,16 @@ impl SharedShape {
             }
             Self::ConvexPolygon { vertices } | Self::ConcavePolygon { vertices } => {
                 if vertices.len() < 3 {
+                    return Err(match field_scope {
+                        "patch" => ValidationError::ColliderPatch {
+                            field: "shape.vertices",
+                        },
+                        _ => ValidationError::ColliderDesc {
+                            field: "shape.vertices",
+                        },
+                    });
+                }
+                if polygon_area(vertices).abs() <= FloatNum::EPSILON {
                     return Err(match field_scope {
                         "patch" => ValidationError::ColliderPatch {
                             field: "shape.vertices",
@@ -254,6 +325,7 @@ impl SharedShape {
                     || !start.y().is_finite()
                     || !end.x().is_finite()
                     || !end.y().is_finite()
+                    || Vector::from((*start, *end)).length() <= FloatNum::EPSILON
                 {
                     return Err(match field_scope {
                         "patch" => ValidationError::ColliderPatch {
@@ -270,6 +342,77 @@ impl SharedShape {
     }
 }
 
+fn collider_mass_properties_error(field_scope: &'static str) -> ValidationError {
+    match field_scope {
+        "patch" => ValidationError::ColliderPatch {
+            field: "mass_properties",
+        },
+        _ => ValidationError::ColliderDesc {
+            field: "mass_properties",
+        },
+    }
+}
+
+fn polygon_area(vertices: &[Point]) -> FloatNum {
+    vertices
+        .iter()
+        .copied()
+        .zip(vertices.iter().copied().cycle().skip(1))
+        .take(vertices.len())
+        .map(|(a, b)| a.x() * b.y() - b.x() * a.y())
+        .sum::<FloatNum>()
+        * 0.5
+}
+
+fn polygon_mass_properties(vertices: &[Point], density: FloatNum) -> Option<MassProperties> {
+    let mut cross_sum = 0.0;
+    let mut centroid_x_sum = 0.0;
+    let mut centroid_y_sum = 0.0;
+    let mut inertia_sum = 0.0;
+
+    // Shoelace formulas assume a simple, non-self-intersecting loop. They work for convex
+    // polygons and for simple concave polygons, but they are not a triangulation validator.
+    for (a, b) in vertices
+        .iter()
+        .copied()
+        .zip(vertices.iter().copied().cycle().skip(1))
+        .take(vertices.len())
+    {
+        let cross = a.x() * b.y() - b.x() * a.y();
+        cross_sum += cross;
+        centroid_x_sum += (a.x() + b.x()) * cross;
+        centroid_y_sum += (a.y() + b.y()) * cross;
+        inertia_sum += cross
+            * (a.x() * a.x()
+                + a.x() * b.x()
+                + b.x() * b.x()
+                + a.y() * a.y()
+                + a.y() * b.y()
+                + b.y() * b.y());
+    }
+
+    if cross_sum.abs() <= FloatNum::EPSILON {
+        return None;
+    }
+
+    let area = cross_sum * 0.5;
+    let mass = density * area.abs();
+    let centroid = Point::new(
+        centroid_x_sum / (3.0 * cross_sum),
+        centroid_y_sum / (3.0 * cross_sum),
+    );
+    let inertia_about_origin = density * inertia_sum.abs() / 12.0;
+    let centroid_offset = Vector::from(centroid).length_squared();
+    let inertia = (inertia_about_origin - mass * centroid_offset).max(0.0);
+
+    Some(MassProperties {
+        mass,
+        local_center_of_mass: centroid,
+        inertia,
+        ..MassProperties::default()
+    })
+}
+
 /// Descriptor used to create a collider attached to a body.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ColliderDesc {
@@ -277,7 +420,7 @@ pub struct ColliderDesc {
     pub shape: SharedShape,
     /// Local-space transform relative to the parent body.
     pub local_pose: Pose,
-    /// Density used by future mass-property adapters.
+    /// Mass per unit area used when deriving body mass properties.
     pub density: FloatNum,
     /// Surface material parameters.
     pub material: Material,
@@ -604,4 +747,81 @@ fn point_on_segment(point: Point, start: Point, end: Point) -> bool {
     let dot = (point.x() - start.x()) * (point.x() - end.x())
         + (point.y() - start.y()) * (point.y() - end.y());
     dot <= 0.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SharedShape;
+    use crate::{body::Pose, math::point::Point};
+
+    const EPSILON: f32 = 1e-4;
+
+    fn assert_near(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= EPSILON,
+            "expected {actual} to be within {EPSILON} of {expected}"
+        );
+    }
+
+    #[test]
+    fn collider_mass_properties_follow_circle_rect_and_segment_formulas() {
+        let circle = SharedShape::circle(2.0)
+            .mass_properties(0.5, Pose::default())
+            .expect("circle mass should compute");
+        assert_near(circle.mass, 2.0 * std::f32::consts::PI);
+        assert_eq!(circle.local_center_of_mass, Point::new(0.0, 0.0));
+        assert_near(circle.inertia, 4.0 * std::f32::consts::PI);
+
+        let rect = SharedShape::rect(4.0, 2.0)
+            .mass_properties(3.0, Pose::default())
+            .expect("rect mass should compute");
+        assert_near(rect.mass, 24.0);
+        assert_eq!(rect.local_center_of_mass, Point::new(0.0, 0.0));
+        assert_near(rect.inertia, 40.0);
+
+        let segment = SharedShape::segment(Point::new(-1.0, 0.0), Point::new(1.0, 0.0))
+            .mass_properties(9.0, Pose::default())
+            .expect("segment mass should compute");
+        assert_eq!(segment.mass, 0.0);
+        assert_eq!(segment.local_center_of_mass, Point::new(0.0, 0.0));
+        assert_eq!(segment.inertia, 0.0);
+    }
+
+    #[test]
+    fn collider_mass_properties_follow_regular_convex_and_concave_polygon_formulas() {
+        let regular_square = SharedShape::regular_polygon(4, 2.0_f32.sqrt())
+            .mass_properties(1.0, Pose::default())
+            .expect("regular polygon mass should compute");
+        assert_near(regular_square.mass, 4.0);
+        assert_near(regular_square.local_center_of_mass.x(), 0.0);
+        assert_near(regular_square.local_center_of_mass.y(), 0.0);
+        assert_near(regular_square.inertia, 8.0 / 3.0);
+
+        let triangle = SharedShape::convex_polygon(vec![
+            Point::new(0.0, 0.0),
+            Point::new(2.0, 0.0),
+            Point::new(0.0, 2.0),
+        ])
+        .mass_properties(1.0, Pose::default())
+        .expect("convex polygon mass should compute");
+        assert_near(triangle.mass, 2.0);
+        assert_near(triangle.local_center_of_mass.x(), 2.0 / 3.0);
+        assert_near(triangle.local_center_of_mass.y(), 2.0 / 3.0);
+        assert_near(triangle.inertia, 8.0 / 9.0);
+
+        let l_shape = SharedShape::concave_polygon(vec![
+            Point::new(0.0, 0.0),
+            Point::new(2.0, 0.0),
+            Point::new(2.0, 1.0),
+            Point::new(1.0, 1.0),
+            Point::new(1.0, 2.0),
+            Point::new(0.0, 2.0),
+        ])
+        .mass_properties(1.0, Pose::default())
+        .expect("simple concave polygon mass should compute");
+        assert_near(l_shape.mass, 3.0);
+        assert_near(l_shape.local_center_of_mass.x(), 5.0 / 6.0);
+        assert_near(l_shape.local_center_of_mass.y(), 5.0 / 6.0);
+        assert_near(l_shape.inertia, 11.0 / 6.0);
+    }
 }

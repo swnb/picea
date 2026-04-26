@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    body::{BodyType, Pose},
+    body::{BodyType, MassProperties, Pose},
     collider::{CollisionFilter, Material, SharedShape},
     events::{ContactEvent, ContactReductionReason, WorldEvent},
     handles::{
@@ -208,6 +208,8 @@ pub struct DebugBody {
     pub body_type: BodyType,
     /// World transform.
     pub transform: DebugTransform,
+    /// Density-derived mass, center-of-mass, and inertia facts.
+    pub mass_properties: MassProperties,
     /// Linear velocity in world space.
     pub linear_velocity: Vector,
     /// Angular velocity in radians per second.
@@ -226,6 +228,13 @@ impl DebugBody {
             transform: DebugTransform {
                 translation: sanitize_vector(self.transform.translation),
                 rotation: sanitize_scalar(self.transform.rotation),
+            },
+            mass_properties: MassProperties {
+                mass: sanitize_scalar(self.mass_properties.mass).max(0.0),
+                inverse_mass: sanitize_scalar(self.mass_properties.inverse_mass).max(0.0),
+                local_center_of_mass: sanitize_point(self.mass_properties.local_center_of_mass),
+                inertia: sanitize_scalar(self.mass_properties.inertia).max(0.0),
+                inverse_inertia: sanitize_scalar(self.mass_properties.inverse_inertia).max(0.0),
             },
             linear_velocity: sanitize_vector(self.linear_velocity),
             angular_velocity: sanitize_scalar(self.angular_velocity),
@@ -647,6 +656,7 @@ impl DebugSnapshot {
                     translation: body.pose().translation(),
                     rotation: body.pose().angle(),
                 },
+                mass_properties: body.mass_properties(),
                 linear_velocity: body.linear_velocity(),
                 angular_velocity: body.angular_velocity(),
                 sleeping: body.sleeping(),

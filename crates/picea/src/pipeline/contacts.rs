@@ -280,16 +280,8 @@ impl World {
         let Ok(body_b) = self.body_record(contact.body_b) else {
             return Vec::new();
         };
-        let inv_mass_a = if body_a.body_type.is_dynamic() {
-            1.0
-        } else {
-            0.0
-        };
-        let inv_mass_b = if body_b.body_type.is_dynamic() {
-            1.0
-        } else {
-            0.0
-        };
+        let inv_mass_a = body_a.mass_properties.inverse_mass;
+        let inv_mass_b = body_b.mass_properties.inverse_mass;
         let inv_mass_sum = inv_mass_a + inv_mass_b;
         if inv_mass_sum <= FloatNum::EPSILON {
             return Vec::new();

@@ -12,7 +12,7 @@ mod solver;
 pub mod world;
 
 pub mod prelude {
-    pub use super::body::{BodyDesc, BodyPatch, BodyType, BodyView, Pose};
+    pub use super::body::{BodyDesc, BodyPatch, BodyType, BodyView, MassProperties, Pose};
     pub use super::collider::{
         ColliderDesc, ColliderPatch, ColliderView, CollisionFilter, Material, SharedShape,
     };

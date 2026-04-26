@@ -599,6 +599,11 @@ function EntityInspector({
         <>
           <Fact label="type" value={selected.entity.body_type} />
           <Fact label="position" value={vec(selected.entity.transform.translation)} />
+          <Fact label="mass" value={selected.entity.mass_properties.mass.toFixed(3)} />
+          <Fact label="inverse mass" value={selected.entity.mass_properties.inverse_mass.toFixed(3)} />
+          <Fact label="center of mass" value={vec(selected.entity.mass_properties.local_center_of_mass)} />
+          <Fact label="inertia" value={selected.entity.mass_properties.inertia.toFixed(3)} />
+          <Fact label="inverse inertia" value={selected.entity.mass_properties.inverse_inertia.toFixed(3)} />
           <Fact label="linear velocity" value={vec(selected.entity.linear_velocity)} />
           <Fact label="angular velocity" value={selected.entity.angular_velocity.toFixed(3)} />
           <Fact label="sleeping" value={String(selected.entity.sleeping)} />

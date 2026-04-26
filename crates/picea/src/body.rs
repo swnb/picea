@@ -8,6 +8,55 @@ use crate::{
     world::ValidationError,
 };
 
+/// Density-derived mass facts for a body.
+///
+/// `mass` and `inertia` describe how much linear and angular resistance the
+/// attached collider shapes contribute. The inverse fields are what solvers
+/// consume: static and kinematic bodies keep zero inverses so contacts cannot
+/// move them even though their density-derived facts remain inspectable.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MassProperties {
+    /// Total collider mass in local body units.
+    pub mass: FloatNum,
+    /// Reciprocal mass used by velocity response.
+    pub inverse_mass: FloatNum,
+    /// Density-weighted center of mass in body-local coordinates.
+    pub local_center_of_mass: Point,
+    /// Moment of inertia around the local center of mass.
+    pub inertia: FloatNum,
+    /// Reciprocal inertia; zero for non-dynamic bodies and zero-inertia bodies.
+    pub inverse_inertia: FloatNum,
+}
+
+impl MassProperties {
+    pub(crate) fn is_finite_non_negative(&self) -> bool {
+        self.mass.is_finite()
+            && self.mass >= 0.0
+            && self.inverse_mass.is_finite()
+            && self.inverse_mass >= 0.0
+            && self.local_center_of_mass.x().is_finite()
+            && self.local_center_of_mass.y().is_finite()
+            && self.inertia.is_finite()
+            && self.inertia >= 0.0
+            && self.inverse_inertia.is_finite()
+            && self.inverse_inertia >= 0.0
+    }
+
+    pub(crate) fn with_body_type(mut self, body_type: BodyType) -> Self {
+        if body_type.is_dynamic() && self.mass > 0.0 {
+            self.inverse_mass = 1.0 / self.mass;
+        } else {
+            self.inverse_mass = 0.0;
+        }
+        if body_type.is_dynamic() && self.inertia > 0.0 {
+            self.inverse_inertia = 1.0 / self.inertia;
+        } else {
+            self.inverse_inertia = 0.0;
+        }
+        self
+    }
+}
+
 /// World-space position and rotation for bodies and colliders.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Pose {
@@ -309,6 +358,7 @@ pub struct BodyView {
     handle: BodyHandle,
     body_type: BodyType,
     pose: Pose,
+    mass_properties: MassProperties,
     linear_velocity: Vector,
     angular_velocity: FloatNum,
     linear_damping: FloatNum,
@@ -333,6 +383,11 @@ impl BodyView {
     /// Returns the current pose.
     pub fn pose(&self) -> Pose {
         self.pose
+    }
+
+    /// Returns density-derived body mass and inertia facts.
+    pub fn mass_properties(&self) -> MassProperties {
+        self.mass_properties
     }
 
     /// Returns the current linear velocity.
@@ -389,6 +444,7 @@ impl BodyView {
 pub(crate) struct BodyRecord {
     pub(crate) body_type: BodyType,
     pub(crate) pose: Pose,
+    pub(crate) mass_properties: MassProperties,
     pub(crate) linear_velocity: Vector,
     pub(crate) angular_velocity: FloatNum,
     pub(crate) linear_damping: FloatNum,
@@ -407,6 +463,7 @@ impl BodyRecord {
         let mut record = Self {
             body_type: desc.body_type,
             pose: desc.pose,
+            mass_properties: MassProperties::default().with_body_type(desc.body_type),
             linear_velocity: desc.linear_velocity,
             angular_velocity: desc.angular_velocity,
             linear_damping: desc.linear_damping,
@@ -468,6 +525,7 @@ impl BodyRecord {
             self.sleeping = false;
         }
         self.normalize_motion_for_body_type();
+        self.mass_properties = self.mass_properties.with_body_type(self.body_type);
     }
 
     pub(crate) fn view(&self, handle: BodyHandle) -> BodyView {
@@ -475,6 +533,7 @@ impl BodyRecord {
             handle,
             body_type: self.body_type,
             pose: self.pose,
+            mass_properties: self.mass_properties,
             linear_velocity: self.linear_velocity,
             angular_velocity: self.angular_velocity,
             linear_damping: self.linear_damping,
@@ -492,6 +551,10 @@ impl BodyRecord {
 
     pub(crate) fn detach_collider(&mut self, handle: ColliderHandle) {
         self.colliders.retain(|candidate| *candidate != handle);
+    }
+
+    pub(crate) fn set_mass_properties(&mut self, mass_properties: MassProperties) {
+        self.mass_properties = mass_properties.with_body_type(self.body_type);
     }
 
     pub(crate) fn attach_joint(&mut self, handle: JointHandle) {

@@ -108,6 +108,28 @@ fn collider_and_joint_inputs_are_validated_before_revision_bump() {
         "rejected collider patches must not bump the world revision"
     );
 
+    let zero_length_segment_revision = world.revision();
+    let zero_length_segment_error = world
+        .create_collider(
+            body_a,
+            ColliderDesc {
+                shape: SharedShape::segment((1.0, 1.0), (1.0, 1.0)),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect_err("zero-length segments are invalid boundary geometry");
+    assert!(matches!(
+        zero_length_segment_error,
+        WorldError::Validation(ValidationError::ColliderDesc {
+            field: "shape.segment",
+        })
+    ));
+    assert_eq!(
+        world.revision(),
+        zero_length_segment_revision,
+        "rejected segment geometry must not bump the world revision"
+    );
+
     let same_body_revision = world.revision();
     let same_body_error = world
         .create_joint(JointDesc::Distance(DistanceJointDesc {
@@ -181,6 +203,196 @@ fn collider_and_joint_inputs_are_validated_before_revision_bump() {
         world.revision(),
         world_anchor_patch_revision,
         "rejected world-anchor patches must not bump the world revision"
+    );
+}
+
+#[test]
+fn derived_mass_properties_are_validated_before_world_state_mutates() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc::default())
+        .expect("body should be created");
+
+    let shape_overflow_revision = world.revision();
+    let shape_overflow_error = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0e20),
+                density: 1.0,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect_err("finite inputs with overflowing mass formulas must be rejected");
+    assert!(matches!(
+        shape_overflow_error,
+        WorldError::Validation(ValidationError::ColliderDesc {
+            field: "mass_properties",
+        })
+    ));
+    assert_eq!(
+        world.revision(),
+        shape_overflow_revision,
+        "shape mass overflow must not bump the world revision"
+    );
+    assert_eq!(
+        world
+            .colliders_for_body(body)
+            .expect("body should still resolve")
+            .count(),
+        0,
+        "rejected collider descriptors must not attach collider handles"
+    );
+
+    world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                density: 1.0,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("finite base collider should be created");
+    let finite_mass = world
+        .body(body)
+        .expect("body should resolve")
+        .mass_properties();
+    let aggregate_overflow_revision = world.revision();
+    let aggregate_overflow_error = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                local_pose: Pose::from_xy_angle(1.0e20, 0.0, 0.0),
+                density: 1.0,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect_err("finite collider offset can overflow aggregate inertia");
+    assert!(matches!(
+        aggregate_overflow_error,
+        WorldError::Validation(ValidationError::ColliderDesc {
+            field: "mass_properties",
+        })
+    ));
+    assert_eq!(
+        world.revision(),
+        aggregate_overflow_revision,
+        "aggregate mass overflow must not bump the world revision"
+    );
+    assert_eq!(
+        world
+            .colliders_for_body(body)
+            .expect("body should still resolve")
+            .count(),
+        1,
+        "rejected aggregate mass must not allocate or attach another collider"
+    );
+    assert_eq!(
+        world
+            .body(body)
+            .expect("body should resolve")
+            .mass_properties(),
+        finite_mass,
+        "rejected aggregate mass must preserve authoritative body mass facts"
+    );
+
+    world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                local_pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+                density: 1.0,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("second finite collider should be created");
+    let finite_mass_after_second = world
+        .body(body)
+        .expect("body should resolve")
+        .mass_properties();
+    let collider = world
+        .colliders_for_body(body)
+        .expect("body should still resolve")
+        .next()
+        .expect("base collider should exist");
+    let patch_revision = world.revision();
+    let patch_error = world
+        .apply_collider_patch(
+            collider,
+            ColliderPatch {
+                local_pose: Some(Pose::from_xy_angle(1.0e20, 0.0, 0.0)),
+                ..ColliderPatch::default()
+            },
+        )
+        .expect_err("patches must validate prospective aggregate mass before mutation");
+    assert!(matches!(
+        patch_error,
+        WorldError::Validation(ValidationError::ColliderPatch {
+            field: "mass_properties",
+        })
+    ));
+    assert_eq!(
+        world.revision(),
+        patch_revision,
+        "rejected mass-property patches must not bump the world revision"
+    );
+    assert_eq!(
+        world
+            .collider(collider)
+            .expect("collider should resolve")
+            .local_pose(),
+        Pose::default(),
+        "rejected mass-property patches must not mutate collider slots"
+    );
+    assert_eq!(
+        world
+            .body(body)
+            .expect("body should resolve")
+            .mass_properties(),
+        finite_mass_after_second,
+        "rejected patches must preserve authoritative body mass facts"
+    );
+}
+
+#[test]
+fn zero_area_regular_polygons_are_rejected_before_world_state_mutates() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc::default())
+        .expect("body should be created");
+
+    let revision = world.revision();
+    let error = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::regular_polygon(6, 0.0),
+                density: 0.0,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect_err("zero-area regular polygons must be rejected even at zero density");
+    assert!(matches!(
+        error,
+        WorldError::Validation(ValidationError::ColliderDesc {
+            field: "shape.radius",
+        })
+    ));
+    assert_eq!(
+        world.revision(),
+        revision,
+        "rejected zero-area regular polygons must not bump revision"
+    );
+    assert_eq!(
+        world
+            .colliders_for_body(body)
+            .expect("body should still resolve")
+            .count(),
+        0,
+        "rejected zero-area regular polygons must not attach collider handles"
     );
 }
 

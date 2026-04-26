@@ -40,11 +40,22 @@ fn attach_shape(
     shape: SharedShape,
     material: Material,
 ) -> ColliderHandle {
+    attach_shape_with_density(world, body, shape, 1.0, material)
+}
+
+fn attach_shape_with_density(
+    world: &mut World,
+    body: BodyHandle,
+    shape: SharedShape,
+    density: f32,
+    material: Material,
+) -> ColliderHandle {
     world
         .create_collider(
             body,
             ColliderDesc {
                 shape,
+                density,
                 material,
                 ..ColliderDesc::default()
             },
@@ -229,6 +240,85 @@ fn friction_changes_tangential_sliding_speed() {
     assert!(
         low_friction_speed > high_friction_speed + 1.0,
         "low friction should retain more sliding speed; low={low_friction_speed}, high={high_friction_speed}"
+    );
+}
+
+#[test]
+fn collider_density_changes_interim_contact_velocity_response_through_inverse_mass() {
+    fn post_contact_velocity(left_density: f32, right_density: f32) -> (Vector, Vector, f32, f32) {
+        let mut world = no_gravity_world();
+        let left = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            -0.4,
+            0.0,
+            Vector::new(1.0, 0.0),
+        );
+        let right = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            0.4,
+            0.0,
+            Vector::new(-1.0, 0.0),
+        );
+        let material = Material {
+            friction: 0.0,
+            restitution: 0.0,
+        };
+        attach_shape_with_density(
+            &mut world,
+            left,
+            SharedShape::circle(0.5),
+            left_density,
+            material,
+        );
+        attach_shape_with_density(
+            &mut world,
+            right,
+            SharedShape::circle(0.5),
+            right_density,
+            material,
+        );
+
+        step_world(&mut world, 1);
+
+        let left_inverse_mass = world
+            .body(left)
+            .expect("left body should resolve")
+            .mass_properties()
+            .inverse_mass;
+        let right_inverse_mass = world
+            .body(right)
+            .expect("right body should resolve")
+            .mass_properties()
+            .inverse_mass;
+        (
+            body_velocity(&world, left),
+            body_velocity(&world, right),
+            left_inverse_mass,
+            right_inverse_mass,
+        )
+    }
+
+    let (equal_left, equal_right, equal_left_inverse, equal_right_inverse) =
+        post_contact_velocity(1.0, 1.0);
+    let (light_left, heavy_right, light_inverse, heavy_inverse) = post_contact_velocity(1.0, 4.0);
+
+    assert!(
+        (equal_left_inverse - equal_right_inverse).abs() < 1.0e-5,
+        "equal densities should produce equal inverse masses; left={equal_left_inverse}, right={equal_right_inverse}"
+    );
+    assert!(
+        light_inverse > heavy_inverse * 3.9,
+        "density-derived MassProperties should make the left body lighter; left inverse={light_inverse}, right inverse={heavy_inverse}"
+    );
+    assert!(
+        equal_left.x().abs() < 0.1 && equal_right.x().abs() < 0.1,
+        "equal-density inelastic contact should settle near zero velocity; left={equal_left:?}, right={equal_right:?}"
+    );
+    assert!(
+        light_left.x() < -0.3 && heavy_right.x() < -0.3,
+        "unequal density should move the interim response toward the heavier body's incoming velocity; left={light_left:?}, right={heavy_right:?}"
     );
 }
 

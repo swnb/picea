@@ -4,6 +4,15 @@ use picea::prelude::{
 };
 use picea::world::HandleError;
 
+const MASS_EPSILON: f32 = 1e-4;
+
+fn assert_near(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() <= MASS_EPSILON,
+        "expected {actual} to be within {MASS_EPSILON} of {expected}"
+    );
+}
+
 #[test]
 fn body_handles_invalidate_after_destroy_and_recreate() {
     let mut world = World::new(WorldDesc::default());
@@ -168,4 +177,153 @@ fn destroying_a_body_cascades_attached_colliders_and_joints() {
         world.try_joint(joint),
         Err(WorldError::Handle(HandleError::StaleJoint { .. }))
     ));
+}
+
+#[test]
+fn mass_properties_are_density_derived_and_body_type_controls_inverses() {
+    let mut world = World::new(WorldDesc::default());
+    let dynamic = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            ..BodyDesc::default()
+        })
+        .expect("dynamic body should be created");
+    let static_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("static body should be created");
+    let kinematic = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Kinematic,
+            ..BodyDesc::default()
+        })
+        .expect("kinematic body should be created");
+
+    for body in [dynamic, static_body, kinematic] {
+        world
+            .create_collider(
+                body,
+                ColliderDesc {
+                    shape: SharedShape::circle(1.0),
+                    density: 2.0,
+                    is_sensor: true,
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("collider should be created");
+    }
+
+    let dynamic_mass = world
+        .body(dynamic)
+        .expect("dynamic body should resolve")
+        .mass_properties();
+    assert_near(dynamic_mass.mass, 2.0 * std::f32::consts::PI);
+    assert_near(dynamic_mass.inverse_mass, 1.0 / dynamic_mass.mass);
+    assert_eq!(dynamic_mass.local_center_of_mass, (0.0, 0.0).into());
+    assert_near(dynamic_mass.inertia, std::f32::consts::PI);
+    assert_near(dynamic_mass.inverse_inertia, 1.0 / dynamic_mass.inertia);
+
+    for body in [static_body, kinematic] {
+        let mass = world
+            .body(body)
+            .expect("body should resolve")
+            .mass_properties();
+        assert_near(mass.mass, 2.0 * std::f32::consts::PI);
+        assert_eq!(mass.inverse_mass, 0.0);
+        assert_near(mass.inertia, std::f32::consts::PI);
+        assert_eq!(mass.inverse_inertia, 0.0);
+    }
+}
+
+#[test]
+fn mass_properties_recompute_after_collider_and_body_mutations() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc::default())
+        .expect("body should be created");
+
+    assert_eq!(
+        world
+            .body(body)
+            .expect("body should resolve")
+            .mass_properties()
+            .mass,
+        0.0
+    );
+
+    let left = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                local_pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+                density: 1.0,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("left collider should be created");
+    let right = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                local_pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+                density: 1.0,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("right collider should be created");
+
+    let balanced = world
+        .body(body)
+        .expect("body should resolve")
+        .mass_properties();
+    assert_near(balanced.mass, 2.0 * std::f32::consts::PI);
+    assert_eq!(balanced.local_center_of_mass, (0.0, 0.0).into());
+    assert_near(balanced.inertia, 3.0 * std::f32::consts::PI);
+
+    world
+        .apply_collider_patch(
+            right,
+            picea::prelude::ColliderPatch {
+                density: Some(0.0),
+                ..picea::prelude::ColliderPatch::default()
+            },
+        )
+        .expect("density patch should apply");
+    let after_density_patch = world
+        .body(body)
+        .expect("body should resolve")
+        .mass_properties();
+    assert_near(after_density_patch.mass, std::f32::consts::PI);
+    assert_eq!(after_density_patch.local_center_of_mass, (-1.0, 0.0).into());
+    assert_near(after_density_patch.inertia, 0.5 * std::f32::consts::PI);
+
+    world
+        .apply_body_patch(
+            body,
+            BodyPatch {
+                body_type: Some(BodyType::Static),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body type patch should apply");
+    let static_mass = world
+        .body(body)
+        .expect("body should resolve")
+        .mass_properties();
+    assert_near(static_mass.mass, std::f32::consts::PI);
+    assert_eq!(static_mass.inverse_mass, 0.0);
+
+    world
+        .destroy_collider(left)
+        .expect("collider removal should apply");
+    let after_removal = world
+        .body(body)
+        .expect("body should resolve")
+        .mass_properties();
+    assert_eq!(after_removal.mass, 0.0);
+    assert_eq!(after_removal.inertia, 0.0);
 }
