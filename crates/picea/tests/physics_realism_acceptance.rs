@@ -1247,6 +1247,339 @@ fn sleep_requires_a_stability_window_before_a_body_sleeps() {
 }
 
 #[test]
+fn jointed_island_sleeps_together_with_island_reason_facts() {
+    let mut world = no_gravity_world();
+    let left = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-0.5, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("left body should be created");
+    let right = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.5, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("right body should be created");
+    world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: left,
+            body_b: right,
+            rest_length: 1.0,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("resting distance joint should be created");
+
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    let mut reports = Vec::new();
+    for _ in 0..31 {
+        reports.push(pipeline.step(&mut world));
+    }
+    let sleep_events = reports
+        .iter()
+        .flat_map(|report| report.events.iter())
+        .filter_map(|event| match event {
+            WorldEvent::SleepChanged(event) => Some(event),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(sleep_events.len(), 2);
+    assert!(sleep_events.iter().all(|event| event.is_sleeping));
+    assert!(sleep_events
+        .iter()
+        .all(|event| event.reason == picea::events::SleepTransitionReason::StabilityWindow));
+    assert_eq!(sleep_events[0].island_id, sleep_events[1].island_id);
+
+    let snapshot = world.debug_snapshot(&DebugSnapshotOptions::default());
+    let left_debug = snapshot
+        .bodies
+        .iter()
+        .find(|body| body.handle == left)
+        .expect("left body should be in debug snapshot");
+    let right_debug = snapshot
+        .bodies
+        .iter()
+        .find(|body| body.handle == right)
+        .expect("right body should be in debug snapshot");
+    assert_eq!(left_debug.island_id, right_debug.island_id);
+    let island_id = left_debug
+        .island_id
+        .expect("dynamic bodies should have an island");
+    let island = snapshot
+        .islands
+        .iter()
+        .find(|island| island.id == island_id)
+        .expect("debug snapshot should expose the sleeping island");
+    assert!(island.sleeping);
+    assert_eq!(island.bodies, vec![left, right]);
+}
+
+#[test]
+fn transform_patch_wakes_the_touched_sleeping_island_only() {
+    let mut world = no_gravity_world();
+    let first = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-2.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("first body should be created");
+    let partner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("partner body should be created");
+    let unrelated = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(2.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("unrelated body should be created");
+    world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: first,
+            body_b: partner,
+            rest_length: 1.0,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("joint should connect the first island");
+
+    step_world(&mut world, 31);
+    assert!(world.try_body(first).expect("first exists").sleeping());
+    assert!(world.try_body(partner).expect("partner exists").sleeping());
+    assert!(world
+        .try_body(unrelated)
+        .expect("unrelated exists")
+        .sleeping());
+
+    world
+        .apply_body_patch(
+            first,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(-1.5, 0.0, 0.0)),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("pose patch should apply");
+
+    let report = step_world(&mut world, 1);
+    let wake_events = report
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            WorldEvent::SleepChanged(event) if !event.is_sleeping => Some(event),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(wake_events.len(), 2);
+    assert!(wake_events.iter().any(|event| event.body == first));
+    assert!(wake_events.iter().any(|event| event.body == partner));
+    assert!(wake_events
+        .iter()
+        .all(|event| event.reason == picea::events::SleepTransitionReason::TransformEdit));
+    assert_eq!(wake_events[0].island_id, wake_events[1].island_id);
+    assert!(!world.try_body(first).expect("first exists").sleeping());
+    assert!(!world.try_body(partner).expect("partner exists").sleeping());
+    assert!(
+        world
+            .try_body(unrelated)
+            .expect("unrelated exists")
+            .sleeping(),
+        "an unrelated sleeping island should stay asleep"
+    );
+}
+
+#[test]
+fn static_contacts_do_not_bridge_dynamic_sleep_islands() {
+    let mut world = no_gravity_world();
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let left = create_body(&mut world, BodyType::Dynamic, -2.0, 0.0, Vector::default());
+    let right = create_body(&mut world, BodyType::Dynamic, 2.0, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        floor,
+        SharedShape::rect(8.0, 1.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(0.5, 0.5),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(0.5, 0.5),
+        Material::default(),
+    );
+
+    step_world(&mut world, 1);
+    let snapshot = world.debug_snapshot(&DebugSnapshotOptions::default());
+    let left_island = snapshot
+        .bodies
+        .iter()
+        .find(|body| body.handle == left)
+        .and_then(|body| body.island_id)
+        .expect("left dynamic body should have an island");
+    let right_island = snapshot
+        .bodies
+        .iter()
+        .find(|body| body.handle == right)
+        .and_then(|body| body.island_id)
+        .expect("right dynamic body should have an island");
+
+    assert_ne!(
+        left_island, right_island,
+        "one static body must not bridge otherwise unrelated dynamic islands"
+    );
+}
+
+#[test]
+fn sleeping_body_wakes_on_contact_solver_impact() {
+    let mut world = no_gravity_world();
+    let target = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("target should be created");
+    let partner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, 2.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("partner should be created");
+    world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: target,
+            body_b: partner,
+            rest_length: 2.0,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("joint should connect target and partner");
+    attach_shape(
+        &mut world,
+        target,
+        SharedShape::circle(0.5),
+        Material::default(),
+    );
+
+    step_world(&mut world, 31);
+    assert!(world.try_body(target).expect("target exists").sleeping());
+    assert!(world.try_body(partner).expect("partner exists").sleeping());
+
+    let bullet = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            linear_velocity: Vector::new(10.0, 0.0),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("bullet should be created");
+    attach_shape(
+        &mut world,
+        bullet,
+        SharedShape::circle(0.5),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let first_contact_index = report
+        .events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                WorldEvent::ContactStarted(_) | WorldEvent::ContactPersisted(_)
+            )
+        })
+        .expect("impact should emit contact facts");
+    let first_wake_index = report
+        .events
+        .iter()
+        .position(|event| matches!(event, WorldEvent::SleepChanged(event) if !event.is_sleeping))
+        .expect("impact should wake the sleeping island");
+    assert!(
+        first_contact_index < first_wake_index,
+        "contact facts should precede the resulting island wake events"
+    );
+    let wake_events = report
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            WorldEvent::SleepChanged(event) if !event.is_sleeping => Some(event),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(wake_events.len(), 2);
+    assert!(wake_events.iter().any(|event| event.body == target));
+    assert!(wake_events.iter().any(|event| event.body == partner));
+    assert!(wake_events
+        .iter()
+        .all(|event| event.reason == picea::events::SleepTransitionReason::Impact));
+    assert_eq!(wake_events[0].island_id, wake_events[1].island_id);
+}
+
+#[test]
+fn sleeping_body_resting_on_static_contact_stays_asleep() {
+    let mut world = no_gravity_world();
+    let target = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            can_sleep: true,
+            sleeping: true,
+            ..BodyDesc::default()
+        })
+        .expect("sleeping target should be created");
+    let support = create_body(&mut world, BodyType::Static, 0.75, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        target,
+        SharedShape::circle(0.5),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        support,
+        SharedShape::circle(0.5),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+
+    assert!(
+        world.try_body(target).expect("target exists").sleeping(),
+        "static support contact should not be classified as an impact wake"
+    );
+    assert!(
+        !report.events.iter().any(|event| matches!(
+            event,
+            WorldEvent::SleepChanged(event) if event.body == target && !event.is_sleeping
+        )),
+        "resting static contact must not emit a wake transition"
+    );
+}
+
+#[test]
 #[ignore = "known-red physics realism baseline: continuous collision detection is not implemented"]
 fn fast_small_body_does_not_tunnel_through_thin_wall() {
     // Physical behavior: CCD should sweep fast bodies between poses and stop at the first time

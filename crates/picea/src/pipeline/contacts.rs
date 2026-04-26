@@ -3,7 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     body::Pose,
     collider::{CollisionFilter, Material, ShapeAabb, SharedShape},
-    events::{ContactEvent, ContactReductionReason, WarmStartCacheReason, WorldEvent},
+    events::{
+        ContactEvent, ContactReductionReason, SleepTransitionReason, WarmStartCacheReason,
+        WorldEvent,
+    },
     handles::{BodyHandle, ColliderHandle},
     math::{point::Point, vector::Vector, FloatNum},
     pipeline::{
@@ -98,7 +101,7 @@ struct ContactSolverRow {
 pub(crate) fn run_contact_phases(
     world: &mut World,
     config: &StepConfig,
-    awake_bodies: &mut BTreeSet<BodyHandle>,
+    wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
 ) -> (
     Vec<WorldEvent>,
     usize,
@@ -110,7 +113,7 @@ pub(crate) fn run_contact_phases(
     let broadphase_stats = contacts.broadphase_stats;
     let previous_contacts = world.take_active_contacts();
     world.prepare_contact_warm_start(&mut contacts.observations, &previous_contacts);
-    world.resolve_contacts(&mut contacts.observations, config, awake_bodies);
+    world.resolve_contacts(&mut contacts.observations, config, wake_reasons);
     let (events, contact_count, manifold_count, warm_start_stats) =
         world.refresh_contact_events(contacts.observations, previous_contacts);
     (
@@ -258,7 +261,7 @@ impl World {
         &mut self,
         contacts: &mut [ContactObservation],
         config: &StepConfig,
-        awake_bodies: &mut BTreeSet<BodyHandle>,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     ) {
         let mut solver_bodies = self.solver_body_cache(contacts);
         let mut rows = self.contact_solver_rows(contacts, &solver_bodies, config);
@@ -294,11 +297,12 @@ impl World {
             contact.restitution_applied = row.restitution_applied;
         }
 
-        self.write_solver_velocities(&solver_bodies, awake_bodies);
+        self.record_contact_impulse_wakes(contacts, wake_reasons);
+        self.write_solver_velocities(&solver_bodies, wake_reasons);
         self.apply_residual_contact_position_correction(
             contacts,
             config.position_iterations,
-            awake_bodies,
+            wake_reasons,
         );
     }
 
@@ -534,7 +538,7 @@ impl World {
     fn write_solver_velocities(
         &mut self,
         bodies: &BTreeMap<BodyHandle, SolverBody>,
-        awake_bodies: &mut BTreeSet<BodyHandle>,
+        wake_reasons: &BTreeMap<BodyHandle, SleepTransitionReason>,
     ) {
         for (handle, body) in bodies {
             if !body.dynamic {
@@ -543,19 +547,59 @@ impl World {
             let Ok(record) = self.body_record_mut(*handle) else {
                 continue;
             };
+            if record.sleeping && !wake_reasons.contains_key(handle) {
+                continue;
+            }
             record.linear_velocity = body.linear_velocity;
             record.angular_velocity = body.angular_velocity;
-            record.sleeping = false;
-            record.sleep_idle_time = 0.0;
-            awake_bodies.insert(*handle);
         }
+    }
+
+    fn record_contact_impulse_wakes(
+        &self,
+        contacts: &[ContactObservation],
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
+    ) {
+        for contact in contacts
+            .iter()
+            .filter(|contact| !contact.is_sensor && contact.normal_impulse > FloatNum::EPSILON)
+        {
+            self.record_contact_wake_if_sleeping(contact.body_a, contact.body_b, wake_reasons);
+            self.record_contact_wake_if_sleeping(contact.body_b, contact.body_a, wake_reasons);
+        }
+    }
+
+    fn record_contact_wake_if_sleeping(
+        &self,
+        body: BodyHandle,
+        other: BodyHandle,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
+    ) {
+        if self
+            .body_record(body)
+            .map(|record| record.sleeping && record.body_type.is_dynamic())
+            .unwrap_or(false)
+            && self.contact_counterpart_can_wake(other)
+        {
+            crate::pipeline::sleep::record_wake_reason(
+                wake_reasons,
+                body,
+                SleepTransitionReason::Impact,
+            );
+        }
+    }
+
+    fn contact_counterpart_can_wake(&self, other: BodyHandle) -> bool {
+        self.body_record(other)
+            .map(|record| !record.body_type.is_static() && !record.sleeping)
+            .unwrap_or(false)
     }
 
     fn apply_residual_contact_position_correction(
         &mut self,
         contacts: &[ContactObservation],
         iterations: u16,
-        awake_bodies: &mut BTreeSet<BodyHandle>,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     ) {
         if iterations == 0 {
             return;
@@ -583,8 +627,10 @@ impl World {
                 let correction = depth * POSITION_CORRECTION_PERCENT / FloatNum::from(iterations);
                 let correction_a = normal * (correction * inv_mass_a / inv_mass_sum);
                 let correction_b = -normal * (correction * inv_mass_b / inv_mass_sum);
-                self.apply_position_translation(contact.body_a, correction_a, awake_bodies);
-                self.apply_position_translation(contact.body_b, correction_b, awake_bodies);
+                let wake_a = self.contact_counterpart_can_wake(contact.body_b);
+                let wake_b = self.contact_counterpart_can_wake(contact.body_a);
+                self.apply_position_translation(contact.body_a, correction_a, wake_a, wake_reasons);
+                self.apply_position_translation(contact.body_b, correction_b, wake_b, wake_reasons);
             }
         }
     }
@@ -593,7 +639,8 @@ impl World {
         &mut self,
         body: BodyHandle,
         translation: Vector,
-        awake_bodies: &mut BTreeSet<BodyHandle>,
+        wake_sleeping_body: bool,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     ) {
         if translation.length() <= FloatNum::EPSILON {
             return;
@@ -604,10 +651,20 @@ impl World {
         if !record.body_type.is_dynamic() {
             return;
         }
+        let was_sleeping = record.sleeping;
+        if was_sleeping && !wake_sleeping_body {
+            return;
+        }
         crate::solver::body_state::translate_pose(&mut record.pose, translation, 0.0);
         record.sleeping = false;
         record.sleep_idle_time = 0.0;
-        awake_bodies.insert(body);
+        if was_sleeping {
+            crate::pipeline::sleep::record_wake_reason(
+                wake_reasons,
+                body,
+                SleepTransitionReason::ContactImpulse,
+            );
+        }
     }
 }
 

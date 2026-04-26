@@ -308,6 +308,8 @@ mod tests {
         let sleep_changed = WorldEvent::SleepChanged(SleepEvent {
             body: BodyHandle::from_raw_parts(2, 0),
             is_sleeping: true,
+            island_id: 0,
+            reason: crate::events::SleepTransitionReason::StabilityWindow,
         });
 
         let mut pipeline = SimulationPipeline::new(StepConfig {

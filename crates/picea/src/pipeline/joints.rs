@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use crate::{
-    events::NumericsWarningEvent,
+    events::{NumericsWarningEvent, SleepTransitionReason},
     handles::BodyHandle,
     joint::JointDesc,
     math::{vector::Vector, FloatNum},
@@ -13,17 +13,17 @@ use super::integrate::is_finite_vector;
 pub(crate) fn solve_joint_phase(
     world: &mut World,
     dt: FloatNum,
-    awake_bodies: &mut BTreeSet<BodyHandle>,
+    wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     numeric_warnings: &mut Vec<NumericsWarningEvent>,
 ) {
-    world.apply_joint_constraints(dt, awake_bodies, numeric_warnings);
+    world.apply_joint_constraints(dt, wake_reasons, numeric_warnings);
 }
 
 impl World {
     pub(crate) fn apply_joint_constraints(
         &mut self,
         dt: FloatNum,
-        awake_bodies: &mut BTreeSet<BodyHandle>,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
         numeric_warnings: &mut Vec<NumericsWarningEvent>,
     ) {
         let joints = self
@@ -62,7 +62,7 @@ impl World {
                         desc.body_a,
                         desc.body_b,
                         correction,
-                        awake_bodies,
+                        wake_reasons,
                     );
                 }
                 JointDesc::WorldAnchor(desc) => {
@@ -79,7 +79,7 @@ impl World {
                         });
                         continue;
                     }
-                    self.apply_single_body_correction(desc.body, correction, awake_bodies);
+                    self.apply_single_body_correction(desc.body, correction, wake_reasons);
                 }
             }
         }

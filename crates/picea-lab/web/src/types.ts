@@ -45,6 +45,7 @@ export type DebugBody = {
   linear_velocity: Vec2;
   angular_velocity: number;
   sleeping: boolean;
+  island_id?: number | null;
   user_data: number;
 };
 
@@ -129,6 +130,24 @@ export type DebugManifold = {
   active: boolean;
 };
 
+export type SleepTransitionReason =
+  | "unknown"
+  | "stability_window"
+  | "impact"
+  | "contact_impulse"
+  | "joint_correction"
+  | "transform_edit"
+  | "velocity_edit"
+  | "user_patch"
+  | "sleep_disabled";
+
+export type DebugIsland = {
+  id: number;
+  bodies: number[];
+  sleeping: boolean;
+  reason?: SleepTransitionReason;
+};
+
 export type DebugSnapshot = {
   meta: {
     revision: number | null;
@@ -141,6 +160,7 @@ export type DebugSnapshot = {
   joints: DebugJoint[];
   contacts: DebugContact[];
   manifolds: DebugManifold[];
+  islands?: DebugIsland[];
   primitives: DebugPrimitive[];
   stats: {
     step_index: number;

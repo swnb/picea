@@ -5,12 +5,17 @@
 //! state; draw primitives are optional hints for viewers and must not be
 //! treated as authoritative physics state.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
     body::{BodyType, MassProperties, Pose},
     collider::{CollisionFilter, Material, SharedShape},
-    events::{ContactEvent, ContactReductionReason, WarmStartCacheReason, WorldEvent},
+    events::{
+        ContactEvent, ContactReductionReason, SleepTransitionReason, WarmStartCacheReason,
+        WorldEvent,
+    },
     handles::{
         BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
         WorldRevision,
@@ -225,6 +230,9 @@ pub struct DebugBody {
     pub angular_velocity: FloatNum,
     /// Whether the body is currently sleeping.
     pub sleeping: bool,
+    /// Per-step deterministic island id, when the body participates in an island.
+    #[serde(default)]
+    pub island_id: Option<u32>,
     /// Consumer-owned opaque data.
     pub user_data: u64,
 }
@@ -248,9 +256,24 @@ impl DebugBody {
             linear_velocity: sanitize_vector(self.linear_velocity),
             angular_velocity: sanitize_scalar(self.angular_velocity),
             sleeping: self.sleeping,
+            island_id: self.island_id,
             user_data: self.user_data,
         }
     }
+}
+
+/// Read-only island facts for sleep/wake diagnostics.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DebugIsland {
+    /// Per-step deterministic island id.
+    pub id: u32,
+    /// Bodies that belong to this island in deterministic handle order.
+    pub bodies: Vec<BodyHandle>,
+    /// Whether every dynamic member of this island is currently sleeping.
+    pub sleeping: bool,
+    /// Last sleep or wake reason observed for this island in the step event stream.
+    #[serde(default)]
+    pub reason: SleepTransitionReason,
 }
 
 /// Read-only collider facts for external consumers.
@@ -656,6 +679,9 @@ pub struct DebugSnapshot {
     pub contacts: Vec<DebugContact>,
     /// Manifold facts.
     pub manifolds: Vec<DebugManifold>,
+    /// Island facts used to explain sleep/wake behavior.
+    #[serde(default)]
+    pub islands: Vec<DebugIsland>,
     /// Viewer-oriented draw hints.
     ///
     /// The authoritative simulation state lives in the structured facts above;
@@ -697,18 +723,25 @@ impl DebugSnapshot {
         let bodies = world
             .bodies()
             .filter_map(|handle| world.body(handle).ok())
-            .map(|body| DebugBody {
-                handle: body.handle(),
-                body_type: body.body_type(),
-                transform: DebugTransform {
-                    translation: body.pose().translation(),
-                    rotation: body.pose().angle(),
-                },
-                mass_properties: body.mass_properties(),
-                linear_velocity: body.linear_velocity(),
-                angular_velocity: body.angular_velocity(),
-                sleeping: body.sleeping(),
-                user_data: body.user_data(),
+            .map(|body| {
+                let island_id = world
+                    .body_record(body.handle())
+                    .ok()
+                    .and_then(|record| record.island_id);
+                DebugBody {
+                    handle: body.handle(),
+                    body_type: body.body_type(),
+                    transform: DebugTransform {
+                        translation: body.pose().translation(),
+                        rotation: body.pose().angle(),
+                    },
+                    mass_properties: body.mass_properties(),
+                    linear_velocity: body.linear_velocity(),
+                    angular_velocity: body.angular_velocity(),
+                    sleeping: body.sleeping(),
+                    island_id,
+                    user_data: body.user_data(),
+                }
             })
             .collect::<Vec<_>>();
 
@@ -753,6 +786,7 @@ impl DebugSnapshot {
             .map(|report| report.events.as_slice())
             .unwrap_or_else(|| world.last_step_events());
         let (contacts, manifolds) = debug_contacts_and_manifolds(step_events);
+        let islands = debug_islands(&bodies, step_events);
         let stats = report.map(|report| report.stats).unwrap_or(last_step);
         let contacts = if options.include_contacts {
             contacts
@@ -802,6 +836,7 @@ impl DebugSnapshot {
             joints,
             contacts,
             manifolds,
+            islands,
             primitives,
         };
 
@@ -830,6 +865,7 @@ impl DebugSnapshot {
             joints: self.joints.iter().map(DebugJoint::sanitized).collect(),
             contacts: self.contacts.iter().map(DebugContact::sanitized).collect(),
             manifolds: self.manifolds.iter().map(sanitize_manifold).collect(),
+            islands: self.islands.clone(),
             primitives: self
                 .primitives
                 .iter()
@@ -864,10 +900,41 @@ impl Default for DebugSnapshot {
             joints: Vec::new(),
             contacts: Vec::new(),
             manifolds: Vec::new(),
+            islands: Vec::new(),
             primitives: Vec::new(),
             stats: DebugStats::default(),
         }
     }
+}
+
+fn debug_islands(bodies: &[DebugBody], events: &[WorldEvent]) -> Vec<DebugIsland> {
+    let mut islands: BTreeMap<u32, DebugIsland> = BTreeMap::new();
+    for body in bodies {
+        let Some(id) = body.island_id else {
+            continue;
+        };
+        let island = islands.entry(id).or_insert_with(|| DebugIsland {
+            id,
+            bodies: Vec::new(),
+            sleeping: true,
+            reason: SleepTransitionReason::Unknown,
+        });
+        island.bodies.push(body.handle);
+        if body.body_type.is_dynamic() {
+            island.sleeping &= body.sleeping;
+        }
+    }
+    for event in events {
+        if let WorldEvent::SleepChanged(event) = event {
+            if let Some(island) = islands.get_mut(&event.island_id) {
+                island.reason = event.reason;
+                if !event.is_sleeping {
+                    island.sleeping = false;
+                }
+            }
+        }
+    }
+    islands.into_values().collect()
 }
 
 fn extend_aabb(lhs: DebugAabb, rhs: DebugAabb) -> DebugAabb {

@@ -2,7 +2,7 @@ use crate::{
     body::{BodyDesc, BodyPatch, BodyRecord, BodyView, MassProperties},
     collider::{ColliderDesc, ColliderPatch, ColliderRecord, ColliderView, SharedShape},
     debug::{DebugSnapshot, DebugSnapshotOptions},
-    events::WorldEvent,
+    events::{SleepTransitionReason, WorldEvent},
     handles::{BodyHandle, ColliderHandle, JointHandle, WorldRevision},
     joint::{JointDesc, JointKind, JointPatch, JointRecord, JointView},
     math::{point::Point, vector::Vector, FloatNum},
@@ -30,6 +30,7 @@ impl World {
             last_step_dt: 0.0,
             simulated_time: 0.0,
             pending_events: Vec::new(),
+            pending_wake_reasons: Default::default(),
             last_step_events: Vec::new(),
             broadphase: Default::default(),
             active_contacts: Default::default(),
@@ -181,12 +182,26 @@ impl World {
         patch: BodyPatch,
     ) -> Result<(), WorldError> {
         patch.validate().map_err(WorldError::Validation)?;
+        let wake_reason = body_patch_wake_reason(&patch);
+        let was_sleeping = self.body_record(handle)?.sleeping;
         let mass_properties = if let Some(body_type) = patch.body_type {
             Some(self.compute_body_mass_properties(handle, body_type, None, None)?)
         } else {
             None
         };
         self.body_record_mut(handle)?.apply_patch(patch);
+        if was_sleeping {
+            if let Some(reason) = wake_reason {
+                let record = self.body_record_mut(handle)?;
+                record.sleeping = false;
+                record.sleep_idle_time = 0.0;
+                crate::pipeline::sleep::record_wake_reason(
+                    &mut self.pending_wake_reasons,
+                    handle,
+                    reason,
+                );
+            }
+        }
         if let Some(mass_properties) = mass_properties {
             self.body_record_mut(handle)?
                 .set_mass_properties(mass_properties);
@@ -436,6 +451,26 @@ impl World {
                 WorldError::Validation(collider_mass_properties_error(aggregate_field_scope))
             })?;
         Ok(mass_properties)
+    }
+}
+
+fn body_patch_wake_reason(patch: &BodyPatch) -> Option<SleepTransitionReason> {
+    if patch.pose.is_some() {
+        Some(SleepTransitionReason::TransformEdit)
+    } else if patch.linear_velocity.is_some() || patch.angular_velocity.is_some() {
+        Some(SleepTransitionReason::VelocityEdit)
+    } else if patch.wake
+        || patch.body_type.is_some()
+        || patch.linear_damping.is_some()
+        || patch.angular_damping.is_some()
+        || patch.gravity_scale.is_some()
+        || patch.can_sleep == Some(false)
+        || patch.sleeping == Some(false)
+        || patch.user_data.is_some()
+    {
+        Some(SleepTransitionReason::UserPatch)
+    } else {
+        None
     }
 }
 

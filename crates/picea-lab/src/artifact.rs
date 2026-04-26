@@ -127,6 +127,8 @@ pub struct DebugRenderFrame {
     pub colliders: Vec<DebugCollider>,
     pub contacts: Vec<DebugContact>,
     pub manifolds: Vec<DebugManifold>,
+    #[serde(default)]
+    pub islands: Vec<picea::debug::DebugIsland>,
     pub unmeasured: Vec<String>,
 }
 
@@ -261,6 +263,7 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     colliders: frame.snapshot.colliders.clone(),
                     contacts: frame.snapshot.contacts.clone(),
                     manifolds: frame.snapshot.manifolds.clone(),
+                    islands: frame.snapshot.islands.clone(),
                     // M5 exposes contact solver impulses; force/torque accumulation is still
                     // outside the lab artifact contract.
                     unmeasured: ["forces", "torques"]

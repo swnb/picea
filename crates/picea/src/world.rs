@@ -11,7 +11,7 @@ pub mod store;
 use crate::{
     body::BodyRecord,
     collider::ColliderRecord,
-    events::WorldEvent,
+    events::{SleepTransitionReason, WorldEvent},
     handles::{BodyHandle, ColliderHandle, JointHandle, WorldRevision},
     joint::JointRecord,
     math::{vector::Vector, FloatNum},
@@ -57,6 +57,7 @@ pub struct World {
     #[allow(dead_code)]
     simulated_time: f64,
     pending_events: Vec<WorldEvent>,
+    pending_wake_reasons: BTreeMap<BodyHandle, SleepTransitionReason>,
     #[allow(dead_code)]
     last_step_events: Vec<WorldEvent>,
     broadphase: Broadphase,

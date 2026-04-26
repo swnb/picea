@@ -76,6 +76,31 @@ impl WarmStartCacheReason {
     }
 }
 
+/// Stable reason attached to sleep/wake transitions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SleepTransitionReason {
+    /// Older serialized payloads did not include a reason.
+    #[default]
+    Unknown,
+    /// The full island stayed below motion thresholds for the configured stability window.
+    StabilityWindow,
+    /// A non-sensor contact solver row produced a normal impulse against a sleeping body.
+    Impact,
+    /// Residual contact position correction moved a sleeping body.
+    ContactImpulse,
+    /// A joint constraint correction moved a sleeping body.
+    JointCorrection,
+    /// User code edited a sleeping body's transform.
+    TransformEdit,
+    /// User code edited a sleeping body's velocity.
+    VelocityEdit,
+    /// User code explicitly woke or otherwise patched a sleeping body.
+    UserPatch,
+    /// Sleep was disabled at the world or step level.
+    SleepDisabled,
+}
+
 /// Contact lifecycle information exposed by the stable event stream.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ContactEvent {
@@ -137,6 +162,12 @@ pub struct SleepEvent {
     pub body: BodyHandle,
     /// The body's sleep state after the step completed.
     pub is_sleeping: bool,
+    /// Deterministic island id assigned during this step's sleep phase.
+    #[serde(default)]
+    pub island_id: u32,
+    /// Why this body changed sleep state.
+    #[serde(default)]
+    pub reason: SleepTransitionReason,
 }
 
 /// Explicit notice that the pipeline detected and contained non-finite math.
@@ -176,7 +207,7 @@ mod tests {
     use crate::{
         events::{
             ContactEvent, ContactReductionReason, NumericsWarningEvent, SleepEvent,
-            WarmStartCacheReason, WorldEvent,
+            SleepTransitionReason, WarmStartCacheReason, WorldEvent,
         },
         handles::{
             BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
@@ -211,6 +242,8 @@ mod tests {
         let sleep = SleepEvent {
             body: BodyHandle::from_raw_parts(9, 0),
             is_sleeping: true,
+            island_id: 1,
+            reason: SleepTransitionReason::StabilityWindow,
         };
         let numerics = NumericsWarningEvent {
             phase: "integrate".into(),

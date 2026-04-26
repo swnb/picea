@@ -327,6 +327,8 @@ fn stack_artifacts_capture_solver_impulse_facts() {
         "tangent_impulse_clamped",
         "restitution_velocity_threshold",
         "restitution_applied",
+        "islands",
+        "reason",
     ] {
         assert!(
             debug_render_json.contains(field),
@@ -361,6 +363,29 @@ fn stack_artifacts_capture_solver_impulse_facts() {
         "stack artifacts should expose body sleep state for M5/M6 inspection"
     );
     assert!(
+        render.frames.iter().any(|frame| !frame.islands.is_empty()),
+        "M6 stack artifacts should label sleep islands for inspection"
+    );
+    let island_frame = render
+        .frames
+        .iter()
+        .find(|frame| !frame.islands.is_empty())
+        .expect("at least one frame should expose islands");
+    for island in &island_frame.islands {
+        for body in &island.bodies {
+            let body_fact = island_frame
+                .bodies
+                .iter()
+                .find(|candidate| candidate.handle == *body)
+                .expect("island member should have a body fact");
+            assert_eq!(
+                body_fact.island_id,
+                Some(island.id),
+                "body island_id should match its island label"
+            );
+        }
+    }
+    assert!(
         render.frames.iter().all(|frame| frame
             .unmeasured
             .iter()
@@ -392,6 +417,7 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
         colliders: Vec::new(),
         contacts: Vec::new(),
         manifolds: Vec::new(),
+        islands: Vec::new(),
         unmeasured: Vec::new(),
     };
     let mut value = serde_json::to_value(frame).expect("debug render frame should serialize");
@@ -401,6 +427,7 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     object.remove("warm_start_hit_count");
     object.remove("warm_start_miss_count");
     object.remove("warm_start_drop_count");
+    object.remove("islands");
 
     let decoded: DebugRenderFrame =
         serde_json::from_value(value).expect("older debug render frame should deserialize");
@@ -408,4 +435,5 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     assert_eq!(decoded.warm_start_hit_count, 0);
     assert_eq!(decoded.warm_start_miss_count, 0);
     assert_eq!(decoded.warm_start_drop_count, 0);
+    assert!(decoded.islands.is_empty());
 }

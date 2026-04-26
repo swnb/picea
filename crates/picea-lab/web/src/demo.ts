@@ -181,6 +181,7 @@ function baseSnapshot(frameIndex: number, simulatedTime: number, bodies: DebugSn
     joints: [],
     contacts: [],
     manifolds: [],
+    islands: [],
     primitives: [],
     stats: {
       step_index: frameIndex,

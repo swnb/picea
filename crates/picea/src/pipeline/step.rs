@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::{
     handles::BodyHandle,
@@ -7,6 +7,7 @@ use crate::{
 };
 
 pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> StepOutcome {
+    let mut wake_reasons = world.take_pending_wake_reasons();
     let previous_sleep_states = world
         .bodies()
         .map(|handle| {
@@ -14,31 +15,31 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
                 handle,
                 world
                     .body_record(handle)
-                    .map(|record| record.sleeping)
+                    .map(|record| record.sleeping || wake_reasons.contains_key(&handle))
                     .unwrap_or(false),
             )
         })
         .collect::<BTreeMap<BodyHandle, bool>>();
     let mut events = world.take_pending_events();
-    let mut awake_bodies = BTreeSet::new();
     let mut numeric_warnings = Vec::new();
 
     crate::pipeline::integrate::run_integration_phase(world, config, &mut numeric_warnings);
     crate::pipeline::joints::solve_joint_phase(
         world,
         config.dt,
-        &mut awake_bodies,
+        &mut wake_reasons,
         &mut numeric_warnings,
     );
     let (contact_events, contact_count, manifold_count, broadphase_stats, warm_start_stats) =
-        crate::pipeline::contacts::run_contact_phases(world, config, &mut awake_bodies);
+        crate::pipeline::contacts::run_contact_phases(world, config, &mut wake_reasons);
     events.extend(contact_events);
     let (sleep_events, sleep_transition_count, active_body_count) =
         crate::pipeline::sleep::refresh_sleep_phase(
             world,
             config,
             &previous_sleep_states,
-            &awake_bodies,
+            &wake_reasons,
+            &events,
         );
     events.extend(sleep_events);
     events.extend(

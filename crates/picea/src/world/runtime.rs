@@ -1,5 +1,8 @@
+use std::collections::BTreeMap;
+
 use crate::{
-    events::WorldEvent,
+    events::{SleepTransitionReason, WorldEvent},
+    handles::BodyHandle,
     math::FloatNum,
     pipeline::{
         broadphase::{BroadphaseOutput, ColliderProxy},
@@ -27,6 +30,12 @@ impl World {
 
     pub(crate) fn take_pending_events(&mut self) -> Vec<WorldEvent> {
         std::mem::take(&mut self.pending_events)
+    }
+
+    pub(crate) fn take_pending_wake_reasons(
+        &mut self,
+    ) -> BTreeMap<BodyHandle, SleepTransitionReason> {
+        std::mem::take(&mut self.pending_wake_reasons)
     }
 
     pub(crate) fn update_broadphase(&mut self, proxies: &[ColliderProxy]) -> BroadphaseOutput {

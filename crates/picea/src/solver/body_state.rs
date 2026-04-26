@@ -1,7 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use crate::{
     body::Pose,
+    events::SleepTransitionReason,
     handles::BodyHandle,
     math::{vector::Vector, FloatNum},
     world::World,
@@ -13,7 +14,7 @@ impl World {
         body_a: BodyHandle,
         body_b: BodyHandle,
         correction_toward_a: Vector,
-        awake_bodies: &mut BTreeSet<BodyHandle>,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     ) {
         let body_a_dynamic = self
             .body_record(body_a)
@@ -28,14 +29,14 @@ impl World {
 
         match (body_a_dynamic, body_b_dynamic) {
             (true, true) => {
-                self.apply_single_body_correction(body_a, correction_toward_a, awake_bodies);
-                self.apply_single_body_correction(body_b, -correction_toward_a, awake_bodies);
+                self.apply_single_body_correction(body_a, correction_toward_a, wake_reasons);
+                self.apply_single_body_correction(body_b, -correction_toward_a, wake_reasons);
             }
             (true, false) => {
-                self.apply_single_body_correction(body_a, correction_toward_a * 2.0, awake_bodies);
+                self.apply_single_body_correction(body_a, correction_toward_a * 2.0, wake_reasons);
             }
             (false, true) => {
-                self.apply_single_body_correction(body_b, -correction_toward_a * 2.0, awake_bodies);
+                self.apply_single_body_correction(body_b, -correction_toward_a * 2.0, wake_reasons);
             }
             (false, false) => {}
         }
@@ -45,7 +46,7 @@ impl World {
         &mut self,
         body: BodyHandle,
         translation: Vector,
-        awake_bodies: &mut BTreeSet<BodyHandle>,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     ) {
         if translation.length() <= f32::EPSILON {
             return;
@@ -56,12 +57,19 @@ impl World {
         if !record.body_type.is_dynamic() {
             return;
         }
+        let was_sleeping = record.sleeping;
         translate_pose(&mut record.pose, translation, 0.0);
         record.linear_velocity = Vector::default();
         record.angular_velocity = 0.0;
         record.sleeping = false;
         record.sleep_idle_time = 0.0;
-        awake_bodies.insert(body);
+        if was_sleeping {
+            crate::pipeline::sleep::record_wake_reason(
+                wake_reasons,
+                body,
+                SleepTransitionReason::JointCorrection,
+            );
+        }
     }
 }
 

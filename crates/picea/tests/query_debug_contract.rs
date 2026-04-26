@@ -2,10 +2,11 @@ use picea::debug::DebugStats;
 use picea::math::{point::Point, vector::Vector};
 use picea::prelude::{
     BodyDesc, BodyHandle, BodyType, ColliderDesc, ColliderHandle, CollisionFilter, ContactEvent,
-    ContactFeatureId, ContactId, ContactReductionReason, DebugContact, DebugManifold,
-    DebugManifoldPoint, DebugSnapshot, DebugSnapshotOptions, ManifoldId, Material, Pose,
-    QueryFilter, QueryPipeline, SharedShape, SimulationPipeline, StepConfig, StepReport, StepStats,
-    WarmStartCacheReason, World, WorldDesc, WorldEvent,
+    ContactFeatureId, ContactId, ContactReductionReason, DebugBody, DebugContact, DebugIsland,
+    DebugManifold, DebugManifoldPoint, DebugSnapshot, DebugSnapshotOptions, ManifoldId, Material,
+    Pose, QueryFilter, QueryPipeline, SharedShape, SimulationPipeline, SleepEvent,
+    SleepTransitionReason, StepConfig, StepReport, StepStats, WarmStartCacheReason, World,
+    WorldDesc, WorldEvent,
 };
 
 fn step_once(world: &mut World) -> StepReport {
@@ -21,6 +22,7 @@ fn debug_snapshot_defaults_to_empty_stable_fact_layers() {
     assert!(snapshot.joints.is_empty());
     assert!(snapshot.contacts.is_empty());
     assert!(snapshot.manifolds.is_empty());
+    assert!(snapshot.islands.is_empty());
     assert!(snapshot.primitives.is_empty());
 }
 
@@ -432,6 +434,55 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(decoded_debug_manifold.warm_start_hit_count, 0);
     assert_eq!(decoded_debug_manifold.warm_start_miss_count, 0);
     assert_eq!(decoded_debug_manifold.warm_start_drop_count, 0);
+
+    let mut sleep_value = serde_json::to_value(SleepEvent {
+        body: BodyHandle::default(),
+        is_sleeping: false,
+        island_id: 7,
+        reason: SleepTransitionReason::Impact,
+    })
+    .expect("sleep event should serialize");
+    remove_json_fields(&mut sleep_value, &["island_id", "reason"]);
+    let decoded_sleep: SleepEvent =
+        serde_json::from_value(sleep_value).expect("older sleep event should deserialize");
+    assert_eq!(decoded_sleep.island_id, 0);
+    assert_eq!(decoded_sleep.reason, SleepTransitionReason::Unknown);
+
+    let mut debug_body_value = serde_json::to_value(DebugBody {
+        handle: BodyHandle::default(),
+        body_type: BodyType::Dynamic,
+        transform: Default::default(),
+        mass_properties: Default::default(),
+        linear_velocity: Vector::default(),
+        angular_velocity: 0.0,
+        sleeping: false,
+        island_id: Some(1),
+        user_data: 0,
+    })
+    .expect("debug body should serialize");
+    remove_json_fields(&mut debug_body_value, &["island_id"]);
+    let decoded_debug_body: DebugBody =
+        serde_json::from_value(debug_body_value).expect("older debug body should deserialize");
+    assert_eq!(decoded_debug_body.island_id, None);
+
+    let mut debug_island_value = serde_json::to_value(DebugIsland {
+        id: 1,
+        bodies: vec![BodyHandle::default()],
+        sleeping: false,
+        reason: SleepTransitionReason::Impact,
+    })
+    .expect("debug island should serialize");
+    remove_json_fields(&mut debug_island_value, &["reason"]);
+    let decoded_debug_island: DebugIsland =
+        serde_json::from_value(debug_island_value).expect("older debug island should deserialize");
+    assert_eq!(decoded_debug_island.reason, SleepTransitionReason::Unknown);
+
+    let mut snapshot_value =
+        serde_json::to_value(DebugSnapshot::default()).expect("debug snapshot should serialize");
+    remove_json_fields(&mut snapshot_value, &["islands"]);
+    let decoded_snapshot: DebugSnapshot =
+        serde_json::from_value(snapshot_value).expect("older debug snapshot should deserialize");
+    assert!(decoded_snapshot.islands.is_empty());
 }
 
 fn remove_json_fields(value: &mut serde_json::Value, fields: &[&str]) {
