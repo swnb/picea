@@ -116,6 +116,12 @@ pub struct DebugRenderFrame {
     pub broadphase_rebuild_count: usize,
     pub broadphase_tree_depth: usize,
     pub contact_count: usize,
+    #[serde(default)]
+    pub warm_start_hit_count: usize,
+    #[serde(default)]
+    pub warm_start_miss_count: usize,
+    #[serde(default)]
+    pub warm_start_drop_count: usize,
     pub world_bounds: Option<DebugAabb>,
     pub bodies: Vec<DebugBody>,
     pub colliders: Vec<DebugCollider>,
@@ -247,13 +253,16 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     broadphase_rebuild_count: frame.snapshot.stats.broadphase_rebuild_count,
                     broadphase_tree_depth: frame.snapshot.stats.broadphase_tree_depth,
                     contact_count: frame.snapshot.contacts.len(),
+                    warm_start_hit_count: frame.snapshot.stats.warm_start_hit_count,
+                    warm_start_miss_count: frame.snapshot.stats.warm_start_miss_count,
+                    warm_start_drop_count: frame.snapshot.stats.warm_start_drop_count,
                     world_bounds: frame.snapshot.world_bounds(),
                     bodies: frame.snapshot.bodies.clone(),
                     colliders: frame.snapshot.colliders.clone(),
                     contacts: frame.snapshot.contacts.clone(),
                     manifolds: frame.snapshot.manifolds.clone(),
-                    // These names are intentionally explicit so the viewer does
-                    // not present first-slice placeholders as measured facts.
+                    // Warm-start cache transfers are measured above; full M5
+                    // solver impulses are still intentionally unmeasured.
                     unmeasured: ["contact_impulses", "forces", "torques"]
                         .into_iter()
                         .map(str::to_owned)

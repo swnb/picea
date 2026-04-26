@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     body::{BodyType, MassProperties, Pose},
     collider::{CollisionFilter, Material, SharedShape},
-    events::{ContactEvent, ContactReductionReason, WorldEvent},
+    events::{ContactEvent, ContactReductionReason, WarmStartCacheReason, WorldEvent},
     handles::{
         BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
         WorldRevision,
@@ -188,6 +188,15 @@ pub struct DebugStats {
     pub contact_count: usize,
     /// Number of active manifolds in the last step.
     pub manifold_count: usize,
+    /// Number of contacts that reused trusted warm-start cache facts.
+    #[serde(default)]
+    pub warm_start_hit_count: usize,
+    /// Number of contacts that had no matching warm-start cache entry.
+    #[serde(default)]
+    pub warm_start_miss_count: usize,
+    /// Number of contacts whose matching cache entry was rejected as unsafe.
+    #[serde(default)]
+    pub warm_start_drop_count: usize,
 }
 
 /// Translation/rotation facts exported without exposing engine internals.
@@ -348,9 +357,14 @@ pub struct DebugContact {
     pub depth: FloatNum,
     /// Why this contact's manifold was reduced to the exported points.
     pub reduction_reason: ContactReductionReason,
-    /// Cached normal impulse when available.
+    /// Warm-start cache decision for this contact point.
+    #[serde(default)]
+    pub warm_start_reason: WarmStartCacheReason,
+    /// Warm-start normal impulse transferred from the previous step, or zero when not trusted.
+    #[serde(default)]
     pub normal_impulse: FloatNum,
-    /// Cached tangent impulse when available.
+    /// Warm-start tangent impulse transferred from the previous step, or zero when not trusted.
+    #[serde(default)]
     pub tangent_impulse: FloatNum,
 }
 
@@ -365,6 +379,7 @@ impl DebugContact {
             normal: sanitize_vector(self.normal),
             depth: sanitize_scalar(self.depth),
             reduction_reason: self.reduction_reason,
+            warm_start_reason: self.warm_start_reason,
             normal_impulse: sanitize_scalar(self.normal_impulse),
             tangent_impulse: sanitize_scalar(self.tangent_impulse),
         }
@@ -414,6 +429,15 @@ pub struct DebugManifold {
     pub depth: FloatNum,
     /// Why this manifold was reduced to the exported points.
     pub reduction_reason: ContactReductionReason,
+    /// Number of points in this manifold that reused trusted warm-start cache facts.
+    #[serde(default)]
+    pub warm_start_hit_count: usize,
+    /// Number of points in this manifold that had no matching warm-start cache entry.
+    #[serde(default)]
+    pub warm_start_miss_count: usize,
+    /// Number of points in this manifold whose matching cache entry was rejected as unsafe.
+    #[serde(default)]
+    pub warm_start_drop_count: usize,
     /// Whether the manifold is active this step.
     pub active: bool,
 }
@@ -744,6 +768,9 @@ impl DebugSnapshot {
                 broadphase_tree_depth: stats.broadphase_tree_depth,
                 contact_count: stats.contact_count.max(contacts.len()),
                 manifold_count: stats.manifold_count.max(manifolds.len()),
+                warm_start_hit_count: stats.warm_start_hit_count,
+                warm_start_miss_count: stats.warm_start_miss_count,
+                warm_start_drop_count: stats.warm_start_drop_count,
                 ..DebugStats::default()
             },
             bodies,
@@ -840,8 +867,9 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             normal: event.normal,
             depth: event.depth,
             reduction_reason: event.reduction_reason,
-            normal_impulse: 0.0,
-            tangent_impulse: 0.0,
+            warm_start_reason: event.warm_start_reason,
+            normal_impulse: event.warm_start_normal_impulse,
+            tangent_impulse: event.warm_start_tangent_impulse,
         };
         contacts.push(contact);
 
@@ -863,7 +891,10 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             if event.reduction_reason == ContactReductionReason::DuplicateReduced {
                 manifold.reduction_reason = event.reduction_reason;
             }
+            record_warm_start_reason(manifold, event.warm_start_reason);
         } else {
+            let (warm_start_hit_count, warm_start_miss_count, warm_start_drop_count) =
+                warm_start_counts(event.warm_start_reason);
             manifolds.push(DebugManifold {
                 id: event.manifold_id,
                 bodies: [event.body_a, event.body_b],
@@ -878,6 +909,9 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
                 normal: event.normal,
                 depth: event.depth,
                 reduction_reason: event.reduction_reason,
+                warm_start_hit_count,
+                warm_start_miss_count,
+                warm_start_drop_count,
                 active: true,
             });
         }
@@ -900,8 +934,26 @@ fn sanitize_manifold(manifold: &DebugManifold) -> DebugManifold {
         normal: sanitize_vector(manifold.normal),
         depth: sanitize_scalar(manifold.depth),
         reduction_reason: manifold.reduction_reason,
+        warm_start_hit_count: manifold.warm_start_hit_count,
+        warm_start_miss_count: manifold.warm_start_miss_count,
+        warm_start_drop_count: manifold.warm_start_drop_count,
         active: manifold.active,
     }
+}
+
+fn warm_start_counts(reason: WarmStartCacheReason) -> (usize, usize, usize) {
+    (
+        usize::from(reason.is_hit()),
+        usize::from(reason.is_miss()),
+        usize::from(reason.is_drop()),
+    )
+}
+
+fn record_warm_start_reason(manifold: &mut DebugManifold, reason: WarmStartCacheReason) {
+    let (hit_count, miss_count, drop_count) = warm_start_counts(reason);
+    manifold.warm_start_hit_count += hit_count;
+    manifold.warm_start_miss_count += miss_count;
+    manifold.warm_start_drop_count += drop_count;
 }
 
 fn active_contact_event(event: &WorldEvent) -> Option<ContactEvent> {

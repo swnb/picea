@@ -90,6 +90,15 @@ export type DebugContact = {
   normal: Vec2;
   depth: number;
   reduction_reason: "single_point" | "clipped" | "duplicate_reduced" | "non_m2_fallback";
+  warm_start_reason?:
+    | "hit"
+    | "miss_no_previous"
+    | "miss_feature_id"
+    | "miss_previous_sensor"
+    | "skipped_sensor"
+    | "dropped_normal_mismatch"
+    | "dropped_point_drift"
+    | "dropped_invalid_impulse";
   normal_impulse: number;
   tangent_impulse: number;
 };
@@ -108,6 +117,9 @@ export type DebugManifold = {
   normal: Vec2;
   depth: number;
   reduction_reason: "single_point" | "clipped" | "duplicate_reduced" | "non_m2_fallback";
+  warm_start_hit_count?: number;
+  warm_start_miss_count?: number;
+  warm_start_drop_count?: number;
   active: boolean;
 };
 
@@ -132,6 +144,9 @@ export type DebugSnapshot = {
     broadphase_candidate_count: number;
     contact_count: number;
     manifold_count: number;
+    warm_start_hit_count?: number;
+    warm_start_miss_count?: number;
+    warm_start_drop_count?: number;
   };
 };
 

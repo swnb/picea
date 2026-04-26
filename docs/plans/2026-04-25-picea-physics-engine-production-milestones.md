@@ -254,6 +254,22 @@ rtk proxy git diff --check
 
 ## M4 Persistent Contact And Warm-Start Cache
 
+> Status: completed 2026-04-26.
+>
+> Completion notes: contact records now retain per-point warm-start cache facts
+> keyed by normalized collider pair plus `ContactFeatureId`. The pipeline
+> transfers previous normal/tangent impulses only when feature id, normal
+> orientation, and collider-relative contact anchors remain trustworthy. Re-contact
+> after separation, A/B ordering, feature drift, normal flip, point drift,
+> solid/sensor transitions, and older serde payload defaults are covered by core
+> tests. `StepStats`, `DebugSnapshot`, and `picea-lab` artifacts expose
+> warm-start hit/miss/drop counts and per-contact reasons for a stable manifold
+> scenario.
+>
+> Residual risk: the exported impulse values are warm-start cache transfer facts
+> only. Full sequential impulse application, angular contact rows, effective mass
+> solve, and solver-owned normal/tangent impulse ranges remain M5 work.
+
 ### Goal
 
 Persist contact manifolds across frames and transfer cached normal/tangent

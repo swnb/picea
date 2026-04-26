@@ -35,6 +35,7 @@ export function makeDemoFrames(scenarioId = "falling_box_contact", frameCount = 
 
 function makeFallingBoxFrames(frameCount: number): FrameRecord[] {
   const trace: Vec2[] = [];
+  let hasTouched = false;
 
   return Array.from({ length: frameCount }, (_, frameIndex) => {
     const t = frameIndex / Math.max(1, frameCount - 1);
@@ -63,6 +64,7 @@ function makeFallingBoxFrames(frameCount: number): FrameRecord[] {
             normal: { x: 0, y: -1 },
             depth: 0.08,
             reduction_reason: "single_point",
+            warm_start_reason: hasTouched ? "hit" : "miss_no_previous",
             normal_impulse: 0,
             tangent_impulse: 0,
           },
@@ -79,12 +81,17 @@ function makeFallingBoxFrames(frameCount: number): FrameRecord[] {
             normal: { x: 0, y: -1 },
             depth: 0.08,
             reduction_reason: "single_point",
+            warm_start_hit_count: hasTouched ? 1 : 0,
+            warm_start_miss_count: hasTouched ? 0 : 1,
+            warm_start_drop_count: 0,
             active: true,
           },
         ]
       : [];
     snapshot.stats.contact_count = snapshot.contacts.length;
     snapshot.stats.manifold_count = snapshot.manifolds.length;
+    snapshot.stats.warm_start_hit_count = touching && hasTouched ? snapshot.contacts.length : 0;
+    snapshot.stats.warm_start_miss_count = touching && !hasTouched ? snapshot.contacts.length : 0;
     snapshot.primitives = [
       {
         kind: "polyline",
@@ -94,7 +101,9 @@ function makeFallingBoxFrames(frameCount: number): FrameRecord[] {
       },
     ];
 
-    return frame(frameIndex, snapshot);
+    const record = frame(frameIndex, snapshot);
+    hasTouched ||= touching;
+    return record;
   });
 }
 
@@ -175,6 +184,9 @@ function baseSnapshot(frameIndex: number, simulatedTime: number, bodies: DebugSn
       broadphase_candidate_count: 0,
       contact_count: 0,
       manifold_count: 0,
+      warm_start_hit_count: 0,
+      warm_start_miss_count: 0,
+      warm_start_drop_count: 0,
     },
   };
 }

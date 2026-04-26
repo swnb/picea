@@ -20,7 +20,9 @@ pub mod prelude {
         DebugBody, DebugCollider, DebugContact, DebugJoint, DebugManifold, DebugManifoldPoint,
         DebugPrimitive, DebugSnapshot, DebugSnapshotOptions,
     };
-    pub use super::events::{ContactEvent, ContactReductionReason, SleepEvent, WorldEvent};
+    pub use super::events::{
+        ContactEvent, ContactReductionReason, SleepEvent, WarmStartCacheReason, WorldEvent,
+    };
     pub use super::handles::{
         BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
         WorldRevision,

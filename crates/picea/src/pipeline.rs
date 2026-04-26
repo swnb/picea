@@ -77,6 +77,15 @@ pub struct StepStats {
     pub contact_count: usize,
     /// Number of active manifolds after refresh.
     pub manifold_count: usize,
+    /// Number of contacts that reused trusted warm-start cache facts.
+    #[serde(default)]
+    pub warm_start_hit_count: usize,
+    /// Number of contacts that had no matching warm-start cache entry.
+    #[serde(default)]
+    pub warm_start_miss_count: usize,
+    /// Number of contacts whose matching cache entry was rejected as unsafe.
+    #[serde(default)]
+    pub warm_start_drop_count: usize,
     /// Number of velocity iterations used for the step.
     pub velocity_iterations: u16,
     /// Number of position iterations used for the step.
@@ -188,7 +197,7 @@ mod tests {
     use std::{collections::VecDeque, panic::catch_unwind};
 
     use crate::{
-        events::{ContactEvent, SleepEvent, WorldEvent},
+        events::{ContactEvent, SleepEvent, WarmStartCacheReason, WorldEvent},
         handles::{
             BodyHandle, ColliderHandle, ContactFeatureId, ContactId, ManifoldId, WorldRevision,
         },
@@ -255,6 +264,9 @@ mod tests {
             normal: Vector::new(0.0, 1.0),
             depth: 0.25,
             reduction_reason: crate::events::ContactReductionReason::SinglePoint,
+            warm_start_reason: WarmStartCacheReason::Hit,
+            warm_start_normal_impulse: 1.0,
+            warm_start_tangent_impulse: 0.25,
         });
         let sleep_changed = WorldEvent::SleepChanged(SleepEvent {
             body: BodyHandle::from_raw_parts(2, 0),

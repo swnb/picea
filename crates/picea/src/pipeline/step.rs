@@ -30,7 +30,7 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         &mut awake_bodies,
         &mut numeric_warnings,
     );
-    let (contact_events, contact_count, manifold_count, broadphase_stats) =
+    let (contact_events, contact_count, manifold_count, broadphase_stats, warm_start_stats) =
         crate::pipeline::contacts::run_contact_phases(world, config, &mut awake_bodies);
     events.extend(contact_events);
     let (sleep_events, sleep_transition_count, active_body_count) =
@@ -64,6 +64,9 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         broadphase_tree_depth: broadphase_stats.tree_depth,
         contact_count,
         manifold_count,
+        warm_start_hit_count: warm_start_stats.hit_count,
+        warm_start_miss_count: warm_start_stats.miss_count,
+        warm_start_drop_count: warm_start_stats.drop_count,
         velocity_iterations: config.velocity_iterations,
         position_iterations: config.position_iterations,
         sleep_transition_count,

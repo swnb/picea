@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     body::Pose,
     collider::{CollisionFilter, Material, ShapeAabb, SharedShape},
-    events::{ContactEvent, ContactReductionReason, WorldEvent},
+    events::{ContactEvent, ContactReductionReason, WarmStartCacheReason, WorldEvent},
     handles::{BodyHandle, ColliderHandle},
     math::{point::Point, vector::Vector, FloatNum},
     pipeline::{
@@ -12,10 +12,13 @@ use crate::{
         StepConfig,
     },
     world::{
-        contact_state::{ContactKey, ContactPairKey, ContactRecord},
+        contact_state::{ContactKey, ContactPairKey, ContactRecord, WarmStartStats},
         World,
     },
 };
+
+const WARM_START_NORMAL_DOT_THRESHOLD: FloatNum = 0.98;
+const WARM_START_POINT_DRIFT_THRESHOLD: FloatNum = 0.05;
 
 #[derive(Clone, Debug)]
 struct ContactObservation {
@@ -25,6 +28,8 @@ struct ContactObservation {
     body_b: BodyHandle,
     collider_a: ColliderHandle,
     collider_b: ColliderHandle,
+    anchor_a: Vector,
+    anchor_b: Vector,
     point: Point,
     normal: Vector,
     depth: FloatNum,
@@ -32,6 +37,8 @@ struct ContactObservation {
     reduction_reason: ContactReductionReason,
     is_sensor: bool,
     material: Material,
+    normal_impulse: FloatNum,
+    tangent_impulse: FloatNum,
 }
 
 #[derive(Clone, Debug)]
@@ -53,17 +60,35 @@ struct VelocityUpdate {
     angular_velocity: FloatNum,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct ContactImpulse {
+    normal: FloatNum,
+    tangent: FloatNum,
+}
+
 pub(crate) fn run_contact_phases(
     world: &mut World,
     config: &StepConfig,
     awake_bodies: &mut BTreeSet<BodyHandle>,
-) -> (Vec<WorldEvent>, usize, usize, BroadphaseStats) {
-    let contacts = world.collect_contact_observations();
+) -> (
+    Vec<WorldEvent>,
+    usize,
+    usize,
+    BroadphaseStats,
+    WarmStartStats,
+) {
+    let mut contacts = world.collect_contact_observations();
     let broadphase_stats = contacts.broadphase_stats;
-    world.resolve_contacts(&contacts.observations, config.dt, awake_bodies);
-    let (events, contact_count, manifold_count) =
+    world.resolve_contacts(&mut contacts.observations, config.dt, awake_bodies);
+    let (events, contact_count, manifold_count, warm_start_stats) =
         world.refresh_contact_events(contacts.observations);
-    (events, contact_count, manifold_count, broadphase_stats)
+    (
+        events,
+        contact_count,
+        manifold_count,
+        broadphase_stats,
+        warm_start_stats,
+    )
 }
 
 struct ContactPhaseObservations {
@@ -107,24 +132,35 @@ impl World {
                 continue;
             };
 
-            let (ordered_a, ordered_b, ordered_body_a, ordered_body_b, ordered_normal) =
-                if collider_a.handle <= collider_b.handle {
-                    (
-                        collider_a.handle,
-                        collider_b.handle,
-                        collider_a.body,
-                        collider_b.body,
-                        contact.normal,
-                    )
-                } else {
-                    (
-                        collider_b.handle,
-                        collider_a.handle,
-                        collider_b.body,
-                        collider_a.body,
-                        -contact.normal,
-                    )
-                };
+            let (
+                ordered_a,
+                ordered_b,
+                ordered_body_a,
+                ordered_body_b,
+                ordered_pose_a,
+                ordered_pose_b,
+                ordered_normal,
+            ) = if collider_a.handle <= collider_b.handle {
+                (
+                    collider_a.handle,
+                    collider_b.handle,
+                    collider_a.body,
+                    collider_b.body,
+                    collider_a.world_pose,
+                    collider_b.world_pose,
+                    contact.normal,
+                )
+            } else {
+                (
+                    collider_b.handle,
+                    collider_a.handle,
+                    collider_b.body,
+                    collider_a.body,
+                    collider_b.world_pose,
+                    collider_a.world_pose,
+                    -contact.normal,
+                )
+            };
 
             for point in contact.points {
                 let pair_key = ContactPairKey::new(ordered_a, ordered_b);
@@ -135,6 +171,8 @@ impl World {
                     body_b: ordered_body_b,
                     collider_a: ordered_a,
                     collider_b: ordered_b,
+                    anchor_a: point.point - ordered_pose_a.point(),
+                    anchor_b: point.point - ordered_pose_b.point(),
                     point: point.point,
                     normal: ordered_normal,
                     depth: point.depth,
@@ -142,6 +180,8 @@ impl World {
                     reduction_reason: contact.reduction_reason,
                     is_sensor: collider_a.is_sensor || collider_b.is_sensor,
                     material: combine_materials(collider_a.material, collider_b.material),
+                    normal_impulse: 0.0,
+                    tangent_impulse: 0.0,
                 });
             }
         }
@@ -154,20 +194,22 @@ impl World {
 
     fn resolve_contacts(
         &mut self,
-        contacts: &[ContactObservation],
+        contacts: &mut [ContactObservation],
         dt: FloatNum,
         awake_bodies: &mut BTreeSet<BodyHandle>,
     ) {
-        let manifolds = strongest_contact_per_pair(contacts);
-        for contact in manifolds {
-            if contact.is_sensor {
+        let contact_indices = strongest_contact_per_pair(contacts);
+        for index in contact_indices {
+            if contacts[index].is_sensor {
                 continue;
             }
-            let velocity_updates = self.contact_velocity_updates(contact, dt);
+            let (velocity_updates, impulse) = self.contact_velocity_updates(&contacts[index], dt);
+            contacts[index].normal_impulse = impulse.normal;
+            contacts[index].tangent_impulse = impulse.tangent;
             self.apply_body_pair_correction(
-                contact.body_a,
-                contact.body_b,
-                contact.normal * (contact.depth * 0.5),
+                contacts[index].body_a,
+                contacts[index].body_b,
+                contacts[index].normal * (contacts[index].depth * 0.5),
                 awake_bodies,
             );
             self.apply_velocity_updates(&velocity_updates, awake_bodies);
@@ -177,7 +219,7 @@ impl World {
     fn refresh_contact_events(
         &mut self,
         contacts: Vec<ContactObservation>,
-    ) -> (Vec<WorldEvent>, usize, usize) {
+    ) -> (Vec<WorldEvent>, usize, usize, WarmStartStats) {
         let mut previous = self.take_active_contacts();
         let mut pair_manifold_ids = previous
             .values()
@@ -188,12 +230,24 @@ impl World {
                 )
             })
             .collect::<BTreeMap<_, _>>();
+        let previous_pairs = previous
+            .values()
+            .map(|record| ContactPairKey::new(record.contact.collider_a, record.contact.collider_b))
+            .collect::<BTreeSet<_>>();
         let mut next = BTreeMap::new();
         let mut events = Vec::new();
+        let mut warm_start_stats = WarmStartStats::default();
 
         for contact in contacts {
             let existing = previous.remove(&contact.key);
             let is_persisted = existing.is_some();
+            let (warm_start_reason, warm_start_normal_impulse, warm_start_tangent_impulse) =
+                warm_start_transfer(
+                    existing.as_ref(),
+                    &contact,
+                    previous_pairs.contains(&contact.pair_key),
+                );
+            warm_start_stats.record(warm_start_reason);
             let event = if let Some(existing) = existing {
                 ContactEvent {
                     contact_id: existing.contact.contact_id,
@@ -207,6 +261,9 @@ impl World {
                     normal: contact.normal,
                     depth: contact.depth,
                     reduction_reason: contact.reduction_reason,
+                    warm_start_reason,
+                    warm_start_normal_impulse,
+                    warm_start_tangent_impulse,
                 }
             } else {
                 let manifold_id = *pair_manifold_ids
@@ -224,6 +281,9 @@ impl World {
                     normal: contact.normal,
                     depth: contact.depth,
                     reduction_reason: contact.reduction_reason,
+                    warm_start_reason,
+                    warm_start_normal_impulse,
+                    warm_start_tangent_impulse,
                 }
             };
 
@@ -232,7 +292,16 @@ impl World {
             } else {
                 events.push(WorldEvent::ContactStarted(event));
             }
-            next.insert(contact.key, ContactRecord { contact: event });
+            next.insert(
+                contact.key,
+                ContactRecord {
+                    contact: event,
+                    anchor_a: contact.anchor_a,
+                    anchor_b: contact.anchor_b,
+                    normal_impulse: contact.normal_impulse,
+                    tangent_impulse: contact.tangent_impulse,
+                },
+            );
         }
 
         for (_, record) in previous {
@@ -247,7 +316,7 @@ impl World {
             .len();
 
         self.replace_active_contacts(next);
-        (events, contact_count, manifold_count)
+        (events, contact_count, manifold_count, warm_start_stats)
     }
 
     fn live_collider_snapshots(&self) -> Vec<ColliderSnapshot> {
@@ -273,23 +342,23 @@ impl World {
         &self,
         contact: &ContactObservation,
         dt: FloatNum,
-    ) -> Vec<VelocityUpdate> {
+    ) -> (Vec<VelocityUpdate>, ContactImpulse) {
         let Ok(body_a) = self.body_record(contact.body_a) else {
-            return Vec::new();
+            return (Vec::new(), ContactImpulse::default());
         };
         let Ok(body_b) = self.body_record(contact.body_b) else {
-            return Vec::new();
+            return (Vec::new(), ContactImpulse::default());
         };
         let inv_mass_a = body_a.mass_properties.inverse_mass;
         let inv_mass_b = body_b.mass_properties.inverse_mass;
         let inv_mass_sum = inv_mass_a + inv_mass_b;
         if inv_mass_sum <= FloatNum::EPSILON {
-            return Vec::new();
+            return (Vec::new(), ContactImpulse::default());
         }
 
         let normal = contact.normal.normalized_or_zero();
         if normal.length() <= FloatNum::EPSILON {
-            return Vec::new();
+            return (Vec::new(), ContactImpulse::default());
         }
 
         let mut velocity_a = body_a.linear_velocity;
@@ -305,6 +374,7 @@ impl World {
         }
 
         let tangent = normal.perp().normalized_or_zero();
+        let mut tangent_impulse = 0.0;
         if tangent.length() > FloatNum::EPSILON && normal_speed <= 0.0 {
             let tangent_speed = (velocity_a - velocity_b).dot(tangent);
             let friction = contact.material.friction.clamp(0.0, 1.0);
@@ -312,13 +382,13 @@ impl World {
             // a support budget for resting contacts. Separating contacts receive no friction.
             let support_impulse = contact.depth.max(0.0) / dt.max(FloatNum::EPSILON);
             let max_friction_impulse = friction * normal_impulse.max(support_impulse);
-            let tangent_impulse =
+            tangent_impulse =
                 (-tangent_speed / inv_mass_sum).clamp(-max_friction_impulse, max_friction_impulse);
             velocity_a += tangent * (tangent_impulse * inv_mass_a);
             velocity_b -= tangent * (tangent_impulse * inv_mass_b);
         }
 
-        [
+        let updates = [
             (
                 contact.body_a,
                 velocity_a,
@@ -340,7 +410,14 @@ impl World {
                 angular_velocity,
             })
         })
-        .collect()
+        .collect();
+        (
+            updates,
+            ContactImpulse {
+                normal: normal_impulse,
+                tangent: tangent_impulse,
+            },
+        )
     }
 
     fn apply_velocity_updates(
@@ -364,17 +441,70 @@ impl World {
     }
 }
 
-fn strongest_contact_per_pair(contacts: &[ContactObservation]) -> Vec<&ContactObservation> {
-    let mut strongest = BTreeMap::<ContactPairKey, &ContactObservation>::new();
-    for contact in contacts {
+fn warm_start_transfer(
+    previous: Option<&ContactRecord>,
+    contact: &ContactObservation,
+    had_previous_pair: bool,
+) -> (WarmStartCacheReason, FloatNum, FloatNum) {
+    if contact.is_sensor {
+        return (WarmStartCacheReason::SkippedSensor, 0.0, 0.0);
+    }
+
+    let Some(previous) = previous else {
+        return if had_previous_pair {
+            (WarmStartCacheReason::MissFeatureId, 0.0, 0.0)
+        } else {
+            (WarmStartCacheReason::MissNoPrevious, 0.0, 0.0)
+        };
+    };
+
+    if previous.contact.warm_start_reason == WarmStartCacheReason::SkippedSensor {
+        return (WarmStartCacheReason::MissPreviousSensor, 0.0, 0.0);
+    }
+
+    if !previous.normal_impulse.is_finite() || !previous.tangent_impulse.is_finite() {
+        return (WarmStartCacheReason::DroppedInvalidImpulse, 0.0, 0.0);
+    }
+
+    let previous_normal = previous.contact.normal.normalized_or_zero();
+    let current_normal = contact.normal.normalized_or_zero();
+    // Normal mismatch means the old impulse would push along the wrong
+    // constraint row. Feature ids alone are not enough after a normal flip.
+    if previous_normal.length() <= FloatNum::EPSILON
+        || current_normal.length() <= FloatNum::EPSILON
+        || previous_normal.dot(current_normal) < WARM_START_NORMAL_DOT_THRESHOLD
+    {
+        return (WarmStartCacheReason::DroppedNormalMismatch, 0.0, 0.0);
+    }
+
+    // Feature ids are local geometric names, not raw world-space guarantees.
+    // Compare contact anchors relative to both colliders so a pair translating
+    // together keeps its cache, while contact movement on either shape drops it.
+    let drift_a = (contact.anchor_a - previous.anchor_a).length();
+    let drift_b = (contact.anchor_b - previous.anchor_b).length();
+    let drift = drift_a.max(drift_b);
+    if !drift.is_finite() || drift > WARM_START_POINT_DRIFT_THRESHOLD {
+        return (WarmStartCacheReason::DroppedPointDrift, 0.0, 0.0);
+    }
+
+    (
+        WarmStartCacheReason::Hit,
+        previous.normal_impulse,
+        previous.tangent_impulse,
+    )
+}
+
+fn strongest_contact_per_pair(contacts: &[ContactObservation]) -> Vec<usize> {
+    let mut strongest = BTreeMap::<ContactPairKey, usize>::new();
+    for (index, contact) in contacts.iter().enumerate() {
         strongest
             .entry(contact.pair_key)
             .and_modify(|current| {
-                if contact.depth > current.depth {
-                    *current = contact;
+                if contact.depth > contacts[*current].depth {
+                    *current = index;
                 }
             })
-            .or_insert(contact);
+            .or_insert(index);
     }
     strongest.into_values().collect()
 }

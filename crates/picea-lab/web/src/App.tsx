@@ -30,6 +30,10 @@ import { demoScenarios, makeDemoFrames } from "./demo";
 import type { DebugBody, DebugCollider, FrameRecord, ScenarioDescriptor, SelectedEntity, WorkbenchLog } from "./types";
 import { cn } from "./lib/utils";
 
+function warmStartTriplet(stats: FrameRecord["snapshot"]["stats"]) {
+  return `${stats.warm_start_hit_count ?? 0}/${stats.warm_start_miss_count ?? 0}/${stats.warm_start_drop_count ?? 0}`;
+}
+
 type LayerState = {
   shapes: boolean;
   aabbs: boolean;
@@ -563,8 +567,11 @@ function Inspector({
           </div>
           <Fact label="forces" value="unmeasured" muted />
           <Fact label="torques" value="unmeasured" muted />
-          <Fact label="broadphase candidates" value="unmeasured" muted />
-          <Fact label="normal/tangent impulses" value="unmeasured" muted />
+          <Fact label="broadphase candidates" value={String(frame.snapshot.stats.broadphase_candidate_count)} />
+          <Fact
+            label="warm-start"
+            value={warmStartTriplet(frame.snapshot.stats)}
+          />
         </section>
 
         {selected ? (
@@ -627,8 +634,9 @@ function EntityInspector({
           <Fact label="depth" value={selected.entity.depth.toFixed(4)} />
           <Fact label="feature" value={String(selected.entity.feature_id)} />
           <Fact label="reduction" value={selected.entity.reduction_reason} />
-          <Fact label="normal impulse" value="unmeasured" muted />
-          <Fact label="tangent impulse" value="unmeasured" muted />
+          <Fact label="warm-start" value={selected.entity.warm_start_reason ?? "miss_no_previous"} />
+          <Fact label="warm-start normal" value={selected.entity.normal_impulse.toFixed(4)} />
+          <Fact label="warm-start tangent" value={selected.entity.tangent_impulse.toFixed(4)} />
         </>
       )}
       {selected.kind === "joint" && (

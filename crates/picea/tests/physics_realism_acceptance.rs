@@ -87,6 +87,19 @@ fn body_position(world: &World, body: BodyHandle) -> Vector {
         .translation()
 }
 
+fn active_contact_events(report: &StepReport) -> Vec<ContactEvent> {
+    report
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            WorldEvent::ContactStarted(contact) | WorldEvent::ContactPersisted(contact) => {
+                Some(*contact)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn sat_polygon_manifold_reports_two_points_with_stable_features() {
     let mut world = no_gravity_world();
@@ -138,6 +151,525 @@ fn sat_polygon_manifold_reports_two_points_with_stable_features() {
             contact.normal == Vector::new(-1.0, 0.0) && (contact.depth - 0.5).abs() < 1.0e-4,
         _ => true,
     }));
+}
+
+#[test]
+fn warm_start_cache_hits_continuing_contact_identity() {
+    let mut world = no_gravity_world();
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    let second = pipeline.step(&mut world);
+    let first_contacts = active_contact_events(&first);
+    let second_contacts = active_contact_events(&second);
+
+    assert_eq!(first.stats.warm_start_miss_count, first_contacts.len());
+    assert_eq!(first.stats.warm_start_hit_count, 0);
+    assert_eq!(second.stats.warm_start_hit_count, second_contacts.len());
+    assert_eq!(second.stats.warm_start_miss_count, 0);
+    assert_eq!(second.stats.warm_start_drop_count, 0);
+    assert_eq!(
+        first_contacts
+            .iter()
+            .map(|contact| (contact.contact_id, contact.manifold_id, contact.feature_id))
+            .collect::<Vec<_>>(),
+        second_contacts
+            .iter()
+            .map(|contact| (contact.contact_id, contact.manifold_id, contact.feature_id))
+            .collect::<Vec<_>>()
+    );
+    assert!(second_contacts
+        .iter()
+        .all(|contact| contact.warm_start_reason == WarmStartCacheReason::Hit));
+}
+
+#[test]
+fn warm_start_cache_transfers_cached_impulse_after_trustworthy_match() {
+    let mut world = no_gravity_world();
+    let moving = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -0.2,
+        0.0,
+        Vector::new(1.0, 0.0),
+    );
+    let wall = create_body(&mut world, BodyType::Static, 0.2, 0.0, Vector::default());
+    let material = Material {
+        friction: 0.5,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, moving, SharedShape::circle(1.0), material);
+    attach_shape(&mut world, wall, SharedShape::circle(1.0), material);
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    world
+        .apply_body_patch(
+            moving,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(-0.2, 0.0, 0.0)),
+                linear_velocity: Some(Vector::default()),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body patch should keep the next step on the same contact feature");
+    let second = pipeline.step(&mut world);
+    let first_contact = active_contact_events(&first)
+        .into_iter()
+        .next()
+        .expect("first step should create one contact");
+    let second_contact = active_contact_events(&second)
+        .into_iter()
+        .next()
+        .expect("second step should persist one contact");
+
+    assert_eq!(
+        first_contact.warm_start_reason,
+        WarmStartCacheReason::MissNoPrevious
+    );
+    assert_eq!(second_contact.warm_start_reason, WarmStartCacheReason::Hit);
+    assert!(
+        second_contact.warm_start_normal_impulse > 0.0,
+        "the second step should transfer the first step's cached normal impulse: {second_contact:?}"
+    );
+    assert_eq!(second.stats.warm_start_hit_count, 1);
+}
+
+#[test]
+fn warm_start_cache_drops_cached_impulse_when_normal_orientation_flips() {
+    let mut world = no_gravity_world();
+    let moving = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -0.2,
+        0.0,
+        Vector::new(1.0, 0.0),
+    );
+    let anchor = create_body(&mut world, BodyType::Static, 0.2, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        moving,
+        SharedShape::circle(1.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        anchor,
+        SharedShape::circle(1.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    assert_eq!(first.stats.warm_start_miss_count, 1);
+    world
+        .apply_body_patch(
+            moving,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(0.8, 0.0, 0.0)),
+                linear_velocity: Some(Vector::default()),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body patch should move the contact across the anchor");
+    let second = pipeline.step(&mut world);
+    let contact = active_contact_events(&second)
+        .into_iter()
+        .next()
+        .expect("second step should keep the pair in contact");
+
+    assert_eq!(
+        contact.warm_start_reason,
+        WarmStartCacheReason::DroppedNormalMismatch
+    );
+    assert_eq!(contact.warm_start_normal_impulse, 0.0);
+    assert_eq!(contact.warm_start_tangent_impulse, 0.0);
+    assert_eq!(second.stats.warm_start_drop_count, 1);
+}
+
+#[test]
+fn warm_start_cache_does_not_survive_recontact_after_separation() {
+    let mut world = no_gravity_world();
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    world
+        .apply_body_patch(
+            right,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(4.0, 0.0, 0.0)),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body should move out of contact");
+    let separated = pipeline.step(&mut world);
+    world
+        .apply_body_patch(
+            right,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(1.5, 0.0, 0.0)),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body should move back into contact");
+    let recontact = pipeline.step(&mut world);
+
+    assert!(!active_contact_events(&first).is_empty());
+    assert!(active_contact_events(&separated).is_empty());
+    let recontact_contacts = active_contact_events(&recontact);
+    assert!(!recontact_contacts.is_empty());
+    assert!(recontact_contacts
+        .iter()
+        .all(|contact| contact.warm_start_reason == WarmStartCacheReason::MissNoPrevious));
+    assert_eq!(recontact.stats.warm_start_hit_count, 0);
+}
+
+#[test]
+fn warm_start_cache_uses_normalized_pair_identity_when_geometric_a_b_order_is_swapped() {
+    let mut world = no_gravity_world();
+    let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let right_collider = attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let left_collider = attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    let second = pipeline.step(&mut world);
+    let first_contacts = active_contact_events(&first);
+    let second_contacts = active_contact_events(&second);
+
+    assert!(!first_contacts.is_empty());
+    assert_eq!(second.stats.warm_start_hit_count, second_contacts.len());
+    assert!(second_contacts
+        .iter()
+        .all(|contact| contact.warm_start_reason == WarmStartCacheReason::Hit));
+    assert!(second_contacts.iter().all(|contact| {
+        contact.collider_a == right_collider.min(left_collider)
+            && contact.collider_b == right_collider.max(left_collider)
+    }));
+}
+
+#[test]
+fn warm_start_cache_reports_feature_id_miss_when_pair_persists_on_different_features() {
+    let mut world = no_gravity_world();
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let right_collider = attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    world
+        .apply_collider_patch(
+            right_collider,
+            ColliderPatch {
+                shape: Some(SharedShape::circle(1.0)),
+                ..ColliderPatch::default()
+            },
+        )
+        .expect("collider should switch to a different feature family");
+    let second = pipeline.step(&mut world);
+
+    assert!(!active_contact_events(&first).is_empty());
+    let reasons = active_contact_events(&second)
+        .into_iter()
+        .map(|contact| contact.warm_start_reason)
+        .collect::<Vec<_>>();
+    assert!(
+        reasons.contains(&WarmStartCacheReason::MissFeatureId),
+        "expected at least one point-level feature miss after clipped feature drift; reasons={reasons:?}"
+    );
+}
+
+#[test]
+fn warm_start_cache_drops_when_pair_anchor_relative_contact_point_drifts() {
+    let mut world = no_gravity_world();
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let right = create_body(&mut world, BodyType::Static, 5.0, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::circle(10.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        right,
+        SharedShape::circle(10.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    pipeline.step(&mut world);
+    world
+        .apply_body_patch(
+            right,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(5.0, 0.4, 0.0)),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body should drift while staying in contact");
+    let second = pipeline.step(&mut world);
+    let contact = active_contact_events(&second)
+        .into_iter()
+        .next()
+        .expect("pair should remain in contact after a small normal change");
+
+    assert_eq!(
+        contact.warm_start_reason,
+        WarmStartCacheReason::DroppedPointDrift
+    );
+    assert_eq!(second.stats.warm_start_drop_count, 1);
+}
+
+#[test]
+fn warm_start_cache_keeps_hit_when_touching_pair_translates_together() {
+    let mut world = no_gravity_world();
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    pipeline.step(&mut world);
+    world
+        .apply_body_patch(
+            left,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(1.0, 0.0, 0.0)),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("left body should translate");
+    world
+        .apply_body_patch(
+            right,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(2.5, 0.0, 0.0)),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("right body should translate with the pair");
+    let second = pipeline.step(&mut world);
+    let contacts = active_contact_events(&second);
+
+    assert!(!contacts.is_empty());
+    assert!(contacts
+        .iter()
+        .all(|contact| contact.warm_start_reason == WarmStartCacheReason::Hit));
+    assert_eq!(second.stats.warm_start_hit_count, contacts.len());
+}
+
+#[test]
+fn warm_start_cache_does_not_hit_or_expose_stale_impulses_after_solid_contact_becomes_sensor() {
+    let mut world = no_gravity_world();
+    let moving = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -0.2,
+        0.0,
+        Vector::new(1.0, 0.0),
+    );
+    let wall = create_body(&mut world, BodyType::Static, 0.2, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        moving,
+        SharedShape::circle(1.0),
+        Material::default(),
+    );
+    let wall_collider = attach_shape(
+        &mut world,
+        wall,
+        SharedShape::circle(1.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    let first_contact = active_contact_events(&first)
+        .into_iter()
+        .next()
+        .expect("solid contact should exist");
+    assert_eq!(
+        first_contact.warm_start_reason,
+        WarmStartCacheReason::MissNoPrevious
+    );
+
+    world
+        .apply_collider_patch(
+            wall_collider,
+            ColliderPatch {
+                is_sensor: Some(true),
+                ..ColliderPatch::default()
+            },
+        )
+        .expect("collider should become a sensor");
+    world
+        .apply_body_patch(
+            moving,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(-0.2, 0.0, 0.0)),
+                linear_velocity: Some(Vector::default()),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body should stay on the same contact feature");
+    let second = pipeline.step(&mut world);
+    let sensor_contact = active_contact_events(&second)
+        .into_iter()
+        .next()
+        .expect("sensor contact should still be observable");
+
+    assert_eq!(
+        sensor_contact.warm_start_reason,
+        WarmStartCacheReason::SkippedSensor
+    );
+    assert_eq!(sensor_contact.warm_start_normal_impulse, 0.0);
+    assert_eq!(sensor_contact.warm_start_tangent_impulse, 0.0);
+    assert_eq!(second.stats.warm_start_hit_count, 0);
+}
+
+#[test]
+fn warm_start_cache_does_not_hit_after_sensor_contact_becomes_solid() {
+    let mut world = no_gravity_world();
+    let moving = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -0.2,
+        0.0,
+        Vector::new(1.0, 0.0),
+    );
+    let wall = create_body(&mut world, BodyType::Static, 0.2, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        moving,
+        SharedShape::circle(1.0),
+        Material::default(),
+    );
+    let wall_collider = world
+        .create_collider(
+            wall,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                is_sensor: true,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("sensor collider should be created");
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    let sensor_contact = active_contact_events(&first)
+        .into_iter()
+        .next()
+        .expect("sensor contact should be observable");
+    assert_eq!(
+        sensor_contact.warm_start_reason,
+        WarmStartCacheReason::SkippedSensor
+    );
+
+    world
+        .apply_collider_patch(
+            wall_collider,
+            ColliderPatch {
+                is_sensor: Some(false),
+                ..ColliderPatch::default()
+            },
+        )
+        .expect("collider should become solid");
+    world
+        .apply_body_patch(
+            moving,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(-0.2, 0.0, 0.0)),
+                linear_velocity: Some(Vector::default()),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body should stay on the same contact feature");
+    let second = pipeline.step(&mut world);
+    let solid_contact = active_contact_events(&second)
+        .into_iter()
+        .next()
+        .expect("solid contact should continue from the sensor overlap");
+
+    assert_ne!(solid_contact.warm_start_reason, WarmStartCacheReason::Hit);
+    assert_eq!(
+        solid_contact.warm_start_reason,
+        WarmStartCacheReason::MissPreviousSensor
+    );
+    assert_eq!(solid_contact.warm_start_normal_impulse, 0.0);
+    assert_eq!(solid_contact.warm_start_tangent_impulse, 0.0);
+    assert_eq!(second.stats.warm_start_hit_count, 0);
+    assert_eq!(second.stats.warm_start_miss_count, 1);
 }
 
 #[test]

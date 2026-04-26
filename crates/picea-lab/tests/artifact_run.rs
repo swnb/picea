@@ -1,8 +1,8 @@
 use std::fs;
 
 use picea_lab::{
-    run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact, FrameRecord, RunConfig,
-    RunManifest, ScenarioId,
+    run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact, DebugRenderFrame, FrameRecord,
+    RunConfig, RunManifest, ScenarioId,
 };
 
 #[test]
@@ -225,4 +225,113 @@ fn sat_polygon_artifacts_capture_manifold_points_and_normals() {
     assert_eq!(render_first.contacts.len(), 2);
     assert_eq!(render_first.manifolds.len(), 1);
     assert_eq!(render_first.manifolds[0].points.len(), 2);
+}
+
+#[test]
+fn warm_start_artifacts_capture_per_step_manifold_cache_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::SatPolygon,
+            frame_count: 2,
+            run_id: Some("warm-start-facts".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("warm-start run should write artifacts");
+
+    let first = run.frames.first().expect("first frame should exist");
+    let second = run.frames.get(1).expect("second frame should exist");
+    assert_eq!(first.stats.warm_start_miss_count, first.stats.contact_count);
+    assert_eq!(first.stats.warm_start_hit_count, 0);
+    assert_eq!(
+        second.stats.warm_start_hit_count,
+        second.stats.contact_count
+    );
+    assert_eq!(second.stats.warm_start_miss_count, 0);
+    assert_eq!(second.stats.warm_start_drop_count, 0);
+
+    let first_manifold = first
+        .snapshot
+        .manifolds
+        .first()
+        .expect("first frame should expose a manifold");
+    let second_manifold = second
+        .snapshot
+        .manifolds
+        .first()
+        .expect("second frame should expose the persisted manifold");
+    assert_eq!(first_manifold.id, second_manifold.id);
+    assert_eq!(first_manifold.points.len(), second_manifold.points.len());
+    assert_eq!(
+        second
+            .snapshot
+            .contacts
+            .iter()
+            .filter(|contact| contact.warm_start_reason == picea::events::WarmStartCacheReason::Hit)
+            .count(),
+        second.stats.contact_count
+    );
+
+    let render: DebugRenderArtifact = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable"),
+    )
+    .expect("debug render should match schema");
+    let render_second = render
+        .frames
+        .get(1)
+        .expect("debug render should include warm-start frame facts");
+    assert_eq!(
+        render_second.warm_start_hit_count,
+        second.stats.warm_start_hit_count
+    );
+    assert_eq!(
+        render_second.manifolds[0].warm_start_hit_count,
+        second.stats.contact_count
+    );
+}
+
+#[test]
+fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() {
+    let frame = DebugRenderFrame {
+        frame_index: 0,
+        body_count: 0,
+        collider_count: 0,
+        broadphase_candidate_count: 0,
+        broadphase_update_count: 0,
+        broadphase_stale_proxy_drop_count: 0,
+        broadphase_same_body_drop_count: 0,
+        broadphase_filter_drop_count: 0,
+        broadphase_narrowphase_drop_count: 0,
+        broadphase_rebuild_count: 0,
+        broadphase_tree_depth: 0,
+        contact_count: 0,
+        warm_start_hit_count: 1,
+        warm_start_miss_count: 2,
+        warm_start_drop_count: 3,
+        world_bounds: None,
+        bodies: Vec::new(),
+        colliders: Vec::new(),
+        contacts: Vec::new(),
+        manifolds: Vec::new(),
+        unmeasured: Vec::new(),
+    };
+    let mut value = serde_json::to_value(frame).expect("debug render frame should serialize");
+    let object = value
+        .as_object_mut()
+        .expect("debug render frame should serialize as an object");
+    object.remove("warm_start_hit_count");
+    object.remove("warm_start_miss_count");
+    object.remove("warm_start_drop_count");
+
+    let decoded: DebugRenderFrame =
+        serde_json::from_value(value).expect("older debug render frame should deserialize");
+
+    assert_eq!(decoded.warm_start_hit_count, 0);
+    assert_eq!(decoded.warm_start_miss_count, 0);
+    assert_eq!(decoded.warm_start_drop_count, 0);
 }

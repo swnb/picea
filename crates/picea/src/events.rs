@@ -22,6 +22,60 @@ pub enum ContactReductionReason {
     NonM2Fallback,
 }
 
+/// Why a contact did or did not reuse the previous step's impulse cache.
+///
+/// A warm-start cache stores the normal/tangent impulses solved for a contact
+/// point in the previous step. Reusing them is only safe when the same
+/// geometric feature is still touching and the contact normal/point have not
+/// drifted enough to make the old impulse point at the wrong constraint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WarmStartCacheReason {
+    /// Previous cache entry matched this contact and passed the conservative validity checks.
+    Hit,
+    /// No previous contact for the normalized collider pair was active last step.
+    #[default]
+    MissNoPrevious,
+    /// The pair existed last step, but the point-level feature id did not match.
+    MissFeatureId,
+    /// The previous matching contact was sensor-only and had no solver impulse cache.
+    MissPreviousSensor,
+    /// The contact is a sensor-only overlap, so solver impulses are intentionally ignored.
+    SkippedSensor,
+    /// The feature id matched, but the current normal points in a different direction.
+    DroppedNormalMismatch,
+    /// The feature id matched, but the contact point moved farther than the drift threshold.
+    DroppedPointDrift,
+    /// The previous cached impulse was non-finite and was not transferred.
+    DroppedInvalidImpulse,
+}
+
+impl WarmStartCacheReason {
+    /// Returns true when previous cached impulses were transferred to this step's facts.
+    pub const fn is_hit(self) -> bool {
+        matches!(self, Self::Hit)
+    }
+
+    /// Returns true when no matching cache entry existed for this contact.
+    pub const fn is_miss(self) -> bool {
+        matches!(
+            self,
+            Self::MissNoPrevious
+                | Self::MissFeatureId
+                | Self::MissPreviousSensor
+                | Self::SkippedSensor
+        )
+    }
+
+    /// Returns true when a matching cache entry was found but rejected as unsafe.
+    pub const fn is_drop(self) -> bool {
+        matches!(
+            self,
+            Self::DroppedNormalMismatch | Self::DroppedPointDrift | Self::DroppedInvalidImpulse
+        )
+    }
+}
+
 /// Contact lifecycle information exposed by the stable event stream.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ContactEvent {
@@ -47,6 +101,15 @@ pub struct ContactEvent {
     pub depth: FloatNum,
     /// Why this point set was reduced to the exported manifold.
     pub reduction_reason: ContactReductionReason,
+    /// Warm-start cache decision for this contact point.
+    #[serde(default)]
+    pub warm_start_reason: WarmStartCacheReason,
+    /// Previous normal impulse transferred into this step, or zero when not trusted.
+    #[serde(default)]
+    pub warm_start_normal_impulse: FloatNum,
+    /// Previous tangent impulse transferred into this step, or zero when not trusted.
+    #[serde(default)]
+    pub warm_start_tangent_impulse: FloatNum,
 }
 
 /// Sleep or wake transitions for a body.
@@ -94,7 +157,8 @@ pub enum WorldEvent {
 mod tests {
     use crate::{
         events::{
-            ContactEvent, ContactReductionReason, NumericsWarningEvent, SleepEvent, WorldEvent,
+            ContactEvent, ContactReductionReason, NumericsWarningEvent, SleepEvent,
+            WarmStartCacheReason, WorldEvent,
         },
         handles::{
             BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
@@ -116,6 +180,9 @@ mod tests {
             normal: Vector::new(0.0, 1.0),
             depth: 0.25,
             reduction_reason: ContactReductionReason::Clipped,
+            warm_start_reason: WarmStartCacheReason::Hit,
+            warm_start_normal_impulse: 1.0,
+            warm_start_tangent_impulse: -0.25,
         };
         let sleep = SleepEvent {
             body: BodyHandle::from_raw_parts(9, 0),

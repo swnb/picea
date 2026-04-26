@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    events::ContactEvent,
+    events::{ContactEvent, WarmStartCacheReason},
     handles::{ColliderHandle, ContactFeatureId, ContactId, ManifoldId},
+    math::FloatNum,
     world::World,
 };
 
@@ -43,6 +44,29 @@ impl ContactKey {
 #[derive(Clone, Debug)]
 pub(crate) struct ContactRecord {
     pub(crate) contact: ContactEvent,
+    pub(crate) anchor_a: crate::math::vector::Vector,
+    pub(crate) anchor_b: crate::math::vector::Vector,
+    pub(crate) normal_impulse: FloatNum,
+    pub(crate) tangent_impulse: FloatNum,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WarmStartStats {
+    pub(crate) hit_count: usize,
+    pub(crate) miss_count: usize,
+    pub(crate) drop_count: usize,
+}
+
+impl WarmStartStats {
+    pub(crate) fn record(&mut self, reason: WarmStartCacheReason) {
+        if reason.is_hit() {
+            self.hit_count += 1;
+        } else if reason.is_miss() {
+            self.miss_count += 1;
+        } else if reason.is_drop() {
+            self.drop_count += 1;
+        }
+    }
 }
 
 impl World {
