@@ -1,0 +1,28 @@
+{
+  "run_id": "run-1777217579176161000",
+  "scenario_id": "falling_box_contact",
+  "frame_count": 120,
+  "final_state_hash": "3e3de528d39ebec6",
+  "artifacts": [
+    {
+      "file": "manifest.json",
+      "content_type": "application/json"
+    },
+    {
+      "file": "frames.jsonl",
+      "content_type": "application/x-ndjson"
+    },
+    {
+      "file": "debug_render.json",
+      "content_type": "application/json"
+    },
+    {
+      "file": "final_snapshot.json",
+      "content_type": "application/json"
+    },
+    {
+      "file": "perf.json",
+      "content_type": "application/json"
+    }
+  ]
+}

@@ -1,0 +1,426 @@
+{
+  "meta": {
+    "revision": 124,
+    "dt": 0.016666668,
+    "simulated_time": 2.0000001043081284,
+    "gravity": {
+      "x": 0.0,
+      "y": 9.8
+    }
+  },
+  "bodies": [
+    {
+      "handle": 0,
+      "body_type": "static",
+      "transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 2.0
+        },
+        "rotation": 0.0
+      },
+      "mass_properties": {
+        "mass": 4.0,
+        "inverse_mass": 0.0,
+        "local_center_of_mass": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "inertia": 21.416666,
+        "inverse_inertia": 0.0
+      },
+      "linear_velocity": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "angular_velocity": 0.0,
+      "sleeping": false,
+      "island_id": null,
+      "user_data": 0
+    },
+    {
+      "handle": 1,
+      "body_type": "dynamic",
+      "transform": {
+        "translation": {
+          "x": -1.9449123e-8,
+          "y": 1.253977
+        },
+        "rotation": 4.333198e-8
+      },
+      "mass_properties": {
+        "mass": 1.0,
+        "inverse_mass": 1.0,
+        "local_center_of_mass": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "inertia": 0.16666667,
+        "inverse_inertia": 6.0
+      },
+      "linear_velocity": {
+        "x": -9.313226e-10,
+        "y": 0.0
+      },
+      "angular_velocity": 2.8127e-9,
+      "sleeping": false,
+      "island_id": 0,
+      "user_data": 0
+    }
+  ],
+  "colliders": [
+    {
+      "handle": 0,
+      "body": 0,
+      "local_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "rotation": 0.0
+      },
+      "world_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 2.0
+        },
+        "rotation": 0.0
+      },
+      "aabb": {
+        "min": {
+          "x": -4.0,
+          "y": 1.75
+        },
+        "max": {
+          "x": 4.0,
+          "y": 2.25
+        }
+      },
+      "shape": {
+        "kind": "polygon",
+        "vertices": [
+          {
+            "x": -4.0,
+            "y": 1.75
+          },
+          {
+            "x": 4.0,
+            "y": 1.75
+          },
+          {
+            "x": 4.0,
+            "y": 2.25
+          },
+          {
+            "x": -4.0,
+            "y": 2.25
+          }
+        ]
+      },
+      "density": 1.0,
+      "material": {
+        "friction": 0.2,
+        "restitution": 0.0
+      },
+      "filter": {
+        "memberships": 18446744073709551615,
+        "collides_with": 18446744073709551615
+      },
+      "is_sensor": false,
+      "user_data": 0
+    },
+    {
+      "handle": 1,
+      "body": 1,
+      "local_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "rotation": 0.0
+      },
+      "world_transform": {
+        "translation": {
+          "x": -1.9449123e-8,
+          "y": 1.253977
+        },
+        "rotation": 4.333198e-8
+      },
+      "aabb": {
+        "min": {
+          "x": -0.5,
+          "y": 0.75397694
+        },
+        "max": {
+          "x": 0.49999997,
+          "y": 1.753977
+        }
+      },
+      "shape": {
+        "kind": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": 0.75397694
+          },
+          {
+            "x": 0.49999994,
+            "y": 0.75397694
+          },
+          {
+            "x": 0.49999997,
+            "y": 1.753977
+          },
+          {
+            "x": -0.5,
+            "y": 1.753977
+          }
+        ]
+      },
+      "density": 1.0,
+      "material": {
+        "friction": 0.2,
+        "restitution": 0.0
+      },
+      "filter": {
+        "memberships": 18446744073709551615,
+        "collides_with": 18446744073709551615
+      },
+      "is_sensor": false,
+      "user_data": 0
+    }
+  ],
+  "joints": [],
+  "contacts": [
+    {
+      "id": 2,
+      "bodies": [
+        0,
+        1
+      ],
+      "colliders": [
+        0,
+        1
+      ],
+      "feature_id": 4311744514,
+      "point": {
+        "x": -0.5,
+        "y": 1.7600567
+      },
+      "normal": {
+        "x": -0.0,
+        "y": 1.0
+      },
+      "depth": 0.0067044497,
+      "reduction_reason": "clipped",
+      "warm_start_reason": "hit",
+      "normal_impulse": 0.08166667,
+      "tangent_impulse": 0.0148392245,
+      "solver_normal_impulse": 0.08166667,
+      "solver_tangent_impulse": 0.014839224,
+      "normal_impulse_clamped": false,
+      "tangent_impulse_clamped": false,
+      "restitution_velocity_threshold": 1.0,
+      "restitution_applied": false
+    },
+    {
+      "id": 3,
+      "bodies": [
+        0,
+        1
+      ],
+      "colliders": [
+        0,
+        1
+      ],
+      "feature_id": 16777218,
+      "point": {
+        "x": 0.49999997,
+        "y": 1.7600567
+      },
+      "normal": {
+        "x": -0.0,
+        "y": 1.0
+      },
+      "depth": 0.0067044497,
+      "reduction_reason": "clipped",
+      "warm_start_reason": "hit",
+      "normal_impulse": 0.08166667,
+      "tangent_impulse": -0.014839224,
+      "solver_normal_impulse": 0.08166667,
+      "solver_tangent_impulse": -0.014839224,
+      "normal_impulse_clamped": false,
+      "tangent_impulse_clamped": false,
+      "restitution_velocity_threshold": 1.0,
+      "restitution_applied": false
+    }
+  ],
+  "manifolds": [
+    {
+      "id": 1,
+      "bodies": [
+        0,
+        1
+      ],
+      "colliders": [
+        0,
+        1
+      ],
+      "contact_ids": [
+        2,
+        3
+      ],
+      "points": [
+        {
+          "contact_id": 2,
+          "feature_id": 4311744514,
+          "point": {
+            "x": -0.5,
+            "y": 1.7600567
+          },
+          "depth": 0.0067044497
+        },
+        {
+          "contact_id": 3,
+          "feature_id": 16777218,
+          "point": {
+            "x": 0.49999997,
+            "y": 1.7600567
+          },
+          "depth": 0.0067044497
+        }
+      ],
+      "normal": {
+        "x": -0.0,
+        "y": 1.0
+      },
+      "depth": 0.0067044497,
+      "reduction_reason": "clipped",
+      "warm_start_hit_count": 2,
+      "warm_start_miss_count": 0,
+      "warm_start_drop_count": 0,
+      "active": true
+    }
+  ],
+  "islands": [
+    {
+      "id": 0,
+      "bodies": [
+        1
+      ],
+      "sleeping": false,
+      "reason": "unknown"
+    }
+  ],
+  "primitives": [
+    {
+      "kind": "polygon",
+      "points": [
+        {
+          "x": -4.0,
+          "y": 1.75
+        },
+        {
+          "x": 4.0,
+          "y": 1.75
+        },
+        {
+          "x": 4.0,
+          "y": 2.25
+        },
+        {
+          "x": -4.0,
+          "y": 2.25
+        }
+      ],
+      "stroke": {
+        "r": 64,
+        "g": 200,
+        "b": 255,
+        "a": 255
+      },
+      "fill": null
+    },
+    {
+      "kind": "polygon",
+      "points": [
+        {
+          "x": -0.5,
+          "y": 0.75397694
+        },
+        {
+          "x": 0.49999994,
+          "y": 0.75397694
+        },
+        {
+          "x": 0.49999997,
+          "y": 1.753977
+        },
+        {
+          "x": -0.5,
+          "y": 1.753977
+        }
+      ],
+      "stroke": {
+        "r": 64,
+        "g": 200,
+        "b": 255,
+        "a": 255
+      },
+      "fill": null
+    },
+    {
+      "kind": "arrow",
+      "origin": {
+        "x": -0.5,
+        "y": 1.7600567
+      },
+      "direction": {
+        "x": -0.0,
+        "y": 0.25
+      },
+      "color": {
+        "r": 255,
+        "g": 96,
+        "b": 96,
+        "a": 255
+      }
+    },
+    {
+      "kind": "arrow",
+      "origin": {
+        "x": 0.49999997,
+        "y": 1.7600567
+      },
+      "direction": {
+        "x": -0.0,
+        "y": 0.25
+      },
+      "color": {
+        "r": 255,
+        "g": 96,
+        "b": 96,
+        "a": 255
+      }
+    }
+  ],
+  "stats": {
+    "step_index": 120,
+    "active_body_count": 2,
+    "active_collider_count": 2,
+    "active_joint_count": 0,
+    "broadphase_candidate_count": 1,
+    "broadphase_update_count": 0,
+    "broadphase_stale_proxy_drop_count": 0,
+    "broadphase_same_body_drop_count": 0,
+    "broadphase_filter_drop_count": 0,
+    "broadphase_narrowphase_drop_count": 0,
+    "broadphase_rebuild_count": 0,
+    "broadphase_tree_depth": 2,
+    "contact_count": 2,
+    "manifold_count": 1,
+    "warm_start_hit_count": 2,
+    "warm_start_miss_count": 0,
+    "warm_start_drop_count": 0
+  }
+}

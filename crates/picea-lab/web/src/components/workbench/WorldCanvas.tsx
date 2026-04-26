@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type {
   DebugAabb,
+  DebugBody,
   DebugCollider,
   DebugContact,
   DebugShape,
@@ -121,15 +122,23 @@ function drawWorld(
 
   if (layers.shapes) {
     for (const collider of frame.snapshot.colliders) {
-      drawShape(ctx, collider, camera, selected?.kind === "collider" && selected.id === collider.handle);
+      drawShape(ctx, collider, camera, isColliderSelected(collider, selected));
     }
   }
 
   if (layers.aabbs) {
     for (const collider of frame.snapshot.colliders) {
       if (collider.aabb) {
-        drawAabb(ctx, collider.aabb, camera, selected?.kind === "collider" && selected.id === collider.handle);
+        drawAabb(ctx, collider.aabb, camera, isColliderSelected(collider, selected));
       }
+    }
+  }
+
+  if (selected?.kind === "body") {
+    const body = frame.snapshot.bodies.find((entry) => entry.handle === selected.id);
+    if (body) {
+      const ownedColliders = frame.snapshot.colliders.filter((collider) => collider.body === body.handle);
+      drawBodySelection(ctx, body, ownedColliders, camera);
     }
   }
 
@@ -158,6 +167,13 @@ function drawWorld(
       drawContact(ctx, contact, camera, selected?.kind === "contact" && selected.id === contact.id);
     }
   }
+}
+
+function isColliderSelected(collider: DebugCollider, selected: SelectedEntity | null): boolean {
+  return (
+    (selected?.kind === "collider" && selected.id === collider.handle) ||
+    (selected?.kind === "body" && selected.id === collider.body)
+  );
 }
 
 function fillBackground(ctx: CanvasRenderingContext2D, camera: Camera) {
@@ -254,6 +270,35 @@ function drawAabb(ctx: CanvasRenderingContext2D, aabb: DebugAabb, camera: Camera
   ctx.setLineDash([5, 4]);
   ctx.strokeRect(min.x, max.y, max.x - min.x, min.y - max.y);
   ctx.setLineDash([]);
+}
+
+function drawBodySelection(ctx: CanvasRenderingContext2D, body: DebugBody, colliders: DebugCollider[], camera: Camera) {
+  const center = worldToScreen(body.transform.translation, camera);
+  ctx.save();
+  ctx.strokeStyle = "#f0c36b";
+  ctx.fillStyle = "#f0c36b";
+  ctx.lineWidth = 2;
+  ctx.shadowColor = "rgba(240, 195, 107, 0.45)";
+  ctx.shadowBlur = 12;
+
+  const bounds = aggregateBounds(colliders);
+  if (bounds) {
+    const min = worldToScreen(bounds.min, camera);
+    const max = worldToScreen(bounds.max, camera);
+    const pad = 7;
+    ctx.setLineDash([7, 4]);
+    ctx.strokeRect(min.x - pad, max.y - pad, max.x - min.x + pad * 2, min.y - max.y + pad * 2);
+    ctx.setLineDash([]);
+  }
+
+  // Body 是质点/位姿容器，实际几何来自它拥有的 collider；这里同时标出位姿中心。
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, 11, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawContact(ctx: CanvasRenderingContext2D, contact: DebugContact, camera: Camera, isSelected: boolean) {
