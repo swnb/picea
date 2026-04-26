@@ -120,6 +120,18 @@ rtk proxy git diff --check
 
 ## M2 SAT And Clipping Manifold
 
+> Status: completed 2026-04-26.
+>
+> Completion notes: convex rectangle / regular polygon / convex polygon pairs
+> now use SAT minimum-penetration axes, deterministic reference/incident edge
+> selection, clipping, duplicate point reduction, and stable per-point
+> `ContactFeatureId`s. Circle-circle, circle-polygon, and circle-segment paths
+> use analytic contacts. Contact events/debug snapshots expose manifold points,
+> feature ids, normals, depths, and reduction reasons; contact identity is now
+> collider pair + feature id while one `ManifoldId` is shared per collider pair.
+> Concave polygons remain outside M2 and use an explicit `non_m2_fallback`
+> residual-risk path rather than entering convex SAT.
+
 ### Goal
 
 Make convex contact generation real: polygon and rectangle pairs should produce

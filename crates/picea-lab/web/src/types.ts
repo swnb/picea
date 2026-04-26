@@ -78,11 +78,30 @@ export type DebugContact = {
   id: number;
   bodies: [number, number];
   colliders: [number, number];
+  feature_id: number;
   point: Vec2;
   normal: Vec2;
   depth: number;
+  reduction_reason: "single_point" | "clipped" | "duplicate_reduced" | "non_m2_fallback";
   normal_impulse: number;
   tangent_impulse: number;
+};
+
+export type DebugManifold = {
+  id: number;
+  bodies: [number, number];
+  colliders: [number, number];
+  contact_ids: number[];
+  points: Array<{
+    contact_id: number;
+    feature_id: number;
+    point: Vec2;
+    depth: number;
+  }>;
+  normal: Vec2;
+  depth: number;
+  reduction_reason: "single_point" | "clipped" | "duplicate_reduced" | "non_m2_fallback";
+  active: boolean;
 };
 
 export type DebugSnapshot = {
@@ -96,13 +115,7 @@ export type DebugSnapshot = {
   colliders: DebugCollider[];
   joints: DebugJoint[];
   contacts: DebugContact[];
-  manifolds: Array<{
-    id: number;
-    bodies: [number, number];
-    colliders: [number, number];
-    contact_ids: number[];
-    active: boolean;
-  }>;
+  manifolds: DebugManifold[];
   primitives: DebugPrimitive[];
   stats: {
     step_index: number;

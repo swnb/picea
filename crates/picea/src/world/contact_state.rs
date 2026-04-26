@@ -2,21 +2,40 @@ use std::collections::BTreeMap;
 
 use crate::{
     events::ContactEvent,
-    handles::{ColliderHandle, ContactId, ManifoldId},
+    handles::{ColliderHandle, ContactFeatureId, ContactId, ManifoldId},
     world::World,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ContactKey {
+pub(crate) struct ContactPairKey {
     collider_a: ColliderHandle,
     collider_b: ColliderHandle,
 }
 
-impl ContactKey {
+impl ContactPairKey {
     pub(crate) fn new(collider_a: ColliderHandle, collider_b: ColliderHandle) -> Self {
         Self {
             collider_a,
             collider_b,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ContactKey {
+    pub(crate) pair: ContactPairKey,
+    feature_id: ContactFeatureId,
+}
+
+impl ContactKey {
+    pub(crate) fn new(
+        collider_a: ColliderHandle,
+        collider_b: ColliderHandle,
+        feature_id: ContactFeatureId,
+    ) -> Self {
+        Self {
+            pair: ContactPairKey::new(collider_a, collider_b),
+            feature_id,
         }
     }
 }

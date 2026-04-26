@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     body::Pose,
     collider::{CollisionFilter, Material, ShapeAabb, SharedShape},
-    events::{ContactEvent, WorldEvent},
+    events::{ContactEvent, ContactReductionReason, WorldEvent},
     handles::{BodyHandle, ColliderHandle},
     math::{point::Point, vector::Vector, FloatNum},
     pipeline::{
@@ -12,7 +12,7 @@ use crate::{
         StepConfig,
     },
     world::{
-        contact_state::{ContactKey, ContactRecord},
+        contact_state::{ContactKey, ContactPairKey, ContactRecord},
         World,
     },
 };
@@ -20,6 +20,7 @@ use crate::{
 #[derive(Clone, Debug)]
 struct ContactObservation {
     key: ContactKey,
+    pair_key: ContactPairKey,
     body_a: BodyHandle,
     body_b: BodyHandle,
     collider_a: ColliderHandle,
@@ -27,6 +28,8 @@ struct ContactObservation {
     point: Point,
     normal: Vector,
     depth: FloatNum,
+    feature_id: crate::handles::ContactFeatureId,
+    reduction_reason: ContactReductionReason,
     is_sensor: bool,
     material: Material,
 }
@@ -123,18 +126,24 @@ impl World {
                     )
                 };
 
-            observations.push(ContactObservation {
-                key: ContactKey::new(ordered_a, ordered_b),
-                body_a: ordered_body_a,
-                body_b: ordered_body_b,
-                collider_a: ordered_a,
-                collider_b: ordered_b,
-                point: contact.point,
-                normal: ordered_normal,
-                depth: contact.depth,
-                is_sensor: collider_a.is_sensor || collider_b.is_sensor,
-                material: combine_materials(collider_a.material, collider_b.material),
-            });
+            for point in contact.points {
+                let pair_key = ContactPairKey::new(ordered_a, ordered_b);
+                observations.push(ContactObservation {
+                    key: ContactKey::new(ordered_a, ordered_b, point.feature_id),
+                    pair_key,
+                    body_a: ordered_body_a,
+                    body_b: ordered_body_b,
+                    collider_a: ordered_a,
+                    collider_b: ordered_b,
+                    point: point.point,
+                    normal: ordered_normal,
+                    depth: point.depth,
+                    feature_id: point.feature_id,
+                    reduction_reason: contact.reduction_reason,
+                    is_sensor: collider_a.is_sensor || collider_b.is_sensor,
+                    material: combine_materials(collider_a.material, collider_b.material),
+                });
+            }
         }
 
         ContactPhaseObservations {
@@ -149,7 +158,8 @@ impl World {
         dt: FloatNum,
         awake_bodies: &mut BTreeSet<BodyHandle>,
     ) {
-        for contact in contacts {
+        let manifolds = strongest_contact_per_pair(contacts);
+        for contact in manifolds {
             if contact.is_sensor {
                 continue;
             }
@@ -169,6 +179,15 @@ impl World {
         contacts: Vec<ContactObservation>,
     ) -> (Vec<WorldEvent>, usize, usize) {
         let mut previous = self.take_active_contacts();
+        let mut pair_manifold_ids = previous
+            .values()
+            .map(|record| {
+                (
+                    ContactPairKey::new(record.contact.collider_a, record.contact.collider_b),
+                    record.contact.manifold_id,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
         let mut next = BTreeMap::new();
         let mut events = Vec::new();
 
@@ -183,21 +202,28 @@ impl World {
                     body_b: contact.body_b,
                     collider_a: contact.collider_a,
                     collider_b: contact.collider_b,
+                    feature_id: contact.feature_id,
                     point: contact.point,
                     normal: contact.normal,
                     depth: contact.depth,
+                    reduction_reason: contact.reduction_reason,
                 }
             } else {
+                let manifold_id = *pair_manifold_ids
+                    .entry(contact.pair_key)
+                    .or_insert_with(|| self.alloc_next_manifold_id());
                 ContactEvent {
                     contact_id: self.alloc_next_contact_id(),
-                    manifold_id: self.alloc_next_manifold_id(),
+                    manifold_id,
                     body_a: contact.body_a,
                     body_b: contact.body_b,
                     collider_a: contact.collider_a,
                     collider_b: contact.collider_b,
+                    feature_id: contact.feature_id,
                     point: contact.point,
                     normal: contact.normal,
                     depth: contact.depth,
+                    reduction_reason: contact.reduction_reason,
                 }
             };
 
@@ -215,8 +241,8 @@ impl World {
 
         let contact_count = next.len();
         let manifold_count = next
-            .values()
-            .map(|record| ordered_body_pair(record.contact.body_a, record.contact.body_b))
+            .keys()
+            .map(|key| key.pair)
             .collect::<BTreeSet<_>>()
             .len();
 
@@ -346,12 +372,19 @@ impl World {
     }
 }
 
-fn ordered_body_pair(a: BodyHandle, b: BodyHandle) -> (BodyHandle, BodyHandle) {
-    if a <= b {
-        (a, b)
-    } else {
-        (b, a)
+fn strongest_contact_per_pair(contacts: &[ContactObservation]) -> Vec<&ContactObservation> {
+    let mut strongest = BTreeMap::<ContactPairKey, &ContactObservation>::new();
+    for contact in contacts {
+        strongest
+            .entry(contact.pair_key)
+            .and_modify(|current| {
+                if contact.depth > current.depth {
+                    *current = contact;
+                }
+            })
+            .or_insert(contact);
     }
+    strongest.into_values().collect()
 }
 
 fn combine_materials(a: Material, b: Material) -> Material {

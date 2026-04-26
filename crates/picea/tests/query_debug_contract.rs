@@ -1,8 +1,9 @@
 use picea::math::{point::Point, vector::Vector};
 use picea::prelude::{
-    BodyDesc, BodyType, ColliderDesc, CollisionFilter, ContactEvent, ContactId, DebugSnapshot,
-    DebugSnapshotOptions, ManifoldId, Material, Pose, QueryFilter, QueryPipeline, SharedShape,
-    SimulationPipeline, StepConfig, StepReport, StepStats, World, WorldDesc, WorldEvent,
+    BodyDesc, BodyType, ColliderDesc, CollisionFilter, ContactEvent, ContactFeatureId, ContactId,
+    ContactReductionReason, DebugSnapshot, DebugSnapshotOptions, ManifoldId, Material, Pose,
+    QueryFilter, QueryPipeline, SharedShape, SimulationPipeline, StepConfig, StepReport, StepStats,
+    World, WorldDesc, WorldEvent,
 };
 
 fn step_once(world: &mut World) -> StepReport {
@@ -116,9 +117,11 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
             body_b,
             collider_a,
             collider_b,
+            feature_id: ContactFeatureId::default(),
             point: Point::new(1.0, 0.0),
             normal: Vector::new(-1.0, 0.0),
             depth: 0.125,
+            reduction_reason: ContactReductionReason::Clipped,
         })],
     };
 
@@ -153,10 +156,18 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
     assert_eq!(collider.filter, filter_a);
 
     assert_eq!(snapshot.contacts[0].colliders, [collider_a, collider_b]);
+    assert_eq!(snapshot.contacts[0].feature_id, ContactFeatureId::default());
+    assert_eq!(
+        snapshot.contacts[0].reduction_reason,
+        ContactReductionReason::Clipped
+    );
     assert_eq!(
         snapshot.manifolds[0].contact_ids,
         vec![ContactId::default()]
     );
+    assert_eq!(snapshot.manifolds[0].points.len(), 1);
+    assert_eq!(snapshot.manifolds[0].normal, Vector::new(-1.0, 0.0));
+    assert_eq!(snapshot.manifolds[0].depth, 0.125);
 }
 
 #[test]

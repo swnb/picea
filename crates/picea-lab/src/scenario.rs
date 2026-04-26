@@ -23,14 +23,16 @@ pub enum ScenarioId {
     Stack4,
     JointAnchor,
     BroadphaseSparse,
+    SatPolygon,
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::FallingBoxContact,
         Self::Stack4,
         Self::JointAnchor,
         Self::BroadphaseSparse,
+        Self::SatPolygon,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -39,6 +41,7 @@ impl ScenarioId {
             Self::Stack4 => "stack_4",
             Self::JointAnchor => "joint_anchor",
             Self::BroadphaseSparse => "broadphase_sparse",
+            Self::SatPolygon => "sat_polygon",
         }
     }
 }
@@ -58,6 +61,7 @@ impl FromStr for ScenarioId {
             "stack_4" => Ok(Self::Stack4),
             "joint_anchor" => Ok(Self::JointAnchor),
             "broadphase_sparse" => Ok(Self::BroadphaseSparse),
+            "sat_polygon" => Ok(Self::SatPolygon),
             other => Err(LabError::UnknownScenario(other.to_owned())),
         }
     }
@@ -81,6 +85,7 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::Stack4 => "Four box stack",
                 ScenarioId::JointAnchor => "World anchor joint",
                 ScenarioId::BroadphaseSparse => "Sparse broadphase",
+                ScenarioId::SatPolygon => "SAT polygon manifold",
             },
             description: match id {
                 ScenarioId::FallingBoxContact => "A dynamic box falling into static floor contact.",
@@ -88,6 +93,9 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::JointAnchor => "A body constrained toward a fixed world-space anchor.",
                 ScenarioId::BroadphaseSparse => {
                     "Five static boxes with exactly one broadphase overlap."
+                }
+                ScenarioId::SatPolygon => {
+                    "A rectangle and convex polygon exposing clipped manifold points."
                 }
             },
         })
@@ -192,6 +200,35 @@ pub(crate) fn build_scenario(
             add_box(&mut world, BodyType::Static, 5.0, 0.0, 1.0, 1.0)?;
             add_box(&mut world, BodyType::Static, 10.0, 0.0, 1.0, 1.0)?;
             add_box(&mut world, BodyType::Static, 15.0, 0.0, 1.0, 1.0)?;
+        }
+        ScenarioId::SatPolygon => {
+            world = World::new(WorldDesc {
+                gravity: Vector::default(),
+                enable_sleep: false,
+            });
+            add_box(&mut world, BodyType::Static, 0.0, 0.0, 2.0, 2.0)?;
+            let body = world
+                .create_body(BodyDesc {
+                    body_type: BodyType::Static,
+                    pose: Pose::from_xy_angle(1.5, 0.0, 0.0),
+                    can_sleep: false,
+                    ..BodyDesc::default()
+                })
+                .map_err(|error| LabError::World(error.to_string()))?;
+            world
+                .create_collider(
+                    body,
+                    ColliderDesc {
+                        shape: SharedShape::convex_polygon(vec![
+                            Point::new(-1.0, -1.0),
+                            Point::new(1.0, -1.0),
+                            Point::new(1.0, 1.0),
+                            Point::new(-1.0, 1.0),
+                        ]),
+                        ..ColliderDesc::default()
+                    },
+                )
+                .map_err(|error| LabError::World(error.to_string()))?;
         }
     }
 

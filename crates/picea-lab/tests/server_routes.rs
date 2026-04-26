@@ -40,6 +40,7 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "stack_4",
             "joint_anchor",
             "broadphase_sparse",
+            "sat_polygon",
         ]
     );
 

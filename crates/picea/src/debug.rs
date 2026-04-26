@@ -10,8 +10,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     body::{BodyType, Pose},
     collider::{CollisionFilter, Material, SharedShape},
-    events::{ContactEvent, WorldEvent},
-    handles::{BodyHandle, ColliderHandle, ContactId, JointHandle, ManifoldId, WorldRevision},
+    events::{ContactEvent, ContactReductionReason, WorldEvent},
+    handles::{
+        BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
+        WorldRevision,
+    },
     joint::JointDesc,
     math::{point::Point, vector::Vector, FloatNum},
     pipeline::StepReport,
@@ -326,12 +329,16 @@ pub struct DebugContact {
     pub bodies: [BodyHandle; 2],
     /// Colliders touched by this contact.
     pub colliders: [ColliderHandle; 2],
+    /// Stable geometric feature identity for this contact point.
+    pub feature_id: ContactFeatureId,
     /// World-space contact point.
     pub point: Point,
     /// Contact normal pointing from collider B toward collider A.
     pub normal: Vector,
     /// Penetration depth.
     pub depth: FloatNum,
+    /// Why this contact's manifold was reduced to the exported points.
+    pub reduction_reason: ContactReductionReason,
     /// Cached normal impulse when available.
     pub normal_impulse: FloatNum,
     /// Cached tangent impulse when available.
@@ -344,11 +351,37 @@ impl DebugContact {
             id: self.id,
             bodies: self.bodies,
             colliders: self.colliders,
+            feature_id: self.feature_id,
             point: sanitize_point(self.point),
             normal: sanitize_vector(self.normal),
             depth: sanitize_scalar(self.depth),
+            reduction_reason: self.reduction_reason,
             normal_impulse: sanitize_scalar(self.normal_impulse),
             tangent_impulse: sanitize_scalar(self.tangent_impulse),
+        }
+    }
+}
+
+/// One point inside a debug manifold.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DebugManifoldPoint {
+    /// Contact id associated with this point.
+    pub contact_id: ContactId,
+    /// Stable geometric feature identity for this point.
+    pub feature_id: ContactFeatureId,
+    /// World-space contact point.
+    pub point: Point,
+    /// Penetration depth for this point's manifold.
+    pub depth: FloatNum,
+}
+
+impl DebugManifoldPoint {
+    fn sanitized(&self) -> Self {
+        Self {
+            contact_id: self.contact_id,
+            feature_id: self.feature_id,
+            point: sanitize_point(self.point),
+            depth: sanitize_scalar(self.depth),
         }
     }
 }
@@ -364,6 +397,14 @@ pub struct DebugManifold {
     pub colliders: [ColliderHandle; 2],
     /// Contacts currently attached to the manifold.
     pub contact_ids: Vec<ContactId>,
+    /// Contact points currently attached to the manifold.
+    pub points: Vec<DebugManifoldPoint>,
+    /// Manifold normal pointing from collider B toward collider A.
+    pub normal: Vector,
+    /// Maximum penetration depth among the manifold points.
+    pub depth: FloatNum,
+    /// Why this manifold was reduced to the exported points.
+    pub reduction_reason: ContactReductionReason,
     /// Whether the manifold is active this step.
     pub active: bool,
 }
@@ -727,7 +768,7 @@ impl DebugSnapshot {
                 .collect(),
             joints: self.joints.iter().map(DebugJoint::sanitized).collect(),
             contacts: self.contacts.iter().map(DebugContact::sanitized).collect(),
-            manifolds: self.manifolds.clone(),
+            manifolds: self.manifolds.iter().map(sanitize_manifold).collect(),
             primitives: self
                 .primitives
                 .iter()
@@ -784,9 +825,11 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             id: event.contact_id,
             bodies: [event.body_a, event.body_b],
             colliders: [event.collider_a, event.collider_b],
+            feature_id: event.feature_id,
             point: event.point,
             normal: event.normal,
             depth: event.depth,
+            reduction_reason: event.reduction_reason,
             normal_impulse: 0.0,
             tangent_impulse: 0.0,
         };
@@ -797,18 +840,58 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             .find(|entry| entry.id == event.manifold_id)
         {
             manifold.contact_ids.push(event.contact_id);
+            manifold.points.push(DebugManifoldPoint {
+                contact_id: event.contact_id,
+                feature_id: event.feature_id,
+                point: event.point,
+                depth: event.depth,
+            });
+            if event.depth > manifold.depth {
+                manifold.depth = event.depth;
+                manifold.normal = event.normal;
+            }
+            if event.reduction_reason == ContactReductionReason::DuplicateReduced {
+                manifold.reduction_reason = event.reduction_reason;
+            }
         } else {
             manifolds.push(DebugManifold {
                 id: event.manifold_id,
                 bodies: [event.body_a, event.body_b],
                 colliders: [event.collider_a, event.collider_b],
                 contact_ids: vec![event.contact_id],
+                points: vec![DebugManifoldPoint {
+                    contact_id: event.contact_id,
+                    feature_id: event.feature_id,
+                    point: event.point,
+                    depth: event.depth,
+                }],
+                normal: event.normal,
+                depth: event.depth,
+                reduction_reason: event.reduction_reason,
                 active: true,
             });
         }
     }
 
     (contacts, manifolds)
+}
+
+fn sanitize_manifold(manifold: &DebugManifold) -> DebugManifold {
+    DebugManifold {
+        id: manifold.id,
+        bodies: manifold.bodies,
+        colliders: manifold.colliders,
+        contact_ids: manifold.contact_ids.clone(),
+        points: manifold
+            .points
+            .iter()
+            .map(DebugManifoldPoint::sanitized)
+            .collect(),
+        normal: sanitize_vector(manifold.normal),
+        depth: sanitize_scalar(manifold.depth),
+        reduction_reason: manifold.reduction_reason,
+        active: manifold.active,
+    }
 }
 
 fn active_contact_event(event: &WorldEvent) -> Option<ContactEvent> {

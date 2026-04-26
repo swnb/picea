@@ -120,6 +120,7 @@ pub struct DebugRenderFrame {
     pub bodies: Vec<DebugBody>,
     pub colliders: Vec<DebugCollider>,
     pub contacts: Vec<DebugContact>,
+    pub manifolds: Vec<DebugManifold>,
     pub unmeasured: Vec<String>,
 }
 
@@ -250,6 +251,7 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     bodies: frame.snapshot.bodies.clone(),
                     colliders: frame.snapshot.colliders.clone(),
                     contacts: frame.snapshot.contacts.clone(),
+                    manifolds: frame.snapshot.manifolds.clone(),
                     // These names are intentionally explicit so the viewer does
                     // not present first-slice placeholders as measured facts.
                     unmeasured: ["contact_impulses", "forces", "torques"]

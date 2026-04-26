@@ -58,16 +58,30 @@ function makeFallingBoxFrames(frameCount: number): FrameRecord[] {
             id: 1,
             bodies: [2, 1],
             colliders: [2, 1],
+            feature_id: 1,
             point: { x: center.x, y: 1.5 },
             normal: { x: 0, y: -1 },
             depth: 0.08,
+            reduction_reason: "single_point",
             normal_impulse: 0,
             tangent_impulse: 0,
           },
         ]
       : [];
     snapshot.manifolds = touching
-      ? [{ id: 1, bodies: [2, 1], colliders: [2, 1], contact_ids: [1], active: true }]
+      ? [
+          {
+            id: 1,
+            bodies: [2, 1],
+            colliders: [2, 1],
+            contact_ids: [1],
+            points: [{ contact_id: 1, feature_id: 1, point: { x: center.x, y: 1.5 }, depth: 0.08 }],
+            normal: { x: 0, y: -1 },
+            depth: 0.08,
+            reduction_reason: "single_point",
+            active: true,
+          },
+        ]
       : [];
     snapshot.stats.contact_count = snapshot.contacts.length;
     snapshot.stats.manifold_count = snapshot.manifolds.length;

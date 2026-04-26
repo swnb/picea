@@ -69,6 +69,10 @@ define_handle!(
     "Opaque identifier for a contact in debug and event streams."
 );
 define_handle!(
+    ContactFeatureId,
+    "Opaque identifier for one contact point feature inside a collider-pair manifold."
+);
+define_handle!(
     ManifoldId,
     "Opaque identifier for a contact manifold in debug and event streams."
 );

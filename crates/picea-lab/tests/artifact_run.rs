@@ -176,3 +176,45 @@ fn broadphase_scenario_artifacts_capture_candidate_and_tree_facts() {
         "debug render should no longer mark broadphase candidates as unmeasured"
     );
 }
+
+#[test]
+fn sat_polygon_artifacts_capture_manifold_points_and_normals() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::SatPolygon,
+            frame_count: 1,
+            run_id: Some("sat-polygon-facts".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("sat polygon run should write artifacts");
+
+    let first = run.frames.first().expect("first frame should exist");
+    assert_eq!(first.stats.contact_count, 2);
+    assert_eq!(first.stats.manifold_count, 1);
+    let manifold = first
+        .snapshot
+        .manifolds
+        .first()
+        .expect("snapshot should expose one manifold");
+    assert_eq!(manifold.points.len(), 2);
+    assert_eq!(manifold.normal.x(), -1.0);
+    assert_eq!(manifold.normal.y(), 0.0);
+
+    let render: DebugRenderArtifact = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable"),
+    )
+    .expect("debug render should match schema");
+    let render_first = render
+        .frames
+        .first()
+        .expect("debug render should include sat frame facts");
+    assert_eq!(render_first.contacts.len(), 2);
+    assert_eq!(render_first.manifolds.len(), 1);
+    assert_eq!(render_first.manifolds[0].points.len(), 2);
+}

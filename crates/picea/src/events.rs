@@ -3,9 +3,24 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    handles::{BodyHandle, ColliderHandle, ContactId, JointHandle, ManifoldId},
+    handles::{BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId},
     math::{point::Point, vector::Vector, FloatNum},
 };
+
+/// Stable explanation for how a contact manifold was reduced to exported points.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContactReductionReason {
+    /// A shape pair naturally produced one contact point.
+    #[default]
+    SinglePoint,
+    /// Edge clipping produced the exported 1-2 manifold points.
+    Clipped,
+    /// Near-duplicate clipped points were merged to keep the manifold stable.
+    DuplicateReduced,
+    /// The pair is intentionally outside the M2 convex path and used the legacy fallback.
+    NonM2Fallback,
+}
 
 /// Contact lifecycle information exposed by the stable event stream.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -22,12 +37,16 @@ pub struct ContactEvent {
     pub collider_a: ColliderHandle,
     /// Stable handle for the second collider in the pair.
     pub collider_b: ColliderHandle,
+    /// Stable geometric feature identity for this contact point.
+    pub feature_id: ContactFeatureId,
     /// World-space contact position.
     pub point: Point,
     /// World-space contact normal pointing toward body A.
     pub normal: Vector,
     /// Penetration depth or separation distance for this contact.
     pub depth: FloatNum,
+    /// Why this point set was reduced to the exported manifold.
+    pub reduction_reason: ContactReductionReason,
 }
 
 /// Sleep or wake transitions for a body.
@@ -74,8 +93,12 @@ pub enum WorldEvent {
 #[cfg(test)]
 mod tests {
     use crate::{
-        events::{ContactEvent, NumericsWarningEvent, SleepEvent, WorldEvent},
-        handles::{BodyHandle, ColliderHandle, ContactId, JointHandle, ManifoldId},
+        events::{
+            ContactEvent, ContactReductionReason, NumericsWarningEvent, SleepEvent, WorldEvent,
+        },
+        handles::{
+            BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
+        },
         math::{point::Point, vector::Vector},
     };
 
@@ -88,9 +111,11 @@ mod tests {
             body_b: BodyHandle::from_raw_parts(4, 0),
             collider_a: ColliderHandle::from_raw_parts(5, 0),
             collider_b: ColliderHandle::from_raw_parts(6, 0),
+            feature_id: ContactFeatureId::from_raw_parts(7, 0),
             point: Point::new(7.0, 8.0),
             normal: Vector::new(0.0, 1.0),
             depth: 0.25,
+            reduction_reason: ContactReductionReason::Clipped,
         };
         let sleep = SleepEvent {
             body: BodyHandle::from_raw_parts(9, 0),

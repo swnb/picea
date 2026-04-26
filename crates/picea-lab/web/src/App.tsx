@@ -620,6 +620,8 @@ function EntityInspector({
           <Fact label="point" value={vec(selected.entity.point)} />
           <Fact label="normal" value={vec(selected.entity.normal)} />
           <Fact label="depth" value={selected.entity.depth.toFixed(4)} />
+          <Fact label="feature" value={String(selected.entity.feature_id)} />
+          <Fact label="reduction" value={selected.entity.reduction_reason} />
           <Fact label="normal impulse" value="unmeasured" muted />
           <Fact label="tangent impulse" value="unmeasured" muted />
         </>

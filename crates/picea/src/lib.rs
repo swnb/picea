@@ -17,12 +17,13 @@ pub mod prelude {
         ColliderDesc, ColliderPatch, ColliderView, CollisionFilter, Material, SharedShape,
     };
     pub use super::debug::{
-        DebugBody, DebugCollider, DebugContact, DebugJoint, DebugManifold, DebugPrimitive,
-        DebugSnapshot, DebugSnapshotOptions,
+        DebugBody, DebugCollider, DebugContact, DebugJoint, DebugManifold, DebugManifoldPoint,
+        DebugPrimitive, DebugSnapshot, DebugSnapshotOptions,
     };
-    pub use super::events::{ContactEvent, SleepEvent, WorldEvent};
+    pub use super::events::{ContactEvent, ContactReductionReason, SleepEvent, WorldEvent};
     pub use super::handles::{
-        BodyHandle, ColliderHandle, ContactId, JointHandle, ManifoldId, WorldRevision,
+        BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
+        WorldRevision,
     };
     pub use super::joint::{
         DistanceJointDesc, DistanceJointPatch, JointDesc, JointPatch, JointView,

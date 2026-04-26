@@ -189,7 +189,9 @@ mod tests {
 
     use crate::{
         events::{ContactEvent, SleepEvent, WorldEvent},
-        handles::{BodyHandle, ColliderHandle, ContactId, ManifoldId, WorldRevision},
+        handles::{
+            BodyHandle, ColliderHandle, ContactFeatureId, ContactId, ManifoldId, WorldRevision,
+        },
         math::{point::Point, vector::Vector},
         pipeline::{SimulationPipeline, SimulationWorld, StepConfig, StepOutcome, StepStats},
     };
@@ -248,9 +250,11 @@ mod tests {
             body_b: BodyHandle::from_raw_parts(2, 0),
             collider_a: ColliderHandle::from_raw_parts(3, 0),
             collider_b: ColliderHandle::from_raw_parts(4, 0),
+            feature_id: ContactFeatureId::from_raw_parts(5, 0),
             point: Point::new(2.0, -1.0),
             normal: Vector::new(0.0, 1.0),
             depth: 0.25,
+            reduction_reason: crate::events::ContactReductionReason::SinglePoint,
         });
         let sleep_changed = WorldEvent::SleepChanged(SleepEvent {
             body: BodyHandle::from_raw_parts(2, 0),

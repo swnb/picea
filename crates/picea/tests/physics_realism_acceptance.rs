@@ -77,6 +77,59 @@ fn body_position(world: &World, body: BodyHandle) -> Vector {
 }
 
 #[test]
+fn sat_polygon_manifold_reports_two_points_with_stable_features() {
+    let mut world = no_gravity_world();
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        right,
+        SharedShape::convex_polygon(vec![
+            Point::new(-1.0, -1.0),
+            Point::new(1.0, -1.0),
+            Point::new(1.0, 1.0),
+            Point::new(-1.0, 1.0),
+        ]),
+        Material::default(),
+    );
+
+    let first = step_world(&mut world, 1);
+    let second = step_world(&mut world, 1);
+
+    assert_eq!(first.stats.contact_count, 2);
+    assert_eq!(first.stats.manifold_count, 1);
+    let first_features = first
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            WorldEvent::ContactStarted(contact) => Some(contact.feature_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let second_features = second
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            WorldEvent::ContactPersisted(contact) => Some(contact.feature_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(first_features.len(), 2);
+    assert_eq!(first_features, second_features);
+    assert!(first.events.iter().all(|event| match event {
+        WorldEvent::ContactStarted(contact) =>
+            contact.normal == Vector::new(-1.0, 0.0) && (contact.depth - 0.5).abs() < 1.0e-4,
+        _ => true,
+    }));
+}
+
+#[test]
 fn circles_with_overlapping_aabbs_but_separated_geometry_do_not_contact() {
     // Physical behavior: broadphase AABB overlap should be followed by shape-level narrowing.
     // Two diagonal circles can have overlapping AABBs while their actual circle geometry is
@@ -167,7 +220,6 @@ fn friction_changes_tangential_sliding_speed() {
         attach_shape(&mut world, slider, SharedShape::circle(0.5), material);
 
         step_world(&mut world, 10);
-
         body_velocity(&world, slider).x().abs()
     }
 
