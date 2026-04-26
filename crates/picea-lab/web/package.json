@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:i18n": "node scripts/i18n-contract.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },

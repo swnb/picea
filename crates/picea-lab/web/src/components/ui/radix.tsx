@@ -87,15 +87,18 @@ export function Select({
   onValueChange,
   items,
   className,
+  ariaLabel,
 }: {
   value: string;
   onValueChange: (value: string) => void;
   items: Array<{ value: string; label: string }>;
   className?: string;
+  ariaLabel?: string;
 }) {
   return (
     <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
       <SelectPrimitive.Trigger
+        aria-label={ariaLabel}
         className={cn(
           "inline-flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-lab-line bg-lab-panel2 px-2 text-sm text-lab-text",
           "focus-visible:outline-none focus-visible:shadow-focus",

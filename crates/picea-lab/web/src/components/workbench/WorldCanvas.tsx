@@ -22,6 +22,11 @@ type WorldCanvasProps = {
   frameIndex: number;
   selected: SelectedEntity | null;
   layers: LayerState;
+  labels: {
+    frame: string;
+    colliders: string;
+    contacts: string;
+  };
   onSelect: (entity: SelectedEntity | null) => void;
 };
 
@@ -32,7 +37,7 @@ type Camera = {
   height: number;
 };
 
-export function WorldCanvas({ frames, frameIndex, selected, layers, onSelect }: WorldCanvasProps) {
+export function WorldCanvas({ frames, frameIndex, selected, layers, labels, onSelect }: WorldCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 900, height: 600 });
@@ -88,10 +93,10 @@ export function WorldCanvas({ frames, frameIndex, selected, layers, onSelect }: 
     <div ref={containerRef} className="relative h-full min-h-0 w-full overflow-hidden bg-lab-canvas">
       <canvas ref={canvasRef} className="block h-full w-full cursor-crosshair" onPointerDown={handlePointerDown} />
       <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded border border-lab-line bg-lab-panel/90 px-2 py-1 text-xs text-lab-muted">
-        <span>frame {frame?.frame_index ?? 0}</span>
+        <span>{labels.frame} {frame?.frame_index ?? 0}</span>
         <span className="h-3 w-px bg-lab-line" />
-        <span>{frame?.snapshot.colliders.length ?? 0} colliders</span>
-        <span>{frame?.snapshot.contacts.length ?? 0} contacts</span>
+        <span>{frame?.snapshot.colliders.length ?? 0} {labels.colliders}</span>
+        <span>{frame?.snapshot.contacts.length ?? 0} {labels.contacts}</span>
       </div>
     </div>
   );

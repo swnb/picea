@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleDot,
   Gauge,
+  Languages,
   Layers,
   MousePointer2,
   Pause,
@@ -27,6 +28,26 @@ import { Input } from "./components/ui/input";
 import { PanelHeader, PanelTitle } from "./components/ui/panel";
 import { Checkbox, Select, Slider, Tooltip } from "./components/ui/radix";
 import { demoScenarios, makeDemoFrames } from "./demo";
+import {
+  actionLabel,
+  bodyTypeLabel,
+  booleanLabel,
+  detectInitialLocale,
+  dynamicValueLabel,
+  entityKindLabel,
+  entityLabel,
+  layerLabel,
+  localeLabels,
+  localizeScenario,
+  sourceLabel,
+  statusLabel,
+  storeLocale,
+  supportedLocales,
+  t,
+  type LayerKey,
+  type Locale,
+  type StatusKind,
+} from "./i18n";
 import type { DebugBody, DebugCollider, FrameRecord, ScenarioDescriptor, SelectedEntity, WorkbenchLog } from "./types";
 import { cn } from "./lib/utils";
 
@@ -51,6 +72,7 @@ const defaultLayers: LayerState = {
 };
 
 export function App() {
+  const [locale, setLocale] = useState<Locale>(() => detectInitialLocale());
   const [scenarios, setScenarios] = useState<ScenarioDescriptor[]>(demoScenarios);
   const [selectedScenario, setSelectedScenario] = useState("falling_box_contact");
   const [frameCount, setFrameCount] = useState(120);
@@ -60,9 +82,9 @@ export function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [source, setSource] = useState<"server" | "demo">("demo");
-  const [status, setStatus] = useState<"idle" | "loading" | "playing" | "paused" | "failed">("idle");
+  const [status, setStatus] = useState<StatusKind>("idle");
   const [logs, setLogs] = useState<WorkbenchLog[]>([
-    log("warn", "Rust server not confirmed yet; showing built-in demo frames."),
+    log("warn", t(locale, "log.serverNotConfirmed")),
   ]);
   const [layers, setLayers] = useState<LayerState>(defaultLayers);
   const [useCustomGravity, setUseCustomGravity] = useState(false);
@@ -70,7 +92,12 @@ export function App() {
   const playTimer = useRef<number | null>(null);
 
   const currentFrame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))];
-  const scenario = scenarios.find((entry) => entry.id === selectedScenario) ?? scenarios[0];
+  const scenario = localizeScenario(locale, scenarios.find((entry) => entry.id === selectedScenario) ?? scenarios[0]);
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    storeLocale(locale);
+  }, [locale]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,19 +108,19 @@ export function App() {
         }
         setScenarios(next);
         setSource("server");
-        setLogs((prev) => [log("info", "Connected to /api/scenarios."), ...prev].slice(0, 80));
+        setLogs((prev) => [log("info", t(locale, "log.connectedScenarios")), ...prev].slice(0, 80));
       })
       .catch((error: Error) => {
         if (cancelled) {
           return;
         }
         setSource("demo");
-        setLogs((prev) => [log("warn", `Server unavailable: ${error.message}. Demo fallback is active.`), ...prev].slice(0, 80));
+        setLogs((prev) => [log("warn", t(locale, "log.serverUnavailable", { message: error.message })), ...prev].slice(0, 80));
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
     if (status !== "playing") {
@@ -136,21 +163,22 @@ export function App() {
     try {
       const session = await createSession(selectedScenario, frameCount, gravity);
       if (!session.run_id) {
-        throw new Error("session completed without run_id");
+        throw new Error(t(locale, "error.sessionWithoutRun"));
       }
-      const nextFrames = await fetchFrames(session.run_id);
+      const completedRunId = session.run_id;
+      const nextFrames = await fetchFrames(completedRunId);
       if (nextFrames.length === 0) {
-        throw new Error("frames.jsonl was empty");
+        throw new Error(t(locale, "error.emptyFrames"));
       }
       setSessionId(session.id);
-      setRunId(session.run_id);
+      setRunId(completedRunId);
       setFrames(nextFrames);
       setSource("server");
       setStatus("paused");
       setLogs((prev) =>
         [
-          log("info", `Loaded ${nextFrames.length} frames from run ${session.run_id}.`),
-          log("info", `Session ${session.id} status: ${session.status}.`),
+          log("info", t(locale, "log.loadedFrames", { count: nextFrames.length, runId: completedRunId })),
+          log("info", t(locale, "log.sessionStatus", { sessionId: session.id, status: statusLabel(locale, session.status) })),
           ...prev,
         ].slice(0, 80),
       );
@@ -164,8 +192,8 @@ export function App() {
       setStatus("paused");
       setLogs((prev) =>
         [
-          log("warn", `Server run failed; switched to demo fallback (${messageOf(error)}).`),
-          log("info", `Generated ${nextFrames.length} local demo frames for ${selectedScenario}.`),
+          log("warn", t(locale, "log.serverRunFailed", { message: messageOf(error) })),
+          log("info", t(locale, "log.generatedDemoFrames", { count: nextFrames.length, scenarioId: selectedScenario })),
           ...prev,
         ].slice(0, 80),
       );
@@ -176,14 +204,14 @@ export function App() {
     try {
       const events = openSessionEvents(nextSessionId);
       events.addEventListener("frame", (event) => {
-        setLogs((prev) => [log("info", `SSE frame ${event.data}`), ...prev].slice(0, 80));
+        setLogs((prev) => [log("info", t(locale, "log.sseFrame", { data: event.data })), ...prev].slice(0, 80));
       });
       events.addEventListener("failed", (event) => {
-        setLogs((prev) => [log("error", `SSE failed ${event.data}`), ...prev].slice(0, 80));
+        setLogs((prev) => [log("error", t(locale, "log.sseFailed", { data: event.data })), ...prev].slice(0, 80));
       });
       window.setTimeout(() => events.close(), 2000);
     } catch (error) {
-      setLogs((prev) => [log("warn", `SSE unavailable: ${messageOf(error)}`), ...prev].slice(0, 80));
+      setLogs((prev) => [log("warn", t(locale, "log.sseUnavailable", { message: messageOf(error) })), ...prev].slice(0, 80));
     }
   }
 
@@ -214,7 +242,12 @@ export function App() {
 
     try {
       const session = await controlSession(sessionId, action);
-      setLogs((prev) => [log("info", `Server accepted ${action}: ${session.status}.`), ...prev].slice(0, 80));
+      setLogs((prev) =>
+        [
+          log("info", t(locale, "log.serverAccepted", { action: actionLabel(locale, action), status: statusLabel(locale, session.status) })),
+          ...prev,
+        ].slice(0, 80),
+      );
       setFrameIndex(Math.min(session.current_frame_index, Math.max(0, frames.length - 1)));
       if (session.run_id && action === "reset") {
         const nextFrames = await fetchFrames(session.run_id);
@@ -225,7 +258,9 @@ export function App() {
         }
       }
     } catch (error) {
-      setLogs((prev) => [log("warn", `Server ${action} failed: ${messageOf(error)}.`), ...prev].slice(0, 80));
+      setLogs((prev) =>
+        [log("warn", t(locale, "log.serverControlFailed", { action: actionLabel(locale, action), message: messageOf(error) })), ...prev].slice(0, 80),
+      );
     }
   }
 
@@ -236,6 +271,8 @@ export function App() {
   return (
     <div className="flex h-screen min-h-[720px] flex-col overflow-hidden bg-lab-canvas text-lab-text">
       <Toolbar
+        locale={locale}
+        onLocaleChange={setLocale}
         scenario={scenario}
         scenarios={scenarios}
         selectedScenario={selectedScenario}
@@ -255,7 +292,7 @@ export function App() {
 
       <PanelGroup direction="horizontal" className="min-h-0 flex-1">
         <Panel defaultSize={20} minSize={16} maxSize={30} className="min-w-[240px] border-r border-lab-line bg-lab-panel">
-          <SceneHierarchy frame={currentFrame} selected={selectedEntity} onSelect={setSelectedEntity} />
+          <SceneHierarchy frame={currentFrame} selected={selectedEntity} onSelect={setSelectedEntity} locale={locale} />
         </Panel>
         <ResizeHandle />
         <Panel defaultSize={56} minSize={35} className="min-w-[420px]">
@@ -266,6 +303,11 @@ export function App() {
                 frameIndex={frameIndex}
                 selected={selectedEntity}
                 layers={layers}
+                labels={{
+                  frame: t(locale, "canvas.frame"),
+                  colliders: t(locale, "canvas.colliders"),
+                  contacts: t(locale, "canvas.contacts"),
+                }}
                 onSelect={setSelectedEntity}
               />
             </Panel>
@@ -282,13 +324,14 @@ export function App() {
                 setUseCustomGravity={setUseCustomGravity}
                 gravityY={gravityY}
                 setGravityY={setGravityY}
+                locale={locale}
               />
             </Panel>
           </PanelGroup>
         </Panel>
         <ResizeHandle />
         <Panel defaultSize={24} minSize={18} maxSize={34} className="min-w-[280px] border-l border-lab-line bg-lab-panel">
-          <Inspector frame={currentFrame} selected={selectedDetails} />
+          <Inspector frame={currentFrame} selected={selectedDetails} locale={locale} />
         </Panel>
       </PanelGroup>
     </div>
@@ -296,6 +339,8 @@ export function App() {
 }
 
 function Toolbar({
+  locale,
+  onLocaleChange,
   scenario,
   scenarios,
   selectedScenario,
@@ -312,11 +357,13 @@ function Toolbar({
   layers,
   onLayerChange,
 }: {
+  locale: Locale;
+  onLocaleChange: (locale: Locale) => void;
   scenario: ScenarioDescriptor;
   scenarios: ScenarioDescriptor[];
   selectedScenario: string;
   onScenarioChange: (value: string) => void;
-  status: string;
+  status: StatusKind;
   source: "server" | "demo";
   sessionId: string | null;
   runId: string | null;
@@ -334,67 +381,81 @@ function Toolbar({
         <div className="flex items-center gap-2">
           <Activity className="h-5 w-5 text-lab-accent" />
           <div className="leading-tight">
-            <div className="text-sm font-semibold text-lab-text">picea-lab-web</div>
+            <div className="text-sm font-semibold text-lab-text">{t(locale, "app.name")}</div>
             <div className="truncate text-[11px] text-lab-muted">{scenario.description}</div>
           </div>
         </div>
         <Select
           value={selectedScenario}
           onValueChange={onScenarioChange}
-          items={scenarios.map((entry) => ({ value: entry.id, label: entry.name }))}
+          items={scenarios.map((entry) => ({ value: entry.id, label: localizeScenario(locale, entry).name }))}
           className="ml-2 w-52"
         />
-        <Badge tone={source === "server" ? "green" : "warn"}>{source}</Badge>
-        <Badge tone={status === "failed" ? "danger" : status === "playing" ? "accent" : "neutral"}>{status}</Badge>
+        <Badge tone={source === "server" ? "green" : "warn"}>{sourceLabel(locale, source)}</Badge>
+        <Badge tone={status === "failed" ? "danger" : status === "playing" ? "accent" : "neutral"}>{statusLabel(locale, status)}</Badge>
       </div>
 
       <div className="flex items-center gap-1">
-        <Tooltip label="Run selected scenario">
+        <Tooltip label={t(locale, "tooltip.runScenario")}>
           <Button size="icon" onClick={onRun} disabled={status === "loading"}>
             <Play className="h-4 w-4" />
           </Button>
         </Tooltip>
-        <Tooltip label="Pause playback">
+        <Tooltip label={t(locale, "tooltip.pausePlayback")}>
           <Button size="icon" variant="outline" onClick={onPause}>
             <Pause className="h-4 w-4" />
           </Button>
         </Tooltip>
-        <Tooltip label="Play local timeline">
+        <Tooltip label={t(locale, "tooltip.playTimeline")}>
           <Button size="icon" variant="outline" onClick={onPlay}>
             <Gauge className="h-4 w-4" />
           </Button>
         </Tooltip>
-        <Tooltip label="Advance one frame">
+        <Tooltip label={t(locale, "tooltip.advanceFrame")}>
           <Button size="icon" variant="outline" onClick={onStep}>
             <SkipForward className="h-4 w-4" />
           </Button>
         </Tooltip>
-        <Tooltip label="Reset timeline">
+        <Tooltip label={t(locale, "tooltip.resetTimeline")}>
           <Button size="icon" variant="outline" onClick={onReset}>
             <RotateCcw className="h-4 w-4" />
           </Button>
         </Tooltip>
-        <LayerMenu layers={layers} onLayerChange={onLayerChange} />
+        <LayerMenu locale={locale} layers={layers} onLayerChange={onLayerChange} />
+        <Tooltip label={t(locale, "app.language")}>
+          <div className="ml-1 flex items-center gap-1">
+            <Languages className="h-4 w-4 text-lab-muted" />
+            <Select
+              value={locale}
+              onValueChange={(value) => onLocaleChange(value as Locale)}
+              items={supportedLocales.map((entry) => ({ value: entry, label: localeLabels[entry] }))}
+              ariaLabel={t(locale, "app.language")}
+              className="w-24"
+            />
+          </div>
+        </Tooltip>
       </div>
 
       <div className="hidden min-w-[220px] flex-col text-right text-[11px] text-lab-muted xl:flex">
-        <span>{sessionId ?? "no session"}</span>
-        <span>{runId ?? "no run artifact"}</span>
+        <span>{sessionId ?? t(locale, "app.noSession")}</span>
+        <span>{runId ?? t(locale, "app.noRunArtifact")}</span>
       </div>
     </header>
   );
 }
 
 function LayerMenu({
+  locale,
   layers,
   onLayerChange,
 }: {
+  locale: Locale;
   layers: LayerState;
   onLayerChange: (key: keyof LayerState, value: boolean) => void;
 }) {
   return (
     <DropdownMenu.Root>
-      <Tooltip label="Canvas layers">
+      <Tooltip label={t(locale, "tooltip.canvasLayers")}>
         <DropdownMenu.Trigger asChild>
           <Button size="icon" variant="outline">
             <Layers className="h-4 w-4" />
@@ -407,7 +468,7 @@ function LayerMenu({
           sideOffset={8}
           className="z-50 w-52 rounded-md border border-lab-line bg-lab-panel2 p-2 text-sm text-lab-text shadow-xl"
         >
-          {(Object.keys(layers) as Array<keyof LayerState>).map((key) => (
+          {(Object.keys(layers) as Array<LayerKey>).map((key) => (
             <DropdownMenu.CheckboxItem
               key={key}
               checked={layers[key]}
@@ -417,7 +478,7 @@ function LayerMenu({
               <DropdownMenu.ItemIndicator>
                 <ChevronRight className="h-3.5 w-3.5 rotate-90 text-lab-accent" />
               </DropdownMenu.ItemIndicator>
-              <span className="capitalize">{key}</span>
+              <span>{layerLabel(locale, key)}</span>
             </DropdownMenu.CheckboxItem>
           ))}
         </DropdownMenu.Content>
@@ -430,50 +491,52 @@ function SceneHierarchy({
   frame,
   selected,
   onSelect,
+  locale,
 }: {
   frame: FrameRecord;
   selected: SelectedEntity | null;
   onSelect: (entity: SelectedEntity) => void;
+  locale: Locale;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PanelHeader>
-        <PanelTitle>Scene hierarchy</PanelTitle>
+        <PanelTitle>{t(locale, "panel.sceneHierarchy")}</PanelTitle>
         <Badge>{frame.snapshot.stats.step_index}</Badge>
       </PanelHeader>
       <div className="min-h-0 flex-1 overflow-auto p-2">
-        <TreeGroup icon={<Box className="h-4 w-4" />} label="Bodies" count={frame.snapshot.bodies.length}>
+        <TreeGroup icon={<Box className="h-4 w-4" />} label={t(locale, "tree.bodies")} count={frame.snapshot.bodies.length} locale={locale}>
           {frame.snapshot.bodies.map((body) => (
             <TreeRow
               key={body.handle}
               active={selected?.kind === "body" && selected.id === body.handle}
               icon={<Square className="h-3.5 w-3.5" />}
-              label={`Body ${body.handle}`}
-              meta={body.body_type}
+              label={entityLabel(locale, "body", body.handle)}
+              meta={bodyTypeLabel(locale, body.body_type)}
               onClick={() => onSelect({ kind: "body", id: body.handle })}
             />
           ))}
         </TreeGroup>
-        <TreeGroup icon={<Layers className="h-4 w-4" />} label="Colliders" count={frame.snapshot.colliders.length}>
+        <TreeGroup icon={<Layers className="h-4 w-4" />} label={t(locale, "tree.colliders")} count={frame.snapshot.colliders.length} locale={locale}>
           {frame.snapshot.colliders.map((collider) => (
             <TreeRow
               key={collider.handle}
               active={selected?.kind === "collider" && selected.id === collider.handle}
               icon={<CircleDot className="h-3.5 w-3.5" />}
-              label={`Collider ${collider.handle}`}
-              meta={`body ${collider.body}`}
+              label={entityLabel(locale, "collider", collider.handle)}
+              meta={entityLabel(locale, "body", collider.body)}
               onClick={() => onSelect({ kind: "collider", id: collider.handle })}
             />
           ))}
         </TreeGroup>
-        <TreeGroup icon={<Waypoints className="h-4 w-4" />} label="Contacts" count={frame.snapshot.contacts.length}>
+        <TreeGroup icon={<Waypoints className="h-4 w-4" />} label={t(locale, "tree.contacts")} count={frame.snapshot.contacts.length} locale={locale}>
           {frame.snapshot.contacts.map((contact) => (
             <TreeRow
               key={contact.id}
               active={selected?.kind === "contact" && selected.id === contact.id}
               icon={<MousePointer2 className="h-3.5 w-3.5" />}
-              label={`Contact ${contact.id}`}
-              meta={`depth ${contact.depth.toFixed(3)}`}
+              label={entityLabel(locale, "contact", contact.id)}
+              meta={`${t(locale, "fact.depth")} ${contact.depth.toFixed(3)}`}
               onClick={() => onSelect({ kind: "contact", id: contact.id })}
             />
           ))}
@@ -488,11 +551,13 @@ function TreeGroup({
   label,
   count,
   children,
+  locale,
 }: {
   icon: ReactNode;
   label: string;
   count: number;
   children: ReactNode;
+  locale: Locale;
 }) {
   return (
     <section className="mb-3">
@@ -501,7 +566,7 @@ function TreeGroup({
         <span className="flex-1">{label}</span>
         <span>{count}</span>
       </div>
-      <div className="space-y-0.5">{count > 0 ? children : <div className="px-8 py-1 text-xs text-lab-muted">empty</div>}</div>
+      <div className="space-y-0.5">{count > 0 ? children : <div className="px-8 py-1 text-xs text-lab-muted">{t(locale, "tree.empty")}</div>}</div>
     </section>
   );
 }
@@ -538,8 +603,10 @@ function TreeRow({
 function Inspector({
   frame,
   selected,
+  locale,
 }: {
   frame: FrameRecord;
+  locale: Locale;
   selected:
     | { kind: "body"; entity: DebugBody }
     | { kind: "collider"; entity: DebugCollider; body?: DebugBody }
@@ -550,35 +617,32 @@ function Inspector({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PanelHeader>
-        <PanelTitle>Inspector</PanelTitle>
-        <Badge tone="warn">first slice facts</Badge>
+        <PanelTitle>{t(locale, "panel.inspector")}</PanelTitle>
+        <Badge tone="warn">{t(locale, "panel.firstSliceFacts")}</Badge>
       </PanelHeader>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         <div className="mb-3 grid grid-cols-3 gap-2">
-          <Metric label="bodies" value={frame.snapshot.bodies.length} />
-          <Metric label="contacts" value={frame.snapshot.contacts.length} />
-          <Metric label="dt" value={frame.snapshot.meta.dt.toFixed(4)} />
+          <Metric label={t(locale, "metric.bodies")} value={frame.snapshot.bodies.length} />
+          <Metric label={t(locale, "metric.contacts")} value={frame.snapshot.contacts.length} />
+          <Metric label={t(locale, "metric.dt")} value={frame.snapshot.meta.dt.toFixed(4)} />
         </div>
 
         <section className="mb-4 rounded-md border border-lab-line bg-lab-panel2 p-3">
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-normal text-lab-muted">Measurement status</h3>
-            <Badge tone="warn">unmeasured</Badge>
+            <h3 className="text-xs font-semibold uppercase tracking-normal text-lab-muted">{t(locale, "inspector.measurementStatus")}</h3>
+            <Badge tone="warn">{t(locale, "inspector.unmeasured")}</Badge>
           </div>
-          <Fact label="forces" value="unmeasured" muted />
-          <Fact label="torques" value="unmeasured" muted />
-          <Fact label="broadphase candidates" value={String(frame.snapshot.stats.broadphase_candidate_count)} />
-          <Fact
-            label="warm-start"
-            value={warmStartTriplet(frame.snapshot.stats)}
-          />
+          <Fact label={t(locale, "inspector.forces")} value={t(locale, "inspector.unmeasured")} muted />
+          <Fact label={t(locale, "inspector.torques")} value={t(locale, "inspector.unmeasured")} muted />
+          <Fact label={t(locale, "inspector.broadphaseCandidates")} value={String(frame.snapshot.stats.broadphase_candidate_count)} />
+          <Fact label={t(locale, "inspector.warmStart")} value={warmStartTriplet(frame.snapshot.stats)} />
         </section>
 
         {selected ? (
-          <EntityInspector selected={selected} />
+          <EntityInspector selected={selected} locale={locale} />
         ) : (
           <div className="rounded-md border border-lab-line bg-lab-panel2 p-4 text-sm text-lab-muted">
-            Select a body, collider, contact, or joint in the hierarchy or canvas.
+            {t(locale, "inspector.emptySelection")}
           </div>
         )}
       </div>
@@ -588,67 +652,69 @@ function Inspector({
 
 function EntityInspector({
   selected,
+  locale,
 }: {
+  locale: Locale;
   selected:
     | { kind: "body"; entity: DebugBody }
     | { kind: "collider"; entity: DebugCollider; body?: DebugBody }
     | { kind: "contact"; entity: FrameRecord["snapshot"]["contacts"][number] }
     | { kind: "joint"; entity: FrameRecord["snapshot"]["joints"][number] };
 }) {
-  const title = `${selected.kind} ${entityId(selected)}`;
+  const title = entityLabel(locale, selected.kind, entityId(selected));
   return (
     <section className="rounded-md border border-lab-line bg-lab-panel2 p-3">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold capitalize text-lab-text">{title}</h3>
-        <Badge tone="accent">{selected.kind}</Badge>
+        <h3 className="text-sm font-semibold text-lab-text">{title}</h3>
+        <Badge tone="accent">{entityKindLabel(locale, selected.kind)}</Badge>
       </div>
       {selected.kind === "body" && (
         <>
-          <Fact label="type" value={selected.entity.body_type} />
-          <Fact label="position" value={vec(selected.entity.transform.translation)} />
-          <Fact label="mass" value={selected.entity.mass_properties.mass.toFixed(3)} />
-          <Fact label="inverse mass" value={selected.entity.mass_properties.inverse_mass.toFixed(3)} />
-          <Fact label="center of mass" value={vec(selected.entity.mass_properties.local_center_of_mass)} />
-          <Fact label="inertia" value={selected.entity.mass_properties.inertia.toFixed(3)} />
-          <Fact label="inverse inertia" value={selected.entity.mass_properties.inverse_inertia.toFixed(3)} />
-          <Fact label="linear velocity" value={vec(selected.entity.linear_velocity)} />
-          <Fact label="angular velocity" value={selected.entity.angular_velocity.toFixed(3)} />
-          <Fact label="sleeping" value={String(selected.entity.sleeping)} />
+          <Fact label={t(locale, "fact.type")} value={bodyTypeLabel(locale, selected.entity.body_type)} />
+          <Fact label={t(locale, "fact.position")} value={vec(selected.entity.transform.translation)} />
+          <Fact label={t(locale, "fact.mass")} value={selected.entity.mass_properties.mass.toFixed(3)} />
+          <Fact label={t(locale, "fact.inverseMass")} value={selected.entity.mass_properties.inverse_mass.toFixed(3)} />
+          <Fact label={t(locale, "fact.centerOfMass")} value={vec(selected.entity.mass_properties.local_center_of_mass)} />
+          <Fact label={t(locale, "fact.inertia")} value={selected.entity.mass_properties.inertia.toFixed(3)} />
+          <Fact label={t(locale, "fact.inverseInertia")} value={selected.entity.mass_properties.inverse_inertia.toFixed(3)} />
+          <Fact label={t(locale, "fact.linearVelocity")} value={vec(selected.entity.linear_velocity)} />
+          <Fact label={t(locale, "fact.angularVelocity")} value={selected.entity.angular_velocity.toFixed(3)} />
+          <Fact label={t(locale, "fact.sleeping")} value={booleanLabel(locale, selected.entity.sleeping)} />
         </>
       )}
       {selected.kind === "collider" && (
         <>
-          <Fact label="body" value={String(selected.entity.body)} />
-          <Fact label="shape" value={selected.entity.shape.kind} />
-          <Fact label="center" value={vec(selected.entity.world_transform.translation)} />
-          <Fact label="friction" value={selected.entity.material.friction.toFixed(3)} />
-          <Fact label="restitution" value={selected.entity.material.restitution.toFixed(3)} />
-          <Fact label="sensor" value={String(selected.entity.is_sensor)} />
-          <Fact label="owner velocity" value={selected.body ? vec(selected.body.linear_velocity) : "unknown"} />
+          <Fact label={t(locale, "fact.body")} value={String(selected.entity.body)} />
+          <Fact label={t(locale, "fact.shape")} value={dynamicValueLabel(locale, selected.entity.shape.kind)} />
+          <Fact label={t(locale, "fact.center")} value={vec(selected.entity.world_transform.translation)} />
+          <Fact label={t(locale, "fact.friction")} value={selected.entity.material.friction.toFixed(3)} />
+          <Fact label={t(locale, "fact.restitution")} value={selected.entity.material.restitution.toFixed(3)} />
+          <Fact label={t(locale, "fact.sensor")} value={booleanLabel(locale, selected.entity.is_sensor)} />
+          <Fact label={t(locale, "fact.ownerVelocity")} value={selected.body ? vec(selected.body.linear_velocity) : t(locale, "common.unknown")} />
         </>
       )}
       {selected.kind === "contact" && (
         <>
-          <Fact label="point" value={vec(selected.entity.point)} />
-          <Fact label="normal" value={vec(selected.entity.normal)} />
-          <Fact label="depth" value={selected.entity.depth.toFixed(4)} />
-          <Fact label="feature" value={String(selected.entity.feature_id)} />
-          <Fact label="reduction" value={selected.entity.reduction_reason} />
-          <Fact label="warm-start" value={selected.entity.warm_start_reason ?? "miss_no_previous"} />
-          <Fact label="warm-start normal" value={selected.entity.normal_impulse.toFixed(4)} />
-          <Fact label="warm-start tangent" value={selected.entity.tangent_impulse.toFixed(4)} />
-          <Fact label="solver normal" value={(selected.entity.solver_normal_impulse ?? 0).toFixed(4)} />
-          <Fact label="solver tangent" value={(selected.entity.solver_tangent_impulse ?? 0).toFixed(4)} />
-          <Fact label="normal clamped" value={String(selected.entity.normal_impulse_clamped ?? false)} />
-          <Fact label="tangent clamped" value={String(selected.entity.tangent_impulse_clamped ?? false)} />
-          <Fact label="restitution" value={selected.entity.restitution_applied ? "applied" : "suppressed"} />
+          <Fact label={t(locale, "fact.point")} value={vec(selected.entity.point)} />
+          <Fact label={t(locale, "fact.normal")} value={vec(selected.entity.normal)} />
+          <Fact label={t(locale, "fact.depth")} value={selected.entity.depth.toFixed(4)} />
+          <Fact label={t(locale, "fact.feature")} value={String(selected.entity.feature_id)} />
+          <Fact label={t(locale, "fact.reduction")} value={dynamicValueLabel(locale, selected.entity.reduction_reason)} />
+          <Fact label={t(locale, "inspector.warmStart")} value={dynamicValueLabel(locale, selected.entity.warm_start_reason ?? "miss_no_previous")} />
+          <Fact label={t(locale, "fact.warmStartNormal")} value={selected.entity.normal_impulse.toFixed(4)} />
+          <Fact label={t(locale, "fact.warmStartTangent")} value={selected.entity.tangent_impulse.toFixed(4)} />
+          <Fact label={t(locale, "fact.solverNormal")} value={(selected.entity.solver_normal_impulse ?? 0).toFixed(4)} />
+          <Fact label={t(locale, "fact.solverTangent")} value={(selected.entity.solver_tangent_impulse ?? 0).toFixed(4)} />
+          <Fact label={t(locale, "fact.normalClamped")} value={booleanLabel(locale, selected.entity.normal_impulse_clamped ?? false)} />
+          <Fact label={t(locale, "fact.tangentClamped")} value={booleanLabel(locale, selected.entity.tangent_impulse_clamped ?? false)} />
+          <Fact label={t(locale, "fact.restitution")} value={selected.entity.restitution_applied ? t(locale, "contact.applied") : t(locale, "contact.suppressed")} />
         </>
       )}
       {selected.kind === "joint" && (
         <>
-          <Fact label="kind" value={selected.entity.kind} />
-          <Fact label="bodies" value={selected.entity.bodies.join(", ")} />
-          <Fact label="anchors" value={selected.entity.anchors.map(vec).join(" -> ")} />
+          <Fact label={t(locale, "fact.kind")} value={dynamicValueLabel(locale, selected.entity.kind)} />
+          <Fact label={t(locale, "tree.bodies")} value={selected.entity.bodies.join(", ")} />
+          <Fact label={t(locale, "fact.anchors")} value={selected.entity.anchors.map(vec).join(" -> ")} />
         </>
       )}
     </section>
@@ -676,6 +742,7 @@ function BottomTimeline({
   setUseCustomGravity,
   gravityY,
   setGravityY,
+  locale,
 }: {
   frames: FrameRecord[];
   frameIndex: number;
@@ -687,6 +754,7 @@ function BottomTimeline({
   setUseCustomGravity: (value: boolean) => void;
   gravityY: number;
   setGravityY: (value: number) => void;
+  locale: Locale;
 }) {
   const frame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))];
   return (
@@ -694,13 +762,13 @@ function BottomTimeline({
       <PanelHeader>
         <Tabs.List className="flex items-center gap-1">
           <Tabs.Trigger value="timeline" className="tab-trigger">
-            Timeline
+            {t(locale, "timeline.timeline")}
           </Tabs.Trigger>
           <Tabs.Trigger value="logs" className="tab-trigger">
-            Logs
+            {t(locale, "timeline.logs")}
           </Tabs.Trigger>
           <Tabs.Trigger value="run" className="tab-trigger">
-            Run setup
+            {t(locale, "timeline.runSetup")}
           </Tabs.Trigger>
         </Tabs.List>
         <div className="flex items-center gap-2 text-xs text-lab-muted">
@@ -711,15 +779,15 @@ function BottomTimeline({
 
       <Tabs.Content value="timeline" className="min-h-0 flex-1 p-3 outline-none">
         <div className="mb-3 flex items-center gap-3">
-          <span className="w-20 text-xs text-lab-muted">frame {frameIndex}</span>
+          <span className="w-20 text-xs text-lab-muted">{t(locale, "timeline.frameAt", { frame: frameIndex })}</span>
           <Slider value={frameIndex} min={0} max={Math.max(0, frames.length - 1)} step={1} onValueChange={onFrameChange} />
-          <span className="w-20 text-right text-xs text-lab-muted">{frames.length} total</span>
+          <span className="w-20 text-right text-xs text-lab-muted">{t(locale, "timeline.totalFrames", { count: frames.length })}</span>
         </div>
         <div className="grid grid-cols-4 gap-2">
-          <Metric label="step" value={frame?.snapshot.stats.step_index ?? 0} />
-          <Metric label="sim time" value={(frame?.snapshot.meta.simulated_time ?? 0).toFixed(3)} />
-          <Metric label="gravity" value={vec(frame?.snapshot.meta.gravity ?? { x: 0, y: 0 })} />
-          <Metric label="manifolds" value={frame?.snapshot.manifolds.length ?? 0} />
+          <Metric label={t(locale, "metric.step")} value={frame?.snapshot.stats.step_index ?? 0} />
+          <Metric label={t(locale, "metric.simTime")} value={(frame?.snapshot.meta.simulated_time ?? 0).toFixed(3)} />
+          <Metric label={t(locale, "metric.gravity")} value={vec(frame?.snapshot.meta.gravity ?? { x: 0, y: 0 })} />
+          <Metric label={t(locale, "metric.manifolds")} value={frame?.snapshot.manifolds.length ?? 0} />
         </div>
       </Tabs.Content>
 
@@ -739,7 +807,7 @@ function BottomTimeline({
 
       <Tabs.Content value="run" className="min-h-0 flex-1 p-3 outline-none">
         <div className="grid max-w-2xl grid-cols-[140px_1fr] items-center gap-3">
-          <label className="text-sm text-lab-muted">frame count</label>
+          <label className="text-sm text-lab-muted">{t(locale, "run.frameCount")}</label>
           <Input
             type="number"
             min={1}
@@ -747,9 +815,9 @@ function BottomTimeline({
             value={frameCount}
             onChange={(event) => setFrameCount(Math.max(1, Number(event.target.value) || 1))}
           />
-          <label className="text-sm text-lab-muted">gravity override</label>
-          <Checkbox checked={useCustomGravity} onCheckedChange={setUseCustomGravity} label="send override with next run" />
-          <label className="text-sm text-lab-muted">gravity y</label>
+          <label className="text-sm text-lab-muted">{t(locale, "run.gravityOverride")}</label>
+          <Checkbox checked={useCustomGravity} onCheckedChange={setUseCustomGravity} label={t(locale, "run.sendOverride")} />
+          <label className="text-sm text-lab-muted">{t(locale, "run.gravityY")}</label>
           <Input
             type="number"
             step="0.1"
