@@ -55,6 +55,10 @@ function warmStartTriplet(stats: FrameRecord["snapshot"]["stats"]) {
   return `${stats.warm_start_hit_count ?? 0}/${stats.warm_start_miss_count ?? 0}/${stats.warm_start_drop_count ?? 0}`;
 }
 
+function traceStage(locale: Locale, termination: string, iterations: number): string {
+  return `${dynamicValueLabel(locale, termination)} / ${iterations}`;
+}
+
 type LayerState = {
   shapes: boolean;
   aabbs: boolean;
@@ -827,6 +831,14 @@ function EntityInspector({
           <Fact label={t(locale, "fact.normalClamped")} value={booleanLabel(locale, selected.entity.normal_impulse_clamped ?? false)} />
           <Fact label={t(locale, "fact.tangentClamped")} value={booleanLabel(locale, selected.entity.tangent_impulse_clamped ?? false)} />
           <Fact label={t(locale, "fact.restitution")} value={selected.entity.restitution_applied ? t(locale, "contact.applied") : t(locale, "contact.suppressed")} />
+          {selected.entity.generic_convex_trace && (
+            <>
+              <Fact label={t(locale, "fact.genericFallback")} value={dynamicValueLabel(locale, selected.entity.generic_convex_trace.fallback_reason)} />
+              <Fact label={t(locale, "fact.gjk")} value={traceStage(locale, selected.entity.generic_convex_trace.gjk_termination, selected.entity.generic_convex_trace.gjk_iterations)} />
+              <Fact label={t(locale, "fact.epa")} value={traceStage(locale, selected.entity.generic_convex_trace.epa_termination, selected.entity.generic_convex_trace.epa_iterations)} />
+              <Fact label={t(locale, "fact.simplex")} value={String(selected.entity.generic_convex_trace.simplex_len)} />
+            </>
+          )}
         </>
       )}
       {selected.kind === "joint" && (

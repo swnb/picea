@@ -46,3 +46,23 @@ assert.match(
   /onSelect=\{\(event\) => event\.preventDefault\(\)\}/,
   "Layer checkbox items should prevent Radix DropdownMenu's default select-close behavior.",
 );
+assert.match(
+  appSource,
+  /generic_convex_trace/,
+  "Contact inspector should render M7 generic convex GJK/EPA trace facts.",
+);
+assert.match(
+  appSource,
+  /fact\.genericFallback/,
+  "Contact inspector should label the generic convex fallback decision.",
+);
+assert.match(
+  appSource,
+  /fact\.gjk/,
+  "Contact inspector should label GJK termination and iteration facts.",
+);
+assert.match(
+  appSource,
+  /fact\.epa/,
+  "Contact inspector should label EPA termination and iteration facts.",
+);

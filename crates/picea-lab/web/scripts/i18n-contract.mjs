@@ -19,6 +19,7 @@ vm.runInNewContext(compiled, {
 
 const {
   bodyTypeLabel,
+  dynamicValueLabel,
   entityLabel,
   layerLabel,
   localizeScenario,
@@ -44,6 +45,8 @@ assert.equal(statusLabel("zh-CN", "playing"), "播放中");
 assert.equal(sourceLabel("en-US", "server"), "server");
 assert.equal(layerLabel("zh-CN", "contacts"), "接触点");
 assert.equal(entityLabel("zh-CN", "body", 2), "物体 2");
+assert.equal(dynamicValueLabel("zh-CN", "generic_convex_fallback"), "通用凸形回退");
+assert.equal(dynamicValueLabel("en-US", "epa_failure_contained"), "EPA failure contained");
 assert.equal(
   JSON.stringify(localizeScenario("zh-CN", {
     id: "falling_box_contact",
