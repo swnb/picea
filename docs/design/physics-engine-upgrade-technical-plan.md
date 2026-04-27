@@ -197,8 +197,8 @@ flow rather than micro-optimizing isolated helpers:
 
 ## Acceptance Order
 
-1. M10.5 closeout: make docs, backlog, and verification routing agree that the
-   M1-M10 capability line is complete.
+1. M10.5 closeout (completed 2026-04-27): make docs, backlog, and verification
+   routing agree that the M1-M10 capability line is complete.
 2. M11 performance substrate: broadphase leaf indexing, query reuse, shape
    geometry caches, allocation reduction, and benchmark counter baselines.
 3. M12 active island solver: compact active arrays, island-level contact/joint

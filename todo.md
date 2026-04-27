@@ -101,8 +101,8 @@
 
 ### M10.5 Documentation And Backlog Closeout
 
-- [ ] 将生产 milestone、升级技术方案、AI 路由和本文件校准到 M10 后状态。
-- [ ] 验证 YAML、diff whitespace 和文档范围。
+- [x] 将生产 milestone、升级技术方案、AI 路由和本文件校准到 M10 后状态。
+- [x] 验证 YAML、diff whitespace 和文档范围。
 
 ### M11 Performance Substrate
 

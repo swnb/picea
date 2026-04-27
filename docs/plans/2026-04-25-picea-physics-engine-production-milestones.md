@@ -753,7 +753,12 @@ rtk proxy git diff --check
 
 ## M10.5 Documentation And Backlog Closeout
 
-> Status: planned.
+> Status: completed 2026-04-27.
+>
+> Completion notes: M10 is marked completed, the post-M10 upgrade plan now frames
+> the remaining work as system-quality follow-up, `todo.md` keeps M1-M10 as a
+> completed production baseline, and AI routing/catalog metadata points future
+> implementation sessions to M11-M14.
 
 ### Goal
 

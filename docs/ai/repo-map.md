@@ -2,7 +2,10 @@
 
 当前路由优先级：先看实时仓库事实（`git status`、Cargo manifests、`crates/picea/src/lib.rs`、最新验证输出），再用本文定位模块。
 
-`docs/plans/2026-04-18-picea-physics-engine-milestones.md` 只用于当前仍有效的 milestone 边界或历史归档；其中旧 `Scene` / `Context` / `picea-web` / wasm 叙述不代表当前默认路由。
+`docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`
+是当前生产化 milestone 路线；`docs/design/physics-engine-upgrade-technical-plan.md`
+解释 M11-M14 的系统升级方向。`docs/plans/2026-04-18-picea-physics-engine-milestones.md`
+只用于历史归档；其中旧 `Scene` / `Context` / `picea-web` / wasm 叙述不代表当前默认路由。
 
 仓库是一个 Rust workspace，当前三类 crate / 工具入口：
 
@@ -73,4 +76,6 @@
 
 - `docs/ai/index.md`：问题类型路由
 - `docs/ai/doc-catalog.yaml`：文档和关键代码索引
-- `docs/plans/2026-04-18-picea-physics-engine-milestones.md`：当前仍有效的 milestone 边界与历史归档；不要把旧 `Scene` / `Context` / `picea-web` / wasm 条目当作当前默认路由
+- `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`：当前生产化 milestone 边界、M11-M14 路线和验收门
+- `docs/design/physics-engine-upgrade-technical-plan.md`：post-M10 系统升级设计方向
+- `docs/plans/2026-04-18-picea-physics-engine-milestones.md`：历史归档；不要把旧 `Scene` / `Context` / `picea-web` / wasm 条目当作当前默认路由
