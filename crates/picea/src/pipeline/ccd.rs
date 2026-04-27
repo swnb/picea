@@ -14,6 +14,7 @@ use crate::{
 
 const CCD_TOI_EPSILON: FloatNum = 1.0e-5;
 const CCD_CLAMP_SLOP: FloatNum = 1.0e-3;
+const CLIP_SUPPORT_EPSILON: FloatNum = 1.0e-4;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct CcdPoseClampOutcome {
@@ -55,6 +56,18 @@ struct MovingCircle {
 }
 
 #[derive(Clone, Debug)]
+struct MovingConvex {
+    body: BodyHandle,
+    collider: ColliderHandle,
+    start: Point,
+    end: Point,
+    start_vertices: Vec<Point>,
+    swept_aabb: ShapeAabb,
+    filter: CollisionFilter,
+    is_sensor: bool,
+}
+
+#[derive(Clone, Debug)]
 struct StaticConvex {
     body: BodyHandle,
     collider: ColliderHandle,
@@ -72,10 +85,9 @@ struct CcdHit {
     static_collider: ColliderHandle,
     swept_start: Point,
     swept_end: Point,
-    radius: FloatNum,
     toi: FloatNum,
     exit: FloatNum,
-    normal: Vector,
+    toi_point: Point,
 }
 
 pub(crate) fn run_pose_clamp_phase(
@@ -86,6 +98,10 @@ pub(crate) fn run_pose_clamp_phase(
     let moving_circles = snapshots
         .iter()
         .filter_map(moving_circle)
+        .collect::<Vec<_>>();
+    let moving_convexes = snapshots
+        .iter()
+        .filter_map(moving_convex)
         .collect::<Vec<_>>();
     let static_convexes = snapshots
         .iter()
@@ -119,10 +135,43 @@ pub(crate) fn run_pose_clamp_phase(
                     static_collider: target.collider,
                     swept_start: moving.start,
                     swept_end: moving.end,
-                    radius: moving.radius,
                     toi: hit.toi,
                     exit: hit.exit,
-                    normal: hit.normal,
+                    toi_point: moving.start + (moving.end - moving.start) * hit.toi
+                        - hit.normal * moving.radius,
+                });
+            }
+        }
+    }
+    for moving in &moving_convexes {
+        if moving.is_sensor {
+            continue;
+        }
+        for target in &static_convexes {
+            if moving.body == target.body || target.is_sensor {
+                continue;
+            }
+            if !moving.filter.allows(&target.filter) {
+                continue;
+            }
+            if !aabb_overlaps(moving.swept_aabb, target.aabb) {
+                continue;
+            }
+            stats.candidate_count += 1;
+            let sweep = moving.end - moving.start;
+            if let Some(hit) =
+                swept_convex_convex_toi(&moving.start_vertices, sweep, &target.vertices)
+            {
+                hits.push(CcdHit {
+                    moving_body: moving.body,
+                    static_body: target.body,
+                    moving_collider: moving.collider,
+                    static_collider: target.collider,
+                    swept_start: moving.start,
+                    swept_end: moving.end,
+                    toi: hit.toi,
+                    exit: hit.exit,
+                    toi_point: hit.toi_point,
                 });
             }
         }
@@ -204,16 +253,55 @@ fn moving_circle(snapshot: &CcdColliderSnapshot) -> Option<MovingCircle> {
     })
 }
 
+fn moving_convex(snapshot: &CcdColliderSnapshot) -> Option<MovingConvex> {
+    if !snapshot.body_type.is_dynamic() {
+        return None;
+    }
+    if matches!(snapshot.shape, SharedShape::Circle { .. }) {
+        return None;
+    }
+    // This first M13 slice is a translational convex shape cast. Rotational CCD
+    // needs a wider angular sweep bound so it stays outside this minimal path.
+    if (snapshot.start_pose.angle() - snapshot.end_pose.angle()).abs() > CCD_TOI_EPSILON {
+        return None;
+    }
+    let start_vertices = convex_shape_vertices(&snapshot.shape, snapshot.start_pose)?;
+    let end_vertices = convex_shape_vertices(&snapshot.shape, snapshot.end_pose)?;
+    if start_vertices
+        .iter()
+        .chain(end_vertices.iter())
+        .copied()
+        .any(|point| !point_is_finite(point))
+    {
+        return None;
+    }
+    let start = snapshot.start_pose.point();
+    let end = snapshot.end_pose.point();
+    if !point_is_finite(start) || !point_is_finite(end) {
+        return None;
+    }
+    let sweep = end - start;
+    if sweep.length() <= CCD_TOI_EPSILON {
+        return None;
+    }
+    let swept_aabb = swept_points_aabb(start_vertices.iter().chain(end_vertices.iter()).copied());
+    Some(MovingConvex {
+        body: snapshot.body,
+        collider: snapshot.handle,
+        start,
+        end,
+        start_vertices,
+        swept_aabb,
+        filter: snapshot.filter,
+        is_sensor: snapshot.is_sensor,
+    })
+}
+
 fn static_convex(snapshot: &CcdColliderSnapshot) -> Option<StaticConvex> {
     if snapshot.body_type != BodyType::Static {
         return None;
     }
-    let vertices = match &snapshot.shape {
-        SharedShape::Rect { .. }
-        | SharedShape::RegularPolygon { .. }
-        | SharedShape::ConvexPolygon { .. } => snapshot.shape.world_vertices(snapshot.end_pose),
-        _ => return None,
-    };
+    let vertices = convex_shape_vertices(&snapshot.shape, snapshot.end_pose)?;
     if vertices.len() < 3
         || vertices
             .iter()
@@ -232,6 +320,15 @@ fn static_convex(snapshot: &CcdColliderSnapshot) -> Option<StaticConvex> {
     })
 }
 
+fn convex_shape_vertices(shape: &SharedShape, pose: Pose) -> Option<Vec<Point>> {
+    match shape {
+        SharedShape::Rect { .. }
+        | SharedShape::RegularPolygon { .. }
+        | SharedShape::ConvexPolygon { .. } => Some(shape.world_vertices(pose)),
+        _ => None,
+    }
+}
+
 fn swept_circle_aabb(start: Point, end: Point, radius: FloatNum) -> ShapeAabb {
     ShapeAabb {
         min: Point::new(
@@ -243,6 +340,10 @@ fn swept_circle_aabb(start: Point, end: Point, radius: FloatNum) -> ShapeAabb {
             start.y().max(end.y()) + radius,
         ),
     }
+}
+
+fn swept_points_aabb(points: impl IntoIterator<Item = Point>) -> ShapeAabb {
+    ShapeAabb::from_points(points.into_iter().collect())
 }
 
 fn aabb_overlaps(a: ShapeAabb, b: ShapeAabb) -> bool {
@@ -257,6 +358,14 @@ struct SweptCircleConvexToi {
     toi: FloatNum,
     exit: FloatNum,
     normal: Vector,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SweptConvexConvexToi {
+    toi: FloatNum,
+    exit: FloatNum,
+    normal: Vector,
+    toi_point: Point,
 }
 
 fn swept_circle_convex_toi(
@@ -326,6 +435,194 @@ fn swept_circle_convex_toi(
         toi,
         exit: exit.clamp(0.0, 1.0),
         normal,
+    })
+}
+
+fn swept_convex_convex_toi(
+    moving_start_vertices: &[Point],
+    sweep: Vector,
+    static_vertices: &[Point],
+) -> Option<SweptConvexConvexToi> {
+    if moving_start_vertices.len() < 3
+        || static_vertices.len() < 3
+        || sweep.length() <= CCD_TOI_EPSILON
+    {
+        return None;
+    }
+
+    let mut enter = 0.0;
+    let mut exit = 1.0;
+    let mut enter_normal = Vector::default();
+    let axes = polygon_axes(moving_start_vertices)
+        .into_iter()
+        .chain(polygon_axes(static_vertices));
+
+    for axis in axes {
+        let moving = project_points(moving_start_vertices, axis)?;
+        let static_projection = project_points(static_vertices, axis)?;
+        let velocity = sweep.dot(axis);
+        if velocity.abs() <= CCD_TOI_EPSILON {
+            if moving.max < static_projection.min || static_projection.max < moving.min {
+                return None;
+            }
+            continue;
+        }
+
+        let (axis_enter, axis_exit, normal) = if velocity > 0.0 {
+            (
+                (static_projection.min - moving.max) / velocity,
+                (static_projection.max - moving.min) / velocity,
+                -axis,
+            )
+        } else {
+            (
+                (static_projection.max - moving.min) / velocity,
+                (static_projection.min - moving.max) / velocity,
+                axis,
+            )
+        };
+        if axis_enter > enter {
+            enter = axis_enter;
+            enter_normal = normal.normalized_or_zero();
+        }
+        if axis_exit < exit {
+            exit = axis_exit;
+        }
+        if enter > exit {
+            return None;
+        }
+    }
+
+    if !(CCD_TOI_EPSILON..=1.0).contains(&enter) || exit < 0.0 {
+        return None;
+    }
+    if enter_normal.length() <= CCD_TOI_EPSILON {
+        return None;
+    }
+
+    let toi_vertices = moving_start_vertices
+        .iter()
+        .map(|point| *point + sweep * enter)
+        .collect::<Vec<_>>();
+    let toi_point = support_feature_contact_point(&toi_vertices, static_vertices, enter_normal)?;
+
+    Some(SweptConvexConvexToi {
+        toi: enter.clamp(0.0, 1.0),
+        exit: exit.clamp(enter, 1.0),
+        normal: enter_normal,
+        toi_point,
+    })
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Projection {
+    min: FloatNum,
+    max: FloatNum,
+}
+
+fn project_points(points: &[Point], axis: Vector) -> Option<Projection> {
+    let mut min = FloatNum::INFINITY;
+    let mut max = FloatNum::NEG_INFINITY;
+    for point in points {
+        let projection = Vector::from(*point).dot(axis);
+        if !projection.is_finite() {
+            return None;
+        }
+        min = min.min(projection);
+        max = max.max(projection);
+    }
+    (min.is_finite() && max.is_finite()).then_some(Projection { min, max })
+}
+
+fn polygon_axes(vertices: &[Point]) -> Vec<Vector> {
+    let mut axes = Vec::new();
+    for edge_index in 0..vertices.len() {
+        let normal = edge_outward_normal(vertices, edge_index);
+        if normal.length() > CCD_TOI_EPSILON {
+            axes.push(normal.normalized_or_zero());
+        }
+    }
+    axes
+}
+
+fn support_feature_contact_point(
+    moving_vertices: &[Point],
+    static_vertices: &[Point],
+    normal: Vector,
+) -> Option<Point> {
+    let normal = normal.normalized_or_zero();
+    if normal.length() <= CCD_TOI_EPSILON {
+        return None;
+    }
+    let tangent = normal.perp().normalized_or_zero();
+    let moving = support_feature(moving_vertices, -normal, normal, tangent)?;
+    let target = support_feature(static_vertices, normal, normal, tangent)?;
+    let overlap_min = moving.tangent_min.max(target.tangent_min);
+    let overlap_max = moving.tangent_max.min(target.tangent_max);
+    let tangent_coord = if overlap_min <= overlap_max + CCD_TOI_EPSILON {
+        (overlap_min + overlap_max) * 0.5
+    } else {
+        (moving.tangent_center() + target.tangent_center()) * 0.5
+    };
+    let normal_coord = (moving.normal_coord + target.normal_coord) * 0.5;
+    Some(Point::from(normal * normal_coord + tangent * tangent_coord))
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SupportFeature {
+    normal_coord: FloatNum,
+    tangent_min: FloatNum,
+    tangent_max: FloatNum,
+}
+
+impl SupportFeature {
+    fn tangent_center(self) -> FloatNum {
+        (self.tangent_min + self.tangent_max) * 0.5
+    }
+}
+
+fn support_feature(
+    vertices: &[Point],
+    direction: Vector,
+    normal: Vector,
+    tangent: Vector,
+) -> Option<SupportFeature> {
+    if direction.length() <= CCD_TOI_EPSILON {
+        return None;
+    }
+    let mut support_projection = FloatNum::NEG_INFINITY;
+    for point in vertices
+        .iter()
+        .copied()
+        .filter(|point| point_is_finite(*point))
+    {
+        support_projection = support_projection.max(Vector::from(point).dot(direction));
+    }
+    if !support_projection.is_finite() {
+        return None;
+    }
+
+    let mut tangent_min = FloatNum::INFINITY;
+    let mut tangent_max = FloatNum::NEG_INFINITY;
+    let mut normal_sum = 0.0;
+    let mut count = 0;
+    for point in vertices
+        .iter()
+        .copied()
+        .filter(|point| point_is_finite(*point))
+    {
+        if (Vector::from(point).dot(direction) - support_projection).abs() <= CLIP_SUPPORT_EPSILON {
+            let tangent_coord = Vector::from(point).dot(tangent);
+            tangent_min = tangent_min.min(tangent_coord);
+            tangent_max = tangent_max.max(tangent_coord);
+            normal_sum += Vector::from(point).dot(normal);
+            count += 1;
+        }
+    }
+    (count > 0 && tangent_min.is_finite() && tangent_max.is_finite()).then_some(SupportFeature {
+        normal_coord: normal_sum / count as FloatNum,
+        tangent_min,
+        tangent_max,
     })
 }
 
@@ -505,7 +802,7 @@ fn clamp_body_to_toi(world: &mut World, hit: CcdHit) -> Option<CcdTrace> {
         advancement,
         clamp: rollback.length(),
         slop: CCD_CLAMP_SLOP,
-        toi_point: hit.swept_start + sweep * hit.toi - hit.normal * hit.radius,
+        toi_point: hit.toi_point,
     })
 }
 
@@ -524,7 +821,7 @@ fn point_is_finite(point: Point) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::swept_circle_convex_toi;
+    use super::{swept_circle_convex_toi, swept_convex_convex_toi};
     use crate::{
         body::Pose,
         collider::SharedShape,
@@ -558,6 +855,39 @@ mod tests {
                 0.05,
                 &wall,
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn pipeline_ccd_convex_shape_cast_catches_translation_through_thin_rectangle() {
+        let moving =
+            SharedShape::rect(0.1, 0.1).world_vertices(Pose::from_xy_angle(-1.0, 0.0, 0.0));
+        let wall = SharedShape::rect(0.1, 10.0).world_vertices(Pose::default());
+        let hit = swept_convex_convex_toi(&moving, Vector::new(3.3333333, 0.0), &wall)
+            .expect("dynamic convex sweep should hit the thin wall");
+
+        assert!(hit.toi > 0.0 && hit.toi < 1.0);
+        assert!(hit.exit > hit.toi);
+        assert_eq!(hit.normal, Vector::new(-1.0, 0.0));
+        assert!((hit.toi_point.x() + 0.05).abs() < 1.0e-4);
+        assert!(hit.toi_point.y().abs() < 1.0e-4);
+    }
+
+    #[test]
+    fn pipeline_ccd_convex_shape_cast_rejects_missed_translation() {
+        let moving =
+            SharedShape::rect(0.1, 0.1).world_vertices(Pose::from_xy_angle(-0.9, 2.0, 0.0));
+        let diamond = SharedShape::convex_polygon(vec![
+            Point::new(0.0, -1.0),
+            Point::new(1.0, 0.0),
+            Point::new(0.0, 1.0),
+            Point::new(-1.0, 0.0),
+        ])
+        .world_vertices(Pose::default());
+
+        assert_eq!(
+            swept_convex_convex_toi(&moving, Vector::new(0.0, -1.1), &diamond),
             None
         );
     }

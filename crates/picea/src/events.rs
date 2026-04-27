@@ -22,16 +22,16 @@ pub struct CcdTrace {
     /// Static body hit by the sweep.
     #[serde(default)]
     pub static_body: BodyHandle,
-    /// Dynamic circle collider that was swept.
+    /// Dynamic collider that was swept.
     #[serde(default)]
     pub moving_collider: ColliderHandle,
     /// Static convex collider hit by the sweep.
     #[serde(default)]
     pub static_collider: ColliderHandle,
-    /// Circle-center start point at the beginning of the step.
+    /// Swept collider reference point at the beginning of the step.
     #[serde(default)]
     pub swept_start: Point,
-    /// Circle-center end point before contact generation.
+    /// Swept collider reference point before contact generation.
     #[serde(default)]
     pub swept_end: Point,
     /// First time of impact as a fraction of the sweep.
@@ -46,7 +46,7 @@ pub struct CcdTrace {
     /// Small world-space overlap allowed at the clamp.
     #[serde(default)]
     pub slop: FloatNum,
-    /// World-space point where the circle first touched the static convex.
+    /// World-space point where the swept collider first touched the static convex.
     #[serde(default)]
     pub toi_point: Point,
 }

@@ -42,6 +42,7 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "broadphase_sparse",
             "sat_polygon",
             "ccd_fast_circle_wall",
+            "ccd_fast_convex_walls",
         ]
     );
 

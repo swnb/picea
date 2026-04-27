@@ -906,7 +906,25 @@ rtk proxy cargo test -p picea --test world_step_review_regressions
 
 ## M13 CCD Generalization
 
-> Status: planned.
+> Status: completed first staged slice 2026-04-27.
+>
+> Completion notes: CCD remains a named pose-clamping phase before contact
+> generation. The phase now keeps the existing dynamic-circle analytic path and
+> adds a translational dynamic-convex vs static-convex shape cast for rectangles,
+> regular polygons, and convex polygons. Multi-hit behavior is still bounded:
+> hits are sorted by TOI, one moving body receives at most one clamp in a step,
+> and global CCD counters expose candidate / hit / miss / clamp facts so a
+> later ignored hit is visible as `hit_count > clamp_count`. `ccd_trace` keeps
+> its existing field set; comments now describe the swept collider reference
+> point instead of circle-only center semantics. `picea-lab` adds a
+> `ccd_fast_convex_walls` artifact scenario that records the selected earliest
+> hit and the budgeted later hit through the existing stats + selected-contact
+> `ccd_trace` path.
+>
+> Residual risks: this slice intentionally skips rotational convex casts,
+> dynamic-vs-dynamic CCD, and full all-shape CCD. GJK-backed conservative
+> advancement remains the natural follow-up once broader shape coverage or
+> angular CCD needs a shared distance kernel.
 
 ### Goal
 

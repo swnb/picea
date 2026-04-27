@@ -471,6 +471,62 @@ fn ccd_fast_circle_wall_artifacts_capture_toi_trace_facts() {
 }
 
 #[test]
+fn ccd_fast_convex_walls_artifacts_capture_ordered_budget_trace_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::CcdFastConvexWalls,
+            frame_count: 2,
+            run_id: Some("m13-ccd-fast-convex-walls".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("ccd convex run should write artifacts");
+
+    let first = run.frames.first().expect("first frame should exist");
+    assert_eq!(first.stats.ccd_candidate_count, 2);
+    assert_eq!(first.stats.ccd_hit_count, 2);
+    assert_eq!(first.stats.ccd_miss_count, 0);
+    assert_eq!(first.stats.ccd_clamp_count, 1);
+    let contact = first
+        .snapshot
+        .contacts
+        .iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("ccd artifact should expose the selected convex contact trace");
+    let trace = contact.ccd_trace.expect("trace should be present");
+    assert!(trace.toi > 0.0 && trace.toi < 1.0);
+    assert!(trace.advancement >= trace.toi && trace.advancement <= 1.0);
+    assert!(trace.clamp > 0.0);
+    assert!((trace.toi_point.x() + 0.05).abs() < 1.0e-3);
+    assert!(trace.toi_point.y().abs() < 1.0e-3);
+
+    let render: DebugRenderArtifact = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable"),
+    )
+    .expect("debug render should match schema");
+    let render_first = render
+        .frames
+        .first()
+        .expect("debug render should include ccd frame facts");
+    assert_eq!(render_first.ccd_candidate_count, 2);
+    assert_eq!(render_first.ccd_hit_count, 2);
+    assert_eq!(render_first.ccd_miss_count, 0);
+    assert_eq!(render_first.ccd_clamp_count, 1);
+    assert!(
+        render_first
+            .contacts
+            .iter()
+            .any(|contact| contact.ccd_trace == Some(trace)),
+        "debug render should keep the selected CCD trace while counters expose the ignored budget hit"
+    );
+}
+
+#[test]
 fn artifact_schema_keeps_final_observability_fact_set() {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let store = ArtifactStore::new(temp.path().join("runs"));

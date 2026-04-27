@@ -270,6 +270,10 @@ const scenarioMessages: Record<string, Record<Locale, Pick<ScenarioDescriptor, "
     "zh-CN": { name: "CCD 快圆薄墙", description: "高速动态圆扫掠命中静态薄矩形墙，用于观察 TOI、钳制和接触事实。" },
     "en-US": { name: "CCD fast circle wall", description: "A fast dynamic circle swept against a static thin rectangle wall." },
   },
+  ccd_fast_convex_walls: {
+    "zh-CN": { name: "CCD 快凸体双墙", description: "高速动态矩形扫掠两个静态薄墙，用于观察最早命中和预算钳制事实。" },
+    "en-US": { name: "CCD fast convex walls", description: "A fast dynamic rectangle swept against two static thin walls." },
+  },
 };
 
 const bodyTypeLabels: Record<Locale, Record<BodyType, string>> = {
