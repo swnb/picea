@@ -82,6 +82,35 @@ export type DebugJoint = {
   anchors: Vec2[];
 };
 
+export type ContactReductionReason =
+  | "single_point"
+  | "clipped"
+  | "duplicate_reduced"
+  | "non_m2_fallback"
+  | "generic_convex_fallback";
+
+export type GenericConvexTrace = {
+  fallback_reason: "none" | "generic_convex_fallback" | "epa_failure_contained";
+  gjk_termination:
+    | "unknown"
+    | "separated"
+    | "touching"
+    | "intersect"
+    | "degenerate_direction"
+    | "max_iterations"
+    | "invalid_support";
+  epa_termination:
+    | "unknown"
+    | "converged"
+    | "gjk_did_not_intersect"
+    | "degenerate_edge"
+    | "max_iterations"
+    | "invalid_support";
+  gjk_iterations: number;
+  epa_iterations: number;
+  simplex_len: number;
+};
+
 export type DebugContact = {
   id: number;
   bodies: [number, number];
@@ -90,7 +119,7 @@ export type DebugContact = {
   point: Vec2;
   normal: Vec2;
   depth: number;
-  reduction_reason: "single_point" | "clipped" | "duplicate_reduced" | "non_m2_fallback";
+  reduction_reason: ContactReductionReason;
   warm_start_reason?:
     | "hit"
     | "miss_no_previous"
@@ -108,6 +137,7 @@ export type DebugContact = {
   tangent_impulse_clamped?: boolean;
   restitution_velocity_threshold?: number;
   restitution_applied?: boolean;
+  generic_convex_trace?: GenericConvexTrace | null;
 };
 
 export type DebugManifold = {
@@ -123,7 +153,8 @@ export type DebugManifold = {
   }>;
   normal: Vec2;
   depth: number;
-  reduction_reason: "single_point" | "clipped" | "duplicate_reduced" | "non_m2_fallback";
+  reduction_reason: ContactReductionReason;
+  generic_convex_trace?: GenericConvexTrace | null;
   warm_start_hit_count?: number;
   warm_start_miss_count?: number;
   warm_start_drop_count?: number;

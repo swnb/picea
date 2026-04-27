@@ -13,8 +13,8 @@ use crate::{
     body::{BodyType, MassProperties, Pose},
     collider::{CollisionFilter, Material, SharedShape},
     events::{
-        ContactEvent, ContactReductionReason, SleepTransitionReason, WarmStartCacheReason,
-        WorldEvent,
+        ContactEvent, ContactReductionReason, GenericConvexTrace, SleepTransitionReason,
+        WarmStartCacheReason, WorldEvent,
     },
     handles::{
         BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
@@ -407,6 +407,9 @@ pub struct DebugContact {
     /// Whether restitution contributed bounce bias for this contact row.
     #[serde(default)]
     pub restitution_applied: bool,
+    /// GJK/EPA trace facts when the generic convex fallback produced this contact.
+    #[serde(default)]
+    pub generic_convex_trace: Option<GenericConvexTrace>,
 }
 
 impl DebugContact {
@@ -429,6 +432,7 @@ impl DebugContact {
             tangent_impulse_clamped: self.tangent_impulse_clamped,
             restitution_velocity_threshold: sanitize_scalar(self.restitution_velocity_threshold),
             restitution_applied: self.restitution_applied,
+            generic_convex_trace: self.generic_convex_trace,
         }
     }
 }
@@ -485,6 +489,9 @@ pub struct DebugManifold {
     /// Number of points in this manifold whose matching cache entry was rejected as unsafe.
     #[serde(default)]
     pub warm_start_drop_count: usize,
+    /// GJK/EPA trace facts when the generic convex fallback produced this manifold.
+    #[serde(default)]
+    pub generic_convex_trace: Option<GenericConvexTrace>,
     /// Whether the manifold is active this step.
     pub active: bool,
 }
@@ -967,6 +974,7 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             tangent_impulse_clamped: event.tangent_impulse_clamped,
             restitution_velocity_threshold: event.restitution_velocity_threshold,
             restitution_applied: event.restitution_applied,
+            generic_convex_trace: event.generic_convex_trace,
         };
         contacts.push(contact);
 
@@ -987,6 +995,9 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             }
             if event.reduction_reason == ContactReductionReason::DuplicateReduced {
                 manifold.reduction_reason = event.reduction_reason;
+            }
+            if manifold.generic_convex_trace.is_none() {
+                manifold.generic_convex_trace = event.generic_convex_trace;
             }
             record_warm_start_reason(manifold, event.warm_start_reason);
         } else {
@@ -1009,6 +1020,7 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
                 warm_start_hit_count,
                 warm_start_miss_count,
                 warm_start_drop_count,
+                generic_convex_trace: event.generic_convex_trace,
                 active: true,
             });
         }
@@ -1034,6 +1046,7 @@ fn sanitize_manifold(manifold: &DebugManifold) -> DebugManifold {
         warm_start_hit_count: manifold.warm_start_hit_count,
         warm_start_miss_count: manifold.warm_start_miss_count,
         warm_start_drop_count: manifold.warm_start_drop_count,
+        generic_convex_trace: manifold.generic_convex_trace,
         active: manifold.active,
     }
 }

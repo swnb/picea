@@ -3,7 +3,8 @@ use picea::math::{point::Point, vector::Vector};
 use picea::prelude::{
     BodyDesc, BodyHandle, BodyType, ColliderDesc, ColliderHandle, CollisionFilter, ContactEvent,
     ContactFeatureId, ContactId, ContactReductionReason, DebugBody, DebugContact, DebugIsland,
-    DebugManifold, DebugManifoldPoint, DebugSnapshot, DebugSnapshotOptions, ManifoldId, Material,
+    DebugManifold, DebugManifoldPoint, DebugSnapshot, DebugSnapshotOptions, EpaTerminationReason,
+    GenericConvexFallbackReason, GenericConvexTrace, GjkTerminationReason, ManifoldId, Material,
     Pose, QueryFilter, QueryPipeline, SharedShape, SimulationPipeline, SleepEvent,
     SleepTransitionReason, StepConfig, StepReport, StepStats, WarmStartCacheReason, World,
     WorldDesc, WorldEvent,
@@ -138,6 +139,14 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
             tangent_impulse_clamped: true,
             restitution_velocity_threshold: 1.75,
             restitution_applied: true,
+            generic_convex_trace: Some(GenericConvexTrace {
+                fallback_reason: GenericConvexFallbackReason::GenericConvexFallback,
+                gjk_termination: GjkTerminationReason::Intersect,
+                epa_termination: EpaTerminationReason::Converged,
+                gjk_iterations: 3,
+                epa_iterations: 2,
+                simplex_len: 3,
+            }),
         })],
     };
 
@@ -200,6 +209,13 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
     assert!(snapshot.contacts[0].tangent_impulse_clamped);
     assert_eq!(snapshot.contacts[0].restitution_velocity_threshold, 1.75);
     assert!(snapshot.contacts[0].restitution_applied);
+    assert_eq!(
+        snapshot.contacts[0]
+            .generic_convex_trace
+            .expect("debug contact should preserve generic trace")
+            .fallback_reason,
+        GenericConvexFallbackReason::GenericConvexFallback
+    );
     assert_eq!(
         snapshot.manifolds[0].contact_ids,
         vec![ContactId::default()]
@@ -301,6 +317,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "tangent_impulse_clamped",
             "restitution_velocity_threshold",
             "restitution_applied",
+            "generic_convex_trace",
         ],
     );
     let contact: ContactEvent =
@@ -317,6 +334,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert!(!contact.tangent_impulse_clamped);
     assert_eq!(contact.restitution_velocity_threshold, 0.0);
     assert!(!contact.restitution_applied);
+    assert_eq!(contact.generic_convex_trace, None);
 
     let mut stats_value =
         serde_json::to_value(StepStats::default()).expect("step stats should serialize");
@@ -368,6 +386,14 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
         tangent_impulse_clamped: true,
         restitution_velocity_threshold: 1.75,
         restitution_applied: true,
+        generic_convex_trace: Some(GenericConvexTrace {
+            fallback_reason: GenericConvexFallbackReason::GenericConvexFallback,
+            gjk_termination: GjkTerminationReason::Intersect,
+            epa_termination: EpaTerminationReason::Converged,
+            gjk_iterations: 3,
+            epa_iterations: 2,
+            simplex_len: 3,
+        }),
     };
     let mut debug_contact_value =
         serde_json::to_value(debug_contact).expect("debug contact should serialize");
@@ -383,6 +409,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "tangent_impulse_clamped",
             "restitution_velocity_threshold",
             "restitution_applied",
+            "generic_convex_trace",
         ],
     );
     let decoded_debug_contact: DebugContact = serde_json::from_value(debug_contact_value)
@@ -399,6 +426,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert!(!decoded_debug_contact.tangent_impulse_clamped);
     assert_eq!(decoded_debug_contact.restitution_velocity_threshold, 0.0);
     assert!(!decoded_debug_contact.restitution_applied);
+    assert_eq!(decoded_debug_contact.generic_convex_trace, None);
 
     let debug_manifold = DebugManifold {
         id: ManifoldId::default(),
@@ -417,6 +445,14 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
         warm_start_hit_count: 1,
         warm_start_miss_count: 2,
         warm_start_drop_count: 3,
+        generic_convex_trace: Some(GenericConvexTrace {
+            fallback_reason: GenericConvexFallbackReason::GenericConvexFallback,
+            gjk_termination: GjkTerminationReason::Intersect,
+            epa_termination: EpaTerminationReason::Converged,
+            gjk_iterations: 3,
+            epa_iterations: 2,
+            simplex_len: 3,
+        }),
         active: true,
     };
     let mut debug_manifold_value =
@@ -427,6 +463,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "warm_start_hit_count",
             "warm_start_miss_count",
             "warm_start_drop_count",
+            "generic_convex_trace",
         ],
     );
     let decoded_debug_manifold: DebugManifold = serde_json::from_value(debug_manifold_value)
@@ -434,6 +471,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(decoded_debug_manifold.warm_start_hit_count, 0);
     assert_eq!(decoded_debug_manifold.warm_start_miss_count, 0);
     assert_eq!(decoded_debug_manifold.warm_start_drop_count, 0);
+    assert_eq!(decoded_debug_manifold.generic_convex_trace, None);
 
     let mut sleep_value = serde_json::to_value(SleepEvent {
         body: BodyHandle::default(),

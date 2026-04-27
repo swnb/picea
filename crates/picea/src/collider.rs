@@ -206,6 +206,37 @@ impl SharedShape {
             .collect()
     }
 
+    pub(crate) fn support_point(&self, pose: Pose, direction: Vector) -> Option<Point> {
+        if !direction.x().is_finite() || !direction.y().is_finite() {
+            return None;
+        }
+        let direction = if direction.length() <= FloatNum::EPSILON {
+            Vector::new(1.0, 0.0)
+        } else {
+            direction
+        };
+        match self {
+            Self::Circle { radius } => {
+                let unit = direction.normalized_or_zero();
+                let point = pose.point() + unit * *radius;
+                point_is_finite(point).then_some(point)
+            }
+            Self::Rect { .. } | Self::RegularPolygon { .. } | Self::ConvexPolygon { .. } => {
+                support_from_points(self.world_vertices(pose), direction)
+            }
+            // A segment has a valid support map for distance/intersection tests,
+            // but it may still be too degenerate for EPA to produce an area face.
+            Self::Segment { start, end } => support_from_points(
+                vec![pose.transform_point(*start), pose.transform_point(*end)],
+                direction,
+            ),
+            // Concave polygons need decomposition first. Treating the full loop
+            // as one support-mapped convex shape would fabricate contacts across
+            // inward notches.
+            Self::ConcavePolygon { .. } => None,
+        }
+    }
+
     #[allow(dead_code)]
     fn local_vertices(&self) -> Vec<Point> {
         match self {
@@ -340,6 +371,32 @@ impl SharedShape {
         }
         Ok(())
     }
+}
+
+fn support_from_points(points: Vec<Point>, direction: Vector) -> Option<Point> {
+    points
+        .into_iter()
+        .filter(|point| point_is_finite(*point))
+        .max_by(|lhs, rhs| {
+            Vector::from(*lhs)
+                .dot(direction)
+                .partial_cmp(&Vector::from(*rhs).dot(direction))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    lhs.x()
+                        .partial_cmp(&rhs.x())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| {
+                    lhs.y()
+                        .partial_cmp(&rhs.y())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        })
+}
+
+fn point_is_finite(point: Point) -> bool {
+    point.x().is_finite() && point.y().is_finite()
 }
 
 fn collider_mass_properties_error(field_scope: &'static str) -> ValidationError {

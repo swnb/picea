@@ -6,6 +6,7 @@
 
 pub(crate) mod broadphase;
 pub(crate) mod contacts;
+pub(crate) mod gjk;
 pub(crate) mod integrate;
 pub(crate) mod joints;
 pub(crate) mod narrowphase;
@@ -304,6 +305,7 @@ mod tests {
             tangent_impulse_clamped: true,
             restitution_velocity_threshold: 2.0,
             restitution_applied: true,
+            generic_convex_trace: None,
         });
         let sleep_changed = WorldEvent::SleepChanged(SleepEvent {
             body: BodyHandle::from_raw_parts(2, 0),

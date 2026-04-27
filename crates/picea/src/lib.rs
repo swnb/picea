@@ -21,7 +21,8 @@ pub mod prelude {
         DebugManifoldPoint, DebugPrimitive, DebugSnapshot, DebugSnapshotOptions,
     };
     pub use super::events::{
-        ContactEvent, ContactReductionReason, SleepEvent, SleepTransitionReason,
+        ContactEvent, ContactReductionReason, EpaTerminationReason, GenericConvexFallbackReason,
+        GenericConvexTrace, GjkTerminationReason, SleepEvent, SleepTransitionReason,
         WarmStartCacheReason, WorldEvent,
     };
     pub use super::handles::{

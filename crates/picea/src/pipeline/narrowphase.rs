@@ -3,9 +3,10 @@ use std::cmp::Ordering;
 use crate::{
     body::Pose,
     collider::{ShapeAabb, SharedShape},
-    events::ContactReductionReason,
+    events::{ContactReductionReason, GenericConvexFallbackReason, GenericConvexTrace},
     handles::ContactFeatureId,
     math::{point::Point, vector::Vector, FloatNum},
+    pipeline::gjk,
 };
 
 const CLIP_EPSILON: FloatNum = 1.0e-4;
@@ -24,6 +25,7 @@ pub(crate) struct ContactManifoldGeometry {
     pub(crate) depth: FloatNum,
     pub(crate) points: Vec<ContactPointGeometry>,
     pub(crate) reduction_reason: ContactReductionReason,
+    pub(crate) generic_convex_trace: Option<GenericConvexTrace>,
 }
 
 pub(crate) fn contact_from_shapes(
@@ -72,11 +74,15 @@ pub(crate) fn contact_from_shapes(
                 true,
             )
         }
+        _ if should_try_generic_convex(shape_a, pose_a, shape_b, pose_b) => {
+            generic_convex_contact(shape_a, pose_a, shape_b, pose_b)
+        }
         _ => {
             let Some(poly_a) = convex_vertices(shape_a, pose_a) else {
                 // M2 only owns convex SAT. Concave polygons need decomposition
-                // or GJK/EPA in a later milestone, so keep the legacy fallback
-                // explicit instead of pretending it has convex feature ids.
+                // before they can enter the generic convex fallback, so keep the
+                // legacy fallback explicit instead of pretending they have convex
+                // feature ids.
                 return overlap_from_aabbs(aabb_a, aabb_b, ContactReductionReason::NonM2Fallback);
             };
             let Some(poly_b) = convex_vertices(shape_b, pose_b) else {
@@ -212,6 +218,7 @@ fn contact_from_convex_polygons(a: &[Point], b: &[Point]) -> Option<ContactManif
         depth: sat.depth,
         points,
         reduction_reason,
+        generic_convex_trace: None,
     })
 }
 
@@ -333,6 +340,76 @@ fn single_point_manifold(
             feature_id,
         }],
         reduction_reason,
+        generic_convex_trace: None,
+    }
+}
+
+fn should_try_generic_convex(
+    shape_a: &SharedShape,
+    pose_a: Pose,
+    shape_b: &SharedShape,
+    pose_b: Pose,
+) -> bool {
+    // SAT/clipping remains primary for polygonal area shapes because it
+    // produces stable 1-2 point manifolds with feature ids. GJK/EPA is only the
+    // fallback for convex support-mapped pairs that do not have a better local
+    // narrowphase path, such as segment-vs-polygon.
+    let sat_ready =
+        convex_vertices(shape_a, pose_a).is_some() && convex_vertices(shape_b, pose_b).is_some();
+    !sat_ready
+        && shape_a
+            .support_point(pose_a, Vector::new(1.0, 0.0))
+            .is_some()
+        && shape_b
+            .support_point(pose_b, Vector::new(1.0, 0.0))
+            .is_some()
+}
+
+fn generic_convex_contact(
+    shape_a: &SharedShape,
+    pose_a: Pose,
+    shape_b: &SharedShape,
+    pose_b: Pose,
+) -> Option<ContactManifoldGeometry> {
+    let contact = gjk::generic_convex_contact(shape_a, pose_a, shape_b, pose_b)?;
+    Some(ContactManifoldGeometry {
+        normal: contact.normal,
+        depth: contact.depth,
+        points: vec![ContactPointGeometry {
+            point: contact.point,
+            depth: contact.depth,
+            feature_id: generic_convex_feature_id(shape_a, shape_b, contact.trace),
+        }],
+        reduction_reason: ContactReductionReason::GenericConvexFallback,
+        generic_convex_trace: Some(contact.trace),
+    })
+}
+
+fn generic_convex_feature_id(
+    shape_a: &SharedShape,
+    shape_b: &SharedShape,
+    trace: GenericConvexTrace,
+) -> ContactFeatureId {
+    let kind = match trace.fallback_reason {
+        GenericConvexFallbackReason::EpaFailureContained => 7,
+        _ => 6,
+    };
+    feature_id(
+        kind,
+        shape_feature_kind(shape_a),
+        shape_feature_kind(shape_b),
+        0,
+    )
+}
+
+fn shape_feature_kind(shape: &SharedShape) -> usize {
+    match shape {
+        SharedShape::Circle { .. } => 0,
+        SharedShape::Rect { .. } => 1,
+        SharedShape::RegularPolygon { .. } => 2,
+        SharedShape::ConvexPolygon { .. } => 3,
+        SharedShape::ConcavePolygon { .. } => 4,
+        SharedShape::Segment { .. } => 5,
     }
 }
 
@@ -962,5 +1039,102 @@ mod tests {
 
         assert_eq!(contact.normal, Vector::new(0.0, 1.0));
         assert!((contact.depth - 0.05).abs() < 1.0e-4);
+    }
+
+    #[test]
+    fn segment_rectangle_uses_generic_convex_fallback_with_trace_facts() {
+        let segment = SharedShape::segment(Point::new(-1.0, 0.0), Point::new(1.0, 0.0));
+        let rect = SharedShape::rect(1.0, 1.0);
+        let contact = contact_from_shapes(
+            &segment,
+            Pose::default(),
+            aabb(-1.0, 0.0, 1.0, 0.0),
+            &rect,
+            Pose::from_xy_angle(0.25, 0.0, 0.0),
+            aabb(-0.25, -0.5, 0.75, 0.5),
+        )
+        .expect("segment/rectangle overlap should use the generic convex fallback");
+
+        assert_eq!(
+            contact.reduction_reason,
+            ContactReductionReason::GenericConvexFallback
+        );
+        let trace = contact
+            .generic_convex_trace
+            .expect("generic fallback should explain GJK/EPA decisions");
+        assert_eq!(
+            trace.fallback_reason,
+            crate::events::GenericConvexFallbackReason::GenericConvexFallback
+        );
+        assert_eq!(
+            trace.gjk_termination,
+            crate::events::GjkTerminationReason::Intersect
+        );
+        assert_eq!(
+            trace.epa_termination,
+            crate::events::EpaTerminationReason::Converged
+        );
+        assert!(trace.gjk_iterations > 0);
+        assert!(trace.simplex_len > 0);
+        assert_eq!(contact.points[0].feature_id, feature_id(6, 5, 1, 0));
+    }
+
+    #[test]
+    fn segment_segment_containment_surfaces_epa_failure_trace() {
+        let segment = SharedShape::segment(Point::new(-1.0, 0.0), Point::new(1.0, 0.0));
+        let contact = contact_from_shapes(
+            &segment,
+            Pose::default(),
+            aabb(-1.0, 0.0, 1.0, 0.0),
+            &segment,
+            Pose::default(),
+            aabb(-1.0, 0.0, 1.0, 0.0),
+        )
+        .expect("overlapping degenerate convex input should surface contained fallback facts");
+
+        let trace = contact
+            .generic_convex_trace
+            .expect("contained generic fallback should keep trace facts");
+        assert_eq!(
+            trace.fallback_reason,
+            crate::events::GenericConvexFallbackReason::EpaFailureContained
+        );
+        assert_eq!(
+            trace.gjk_termination,
+            crate::events::GjkTerminationReason::Intersect
+        );
+        assert_eq!(
+            trace.epa_termination,
+            crate::events::EpaTerminationReason::DegenerateEdge
+        );
+        assert_eq!(contact.points.len(), 1);
+        assert_eq!(contact.points[0].feature_id, feature_id(7, 5, 5, 0));
+        assert!(contact.points[0].point.x().is_finite());
+        assert!(contact.points[0].point.y().is_finite());
+        assert!(contact.points[0].depth.is_finite());
+    }
+
+    #[test]
+    fn rectangle_and_convex_polygon_keep_sat_clipping_primary() {
+        let rect = SharedShape::rect(2.0, 2.0);
+        let polygon = SharedShape::convex_polygon(vec![
+            Point::new(-1.0, -1.0),
+            Point::new(1.0, -1.0),
+            Point::new(1.0, 1.0),
+            Point::new(-1.0, 1.0),
+        ]);
+        let contact = contact_from_shapes(
+            &rect,
+            Pose::default(),
+            aabb(-1.0, -1.0, 1.0, 1.0),
+            &polygon,
+            Pose::from_xy_angle(1.5, 0.0, 0.0),
+            aabb(0.5, -1.0, 2.5, 1.0),
+        )
+        .expect("SAT should still handle rectangle/convex polygon pairs");
+
+        assert_eq!(contact.reduction_reason, ContactReductionReason::Clipped);
+        assert_eq!(contact.points.len(), 2);
+        assert_eq!(contact.generic_convex_trace, None);
     }
 }

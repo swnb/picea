@@ -223,6 +223,15 @@
   applies_to: [core, architecture, public-modules, prelude]
   keywords: [lib, prelude, algo, body, collider, debug, events, handles, joint, math, pipeline, query, world]
   last_reviewed: 2026-04-23
+- path: crates/picea/src/pipeline/gjk.rs
+  title: Internal GJK/EPA generic convex fallback
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [pipeline, narrowphase, gjk, epa, support-mapping, convex-fallback]
+  keywords: [gjk, epa, simplex, support-map, generic-convex-fallback, penetration, distance]
+  last_reviewed: 2026-04-27
 - path: crates/picea-lab/src/lib.rs
   title: Picea Lab crate entrypoint
   kind: code

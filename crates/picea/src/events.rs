@@ -20,6 +20,90 @@ pub enum ContactReductionReason {
     DuplicateReduced,
     /// The pair is intentionally outside the M2 convex path and used the legacy fallback.
     NonM2Fallback,
+    /// A convex pair outside the specialized SAT/analytic paths used GJK/EPA.
+    GenericConvexFallback,
+}
+
+/// Stable termination fact for the internal GJK convex query.
+///
+/// GJK searches the Minkowski difference with a small simplex: a point, line, or
+/// triangle that is moved toward the origin to decide separation or overlap.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GjkTerminationReason {
+    /// Older serialized payloads did not include a reason.
+    #[default]
+    Unknown,
+    /// The simplex could not pass the origin, so the shapes are separated.
+    Separated,
+    /// The closest simplex distance collapsed to zero without a stable penetration triangle.
+    Touching,
+    /// A triangle simplex contained the origin.
+    Intersect,
+    /// The search direction was too small or ambiguous to continue safely.
+    DegenerateDirection,
+    /// The iteration budget was exhausted and the query was contained.
+    MaxIterations,
+    /// A shape could not produce a finite support point.
+    InvalidSupport,
+}
+
+/// Stable termination fact for the internal EPA penetration query.
+///
+/// EPA expands an intersecting GJK simplex into a small convex polytope and
+/// reads the closest face to the origin as a penetration normal/depth.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EpaTerminationReason {
+    /// Older serialized payloads did not include a reason.
+    #[default]
+    Unknown,
+    /// EPA converged on a finite penetration face.
+    Converged,
+    /// GJK did not provide an intersecting simplex.
+    GjkDidNotIntersect,
+    /// The polytope edge was too small to define a stable 2D face.
+    DegenerateEdge,
+    /// The iteration budget was exhausted and the failure was contained.
+    MaxIterations,
+    /// A shape could not produce a finite support point.
+    InvalidSupport,
+}
+
+/// Why the generic convex fallback was selected or contained.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GenericConvexFallbackReason {
+    /// No generic fallback was involved.
+    #[default]
+    None,
+    /// Specialized SAT/analytic paths were unavailable, so GJK/EPA owned the answer.
+    GenericConvexFallback,
+    /// GJK intersected but EPA could not produce a stable face, so the failure stayed contained.
+    EpaFailureContained,
+}
+
+/// Compact trace facts for generic convex fallback contacts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenericConvexTrace {
+    /// Why the generic convex path contributed this contact or contained failure.
+    #[serde(default)]
+    pub fallback_reason: GenericConvexFallbackReason,
+    /// GJK termination reason.
+    #[serde(default)]
+    pub gjk_termination: GjkTerminationReason,
+    /// EPA termination reason.
+    #[serde(default)]
+    pub epa_termination: EpaTerminationReason,
+    /// Number of GJK iterations used.
+    #[serde(default)]
+    pub gjk_iterations: usize,
+    /// Number of EPA iterations used.
+    #[serde(default)]
+    pub epa_iterations: usize,
+    /// Final GJK simplex size.
+    #[serde(default)]
+    pub simplex_len: usize,
 }
 
 /// Why a contact did or did not reuse the previous step's impulse cache.
@@ -153,6 +237,9 @@ pub struct ContactEvent {
     /// Whether restitution contributed bounce bias for this contact row.
     #[serde(default)]
     pub restitution_applied: bool,
+    /// GJK/EPA trace facts when this contact came from the generic convex fallback.
+    #[serde(default)]
+    pub generic_convex_trace: Option<GenericConvexTrace>,
 }
 
 /// Sleep or wake transitions for a body.
@@ -238,6 +325,7 @@ mod tests {
             tangent_impulse_clamped: true,
             restitution_velocity_threshold: 1.0,
             restitution_applied: true,
+            generic_convex_trace: None,
         };
         let sleep = SleepEvent {
             body: BodyHandle::from_raw_parts(9, 0),

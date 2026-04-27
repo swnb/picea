@@ -4,8 +4,8 @@ use crate::{
     body::Pose,
     collider::{CollisionFilter, Material, ShapeAabb, SharedShape},
     events::{
-        ContactEvent, ContactReductionReason, SleepTransitionReason, WarmStartCacheReason,
-        WorldEvent,
+        ContactEvent, ContactReductionReason, GenericConvexTrace, SleepTransitionReason,
+        WarmStartCacheReason, WorldEvent,
     },
     handles::{BodyHandle, ColliderHandle},
     math::{point::Point, vector::Vector, FloatNum},
@@ -52,6 +52,7 @@ struct ContactObservation {
     tangent_impulse_clamped: bool,
     restitution_velocity_threshold: FloatNum,
     restitution_applied: bool,
+    generic_convex_trace: Option<GenericConvexTrace>,
 }
 
 #[derive(Clone, Debug)]
@@ -223,6 +224,7 @@ impl World {
                     tangent_impulse_clamped: false,
                     restitution_velocity_threshold: 0.0,
                     restitution_applied: false,
+                    generic_convex_trace: contact.generic_convex_trace,
                 });
             }
         }
@@ -350,6 +352,7 @@ impl World {
                     tangent_impulse_clamped: contact.tangent_impulse_clamped,
                     restitution_velocity_threshold: contact.restitution_velocity_threshold,
                     restitution_applied: contact.restitution_applied,
+                    generic_convex_trace: contact.generic_convex_trace,
                 }
             } else {
                 let manifold_id = *pair_manifold_ids
@@ -376,6 +379,7 @@ impl World {
                     tangent_impulse_clamped: contact.tangent_impulse_clamped,
                     restitution_velocity_threshold: contact.restitution_velocity_threshold,
                     restitution_applied: contact.restitution_applied,
+                    generic_convex_trace: contact.generic_convex_trace,
                 }
             };
 

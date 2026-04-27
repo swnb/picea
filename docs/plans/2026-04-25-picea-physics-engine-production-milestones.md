@@ -415,6 +415,25 @@ rtk proxy cargo test -p picea --test world_step_review_regressions
 
 ## M7 GJK, EPA, And Generic Convex Fallback
 
+> Status: completed 2026-04-27.
+>
+> Completion notes: core now has an internal `pipeline::gjk` support-mapped
+> convex kernel. Circles, rectangles, regular polygons, convex polygons, and
+> segments expose crate-private support points; concave polygons remain outside
+> the single-convex-shape path. GJK reports deterministic separation,
+> touching/intersection, iteration count, and simplex size; EPA is the primary
+> penetration route for the generic fallback and contains degenerate failures
+> without panics or NaNs. Specialized SAT/analytic paths remain primary, while
+> segment-vs-convex fallback contacts carry `generic_convex_fallback` plus
+> GJK/EPA trace facts through events and debug snapshots with serde defaults.
+
+Residual risks:
+
+- The generic fallback exports a single conservative contact point; richer
+  clipped manifolds remain owned by the specialized SAT path.
+- Degenerate zero-area convex pairs can be contained before EPA converges; they
+  do not fabricate a penetration face.
+
 ### Goal
 
 Add a generic convex kernel for shapes that are not covered by the specialized

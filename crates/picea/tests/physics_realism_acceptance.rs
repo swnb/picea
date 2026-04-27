@@ -112,6 +112,93 @@ fn active_contact_events(report: &StepReport) -> Vec<ContactEvent> {
 }
 
 #[test]
+fn generic_convex_segment_rectangle_contact_reports_gjk_epa_trace() {
+    let mut world = no_gravity_world();
+    let segment_body = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let rect_body = create_body(&mut world, BodyType::Static, 0.25, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        segment_body,
+        SharedShape::segment(Point::new(-1.0, 0.0), Point::new(1.0, 0.0)),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        rect_body,
+        SharedShape::rect(1.0, 1.0),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .next()
+        .expect("generic convex fallback should produce a contact");
+    let trace = contact
+        .generic_convex_trace
+        .expect("generic fallback contact should carry trace facts");
+
+    assert_eq!(
+        contact.reduction_reason,
+        ContactReductionReason::GenericConvexFallback
+    );
+    assert_eq!(
+        trace.fallback_reason,
+        GenericConvexFallbackReason::GenericConvexFallback
+    );
+    assert_eq!(trace.gjk_termination, GjkTerminationReason::Intersect);
+    assert_eq!(trace.epa_termination, EpaTerminationReason::Converged);
+    assert!(trace.gjk_iterations > 0);
+    assert!(trace.simplex_len > 0);
+}
+
+#[test]
+fn generic_convex_segment_rectangle_identity_is_stable_across_steps() {
+    let mut world = no_gravity_world();
+    let segment_body = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let rect_body = create_body(&mut world, BodyType::Static, 0.25, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        segment_body,
+        SharedShape::segment(Point::new(-1.0, 0.0), Point::new(1.0, 0.0)),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        rect_body,
+        SharedShape::rect(1.0, 1.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    let second = pipeline.step(&mut world);
+    let first_contacts = active_contact_events(&first);
+    let second_contacts = active_contact_events(&second);
+
+    assert_eq!(first_contacts.len(), 1);
+    assert_eq!(second_contacts.len(), 1);
+    assert_eq!(
+        (
+            first_contacts[0].contact_id,
+            first_contacts[0].manifold_id,
+            first_contacts[0].feature_id,
+        ),
+        (
+            second_contacts[0].contact_id,
+            second_contacts[0].manifold_id,
+            second_contacts[0].feature_id,
+        )
+    );
+    assert_eq!(
+        second_contacts[0].warm_start_reason,
+        WarmStartCacheReason::Hit
+    );
+    assert_eq!(second.stats.warm_start_hit_count, 1);
+    assert_eq!(second.stats.warm_start_miss_count, 0);
+}
+
+#[test]
 fn sat_polygon_manifold_reports_two_points_with_stable_features() {
     let mut world = no_gravity_world();
     let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
