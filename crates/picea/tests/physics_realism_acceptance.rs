@@ -1667,11 +1667,18 @@ fn sleeping_body_resting_on_static_contact_stays_asleep() {
 }
 
 #[test]
-#[ignore = "known-red physics realism baseline: continuous collision detection is not implemented"]
 fn fast_small_body_does_not_tunnel_through_thin_wall() {
+    assert_fast_small_body_does_not_tunnel_through_thin_wall();
+}
+
+#[test]
+fn ccd_fast_small_body_does_not_tunnel_through_thin_wall() {
+    assert_fast_small_body_does_not_tunnel_through_thin_wall();
+}
+
+fn assert_fast_small_body_does_not_tunnel_through_thin_wall() {
     // Physical behavior: CCD should sweep fast bodies between poses and stop at the first time
-    // of impact. Current implementation is expected to fail because collision is sampled only
-    // after integration, so the circle tunnels completely through the thin wall.
+    // of impact instead of relying only on the final sampled pose after integration.
     let mut world = no_gravity_world();
     let wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
     let bullet = create_body(
@@ -1681,10 +1688,90 @@ fn fast_small_body_does_not_tunnel_through_thin_wall() {
         0.0,
         Vector::new(200.0, 0.0),
     );
-    attach_shape(
+    let wall_collider = attach_shape(
         &mut world,
         wall,
         SharedShape::rect(0.1, 10.0),
+        Material::default(),
+    );
+    let bullet_collider = attach_shape(
+        &mut world,
+        bullet,
+        SharedShape::circle(0.05),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let position = body_position(&world, bullet);
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("CCD should report the swept contact with the wall");
+    let trace = contact.ccd_trace.expect("contact should carry CCD trace");
+
+    assert!(
+        report.stats.contact_count > 0,
+        "CCD should report the swept contact with the wall"
+    );
+    assert_eq!(report.stats.ccd_candidate_count, 1);
+    assert_eq!(report.stats.ccd_hit_count, 1);
+    assert_eq!(report.stats.ccd_miss_count, 0);
+    assert_eq!(report.stats.ccd_clamp_count, 1);
+    assert_eq!(trace.moving_body, bullet);
+    assert_eq!(trace.static_body, wall);
+    assert_eq!(trace.moving_collider, bullet_collider);
+    assert_eq!(trace.static_collider, wall_collider);
+    assert_eq!(trace.swept_start, Point::new(-1.0, 0.0));
+    assert!(trace.swept_end.x() > 2.0);
+    assert!(trace.toi > 0.0 && trace.toi < 1.0);
+    assert!(trace.advancement >= trace.toi && trace.advancement <= 1.0);
+    assert!(trace.clamp > 0.0);
+    assert!(trace.slop > 0.0);
+    assert!((trace.toi_point.x() + 0.05).abs() < 1.0e-3);
+    assert!(
+        position.x() <= -0.05,
+        "CCD should keep the bullet on the pre-impact side of the wall; x={}",
+        position.x()
+    );
+
+    let snapshot = DebugSnapshot::from_world_with_step_report(
+        &world,
+        &report,
+        &DebugSnapshotOptions::default(),
+    );
+    assert_eq!(snapshot.stats.ccd_candidate_count, 1);
+    assert_eq!(snapshot.stats.ccd_hit_count, 1);
+    assert_eq!(snapshot.stats.ccd_miss_count, 0);
+    assert_eq!(snapshot.stats.ccd_clamp_count, 1);
+    assert!(
+        snapshot
+            .contacts
+            .iter()
+            .any(|contact| contact.ccd_trace == Some(trace)),
+        "debug contacts should retain the CCD trace"
+    );
+}
+
+#[test]
+fn ccd_missed_sweep_does_not_emit_false_positive_or_clamp() {
+    let mut world = no_gravity_world();
+    let diamond = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let bullet = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -0.9,
+        2.0,
+        Vector::new(0.0, -66.0),
+    );
+    attach_shape(
+        &mut world,
+        diamond,
+        SharedShape::convex_polygon(vec![
+            Point::new(0.0, -1.0),
+            Point::new(1.0, 0.0),
+            Point::new(0.0, 1.0),
+            Point::new(-1.0, 0.0),
+        ]),
         Material::default(),
     );
     attach_shape(
@@ -1697,13 +1784,63 @@ fn fast_small_body_does_not_tunnel_through_thin_wall() {
     let report = step_world(&mut world, 1);
     let position = body_position(&world, bullet);
 
+    assert_eq!(report.stats.contact_count, 0);
+    assert_eq!(report.stats.ccd_candidate_count, 1);
+    assert_eq!(report.stats.ccd_hit_count, 0);
+    assert_eq!(report.stats.ccd_miss_count, 1);
+    assert_eq!(report.stats.ccd_clamp_count, 0);
     assert!(
-        report.stats.contact_count > 0,
-        "CCD should report the swept contact with the wall"
+        (position.y() - 0.9).abs() < 1.0e-4,
+        "missed sweep should keep the integrated end pose; y={}",
+        position.y()
     );
+}
+
+#[test]
+fn ccd_dynamic_circle_hits_static_convex_polygon() {
+    let mut world = no_gravity_world();
+    let diamond = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let bullet = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.0,
+        0.0,
+        Vector::new(200.0, 0.0),
+    );
+    attach_shape(
+        &mut world,
+        diamond,
+        SharedShape::convex_polygon(vec![
+            Point::new(0.0, -1.0),
+            Point::new(0.25, 0.0),
+            Point::new(0.0, 1.0),
+            Point::new(-0.25, 0.0),
+        ]),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        bullet,
+        SharedShape::circle(0.05),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let position = body_position(&world, bullet);
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("CCD should report the swept contact with static convex geometry");
+    let trace = contact.ccd_trace.expect("contact should carry CCD trace");
+
+    assert_eq!(report.stats.ccd_candidate_count, 1);
+    assert_eq!(report.stats.ccd_hit_count, 1);
+    assert_eq!(report.stats.ccd_miss_count, 0);
+    assert_eq!(report.stats.ccd_clamp_count, 1);
+    assert!(trace.toi > 0.0 && trace.toi < 1.0);
     assert!(
-        position.x() <= -0.05,
-        "CCD should keep the bullet on the pre-impact side of the wall; x={}",
+        position.x() < -0.2,
+        "bullet should be clamped before crossing the convex polygon; x={}",
         position.x()
     );
 }

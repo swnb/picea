@@ -8,6 +8,7 @@ pub mod joint;
 pub mod math;
 pub mod pipeline;
 pub mod query;
+pub mod recipe;
 mod solver;
 pub mod world;
 
@@ -21,9 +22,9 @@ pub mod prelude {
         DebugManifoldPoint, DebugPrimitive, DebugSnapshot, DebugSnapshotOptions,
     };
     pub use super::events::{
-        ContactEvent, ContactReductionReason, EpaTerminationReason, GenericConvexFallbackReason,
-        GenericConvexTrace, GjkTerminationReason, SleepEvent, SleepTransitionReason,
-        WarmStartCacheReason, WorldEvent,
+        CcdTrace, ContactEvent, ContactReductionReason, EpaTerminationReason,
+        GenericConvexFallbackReason, GenericConvexTrace, GjkTerminationReason, SleepEvent,
+        SleepTransitionReason, WarmStartCacheReason, WorldEvent,
     };
     pub use super::handles::{
         BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
@@ -36,6 +37,11 @@ pub mod prelude {
     pub use super::math::{edge::Edge, point::Point, segment::Segment, vector::Vector, FloatNum};
     pub use super::pipeline::{SimulationPipeline, StepConfig, StepReport, StepStats};
     pub use super::query::{AabbHit, PointHit, QueryFilter, QueryPipeline, RayHit};
+    pub use super::recipe::{
+        BodyBundle, ColliderBundle, CollisionLayerPreset, CollisionLayers, MaterialPreset,
+        WorldCommand, WorldCommandError, WorldCommandEvent, WorldCommandKind, WorldCommandReport,
+        WorldCommands, WorldRecipe, WorldRecipeResult,
+    };
     pub use super::world::{
         HandleError, TopologyError, ValidationError, World, WorldDesc, WorldError,
     };

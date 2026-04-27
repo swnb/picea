@@ -4,7 +4,7 @@ use crate::{
     body::Pose,
     collider::{CollisionFilter, Material, ShapeAabb, SharedShape},
     events::{
-        ContactEvent, ContactReductionReason, GenericConvexTrace, SleepTransitionReason,
+        CcdTrace, ContactEvent, ContactReductionReason, GenericConvexTrace, SleepTransitionReason,
         WarmStartCacheReason, WorldEvent,
     },
     handles::{BodyHandle, ColliderHandle},
@@ -53,6 +53,7 @@ struct ContactObservation {
     restitution_velocity_threshold: FloatNum,
     restitution_applied: bool,
     generic_convex_trace: Option<GenericConvexTrace>,
+    ccd_trace: Option<CcdTrace>,
 }
 
 #[derive(Clone, Debug)]
@@ -103,6 +104,7 @@ pub(crate) fn run_contact_phases(
     world: &mut World,
     config: &StepConfig,
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
+    ccd_traces: &[CcdTrace],
 ) -> (
     Vec<WorldEvent>,
     usize,
@@ -110,7 +112,7 @@ pub(crate) fn run_contact_phases(
     BroadphaseStats,
     WarmStartStats,
 ) {
-    let mut contacts = world.collect_contact_observations();
+    let mut contacts = world.collect_contact_observations(ccd_traces);
     let broadphase_stats = contacts.broadphase_stats;
     let previous_contacts = world.take_active_contacts();
     world.prepare_contact_warm_start(&mut contacts.observations, &previous_contacts);
@@ -132,7 +134,11 @@ struct ContactPhaseObservations {
 }
 
 impl World {
-    fn collect_contact_observations(&mut self) -> ContactPhaseObservations {
+    fn collect_contact_observations(
+        &mut self,
+        ccd_traces: &[CcdTrace],
+    ) -> ContactPhaseObservations {
+        let ccd_traces = ccd_trace_map(ccd_traces);
         let colliders = self.live_collider_snapshots();
         let proxies = colliders
             .iter()
@@ -225,6 +231,7 @@ impl World {
                     restitution_velocity_threshold: 0.0,
                     restitution_applied: false,
                     generic_convex_trace: contact.generic_convex_trace,
+                    ccd_trace: ccd_traces.get(&(ordered_a, ordered_b)).copied(),
                 });
             }
         }
@@ -353,6 +360,7 @@ impl World {
                     restitution_velocity_threshold: contact.restitution_velocity_threshold,
                     restitution_applied: contact.restitution_applied,
                     generic_convex_trace: contact.generic_convex_trace,
+                    ccd_trace: contact.ccd_trace,
                 }
             } else {
                 let manifold_id = *pair_manifold_ids
@@ -380,6 +388,7 @@ impl World {
                     restitution_velocity_threshold: contact.restitution_velocity_threshold,
                     restitution_applied: contact.restitution_applied,
                     generic_convex_trace: contact.generic_convex_trace,
+                    ccd_trace: contact.ccd_trace,
                 }
             };
 
@@ -846,5 +855,24 @@ fn combine_materials(a: Material, b: Material) -> Material {
     Material {
         friction: (a.friction.max(0.0) * b.friction.max(0.0)).sqrt(),
         restitution: a.restitution.max(b.restitution).max(0.0),
+    }
+}
+
+fn ccd_trace_map(traces: &[CcdTrace]) -> BTreeMap<(ColliderHandle, ColliderHandle), CcdTrace> {
+    traces
+        .iter()
+        .copied()
+        .map(|trace| {
+            let pair = ordered_pair(trace.moving_collider, trace.static_collider);
+            (pair, trace)
+        })
+        .collect()
+}
+
+fn ordered_pair(a: ColliderHandle, b: ColliderHandle) -> (ColliderHandle, ColliderHandle) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
     }
 }

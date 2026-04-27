@@ -24,15 +24,17 @@ pub enum ScenarioId {
     JointAnchor,
     BroadphaseSparse,
     SatPolygon,
+    CcdFastCircleWall,
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::FallingBoxContact,
         Self::Stack4,
         Self::JointAnchor,
         Self::BroadphaseSparse,
         Self::SatPolygon,
+        Self::CcdFastCircleWall,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -42,6 +44,7 @@ impl ScenarioId {
             Self::JointAnchor => "joint_anchor",
             Self::BroadphaseSparse => "broadphase_sparse",
             Self::SatPolygon => "sat_polygon",
+            Self::CcdFastCircleWall => "ccd_fast_circle_wall",
         }
     }
 }
@@ -62,6 +65,7 @@ impl FromStr for ScenarioId {
             "joint_anchor" => Ok(Self::JointAnchor),
             "broadphase_sparse" => Ok(Self::BroadphaseSparse),
             "sat_polygon" => Ok(Self::SatPolygon),
+            "ccd_fast_circle_wall" => Ok(Self::CcdFastCircleWall),
             other => Err(LabError::UnknownScenario(other.to_owned())),
         }
     }
@@ -86,6 +90,7 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::JointAnchor => "World anchor joint",
                 ScenarioId::BroadphaseSparse => "Sparse broadphase",
                 ScenarioId::SatPolygon => "SAT polygon manifold",
+                ScenarioId::CcdFastCircleWall => "CCD fast circle wall",
             },
             description: match id {
                 ScenarioId::FallingBoxContact => "A dynamic box falling into static floor contact.",
@@ -96,6 +101,9 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 }
                 ScenarioId::SatPolygon => {
                     "A rectangle and convex polygon exposing clipped manifold points."
+                }
+                ScenarioId::CcdFastCircleWall => {
+                    "A fast dynamic circle swept against a static thin rectangle wall."
                 }
             },
         })
@@ -230,6 +238,21 @@ pub(crate) fn build_scenario(
                 )
                 .map_err(|error| LabError::World(error.to_string()))?;
         }
+        ScenarioId::CcdFastCircleWall => {
+            world = World::new(WorldDesc {
+                gravity: Vector::default(),
+                enable_sleep: false,
+            });
+            add_box(&mut world, BodyType::Static, 0.0, 0.0, 0.1, 10.0)?;
+            add_circle(
+                &mut world,
+                BodyType::Dynamic,
+                -1.0,
+                0.0,
+                0.05,
+                Vector::new(200.0, 0.0),
+            )?;
+        }
     }
 
     Ok(BuiltScenario { world })
@@ -256,6 +279,35 @@ fn add_box(
             body,
             ColliderDesc {
                 shape: SharedShape::rect(width, height),
+                ..ColliderDesc::default()
+            },
+        )
+        .map_err(|error| LabError::World(error.to_string()))?;
+    Ok(body)
+}
+
+fn add_circle(
+    world: &mut World,
+    body_type: BodyType,
+    x: f32,
+    y: f32,
+    radius: f32,
+    linear_velocity: Vector,
+) -> LabResult<BodyHandle> {
+    let body = world
+        .create_body(BodyDesc {
+            body_type,
+            pose: Pose::from_xy_angle(x, y, 0.0),
+            linear_velocity,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .map_err(|error| LabError::World(error.to_string()))?;
+    world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(radius),
                 ..ColliderDesc::default()
             },
         )

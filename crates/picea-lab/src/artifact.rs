@@ -122,6 +122,14 @@ pub struct DebugRenderFrame {
     pub warm_start_miss_count: usize,
     #[serde(default)]
     pub warm_start_drop_count: usize,
+    #[serde(default)]
+    pub ccd_candidate_count: usize,
+    #[serde(default)]
+    pub ccd_hit_count: usize,
+    #[serde(default)]
+    pub ccd_miss_count: usize,
+    #[serde(default)]
+    pub ccd_clamp_count: usize,
     pub world_bounds: Option<DebugAabb>,
     pub bodies: Vec<DebugBody>,
     pub colliders: Vec<DebugCollider>,
@@ -268,6 +276,10 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     warm_start_hit_count: frame.snapshot.stats.warm_start_hit_count,
                     warm_start_miss_count: frame.snapshot.stats.warm_start_miss_count,
                     warm_start_drop_count: frame.snapshot.stats.warm_start_drop_count,
+                    ccd_candidate_count: frame.snapshot.stats.ccd_candidate_count,
+                    ccd_hit_count: frame.snapshot.stats.ccd_hit_count,
+                    ccd_miss_count: frame.snapshot.stats.ccd_miss_count,
+                    ccd_clamp_count: frame.snapshot.stats.ccd_clamp_count,
                     world_bounds: frame.snapshot.world_bounds(),
                     bodies: frame.snapshot.bodies.clone(),
                     colliders: frame.snapshot.colliders.clone(),

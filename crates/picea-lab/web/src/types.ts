@@ -111,6 +111,20 @@ export type GenericConvexTrace = {
   simplex_len: number;
 };
 
+export type CcdTrace = {
+  moving_body: number;
+  static_body: number;
+  moving_collider: number;
+  static_collider: number;
+  swept_start: Vec2;
+  swept_end: Vec2;
+  toi: number;
+  advancement: number;
+  clamp: number;
+  slop: number;
+  toi_point: Vec2;
+};
+
 export type DebugContact = {
   id: number;
   bodies: [number, number];
@@ -138,6 +152,7 @@ export type DebugContact = {
   restitution_velocity_threshold?: number;
   restitution_applied?: boolean;
   generic_convex_trace?: GenericConvexTrace | null;
+  ccd_trace?: CcdTrace | null;
 };
 
 export type DebugManifold = {
@@ -204,6 +219,10 @@ export type DebugSnapshot = {
     warm_start_hit_count?: number;
     warm_start_miss_count?: number;
     warm_start_drop_count?: number;
+    ccd_candidate_count?: number;
+    ccd_hit_count?: number;
+    ccd_miss_count?: number;
+    ccd_clamp_count?: number;
   };
 };
 

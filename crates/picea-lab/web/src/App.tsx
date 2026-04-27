@@ -55,6 +55,10 @@ function warmStartTriplet(stats: FrameRecord["snapshot"]["stats"]) {
   return `${stats.warm_start_hit_count ?? 0}/${stats.warm_start_miss_count ?? 0}/${stats.warm_start_drop_count ?? 0}`;
 }
 
+function ccdQuad(stats: FrameRecord["snapshot"]["stats"]) {
+  return `${stats.ccd_candidate_count ?? 0}/${stats.ccd_hit_count ?? 0}/${stats.ccd_miss_count ?? 0}/${stats.ccd_clamp_count ?? 0}`;
+}
+
 function traceStage(locale: Locale, termination: string, iterations: number): string {
   return `${dynamicValueLabel(locale, termination)} / ${iterations}`;
 }
@@ -759,6 +763,7 @@ function Inspector({
           <Fact label={t(locale, "inspector.torques")} value={t(locale, "inspector.unmeasured")} muted />
           <Fact label={t(locale, "inspector.broadphaseCandidates")} value={String(frame.snapshot.stats.broadphase_candidate_count)} />
           <Fact label={t(locale, "inspector.warmStart")} value={warmStartTriplet(frame.snapshot.stats)} />
+          <Fact label={t(locale, "inspector.ccd")} value={ccdQuad(frame.snapshot.stats)} />
         </section>
 
         {selected ? (
@@ -837,6 +842,17 @@ function EntityInspector({
               <Fact label={t(locale, "fact.gjk")} value={traceStage(locale, selected.entity.generic_convex_trace.gjk_termination, selected.entity.generic_convex_trace.gjk_iterations)} />
               <Fact label={t(locale, "fact.epa")} value={traceStage(locale, selected.entity.generic_convex_trace.epa_termination, selected.entity.generic_convex_trace.epa_iterations)} />
               <Fact label={t(locale, "fact.simplex")} value={String(selected.entity.generic_convex_trace.simplex_len)} />
+            </>
+          )}
+          {selected.entity.ccd_trace && (
+            <>
+              <Fact label={t(locale, "fact.ccdToi")} value={selected.entity.ccd_trace.toi.toFixed(5)} />
+              <Fact label={t(locale, "fact.ccdAdvancement")} value={selected.entity.ccd_trace.advancement.toFixed(5)} />
+              <Fact label={t(locale, "fact.ccdClamp")} value={selected.entity.ccd_trace.clamp.toFixed(5)} />
+              <Fact label={t(locale, "fact.ccdSlop")} value={selected.entity.ccd_trace.slop.toFixed(5)} />
+              <Fact label={t(locale, "fact.ccdSweptStart")} value={vec(selected.entity.ccd_trace.swept_start)} />
+              <Fact label={t(locale, "fact.ccdSweptEnd")} value={vec(selected.entity.ccd_trace.swept_end)} />
+              <Fact label={t(locale, "fact.ccdToiPoint")} value={vec(selected.entity.ccd_trace.toi_point)} />
             </>
           )}
         </>

@@ -116,6 +116,10 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
             warm_start_hit_count: 1,
             warm_start_miss_count: 2,
             warm_start_drop_count: 3,
+            ccd_candidate_count: 4,
+            ccd_hit_count: 2,
+            ccd_miss_count: 1,
+            ccd_clamp_count: 2,
             ..StepStats::default()
         },
         events: vec![WorldEvent::ContactStarted(ContactEvent {
@@ -147,6 +151,7 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
                 epa_iterations: 2,
                 simplex_len: 3,
             }),
+            ccd_trace: None,
         })],
     };
 
@@ -170,6 +175,10 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
     assert_eq!(snapshot.stats.warm_start_hit_count, 1);
     assert_eq!(snapshot.stats.warm_start_miss_count, 2);
     assert_eq!(snapshot.stats.warm_start_drop_count, 3);
+    assert_eq!(snapshot.stats.ccd_candidate_count, 4);
+    assert_eq!(snapshot.stats.ccd_hit_count, 2);
+    assert_eq!(snapshot.stats.ccd_miss_count, 1);
+    assert_eq!(snapshot.stats.ccd_clamp_count, 2);
     assert_eq!(snapshot.contacts.len(), 1);
     assert_eq!(snapshot.manifolds.len(), 1);
     assert!(!snapshot.primitives.is_empty());
@@ -318,6 +327,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "restitution_velocity_threshold",
             "restitution_applied",
             "generic_convex_trace",
+            "ccd_trace",
         ],
     );
     let contact: ContactEvent =
@@ -335,6 +345,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(contact.restitution_velocity_threshold, 0.0);
     assert!(!contact.restitution_applied);
     assert_eq!(contact.generic_convex_trace, None);
+    assert_eq!(contact.ccd_trace, None);
 
     let mut stats_value =
         serde_json::to_value(StepStats::default()).expect("step stats should serialize");
@@ -344,6 +355,10 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "warm_start_hit_count",
             "warm_start_miss_count",
             "warm_start_drop_count",
+            "ccd_candidate_count",
+            "ccd_hit_count",
+            "ccd_miss_count",
+            "ccd_clamp_count",
         ],
     );
     let stats: StepStats =
@@ -351,6 +366,10 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(stats.warm_start_hit_count, 0);
     assert_eq!(stats.warm_start_miss_count, 0);
     assert_eq!(stats.warm_start_drop_count, 0);
+    assert_eq!(stats.ccd_candidate_count, 0);
+    assert_eq!(stats.ccd_hit_count, 0);
+    assert_eq!(stats.ccd_miss_count, 0);
+    assert_eq!(stats.ccd_clamp_count, 0);
 
     let mut debug_stats_value =
         serde_json::to_value(DebugStats::default()).expect("debug stats should serialize");
@@ -360,6 +379,10 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "warm_start_hit_count",
             "warm_start_miss_count",
             "warm_start_drop_count",
+            "ccd_candidate_count",
+            "ccd_hit_count",
+            "ccd_miss_count",
+            "ccd_clamp_count",
         ],
     );
     let debug_stats: DebugStats =
@@ -367,6 +390,10 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(debug_stats.warm_start_hit_count, 0);
     assert_eq!(debug_stats.warm_start_miss_count, 0);
     assert_eq!(debug_stats.warm_start_drop_count, 0);
+    assert_eq!(debug_stats.ccd_candidate_count, 0);
+    assert_eq!(debug_stats.ccd_hit_count, 0);
+    assert_eq!(debug_stats.ccd_miss_count, 0);
+    assert_eq!(debug_stats.ccd_clamp_count, 0);
 
     let debug_contact = DebugContact {
         id: ContactId::default(),
@@ -394,6 +421,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             epa_iterations: 2,
             simplex_len: 3,
         }),
+        ccd_trace: None,
     };
     let mut debug_contact_value =
         serde_json::to_value(debug_contact).expect("debug contact should serialize");
@@ -410,6 +438,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "restitution_velocity_threshold",
             "restitution_applied",
             "generic_convex_trace",
+            "ccd_trace",
         ],
     );
     let decoded_debug_contact: DebugContact = serde_json::from_value(debug_contact_value)
@@ -427,6 +456,7 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(decoded_debug_contact.restitution_velocity_threshold, 0.0);
     assert!(!decoded_debug_contact.restitution_applied);
     assert_eq!(decoded_debug_contact.generic_convex_trace, None);
+    assert_eq!(decoded_debug_contact.ccd_trace, None);
 
     let debug_manifold = DebugManifold {
         id: ManifoldId::default(),

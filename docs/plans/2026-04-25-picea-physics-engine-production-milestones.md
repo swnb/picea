@@ -480,6 +480,21 @@ rtk proxy cargo test -p picea --test physics_realism_acceptance
 
 ## M8 CCD TOI
 
+> Status: lab/docs evidence surfaces updated 2026-04-27.
+>
+> Completion notes: core now exports CCD counters through `StepStats` /
+> `DebugStats` and attaches `ccd_trace: Option<CcdTrace>` to contact events and
+> debug contacts. `picea-lab` keeps those facts on the existing
+> `frames.jsonl` / `final_snapshot.json` path, adds a `ccd_fast_circle_wall`
+> builtin scenario, and the web workbench can inspect selected contact TOI,
+> advancement, clamp/slop, swept start/end, and TOI point. The canvas renders
+> generic `snapshot.primitives`, so core-provided swept path, TOI marker, or
+> label primitives are visible without another lab schema change.
+>
+> Residual risks: dynamic-vs-dynamic CCD and full generic all-shape CCD remain
+> out of scope. Lab evidence is explanatory only; core CCD correctness still
+> belongs in `crates/picea` behavior tests.
+
 ### Goal
 
 Prevent fast bodies from tunneling through thin static geometry by adding a
@@ -521,6 +536,26 @@ rtk proxy cargo test -p picea-lab
 ```
 
 ## M9 API Recipes, Observability Closure, And Benchmarks
+
+> Status: minimal core/API and Criterion baseline slice implemented 2026-04-27.
+>
+> Completion notes: core now exposes `recipe` wrappers for `BodyBundle`,
+> `ColliderBundle`, `WorldRecipe`, and transactional `WorldCommands` without
+> changing the low-level `World::create_body` / `World::create_collider`
+> contracts. Batch commands cover body, existing-body collider, joint, patch, and
+> destroy paths by running against a cloned scratch `World` and committing only
+> after every command succeeds, so validation and handle errors do not leak
+> partial mutation into the caller's world. Material and collision layer presets
+> cover the common recipe/benchmark cases. `crates/picea` now has Criterion
+> baselines for sparse broadphase, dense broadphase, stack stability, CCD bullet,
+> and API batch creation; benchmark IDs record deterministic Picea counters
+> alongside timings and intentionally do not set thresholds. `picea-lab`
+> artifact schema tests parse saved JSON and typed render artifacts to lock the
+> final broadphase, contact/manifold, warm-start, sleep/island, and CCD fact
+> carriers used by the viewer and saved run artifacts.
+>
+> Residual risk: Criterion lockfile ownership needs supervisor acceptance if the
+> dependency update is committed.
 
 ### Goal
 

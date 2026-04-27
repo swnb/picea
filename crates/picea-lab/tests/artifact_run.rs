@@ -409,6 +409,198 @@ fn stack_artifacts_capture_solver_impulse_facts() {
 }
 
 #[test]
+fn ccd_fast_circle_wall_artifacts_capture_toi_trace_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::CcdFastCircleWall,
+            frame_count: 2,
+            run_id: Some("m8-ccd-fast-circle-wall".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("ccd run should write artifacts");
+
+    let first = run.frames.first().expect("first frame should exist");
+    assert_eq!(first.stats.ccd_candidate_count, 1);
+    assert_eq!(first.stats.ccd_hit_count, 1);
+    assert_eq!(first.stats.ccd_miss_count, 0);
+    assert_eq!(first.stats.ccd_clamp_count, 1);
+    let contact = first
+        .snapshot
+        .contacts
+        .iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("ccd artifact should expose a contact trace");
+    let trace = contact.ccd_trace.expect("trace should be present");
+    assert!(trace.toi > 0.0 && trace.toi < 1.0);
+    assert!(trace.advancement >= trace.toi && trace.advancement <= 1.0);
+    assert!(trace.clamp > 0.0);
+    assert!(trace.slop > 0.0);
+
+    let frame_lines = fs::read_to_string(run.path.join(ArtifactFile::Frames.file_name()))
+        .expect("frames should be readable");
+    assert!(
+        frame_lines.contains("\"ccd_trace\""),
+        "frames.jsonl should preserve CCD trace facts"
+    );
+
+    let render: DebugRenderArtifact = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable"),
+    )
+    .expect("debug render should match schema");
+    let render_first = render
+        .frames
+        .first()
+        .expect("debug render should include ccd frame facts");
+    assert_eq!(render_first.ccd_candidate_count, 1);
+    assert_eq!(render_first.ccd_hit_count, 1);
+    assert_eq!(render_first.ccd_miss_count, 0);
+    assert_eq!(render_first.ccd_clamp_count, 1);
+    assert!(
+        render_first
+            .contacts
+            .iter()
+            .any(|contact| contact.ccd_trace.is_some()),
+        "debug render should keep CCD trace facts for the selected-contact inspector"
+    );
+}
+
+#[test]
+fn artifact_schema_keeps_final_observability_fact_set() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::CcdFastCircleWall,
+            frame_count: 1,
+            run_id: Some("m9-observability-schema".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("schema run should write artifacts");
+
+    let final_snapshot_bytes = fs::read(run.path.join(ArtifactFile::FinalSnapshot.file_name()))
+        .expect("final snapshot should be readable");
+    let final_snapshot_json: serde_json::Value = serde_json::from_slice(&final_snapshot_bytes)
+        .expect("final snapshot should match JSON schema");
+    let final_stats = final_snapshot_json
+        .get("stats")
+        .and_then(serde_json::Value::as_object)
+        .expect("final snapshot should carry a stats object");
+    for field in [
+        "broadphase_candidate_count",
+        "broadphase_tree_depth",
+        "contact_count",
+        "manifold_count",
+        "warm_start_hit_count",
+        "warm_start_miss_count",
+        "warm_start_drop_count",
+        "ccd_candidate_count",
+        "ccd_hit_count",
+        "ccd_miss_count",
+        "ccd_clamp_count",
+    ] {
+        assert!(
+            final_stats.contains_key(field),
+            "final snapshot stats should preserve observability field `{field}`"
+        );
+    }
+    assert!(
+        final_snapshot_json
+            .get("contacts")
+            .and_then(serde_json::Value::as_array)
+            .is_some(),
+        "final snapshot should preserve contact carriers"
+    );
+    assert!(
+        final_snapshot_json
+            .get("manifolds")
+            .and_then(serde_json::Value::as_array)
+            .is_some(),
+        "final snapshot should preserve manifold carriers"
+    );
+
+    let debug_render_bytes = fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+        .expect("debug render should be readable");
+    let debug_render_json: serde_json::Value =
+        serde_json::from_slice(&debug_render_bytes).expect("debug render should match JSON schema");
+    let frames = debug_render_json
+        .get("frames")
+        .and_then(serde_json::Value::as_array)
+        .expect("debug render should carry frame objects");
+    let first_frame = frames
+        .first()
+        .and_then(serde_json::Value::as_object)
+        .expect("debug render should include the first frame object");
+    for field in [
+        "broadphase_candidate_count",
+        "broadphase_tree_depth",
+        "contact_count",
+        "contacts",
+        "manifolds",
+        "warm_start_hit_count",
+        "warm_start_miss_count",
+        "warm_start_drop_count",
+        "ccd_candidate_count",
+        "ccd_hit_count",
+        "ccd_miss_count",
+        "ccd_clamp_count",
+        "islands",
+    ] {
+        assert!(
+            first_frame.contains_key(field),
+            "debug render frame should preserve observability field `{field}`"
+        );
+    }
+
+    let bodies = first_frame
+        .get("bodies")
+        .and_then(serde_json::Value::as_array)
+        .expect("debug render frame should carry body facts");
+    let first_body = bodies
+        .first()
+        .and_then(serde_json::Value::as_object)
+        .expect("debug render frame should include at least one body fact");
+    assert!(
+        first_body.contains_key("sleeping") && first_body.contains_key("island_id"),
+        "body facts should preserve sleep/island carriers"
+    );
+
+    let contacts = first_frame
+        .get("contacts")
+        .and_then(serde_json::Value::as_array)
+        .expect("debug render frame should carry contact facts");
+    assert!(
+        contacts.iter().any(|contact| contact
+            .get("ccd_trace")
+            .is_some_and(|trace| !trace.is_null())),
+        "contact facts should preserve CCD trace carriers"
+    );
+
+    let render: DebugRenderArtifact = serde_json::from_slice(&debug_render_bytes)
+        .expect("debug render should deserialize through the typed artifact schema");
+    let render_first = render
+        .frames
+        .first()
+        .expect("typed debug render should include first frame");
+    assert_eq!(render_first.ccd_hit_count, 1);
+    assert!(
+        render_first
+            .contacts
+            .iter()
+            .any(|contact| contact.ccd_trace.is_some()),
+        "typed debug render contacts should preserve CCD trace facts"
+    );
+}
+
+#[test]
 fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() {
     let frame = DebugRenderFrame {
         frame_index: 0,
@@ -426,6 +618,10 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
         warm_start_hit_count: 1,
         warm_start_miss_count: 2,
         warm_start_drop_count: 3,
+        ccd_candidate_count: 4,
+        ccd_hit_count: 2,
+        ccd_miss_count: 1,
+        ccd_clamp_count: 2,
         world_bounds: None,
         bodies: Vec::new(),
         colliders: Vec::new(),
@@ -441,6 +637,10 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     object.remove("warm_start_hit_count");
     object.remove("warm_start_miss_count");
     object.remove("warm_start_drop_count");
+    object.remove("ccd_candidate_count");
+    object.remove("ccd_hit_count");
+    object.remove("ccd_miss_count");
+    object.remove("ccd_clamp_count");
     object.remove("islands");
 
     let decoded: DebugRenderFrame =
@@ -449,5 +649,9 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     assert_eq!(decoded.warm_start_hit_count, 0);
     assert_eq!(decoded.warm_start_miss_count, 0);
     assert_eq!(decoded.warm_start_drop_count, 0);
+    assert_eq!(decoded.ccd_candidate_count, 0);
+    assert_eq!(decoded.ccd_hit_count, 0);
+    assert_eq!(decoded.ccd_miss_count, 0);
+    assert_eq!(decoded.ccd_clamp_count, 0);
     assert!(decoded.islands.is_empty());
 }

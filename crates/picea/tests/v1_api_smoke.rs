@@ -1,7 +1,8 @@
 use picea::prelude::{
-    BodyDesc, BodyType, ColliderDesc, CollisionFilter, DebugSnapshotOptions, DistanceJointDesc,
-    JointDesc, Material, Pose, QueryFilter, QueryPipeline, SharedShape, SimulationPipeline,
-    StepConfig, World, WorldAnchorJointDesc, WorldDesc,
+    BodyBundle, BodyDesc, BodyType, ColliderBundle, ColliderDesc, CollisionFilter,
+    CollisionLayerPreset, DebugSnapshotOptions, DistanceJointDesc, JointDesc, Material,
+    MaterialPreset, Pose, QueryFilter, QueryPipeline, SharedShape, SimulationPipeline, StepConfig,
+    World, WorldAnchorJointDesc, WorldDesc, WorldRecipe,
 };
 
 #[test]
@@ -85,4 +86,64 @@ fn world_api_supports_create_step_query_and_debug_snapshot() {
     assert_eq!(snapshot.colliders.len(), 2);
     assert_eq!(snapshot.joints.len(), 2);
     assert_eq!(snapshot.stats.step_index, report.step_index);
+}
+
+#[test]
+fn recipe_api_creates_a_world_that_can_step_query_and_debug() {
+    let recipe = WorldRecipe::new(WorldDesc::default())
+        .with_body(
+            BodyBundle::static_body()
+                .with_pose(Pose::from_xy_angle(0.0, -2.0, 0.0))
+                .with_collider(
+                    ColliderBundle::new(SharedShape::rect(8.0, 1.0))
+                        .with_material(MaterialPreset::Rough)
+                        .with_filter(CollisionLayerPreset::StaticGeometry),
+                ),
+        )
+        .with_body(
+            BodyBundle::dynamic()
+                .with_pose(Pose::from_xy_angle(0.0, 0.0, 0.0))
+                .with_collider(
+                    ColliderBundle::new(SharedShape::circle(0.5))
+                        .with_material(MaterialPreset::Bouncy)
+                        .with_filter(CollisionLayerPreset::DynamicBody),
+                ),
+        );
+
+    let mut created = recipe
+        .instantiate()
+        .expect("valid recipe should create a world");
+    assert_eq!(created.created.body_handles.len(), 2);
+    assert_eq!(created.created.collider_handles.len(), 2);
+    assert_eq!(
+        created
+            .world
+            .collider(created.created.collider_handles[1])
+            .expect("dynamic collider should resolve")
+            .material(),
+        Material::preset(MaterialPreset::Bouncy)
+    );
+    assert!(
+        CollisionFilter::preset(CollisionLayerPreset::DynamicBody).allows(
+            &CollisionFilter::preset(CollisionLayerPreset::StaticGeometry)
+        ),
+        "default dynamic/static layer presets should interact"
+    );
+
+    let mut pipeline = SimulationPipeline::new(StepConfig::default());
+    let report = pipeline.step(&mut created.world);
+    assert_eq!(report.stats.body_count, 2);
+    assert_eq!(report.stats.collider_count, 2);
+
+    let mut query = QueryPipeline::new();
+    query.sync(&created.world);
+    assert!(!query
+        .intersect_point((0.0, 0.0).into(), QueryFilter::default())
+        .is_empty());
+
+    let snapshot = created
+        .world
+        .debug_snapshot(&DebugSnapshotOptions::default());
+    assert_eq!(snapshot.bodies.len(), 2);
+    assert_eq!(snapshot.colliders.len(), 2);
 }

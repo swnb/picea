@@ -13,7 +13,7 @@ use crate::{
     body::{BodyType, MassProperties, Pose},
     collider::{CollisionFilter, Material, SharedShape},
     events::{
-        ContactEvent, ContactReductionReason, GenericConvexTrace, SleepTransitionReason,
+        CcdTrace, ContactEvent, ContactReductionReason, GenericConvexTrace, SleepTransitionReason,
         WarmStartCacheReason, WorldEvent,
     },
     handles::{
@@ -202,6 +202,18 @@ pub struct DebugStats {
     /// Number of contacts whose matching cache entry was rejected as unsafe.
     #[serde(default)]
     pub warm_start_drop_count: usize,
+    /// Number of swept broadphase candidates considered by CCD in the last step.
+    #[serde(default)]
+    pub ccd_candidate_count: usize,
+    /// Number of CCD candidates with a valid time of impact.
+    #[serde(default)]
+    pub ccd_hit_count: usize,
+    /// Number of swept candidates rejected because the actual sweep missed.
+    #[serde(default)]
+    pub ccd_miss_count: usize,
+    /// Number of dynamic bodies clamped by CCD before contact generation.
+    #[serde(default)]
+    pub ccd_clamp_count: usize,
 }
 
 /// Translation/rotation facts exported without exposing engine internals.
@@ -410,6 +422,9 @@ pub struct DebugContact {
     /// GJK/EPA trace facts when the generic convex fallback produced this contact.
     #[serde(default)]
     pub generic_convex_trace: Option<GenericConvexTrace>,
+    /// CCD trace facts when this contact was created by a swept TOI clamp.
+    #[serde(default)]
+    pub ccd_trace: Option<CcdTrace>,
 }
 
 impl DebugContact {
@@ -433,7 +448,24 @@ impl DebugContact {
             restitution_velocity_threshold: sanitize_scalar(self.restitution_velocity_threshold),
             restitution_applied: self.restitution_applied,
             generic_convex_trace: self.generic_convex_trace,
+            ccd_trace: self.ccd_trace.map(sanitize_ccd_trace),
         }
+    }
+}
+
+fn sanitize_ccd_trace(trace: CcdTrace) -> CcdTrace {
+    CcdTrace {
+        moving_body: trace.moving_body,
+        static_body: trace.static_body,
+        moving_collider: trace.moving_collider,
+        static_collider: trace.static_collider,
+        swept_start: sanitize_point(trace.swept_start),
+        swept_end: sanitize_point(trace.swept_end),
+        toi: sanitize_scalar(trace.toi),
+        advancement: sanitize_scalar(trace.advancement),
+        clamp: sanitize_scalar(trace.clamp).max(0.0),
+        slop: sanitize_scalar(trace.slop).max(0.0),
+        toi_point: sanitize_point(trace.toi_point),
     }
 }
 
@@ -836,6 +868,10 @@ impl DebugSnapshot {
                 warm_start_hit_count: stats.warm_start_hit_count,
                 warm_start_miss_count: stats.warm_start_miss_count,
                 warm_start_drop_count: stats.warm_start_drop_count,
+                ccd_candidate_count: stats.ccd_candidate_count,
+                ccd_hit_count: stats.ccd_hit_count,
+                ccd_miss_count: stats.ccd_miss_count,
+                ccd_clamp_count: stats.ccd_clamp_count,
                 ..DebugStats::default()
             },
             bodies,
@@ -975,6 +1011,7 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             restitution_velocity_threshold: event.restitution_velocity_threshold,
             restitution_applied: event.restitution_applied,
             generic_convex_trace: event.generic_convex_trace,
+            ccd_trace: event.ccd_trace,
         };
         contacts.push(contact);
 

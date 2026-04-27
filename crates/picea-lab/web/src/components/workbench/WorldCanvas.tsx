@@ -4,6 +4,7 @@ import type {
   DebugBody,
   DebugCollider,
   DebugContact,
+  DebugPrimitive,
   DebugShape,
   FrameRecord,
   SelectedEntity,
@@ -43,7 +44,10 @@ export function WorldCanvas({ frames, frameIndex, selected, layers, labels, onSe
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 900, height: 600 });
   const frame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))];
-  const camera = useMemo(() => makeCamera(frame?.snapshot.colliders ?? [], size), [frame, size]);
+  const camera = useMemo(
+    () => makeCamera(frame?.snapshot.colliders ?? [], frame?.snapshot.primitives ?? [], size),
+    [frame, size],
+  );
 
   useEffect(() => {
     const element = containerRef.current;
@@ -118,6 +122,7 @@ function drawWorld(
 
   if (layers.trace) {
     drawTrace(ctx, previousFrames, camera);
+    drawPrimitives(ctx, frame.snapshot.primitives, camera);
   }
 
   if (layers.shapes) {
@@ -331,6 +336,128 @@ function drawTrace(ctx: CanvasRenderingContext2D, frames: FrameRecord[], camera:
   ctx.stroke();
 }
 
+function drawPrimitives(ctx: CanvasRenderingContext2D, primitives: DebugPrimitive[], camera: Camera) {
+  for (const primitive of primitives) {
+    ctx.save();
+    if (primitive.kind === "line") {
+      const start = worldToScreen(primitive.start, camera);
+      const end = worldToScreen(primitive.end, camera);
+      ctx.strokeStyle = colorToCss(primitive.color);
+      ctx.lineWidth = 1.7;
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+    } else if (primitive.kind === "polyline") {
+      drawPrimitivePolyline(ctx, primitive.points, primitive.closed, colorToCss(primitive.color), camera);
+    } else if (primitive.kind === "polygon") {
+      drawPrimitivePolygon(ctx, primitive, camera);
+    } else if (primitive.kind === "circle") {
+      const center = worldToScreen(primitive.center, camera);
+      ctx.strokeStyle = colorToCss(primitive.color);
+      ctx.lineWidth = 1.7;
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, Math.max(2, primitive.radius * camera.scale), 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (primitive.kind === "arrow") {
+      drawPrimitiveArrow(ctx, primitive.origin, primitive.direction, colorToCss(primitive.color), camera);
+    } else if (primitive.kind === "label") {
+      const position = worldToScreen(primitive.position, camera);
+      ctx.fillStyle = colorToCss(primitive.color);
+      ctx.font = "12px ui-monospace, SFMono-Regular, monospace";
+      ctx.fillText(primitive.text, position.x + 6, position.y - 6);
+    }
+    ctx.restore();
+  }
+}
+
+function drawPrimitivePolyline(
+  ctx: CanvasRenderingContext2D,
+  points: Vec2[],
+  closed: boolean,
+  color: string,
+  camera: Camera,
+) {
+  if (points.length < 2) {
+    return;
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.7;
+  ctx.beginPath();
+  points.forEach((point, index) => {
+    const screen = worldToScreen(point, camera);
+    if (index === 0) {
+      ctx.moveTo(screen.x, screen.y);
+    } else {
+      ctx.lineTo(screen.x, screen.y);
+    }
+  });
+  if (closed) {
+    ctx.closePath();
+  }
+  ctx.stroke();
+}
+
+function drawPrimitivePolygon(
+  ctx: CanvasRenderingContext2D,
+  primitive: Extract<DebugPrimitive, { kind: "polygon" }>,
+  camera: Camera,
+) {
+  if (primitive.points.length < 3) {
+    return;
+  }
+  ctx.beginPath();
+  primitive.points.forEach((point, index) => {
+    const screen = worldToScreen(point, camera);
+    if (index === 0) {
+      ctx.moveTo(screen.x, screen.y);
+    } else {
+      ctx.lineTo(screen.x, screen.y);
+    }
+  });
+  ctx.closePath();
+  if (primitive.fill) {
+    ctx.fillStyle = colorToCss(primitive.fill);
+    ctx.fill();
+  }
+  ctx.strokeStyle = colorToCss(primitive.stroke);
+  ctx.lineWidth = 1.7;
+  ctx.stroke();
+}
+
+function drawPrimitiveArrow(
+  ctx: CanvasRenderingContext2D,
+  origin: Vec2,
+  direction: Vec2,
+  color: string,
+  camera: Camera,
+) {
+  const start = worldToScreen(origin, camera);
+  const end = worldToScreen({ x: origin.x + direction.x, y: origin.y + direction.y }, camera);
+  const length = Math.hypot(end.x - start.x, end.y - start.y);
+  if (!Number.isFinite(length) || length <= 0.5) {
+    return;
+  }
+  const angle = Math.atan2(end.y - start.y, end.x - start.x);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1.7;
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(end.x, end.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(end.x, end.y);
+  ctx.lineTo(end.x - 8 * Math.cos(angle - Math.PI / 6), end.y - 8 * Math.sin(angle - Math.PI / 6));
+  ctx.lineTo(end.x - 8 * Math.cos(angle + Math.PI / 6), end.y - 8 * Math.sin(angle + Math.PI / 6));
+  ctx.closePath();
+  ctx.fill();
+}
+
+function colorToCss(color: { r: number; g: number; b: number; a: number }): string {
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${Math.max(0, Math.min(1, color.a / 255))})`;
+}
+
 function drawArrow(
   ctx: CanvasRenderingContext2D,
   camera: Camera,
@@ -414,8 +541,12 @@ function pointInPolygon(point: Vec2, vertices: Vec2[]): boolean {
   return inside;
 }
 
-function makeCamera(colliders: DebugCollider[], size: { width: number; height: number }): Camera {
-  const bounds = aggregateBounds(colliders) ?? { min: { x: -5, y: -3 }, max: { x: 5, y: 3 } };
+function makeCamera(
+  colliders: DebugCollider[],
+  primitives: DebugPrimitive[],
+  size: { width: number; height: number },
+): Camera {
+  const bounds = aggregateSceneBounds(colliders, primitives) ?? { min: { x: -5, y: -3 }, max: { x: 5, y: 3 } };
   const padding = 1.2;
   const width = Math.max(2, bounds.max.x - bounds.min.x + padding * 2);
   const height = Math.max(2, bounds.max.y - bounds.min.y + padding * 2);
@@ -431,8 +562,20 @@ function makeCamera(colliders: DebugCollider[], size: { width: number; height: n
   };
 }
 
+function aggregateSceneBounds(colliders: DebugCollider[], primitives: DebugPrimitive[]): DebugAabb | null {
+  const bounds = [
+    ...colliders.map((collider) => collider.aabb),
+    ...primitives.map(primitiveBounds),
+  ].filter((aabb): aabb is DebugAabb => Boolean(aabb));
+  return mergeBounds(bounds);
+}
+
 function aggregateBounds(colliders: DebugCollider[]): DebugAabb | null {
   const aabbs = colliders.map((collider) => collider.aabb).filter((aabb): aabb is DebugAabb => Boolean(aabb));
+  return mergeBounds(aabbs);
+}
+
+function mergeBounds(aabbs: DebugAabb[]): DebugAabb | null {
   if (aabbs.length === 0) {
     return null;
   }
@@ -440,6 +583,41 @@ function aggregateBounds(colliders: DebugCollider[]): DebugAabb | null {
     min: { x: Math.min(acc.min.x, aabb.min.x), y: Math.min(acc.min.y, aabb.min.y) },
     max: { x: Math.max(acc.max.x, aabb.max.x), y: Math.max(acc.max.y, aabb.max.y) },
   }));
+}
+
+function primitiveBounds(primitive: DebugPrimitive): DebugAabb | null {
+  if (primitive.kind === "line") {
+    return boundsFromPoints([primitive.start, primitive.end]);
+  }
+  if (primitive.kind === "polyline" || primitive.kind === "polygon") {
+    return boundsFromPoints(primitive.points);
+  }
+  if (primitive.kind === "circle") {
+    return {
+      min: { x: primitive.center.x - primitive.radius, y: primitive.center.y - primitive.radius },
+      max: { x: primitive.center.x + primitive.radius, y: primitive.center.y + primitive.radius },
+    };
+  }
+  if (primitive.kind === "arrow") {
+    return boundsFromPoints([
+      primitive.origin,
+      { x: primitive.origin.x + primitive.direction.x, y: primitive.origin.y + primitive.direction.y },
+    ]);
+  }
+  return boundsFromPoints([primitive.position]);
+}
+
+function boundsFromPoints(points: Vec2[]): DebugAabb | null {
+  if (points.length === 0) {
+    return null;
+  }
+  return points.reduce(
+    (acc, point) => ({
+      min: { x: Math.min(acc.min.x, point.x), y: Math.min(acc.min.y, point.y) },
+      max: { x: Math.max(acc.max.x, point.x), y: Math.max(acc.max.y, point.y) },
+    }),
+    { min: { ...points[0] }, max: { ...points[0] } },
+  );
 }
 
 function worldToScreen(point: Vec2, camera: Camera): Vec2 {

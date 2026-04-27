@@ -5,6 +5,7 @@
 //! contact generation, and event production.
 
 pub(crate) mod broadphase;
+pub(crate) mod ccd;
 pub(crate) mod contacts;
 pub(crate) mod gjk;
 pub(crate) mod integrate;
@@ -96,6 +97,18 @@ pub struct StepStats {
     /// Number of contacts whose matching cache entry was rejected as unsafe.
     #[serde(default)]
     pub warm_start_drop_count: usize,
+    /// Number of swept broadphase candidates considered by CCD.
+    #[serde(default)]
+    pub ccd_candidate_count: usize,
+    /// Number of CCD candidates with a valid time of impact.
+    #[serde(default)]
+    pub ccd_hit_count: usize,
+    /// Number of swept candidates rejected because the actual sweep missed.
+    #[serde(default)]
+    pub ccd_miss_count: usize,
+    /// Number of dynamic bodies clamped by CCD before contact generation.
+    #[serde(default)]
+    pub ccd_clamp_count: usize,
     /// Number of velocity iterations used for the step.
     pub velocity_iterations: u16,
     /// Number of position iterations used for the step.
@@ -306,6 +319,7 @@ mod tests {
             restitution_velocity_threshold: 2.0,
             restitution_applied: true,
             generic_convex_trace: None,
+            ccd_trace: None,
         });
         let sleep_changed = WorldEvent::SleepChanged(SleepEvent {
             body: BodyHandle::from_raw_parts(2, 0),

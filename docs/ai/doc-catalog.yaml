@@ -221,8 +221,26 @@
   status: active
   owner: picea-core
   applies_to: [core, architecture, public-modules, prelude]
-  keywords: [lib, prelude, algo, body, collider, debug, events, handles, joint, math, pipeline, query, world]
-  last_reviewed: 2026-04-23
+  keywords: [lib, prelude, algo, body, collider, debug, events, handles, joint, math, pipeline, query, recipe, world]
+  last_reviewed: 2026-04-27
+- path: crates/picea/src/recipe.rs
+  title: Picea Recipe And Command API
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [core, public-api, recipes, world-commands, benchmarks]
+  keywords: [recipe, bodybundle, colliderbundle, worldrecipe, worldcommands, material-preset, collision-layer, batch-create, atomic]
+  last_reviewed: 2026-04-27
+- path: crates/picea/benches/physics_scenarios.rs
+  title: Picea Criterion Physics Scenario Baselines
+  kind: code
+  authority: medium
+  status: active
+  owner: picea-core
+  applies_to: [benchmarks, broadphase, stack, ccd, api, baseline]
+  keywords: [criterion, benchmark, sparse-broadphase, dense-broadphase, stack-stability, ccd-bullet, api-batch, counters]
+  last_reviewed: 2026-04-27
 - path: crates/picea/src/pipeline/gjk.rs
   title: Internal GJK/EPA generic convex fallback
   kind: code

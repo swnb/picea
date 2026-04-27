@@ -7,6 +7,50 @@ use crate::{
     math::{point::Point, vector::Vector, FloatNum},
 };
 
+/// Compact trace facts for a continuous collision detection clamp.
+///
+/// CCD (continuous collision detection) sweeps a fast collider from the
+/// previous step pose to the current pre-contact pose. `toi` is the first time
+/// of impact as a normalized 0..1 fraction of that sweep; `advancement` is the
+/// final clamped fraction after adding a tiny overlap slop so the regular
+/// contact manifold can still be generated.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CcdTrace {
+    /// Dynamic body that was swept.
+    #[serde(default)]
+    pub moving_body: BodyHandle,
+    /// Static body hit by the sweep.
+    #[serde(default)]
+    pub static_body: BodyHandle,
+    /// Dynamic circle collider that was swept.
+    #[serde(default)]
+    pub moving_collider: ColliderHandle,
+    /// Static convex collider hit by the sweep.
+    #[serde(default)]
+    pub static_collider: ColliderHandle,
+    /// Circle-center start point at the beginning of the step.
+    #[serde(default)]
+    pub swept_start: Point,
+    /// Circle-center end point before contact generation.
+    #[serde(default)]
+    pub swept_end: Point,
+    /// First time of impact as a fraction of the sweep.
+    #[serde(default)]
+    pub toi: FloatNum,
+    /// Final fraction used to clamp the moving body for contact generation.
+    #[serde(default)]
+    pub advancement: FloatNum,
+    /// World-space rollback distance from the integrated end pose to the clamp.
+    #[serde(default)]
+    pub clamp: FloatNum,
+    /// Small world-space overlap allowed at the clamp.
+    #[serde(default)]
+    pub slop: FloatNum,
+    /// World-space point where the circle first touched the static convex.
+    #[serde(default)]
+    pub toi_point: Point,
+}
+
 /// Stable explanation for how a contact manifold was reduced to exported points.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -240,6 +284,9 @@ pub struct ContactEvent {
     /// GJK/EPA trace facts when this contact came from the generic convex fallback.
     #[serde(default)]
     pub generic_convex_trace: Option<GenericConvexTrace>,
+    /// CCD trace facts when this contact was created by a swept TOI clamp.
+    #[serde(default)]
+    pub ccd_trace: Option<CcdTrace>,
 }
 
 /// Sleep or wake transitions for a body.
@@ -326,6 +373,7 @@ mod tests {
             restitution_velocity_threshold: 1.0,
             restitution_applied: true,
             generic_convex_trace: None,
+            ccd_trace: None,
         };
         let sleep = SleepEvent {
             body: BodyHandle::from_raw_parts(9, 0),

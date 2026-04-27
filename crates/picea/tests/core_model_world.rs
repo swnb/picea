@@ -1,6 +1,8 @@
 use picea::prelude::{
-    BodyDesc, BodyPatch, BodyType, ColliderDesc, CollisionFilter, DistanceJointDesc, JointDesc,
-    Material, Pose, SharedShape, World, WorldAnchorJointDesc, WorldDesc, WorldError,
+    BodyBundle, BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderBundle, ColliderDesc,
+    ColliderPatch, CollisionFilter, DistanceJointDesc, DistanceJointPatch, JointDesc, JointPatch,
+    Material, Pose, SharedShape, SimulationPipeline, StepConfig, World, WorldAnchorJointDesc,
+    WorldCommand, WorldCommandEvent, WorldCommandKind, WorldDesc, WorldError,
 };
 use picea::world::HandleError;
 
@@ -326,4 +328,307 @@ fn mass_properties_recompute_after_collider_and_body_mutations() {
         .mass_properties();
     assert_eq!(after_removal.mass, 0.0);
     assert_eq!(after_removal.inertia, 0.0);
+}
+
+#[test]
+fn world_commands_create_bundles_with_structured_handles_and_events() {
+    let mut world = World::new(WorldDesc::default());
+    let report = world
+        .commands()
+        .create_bodies([
+            BodyBundle::static_body()
+                .with_collider(ColliderBundle::new(SharedShape::rect(10.0, 1.0))),
+            BodyBundle::dynamic().with_collider(ColliderBundle::new(SharedShape::circle(0.5))),
+        ])
+        .expect("valid batch should create all requested objects");
+
+    assert_eq!(report.body_handles.len(), 2);
+    assert_eq!(report.collider_handles.len(), 2);
+    assert_eq!(world.bodies().collect::<Vec<_>>(), report.body_handles);
+    assert_eq!(
+        world
+            .colliders_for_body(report.body_handles[0])
+            .expect("static body should resolve")
+            .collect::<Vec<_>>(),
+        vec![report.collider_handles[0]]
+    );
+    assert!(matches!(
+        report.events.as_slice(),
+        [
+            WorldCommandEvent::BodyCreated { .. },
+            WorldCommandEvent::ColliderCreated { .. },
+            WorldCommandEvent::BodyCreated { .. },
+            WorldCommandEvent::ColliderCreated { .. },
+        ]
+    ));
+}
+
+#[test]
+fn world_commands_do_not_mutate_when_batch_create_validation_fails() {
+    let mut world = World::new(WorldDesc::default());
+    let revision = world.revision();
+
+    let error = world
+        .commands()
+        .create_bodies([
+            BodyBundle::dynamic().with_collider(ColliderBundle::new(SharedShape::circle(0.5))),
+            BodyBundle::dynamic().with_collider(ColliderBundle::new(SharedShape::circle(-1.0))),
+        ])
+        .expect_err("invalid collider should reject the whole batch");
+
+    assert_eq!(error.command_index, 1);
+    assert_eq!(error.collider_index, Some(0));
+    assert_eq!(error.kind, WorldCommandKind::CreateCollider);
+    assert!(matches!(
+        error.error,
+        WorldError::Validation(picea::world::ValidationError::ColliderDesc {
+            field: "shape.radius",
+        })
+    ));
+    assert_eq!(
+        world.revision(),
+        revision,
+        "rejected batch must leave revision unchanged"
+    );
+    assert_eq!(
+        world.bodies().count(),
+        0,
+        "rejected batch must not partially create earlier bodies"
+    );
+}
+
+#[test]
+fn world_commands_patch_and_destroy_are_atomic_on_handle_errors() {
+    let mut world = World::new(WorldDesc::default());
+    let created = world
+        .commands()
+        .create_bodies([
+            BodyBundle::dynamic(),
+            BodyBundle::dynamic().with_pose(Pose::from_xy_angle(3.0, 0.0, 0.0)),
+        ])
+        .expect("setup batch should create bodies");
+    let first = created.body_handles[0];
+    let second = created.body_handles[1];
+    let revision = world.revision();
+
+    let error = world
+        .commands()
+        .apply([
+            WorldCommand::PatchBody {
+                body: first,
+                patch: BodyPatch {
+                    pose: Some(Pose::from_xy_angle(1.0, 2.0, 0.0)),
+                    ..BodyPatch::default()
+                },
+            },
+            WorldCommand::DestroyBody {
+                body: BodyHandle::INVALID,
+            },
+        ])
+        .expect_err("invalid destroy handle should reject the whole batch");
+
+    assert_eq!(error.command_index, 1);
+    assert_eq!(error.kind, WorldCommandKind::DestroyBody);
+    assert_eq!(
+        world.revision(),
+        revision,
+        "rejected patch/destroy batch must leave revision unchanged"
+    );
+    assert_eq!(
+        world
+            .body(first)
+            .expect("first body should still resolve")
+            .pose(),
+        Pose::default(),
+        "earlier patch in rejected batch must not leak into the real world"
+    );
+    assert!(world.body(second).is_ok());
+
+    let report = world
+        .commands()
+        .apply([
+            WorldCommand::PatchBody {
+                body: first,
+                patch: BodyPatch {
+                    pose: Some(Pose::from_xy_angle(1.0, 2.0, 0.0)),
+                    ..BodyPatch::default()
+                },
+            },
+            WorldCommand::DestroyBody { body: second },
+        ])
+        .expect("valid patch/destroy batch should apply atomically");
+
+    assert_eq!(
+        report.events,
+        vec![
+            WorldCommandEvent::BodyPatched { body: first },
+            WorldCommandEvent::BodyDestroyed { body: second },
+        ]
+    );
+    assert_eq!(
+        world
+            .body(first)
+            .expect("first body should still resolve")
+            .pose(),
+        Pose::from_xy_angle(1.0, 2.0, 0.0)
+    );
+    assert!(matches!(
+        world.body(second),
+        Err(WorldError::Handle(HandleError::StaleBody { .. }))
+    ));
+}
+
+#[test]
+fn world_commands_cover_collider_joint_paths_and_step_after_batch() {
+    let mut world = World::new(WorldDesc::default());
+    let created = world
+        .commands()
+        .create_bodies([
+            BodyBundle::dynamic().with_collider(ColliderBundle::new(SharedShape::circle(0.5))),
+            BodyBundle::dynamic().with_pose(Pose::from_xy_angle(2.0, 0.0, 0.0)),
+        ])
+        .expect("setup batch should create bodies");
+    let body_a = created.body_handles[0];
+    let body_b = created.body_handles[1];
+
+    let created = world
+        .commands()
+        .apply([
+            WorldCommand::CreateCollider {
+                body: body_a,
+                collider: ColliderBundle::new(SharedShape::rect(0.5, 0.25)),
+            },
+            WorldCommand::CreateJoint {
+                desc: JointDesc::Distance(DistanceJointDesc {
+                    body_a,
+                    body_b,
+                    rest_length: 2.0,
+                    ..DistanceJointDesc::default()
+                }),
+            },
+        ])
+        .expect("valid collider/joint batch should apply atomically");
+    let extra_collider = created.collider_handles[0];
+    let joint = created.joint_handles[0];
+    assert_eq!(
+        created.events,
+        vec![
+            WorldCommandEvent::ColliderCreated {
+                body: body_a,
+                collider: extra_collider,
+            },
+            WorldCommandEvent::JointCreated { joint },
+        ]
+    );
+    assert_eq!(
+        world
+            .colliders_for_body(body_a)
+            .expect("body should resolve")
+            .count(),
+        2
+    );
+
+    let revision = world.revision();
+    let error = world
+        .commands()
+        .apply([
+            WorldCommand::PatchCollider {
+                collider: extra_collider,
+                patch: ColliderPatch {
+                    is_sensor: Some(true),
+                    ..ColliderPatch::default()
+                },
+            },
+            WorldCommand::PatchJoint {
+                joint,
+                patch: JointPatch::Distance(DistanceJointPatch {
+                    rest_length: Some(-1.0),
+                    ..DistanceJointPatch::default()
+                }),
+            },
+        ])
+        .expect_err("invalid joint patch should reject the whole batch");
+    assert_eq!(error.command_index, 1);
+    assert_eq!(error.kind, WorldCommandKind::PatchJoint);
+    assert_eq!(
+        world.revision(),
+        revision,
+        "rejected collider/joint patch batch must leave revision unchanged"
+    );
+    assert!(
+        !world
+            .collider(extra_collider)
+            .expect("collider should still resolve")
+            .is_sensor(),
+        "earlier collider patch must not leak from a rejected batch"
+    );
+
+    let patched = world
+        .commands()
+        .apply([
+            WorldCommand::PatchCollider {
+                collider: extra_collider,
+                patch: ColliderPatch {
+                    is_sensor: Some(true),
+                    ..ColliderPatch::default()
+                },
+            },
+            WorldCommand::PatchJoint {
+                joint,
+                patch: JointPatch::Distance(DistanceJointPatch {
+                    rest_length: Some(3.0),
+                    ..DistanceJointPatch::default()
+                }),
+            },
+        ])
+        .expect("valid collider/joint patch batch should apply");
+    assert_eq!(
+        patched.events,
+        vec![
+            WorldCommandEvent::ColliderPatched {
+                collider: extra_collider
+            },
+            WorldCommandEvent::JointPatched { joint },
+        ]
+    );
+    assert!(world
+        .collider(extra_collider)
+        .expect("collider should still resolve")
+        .is_sensor());
+    match world.joint(joint).expect("joint should resolve").desc() {
+        JointDesc::Distance(desc) => assert_eq!(desc.rest_length, 3.0),
+        JointDesc::WorldAnchor(_) => panic!("expected distance joint"),
+    }
+
+    let destroyed = world
+        .commands()
+        .apply([
+            WorldCommand::DestroyCollider {
+                collider: extra_collider,
+            },
+            WorldCommand::DestroyJoint { joint },
+        ])
+        .expect("valid collider/joint destroy batch should apply");
+    assert_eq!(
+        destroyed.events,
+        vec![
+            WorldCommandEvent::ColliderDestroyed {
+                collider: extra_collider
+            },
+            WorldCommandEvent::JointDestroyed { joint },
+        ]
+    );
+    assert!(matches!(
+        world.collider(extra_collider),
+        Err(WorldError::Handle(HandleError::StaleCollider { .. }))
+    ));
+    assert!(matches!(
+        world.joint(joint),
+        Err(WorldError::Handle(HandleError::StaleJoint { .. }))
+    ));
+
+    let mut pipeline = SimulationPipeline::new(StepConfig::default());
+    let report = pipeline.step(&mut world);
+    assert_eq!(report.stats.body_count, 2);
+    assert_eq!(report.stats.collider_count, 1);
 }

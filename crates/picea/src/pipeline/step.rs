@@ -1,12 +1,17 @@
 use std::collections::BTreeMap;
 
 use crate::{
+    body::Pose,
     handles::BodyHandle,
     pipeline::{StepConfig, StepOutcome, StepStats},
     world::World,
 };
 
 pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> StepOutcome {
+    let previous_body_poses = world
+        .body_records()
+        .map(|(handle, record)| (handle, record.pose))
+        .collect::<BTreeMap<BodyHandle, Pose>>();
     let mut wake_reasons = world.take_pending_wake_reasons();
     let previous_sleep_states = world
         .bodies()
@@ -30,8 +35,14 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         &mut wake_reasons,
         &mut numeric_warnings,
     );
+    let ccd = crate::pipeline::ccd::run_ccd_phase(world, &previous_body_poses);
     let (contact_events, contact_count, manifold_count, broadphase_stats, warm_start_stats) =
-        crate::pipeline::contacts::run_contact_phases(world, config, &mut wake_reasons);
+        crate::pipeline::contacts::run_contact_phases(
+            world,
+            config,
+            &mut wake_reasons,
+            &ccd.traces,
+        );
     events.extend(contact_events);
     let (sleep_events, sleep_transition_count, active_body_count) =
         crate::pipeline::sleep::refresh_sleep_phase(
@@ -68,6 +79,10 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         warm_start_hit_count: warm_start_stats.hit_count,
         warm_start_miss_count: warm_start_stats.miss_count,
         warm_start_drop_count: warm_start_stats.drop_count,
+        ccd_candidate_count: ccd.stats.candidate_count,
+        ccd_hit_count: ccd.stats.hit_count,
+        ccd_miss_count: ccd.stats.miss_count,
+        ccd_clamp_count: ccd.stats.clamp_count,
         velocity_iterations: config.velocity_iterations,
         position_iterations: config.position_iterations,
         sleep_transition_count,
