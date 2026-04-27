@@ -112,9 +112,9 @@
   authority: high
   status: active
   owner: architecture
-  applies_to: [engine, physics-upgrade, broadphase, narrowphase, solver, sleep, ccd, api]
-  keywords: [dynamic-aabb-tree, sat, gjk, vclip, manifold, sequential-impulse, sleep-window, ccd, ergonomics]
-  last_reviewed: 2026-04-24
+  applies_to: [engine, physics-upgrade, broadphase, narrowphase, solver, sleep, ccd, api, performance]
+  keywords: [post-m10, dynamic-aabb-tree, sat, gjk, vclip, manifold, sequential-impulse, active-island-solver, ccd-generalization, performance-substrate, shape-cache, query-reuse, ergonomics]
+  last_reviewed: 2026-04-27
 - path: docs/design/debug-observability-design.md
   title: Debug Observability Design
   kind: design
@@ -212,7 +212,16 @@
   status: active
   owner: supervisor
   applies_to: [milestone, scope, acceptance, productionization, physics-upgrade]
-  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks]
+  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks, m10-5, m11, m12, m13, m14, performance-substrate, active-island-solver, ccd-generalization, ergonomic-api-v2]
+  last_reviewed: 2026-04-27
+- path: todo.md
+  title: Picea Physics Engine Backlog Archive
+  kind: backlog
+  authority: medium
+  status: active
+  owner: supervisor
+  applies_to: [backlog, archive, post-m10, future-work]
+  keywords: [m10-5, m11, m12, m13, m14, completed-baseline, performance-substrate, active-island-solver, ccd-generalization, ergonomic-api-v2]
   last_reviewed: 2026-04-27
 - path: crates/picea/src/lib.rs
   title: Picea core entrypoint

@@ -543,9 +543,9 @@ rtk proxy cargo test -p picea --test physics_realism_acceptance
 > TOI marker, or label primitives are visible without another lab schema change.
 >
 > Residual risks: dynamic-vs-dynamic CCD and full generic all-shape CCD remain
-> out of scope. The current CCD phase is also a mutating phase: it computes TOI
-> and clamps poses before contact generation. M10 should clarify that boundary
-> before CCD is generalized.
+> out of scope. M10 clarified the current CCD boundary as a narrow
+> pose-clamping phase before contact generation; broader CCD should build on
+> that explicit phase contract rather than blur it back into contact gathering.
 
 ### Goal
 
@@ -656,6 +656,26 @@ rtk proxy cargo bench -p picea --no-run
 
 ## M10 Architecture Consolidation And Product Surface Cleanup
 
+> Status: completed 2026-04-27.
+>
+> Completion notes: `SimulationPipeline::step` now routes through an explicit
+> internal `StepContext` that owns previous poses, previous sleep state, wake
+> reasons, CCD pose-clamp traces, broadphase stats, warm-start stats, contact
+> counts, sleep counts, numeric warnings, and final `StepStats` assembly. Contact
+> solver rows, effective mass, warm-start application, velocity writeback, and
+> residual correction now live under `solver/contact.rs`, while
+> `pipeline/contacts.rs` retains gather / warm-start / event emission. CCD is
+> named as `run_pose_clamp_phase`; it keeps the M8 shape coverage but makes the
+> mutating TOI clamp boundary explicit. Core `recipe` now supports
+> `JointBundle` / `WorldRecipe::with_joint`, and `picea-lab` exposes replay
+> provenance, final snapshots, selectable joints, backend/demo state, and
+> non-failing empty SSE semantics.
+>
+> Residual risks: M10 preserved behavior rather than broadening physics. The
+> broadphase/query path, shape geometry caches, active-island solver layout,
+> generalized CCD, and higher-level ergonomic scene APIs remain follow-up
+> milestones.
+
 ### Goal
 
 Consolidate the post-M9 engine architecture before adding broader capabilities.
@@ -731,6 +751,253 @@ rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); p
 rtk proxy git diff --check
 ```
 
+## M10.5 Documentation And Backlog Closeout
+
+> Status: planned.
+
+### Goal
+
+Make the repository documentation agree with the M10 reality before new
+implementation work starts. This is a small hygiene milestone, but it prevents
+future sessions from reopening completed M1-M10 work as if it were still
+known-red.
+
+### In Scope
+
+- Mark M10 as completed in this production milestone document.
+- Update `docs/design/physics-engine-upgrade-technical-plan.md` from the old
+  algorithm-gap framing to a post-M10 system-upgrade framing.
+- Update `todo.md` so completed M1-M10 items are not left as unchecked backlog.
+- Refresh AI routing/catalog metadata when the active milestone names or
+  verification commands change.
+
+### Out Of Scope
+
+- Code changes.
+- New performance, solver, CCD, or API behavior.
+- Commit or release work unless explicitly requested.
+
+### Acceptance Method
+
+- Run YAML and whitespace/diff checks.
+- Confirm git status shows only documentation files.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
+## M11 Performance Substrate
+
+> Status: planned.
+
+### Goal
+
+Turn the post-M10 engine into a performance-ready system without changing public
+behavior. M11 should make hot data flow explicit: broadphase indexing, query
+reuse, shape geometry caches, and lower per-step allocation.
+
+### Design Goals
+
+- Add direct collider-handle to broadphase leaf lookup so proxy updates do not
+  search leaves linearly.
+- Expose or reuse broadphase-style tree queries for ray/AABB/region queries
+  where semantics match the stable `QueryPipeline` contract.
+- Cache world-space vertices and support data behind transform/revision
+  invalidation instead of rebuilding `Vec<Point>` in narrowphase, CCD, and GJK
+  paths.
+- Reduce per-step `Vec` / `BTreeMap` churn in broadphase, contact gathering,
+  sleep islands, and solver setup.
+- Preserve deterministic ordering and existing debug counters while adding new
+  allocation/cache counters only when they explain behavior.
+- Keep Criterion as baseline evidence first; add thresholds only after local
+  variance is understood.
+
+### In Scope
+
+- Broadphase leaf map / proxy lookup internals.
+- Query cache acceleration that preserves current public query semantics.
+- Shape geometry/support caches for supported shapes.
+- Focused allocation reductions in step hot paths.
+- Benchmark IDs or artifact counters that explain candidate/contact/query/cache
+  work.
+
+### Out Of Scope
+
+- Public API redesign.
+- Active island compact solver arrays; that is M12.
+- CCD shape-cast generalization; that is M13.
+- Absolute performance thresholds before baseline variance is reviewed.
+
+### Acceptance Method
+
+- Add behavior locks proving query and contact ordering stay deterministic.
+- Add focused tests for stale broadphase/query/shape-cache invalidation.
+- Compare Criterion baseline IDs and counters before/after the change; treat
+  unexplained counter regressions as blockers even without absolute thresholds.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --lib pipeline::broadphase
+rtk proxy cargo test -p picea --test query_debug_contract
+rtk proxy cargo bench -p picea --no-run
+```
+
+## M12 Active Island Solver
+
+> Status: planned.
+
+### Goal
+
+Move from a correct single-world contact solver to an island-owned solver
+execution model. The target is better stability and performance for stacks,
+friction, and jointed scenes while preserving public handles and existing debug
+facts.
+
+### Design Goals
+
+- Build compact active-island arrays for dynamic bodies, contact rows, and joint
+  rows during the step.
+- Solve contacts and joints through one deterministic island ordering contract.
+- Keep sleeping islands out of hot solver arrays unless a wake reason brings
+  them back.
+- Preserve contact ids, manifold ids, warm-start facts, and sleep/wake reasons
+  across the internal layout change.
+- Keep residual position correction in the solver phase and prove it does not
+  overwrite solved velocity facts.
+
+### In Scope
+
+- Internal island solve data structures.
+- Contact and joint row batching by island.
+- Debug facts that prove island membership and solved impulses still line up.
+- Stack, ramp friction, restitution threshold, and jointed-island regressions.
+
+### Out Of Scope
+
+- New joint types.
+- CCD generalization.
+- Multithreaded island solving.
+- Public handle or recipe API changes.
+
+### Acceptance Method
+
+- Start with characterization tests for existing stack/friction/joint behavior.
+- Add active-island tests showing unrelated islands solve and sleep
+  independently.
+- Keep `StepStats`, `DebugSnapshot`, contact events, and lab artifacts
+  semantically stable.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --test physics_realism_acceptance stack
+rtk proxy cargo test -p picea --test physics_realism_acceptance sleep
+rtk proxy cargo test -p picea --test world_step_review_regressions
+```
+
+## M13 CCD Generalization
+
+> Status: planned.
+
+### Goal
+
+Generalize CCD from the narrow dynamic-circle pose clamp into a staged TOI /
+shape-cast system without making the step pipeline opaque. The goal is fewer
+tunneling cases with explicit trace semantics and controlled cost.
+
+### Design Goals
+
+- Keep CCD as a named step phase that proposes or applies TOI advancement before
+  contact generation.
+- Extend dynamic-vs-static support beyond circles through convex shape casts or
+  GJK-backed conservative advancement.
+- Add multi-impact budgeting so one moving body can handle more than one
+  relevant hit without unbounded substeps.
+- Keep `ccd_trace` rich enough to explain swept start/end, candidate, TOI,
+  advancement, clamp/slop, and chosen/ignored impacts.
+- Gate dynamic-vs-dynamic CCD behind benchmark and behavior evidence.
+
+### In Scope
+
+- Dynamic-vs-static convex CCD beyond circles.
+- Conservative advancement or shape-cast helpers.
+- Multi-hit ordering and budget semantics.
+- CCD trace/artifact updates.
+
+### Out Of Scope
+
+- Full all-shape CCD in one slice.
+- Dynamic-vs-dynamic CCD unless a focused follow-up justifies it.
+- Turning CCD into hidden substeps with no event/debug trace.
+
+### Acceptance Method
+
+- Add known-red tests for a non-circle dynamic convex body crossing thin static
+  geometry.
+- Add no-false-positive and multi-hit ordering tests.
+- Use `picea-lab` artifacts to show swept paths and selected/ignored TOI hits.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --test physics_realism_acceptance ccd
+rtk proxy cargo test -p picea --lib pipeline::ccd
+rtk proxy cargo test -p picea-lab
+```
+
+## M14 Ergonomic API V2
+
+> Status: planned.
+
+### Goal
+
+Build on the M9/M10 recipe surface to make scene authoring easier than a direct
+Box2D/Rapier-style object-by-object API, while keeping low-level `World`
+controls stable for advanced users.
+
+### Design Goals
+
+- Add higher-level scene/asset recipes for common test, example, and benchmark
+  worlds.
+- Make recipe and command errors point to the nested body/collider/joint path
+  that failed.
+- Support serializable setup flows where that helps examples, fixtures, and
+  lab scenarios.
+- Keep `WorldCommands` atomic clone-and-commit semantics honest; do not present
+  it as a hot-path mutation API.
+- Keep public API additions additive and small.
+
+### In Scope
+
+- Scene-level recipe helpers.
+- Better recipe/command error context.
+- Serializable recipe fixtures if the schema can stay stable.
+- Documentation examples and smoke tests.
+
+### Out Of Scope
+
+- Replacing low-level `World::create_*` APIs.
+- Live editing semantics in `picea-lab`.
+- Runtime solver or CCD changes.
+
+### Acceptance Method
+
+- Add `v1_api_smoke` tests for the new ergonomic path.
+- Add one lab/example fixture if serialization is introduced.
+- Prove low-level APIs still compile and behave unchanged.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --test v1_api_smoke
+rtk proxy cargo test -p picea --test core_model_world
+rtk proxy cargo test -p picea-lab
+```
+
 ## Picea Lab Role Across Milestones
 
 `picea-lab` should help AI and humans inspect real behavior. Its role grows by
@@ -755,6 +1022,14 @@ milestone:
   baseline summaries.
 - M10: make replay provenance, final snapshots, joints, and backend/demo state
   explicit while preserving the same artifact fact surface.
+- M11: surface performance evidence through candidate/query/cache counters and
+  benchmark scenario IDs without making the lab the timing oracle.
+- M12: show active island membership, solved contact/joint rows, wake reasons,
+  and sleep state after solver compaction.
+- M13: visualize generalized CCD sweeps, selected/ignored TOI hits, and
+  advancement budgets.
+- M14: host ergonomic scene/recipe examples as evidence that the public setup
+  flow stays easy and reproducible.
 
 The lab should not run physics independently from `crates/picea`, and it should
 not be the only pass/fail signal for physics correctness.

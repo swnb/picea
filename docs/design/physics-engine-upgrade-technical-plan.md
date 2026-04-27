@@ -13,17 +13,33 @@ Picea should not try to win by being a smaller clone of Box2D or Rapier. The use
 
 The bias is ease of use first, with performance designed into the internal layout instead of patched on through hidden global state.
 
-## Current Gap
+## Post-M10 Baseline And Remaining Gap
 
-Picea's current `World` path has a clean lifecycle API and useful tests, but it is still below top production engines in several physics areas:
+The first production line has moved Picea past the "missing core algorithms"
+stage. Current `World` + `SimulationPipeline` already has persistent broadphase
+proxies, SAT + clipping manifolds, mass/inertia facts, warm-started sequential
+impulses, island sleep/wake reasons, GJK/EPA fallback, a narrow CCD
+pose-clamping phase, recipe APIs, debug facts, lab artifacts, and Criterion
+baseline benches.
 
-- broadphase now has persistent dynamic-tree proxies, fat AABBs, bounded
-  rebuild/compaction, and debug counters, but still lacks benchmark baselines;
-- narrowphase only had AABB-style overlap for most contact generation;
-- contact solving was positional and did not model mass, friction, restitution, warm-starting, or stable manifolds deeply enough;
-- sleeping lacked a stability window and island-level wake reasoning;
-- CCD is still missing, so fast thin-wall cases can tunnel;
-- scene creation is explicit but still verbose for real users.
+The remaining gap to top production 2D engines is now system quality:
+
+- broadphase is production-shaped but still needs a hotter internal data path:
+  handle-to-leaf indexing, tree query reuse, stronger insertion/balancing
+  heuristics, and fewer per-step temporary collections;
+- queries are stable and easy to use, but still rebuild from debug snapshots and
+  scan cached colliders rather than reusing an indexed spatial structure;
+- the contact solver has the right sequential impulse model, but not yet an
+  active-island compact-array execution path for contacts and joints;
+- CCD covers the first important dynamic-circle vs static-convex slice, but not
+  dynamic-vs-dynamic motion, generic shape casts, or multi-impact advancement;
+- shape geometry and support data are recomputed in several hot paths instead
+  of being cached behind transform revision;
+- public authoring is much better through recipes, but still lacks a higher
+  level scene/asset layer and richer error paths for complex setup flows.
+
+This means the next upgrades should optimize the system around the algorithms
+that now exist, not immediately chase a broad new algorithm surface.
 
 ## Broadphase Decision
 
@@ -38,11 +54,12 @@ Why:
 
 Tradeoff:
 
-- The first production milestone keeps proxy storage internal to `World` rather
-  than exposing broadphase proxy IDs through the public API.
+- Proxy storage remains internal to `World`; public users should not manage
+  broadphase proxy IDs.
 - The persistent tree now uses fat AABBs, incremental moves, stale cleanup,
-  deterministic rebuild/compaction, and step/debug metrics. Ray/AABB/region
-  query reuse is still a future step once query semantics are tightened.
+  deterministic rebuild/compaction, step/debug metrics, and benchmark
+  scenarios. The next step is performance substrate work: direct handle-to-leaf
+  lookup, query reuse, and better balancing/insertion heuristics.
 
 Sources:
 
@@ -84,16 +101,20 @@ This is the path to stable stacks. A single position correction point can pass t
 
 ## Solver Plan
 
-Move from correction-only contacts to a sequential impulse solver:
+The first solver goal has landed: Picea now uses a warm-started sequential
+impulse contact solver with effective mass, inverse inertia, Coulomb friction,
+restitution thresholding, velocity iterations, and residual position correction.
+The next solver goal is active-island execution:
 
-- compute effective inverse mass and inverse inertia per constraint row;
-- warm-start cached normal and tangent impulses before velocity iterations;
-- solve normal impulse with non-negative clamping;
-- solve tangent impulse with Coulomb friction clamped by normal impulse;
-- apply restitution only above a configurable velocity threshold;
-- run a small position correction pass for residual penetration.
+- build compact per-island body/contact/joint arrays for the active solve;
+- solve contacts and joints through the same island ordering contract;
+- preserve stable public handles while keeping hot solver state dense;
+- keep warm-start and debug facts attached to stable contact ids;
+- keep residual position correction from overwriting solved velocity facts.
 
-This follows the same family of ideas as Box2D's solver: iterative impulses plus temporal coherence. The current material velocity response is an interim slice to make restitution and friction observable before the full solver lands.
+This follows the same family of ideas as Box2D's solver: iterative impulses plus
+temporal coherence, with Picea keeping the solved impulse facts available for
+events, debug snapshots, and lab artifacts.
 
 Sources:
 
@@ -102,15 +123,17 @@ Sources:
 
 ## Sleep And Wake Plan
 
-Sleeping must be stability-window based, not "one quiet frame":
+Sleeping is now stability-window and island based, not "one quiet frame":
 
 - each dynamic body tracks low-motion time;
 - a body may sleep only after sustained low linear and angular speed;
-- later production behavior should evaluate islands, not isolated bodies;
+- production behavior evaluates deterministic contact/joint islands;
 - wake reasons should be explicit: contact impulse, joint correction, user patch, transform edit, or velocity edit;
 - sleeping data should eventually move out of hot active arrays for cache locality.
 
-The current slice implements the first body-level timer and resets it on contact, joint correction, integration disable paths, and user wake-like edits.
+The next sleep-related work belongs with active-island storage: keep island
+membership and sleeping bodies out of hot arrays without weakening deterministic
+events and debug facts.
 
 Source:
 
@@ -118,7 +141,10 @@ Source:
 
 ## CCD Plan
 
-Add CCD after the first stable broadphase/narrowphase/solver path:
+The first CCD slice exists as a clearly named pose-clamping phase. It handles
+dynamic circles against static thin walls / static convex geometry, emits
+`ccd_trace`, and feeds the normal contact path after clamping. The next CCD work
+should generalize carefully:
 
 - opt in per body or per collider first, then add automatic fast-body heuristics;
 - generate swept AABBs in broadphase;
@@ -126,7 +152,9 @@ Add CCD after the first stable broadphase/narrowphase/solver path:
 - advance to the earliest impact, clamp to a small slop before contact, then resolve through the normal solver;
 - keep CCD event semantics explicit because hit/contact events may be delayed or split across substeps.
 
-CCD should be narrow in scope at first: fast circles against static thin walls, then dynamic-vs-static convex, then dynamic-vs-dynamic if benchmarks justify it.
+CCD should stay staged: dynamic-vs-static shape casts first, then multi-impact
+conservative advancement, then dynamic-vs-dynamic only when benchmarks and
+behavior locks justify the cost.
 
 Source:
 
@@ -137,54 +165,66 @@ Source:
 The public API should be easier than traditional engine APIs where historical layers leak through:
 
 - keep explicit low-level `World::create_body` and `World::create_collider` for control;
-- add `BodyBundle` / `ColliderBundle` for common body + shape + material creation;
-- add `WorldRecipe` for declarative test worlds and examples;
-- add `WorldCommands` for batch creation, destruction, and patches with validation before mutation;
-- add named material and collision-layer assets so users do not hand-thread masks and coefficients everywhere;
+- keep `BodyBundle` / `ColliderBundle` / `JointBundle` for common object creation;
+- keep `WorldRecipe` for declarative test worlds and examples;
+- keep `WorldCommands` for batch creation, destruction, and patches with validation before mutation;
+- keep named material and collision-layer assets so users do not hand-thread masks and coefficients everywhere;
 - return structured creation results with handles, emitted events, and validation errors;
 - expose `StepReport` and debug snapshots as first-class facts, not afterthought logs.
 
-The advantage over copying Box2D/Rapier surface APIs is that Picea can design around modern Rust data ownership and reproducible debugging from the start.
+The advantage over copying Box2D/Rapier surface APIs is that Picea can design
+around modern Rust data ownership and reproducible debugging from the start.
+The next ergonomic layer should be additive: scene/asset recipes, better nested
+error context, and serializable setup flows without weakening the low-level
+`World` contract.
 
 ## Performance Direction
 
-Performance work should follow data flow:
+Performance work should now become the next main line. It should follow data
+flow rather than micro-optimizing isolated helpers:
 
 - persistent broadphase proxies and fat AABBs;
+- direct broadphase leaf lookup by collider handle;
+- public query reuse of broadphase-style spatial indexes where semantics match;
 - stable arena handles with generation checks;
 - separate hot simulation arrays from user metadata;
 - compact active islands while leaving stable public handles intact;
 - cache shape support data and world-space vertices when transforms change;
 - avoid per-step allocations in contact generation and event refresh;
-- add scenario benchmarks for sparse broadphase, dense broadphase, stacked contacts, CCD bullets, and large batch creation.
+- keep scenario benchmarks for sparse broadphase, dense broadphase, stacked contacts, CCD bullets, and large batch creation;
+- add thresholds only after several local baselines make variance and expected
+  counter shapes clear.
 
 ## Acceptance Order
 
-1. Physics realism baseline: keep acceptance tests for current known gaps.
-2. Broadphase: dynamic AABB tree candidate filtering with deterministic pair order.
-3. Narrowphase: circle analytic contacts, then polygon SAT + clipping.
-4. Solver: sequential impulses, warm-start, effective mass, friction, restitution threshold.
-5. Sleep: body stability window first, island sleep and wake reasons second.
-6. CCD: fast circle vs thin static wall, then broader convex support.
-7. API ergonomics: batch commands, bundles, recipes, and material/layer presets.
-8. Observability: debug facts for candidate drops, contact reduction, impulses, and sleep/CCD decisions.
+1. M10.5 closeout: make docs, backlog, and verification routing agree that the
+   M1-M10 capability line is complete.
+2. M11 performance substrate: broadphase leaf indexing, query reuse, shape
+   geometry caches, allocation reduction, and benchmark counter baselines.
+3. M12 active island solver: compact active arrays, island-level contact/joint
+   solve, warm-start preservation, and debug fact continuity.
+4. M13 CCD generalization: dynamic-vs-static shape casts, conservative
+   advancement, multi-impact budgeting, and trace semantics.
+5. M14 ergonomic API v2: higher-level scene/asset recipes, serializable setup,
+   and richer command error context.
 
-## Slice Landed In This Upgrade
+## Capability Line Landed
 
-This implementation slice intentionally stops short of a full production solver. It adds:
+The M1-M10 line should be treated as the first production capability baseline:
 
-- a persistent internal dynamic AABB tree candidate pass with fat AABBs,
-  stale-proxy cleanup, bounded compaction/rebuild, deterministic pair order,
-  and broadphase debug counters;
-- circle-circle narrowphase rejection of AABB-only false positives;
-- first restitution/friction velocity response so material values affect motion;
-- body-level sleep stability window;
-- acceptance tests that keep CCD visible as the remaining known-red gap.
+- persistent broadphase state with fat AABBs, lifecycle cleanup, deterministic
+  rebuild/compaction, and debug counters;
+- SAT + clipping manifolds, analytic circle contacts, stable feature ids, and
+  a GJK/EPA fallback for supported convex pairs;
+- density-derived mass, center-of-mass, inertia, and static/kinematic/dynamic
+  inverse-mass semantics;
+- persistent contact identity, warm-start transfer, and a row-based sequential
+  impulse contact solver;
+- deterministic island sleep/wake reasons and explicit event/debug facts;
+- narrow CCD for dynamic circle vs static convex geometry with `ccd_trace`;
+- `BodyBundle`, `ColliderBundle`, `JointBundle`, `WorldRecipe`, and
+  transactional `WorldCommands`;
+- `picea-lab` artifact/replay evidence and Criterion baseline scenarios.
 
-Remaining high-risk work:
-
-- SAT + clipping manifolds;
-- full sequential impulse solver with effective mass and warm-start;
-- island sleep and wake reason reporting;
-- CCD time-of-impact implementation;
-- ergonomic creation bundles and command batches.
+The next high-risk work is not "finish the old algorithm checklist"; it is
+making those capabilities faster, more reusable, and harder to misuse.

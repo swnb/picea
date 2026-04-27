@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{collider::ShapeAabb, handles::ColliderHandle, math::FloatNum};
 
@@ -85,6 +85,7 @@ pub(crate) struct DynamicAabbTree {
     nodes: Vec<TreeNode>,
     root: Option<usize>,
     leaves: Vec<usize>,
+    leaf_by_handle: BTreeMap<ColliderHandle, usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -180,9 +181,18 @@ impl DynamicAabbTree {
     }
 
     fn find_leaf(&self, handle: ColliderHandle) -> Option<usize> {
-        self.leaves.iter().copied().find(|&leaf_index| {
-            self.nodes[leaf_index].proxy_index.is_some() && self.nodes[leaf_index].handle == handle
-        })
+        self.leaf_index_for(handle)
+    }
+
+    fn leaf_index_for(&self, handle: ColliderHandle) -> Option<usize> {
+        self.leaf_by_handle
+            .get(&handle)
+            .copied()
+            .filter(|&leaf_index| {
+                self.nodes
+                    .get(leaf_index)
+                    .is_some_and(|node| node.proxy_index.is_some() && node.handle == handle)
+            })
     }
 
     fn depth(&self) -> usize {
@@ -234,6 +244,7 @@ impl DynamicAabbTree {
         self.nodes.clear();
         self.root = None;
         self.leaves.clear();
+        self.leaf_by_handle.clear();
         self.root = self.build_balanced_subtree(&mut entries);
     }
 
@@ -252,6 +263,7 @@ impl DynamicAabbTree {
                     handle: proxy.handle,
                 });
                 self.leaves.push(leaf_index);
+                self.leaf_by_handle.insert(proxy.handle, leaf_index);
                 Some(leaf_index)
             }
             _ => {
@@ -291,6 +303,7 @@ impl DynamicAabbTree {
             handle: proxy.handle,
         });
         self.leaves.push(leaf_index);
+        self.leaf_by_handle.insert(proxy.handle, leaf_index);
 
         let Some(root_index) = self.root else {
             self.root = Some(leaf_index);
@@ -326,6 +339,10 @@ impl DynamicAabbTree {
     }
 
     fn remove_leaf(&mut self, leaf_index: usize) {
+        if let Some(handle) = self.nodes.get(leaf_index).map(|node| node.handle) {
+            self.leaf_by_handle.remove(&handle);
+        }
+
         if self.root == Some(leaf_index) {
             self.root = None;
             self.leaves.retain(|&index| index != leaf_index);
@@ -714,5 +731,60 @@ mod tests {
         ];
 
         assert_eq!(candidate_pairs(&proxies), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn leaf_lookup_tracks_moves_rebuilds_stale_removal_and_recycled_handles() {
+        let mut broadphase = Broadphase::default();
+        let old_handle = handle_with_generation(0, 0);
+        let recycled_handle = handle_with_generation(0, 1);
+        let stable_handle = handle(1);
+
+        broadphase.update(&[
+            proxy_with_handle(old_handle, aabb(0.0, 0.0, 1.0, 1.0)),
+            proxy_with_handle(stable_handle, aabb(3.0, 0.0, 4.0, 1.0)),
+        ]);
+
+        let stable_leaf = broadphase
+            .tree
+            .leaf_index_for(stable_handle)
+            .expect("stable collider should have a leaf");
+        assert_eq!(broadphase.tree.nodes[stable_leaf].handle, stable_handle);
+
+        broadphase.update(&[
+            proxy_with_handle(old_handle, aabb(6.0, 0.0, 7.0, 1.0)),
+            proxy_with_handle(stable_handle, aabb(3.0, 0.0, 4.0, 1.0)),
+        ]);
+        let moved_leaf = broadphase
+            .tree
+            .leaf_index_for(old_handle)
+            .expect("moved collider should still be directly indexed");
+        assert_eq!(broadphase.tree.nodes[moved_leaf].handle, old_handle);
+
+        let many_proxies = (100..132)
+            .map(|index| {
+                let x = index as f32 * 2.0;
+                proxy(index, aabb(x, 2.0, x + 1.0, 3.0))
+            })
+            .collect::<Vec<_>>();
+        broadphase.update(&many_proxies);
+        assert!(broadphase.tree.leaf_index_for(old_handle).is_none());
+        assert!(broadphase.tree.leaf_index_for(stable_handle).is_none());
+        for proxy in &many_proxies {
+            let leaf = broadphase
+                .tree
+                .leaf_index_for(proxy.handle)
+                .expect("rebuilt tree should keep every live handle indexed");
+            assert_eq!(broadphase.tree.nodes[leaf].handle, proxy.handle);
+        }
+
+        broadphase.update(&[proxy_with_handle(recycled_handle, aabb(0.0, 8.0, 1.0, 9.0))]);
+
+        assert!(broadphase.tree.leaf_index_for(old_handle).is_none());
+        let recycled_leaf = broadphase
+            .tree
+            .leaf_index_for(recycled_handle)
+            .expect("recycled generation should be indexed independently");
+        assert_eq!(broadphase.tree.nodes[recycled_leaf].handle, recycled_handle);
     }
 }
