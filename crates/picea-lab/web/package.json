@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "test:i18n": "node scripts/i18n-contract.mjs",
+    "test:ui-contract": "node scripts/ui-contract.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },

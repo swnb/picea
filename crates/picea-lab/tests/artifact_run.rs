@@ -1,9 +1,23 @@
-use std::fs;
+use std::{fs, path::Path};
 
 use picea_lab::{
     run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact, DebugRenderFrame, FrameRecord,
     RunConfig, RunManifest, ScenarioId,
 };
+
+#[test]
+fn default_artifact_store_uses_workspace_target() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("picea-lab should live under workspace/crates/picea-lab");
+
+    assert_eq!(
+        ArtifactStore::default_in_workspace().root(),
+        workspace_root.join("target/picea-lab/runs").as_path(),
+        "the default store should not depend on whether picea-lab is launched from the workspace root or the crate directory"
+    );
+}
 
 #[test]
 fn run_writes_expected_artifacts_and_keeps_state_hash_deterministic() {

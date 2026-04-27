@@ -148,6 +148,11 @@ pub struct RunResult {
 
 /// Filesystem boundary that hides `target/picea-lab/runs/<run_id>` from higher
 /// level CLI and server flows.
+///
+/// The default store is intentionally anchored at the workspace `target/`
+/// directory, not at the process current directory. That keeps local evidence
+/// artifacts next to other generated build outputs whether `picea-lab serve` is
+/// launched from the workspace root or from `crates/picea-lab`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArtifactStore {
     root: PathBuf,
@@ -159,7 +164,12 @@ impl ArtifactStore {
     }
 
     pub fn default_in_workspace() -> Self {
-        Self::new("target/picea-lab/runs")
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace_root = manifest_dir
+            .parent()
+            .and_then(Path::parent)
+            .unwrap_or(manifest_dir);
+        Self::new(workspace_root.join("target/picea-lab/runs"))
     }
 
     pub fn root(&self) -> &Path {

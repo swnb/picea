@@ -5,6 +5,7 @@ import {
   Activity,
   Box,
   Braces,
+  Check,
   ChevronRight,
   CircleDot,
   Gauge,
@@ -42,7 +43,6 @@ import {
   sourceLabel,
   statusLabel,
   storeLocale,
-  supportedLocales,
   t,
   type LayerKey,
   type Locale,
@@ -422,18 +422,7 @@ function Toolbar({
           </Button>
         </Tooltip>
         <LayerMenu locale={locale} layers={layers} onLayerChange={onLayerChange} />
-        <Tooltip label={t(locale, "app.language")}>
-          <div className="ml-1 flex items-center gap-1">
-            <Languages className="h-4 w-4 text-lab-muted" />
-            <Select
-              value={locale}
-              onValueChange={(value) => onLocaleChange(value as Locale)}
-              items={supportedLocales.map((entry) => ({ value: entry, label: localeLabels[entry] }))}
-              ariaLabel={t(locale, "app.language")}
-              className="w-24"
-            />
-          </div>
-        </Tooltip>
+        <LanguageMenu locale={locale} onLocaleChange={onLocaleChange} />
       </div>
 
       <div className="hidden min-w-[220px] flex-col text-right text-[11px] text-lab-muted xl:flex">
@@ -441,6 +430,55 @@ function Toolbar({
         <span>{runId ?? t(locale, "app.noRunArtifact")}</span>
       </div>
     </header>
+  );
+}
+
+function LanguageMenu({
+  locale,
+  onLocaleChange,
+}: {
+  locale: Locale;
+  onLocaleChange: (locale: Locale) => void;
+}) {
+  const localeOptions: Locale[] = ["zh-CN", "en-US"];
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  function handleCloseAutoFocus(event: Event) {
+    event.preventDefault();
+    triggerRef.current?.blur();
+  }
+
+  return (
+    <DropdownMenu.Root>
+      <Tooltip label={t(locale, "app.language")}>
+        <DropdownMenu.Trigger asChild>
+          <Button ref={triggerRef} size="icon" variant="outline" aria-label={t(locale, "app.language")} className="ml-1">
+            <Languages className="h-4 w-4" />
+          </Button>
+        </DropdownMenu.Trigger>
+      </Tooltip>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={8}
+          onCloseAutoFocus={handleCloseAutoFocus}
+          className="z-50 w-36 rounded-md border border-lab-line bg-lab-panel2 p-2 text-sm text-lab-text shadow-xl"
+        >
+          {localeOptions.map((option) => (
+            <DropdownMenu.Item
+              key={option}
+              onSelect={() => onLocaleChange(option)}
+              className="flex h-7 cursor-default select-none items-center gap-2 rounded px-2 outline-none data-[highlighted]:bg-lab-accent/[0.18]"
+            >
+              <span className="flex h-4 w-4 items-center justify-center">
+                {locale === option ? <Check className="h-3.5 w-3.5 text-lab-accent" /> : null}
+              </span>
+              <span>{localeLabels[option]}</span>
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 
@@ -453,11 +491,42 @@ function LayerMenu({
   layers: LayerState;
   onLayerChange: (key: keyof LayerState, value: boolean) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<number | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  function clearCloseTimer() {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
+
+  function scheduleClose() {
+    clearCloseTimer();
+    closeTimer.current = window.setTimeout(() => {
+      setOpen(false);
+      closeTimer.current = null;
+    }, 1200);
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    clearCloseTimer();
+    setOpen(nextOpen);
+  }
+
+  function handleCloseAutoFocus(event: Event) {
+    event.preventDefault();
+    triggerRef.current?.blur();
+  }
+
+  useEffect(() => clearCloseTimer, []);
+
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root open={open} onOpenChange={handleOpenChange}>
       <Tooltip label={t(locale, "tooltip.canvasLayers")}>
         <DropdownMenu.Trigger asChild>
-          <Button size="icon" variant="outline">
+          <Button ref={triggerRef} size="icon" variant="outline">
             <Layers className="h-4 w-4" />
           </Button>
         </DropdownMenu.Trigger>
@@ -466,12 +535,18 @@ function LayerMenu({
         <DropdownMenu.Content
           align="end"
           sideOffset={8}
+          onPointerEnter={clearCloseTimer}
+          onPointerLeave={scheduleClose}
+          onFocusCapture={clearCloseTimer}
+          onBlurCapture={scheduleClose}
+          onCloseAutoFocus={handleCloseAutoFocus}
           className="z-50 w-52 rounded-md border border-lab-line bg-lab-panel2 p-2 text-sm text-lab-text shadow-xl"
         >
           {(Object.keys(layers) as Array<LayerKey>).map((key) => (
             <DropdownMenu.CheckboxItem
               key={key}
               checked={layers[key]}
+              onSelect={(event) => event.preventDefault()}
               onCheckedChange={(value) => onLayerChange(key, value)}
               className="flex h-7 cursor-default select-none items-center gap-2 rounded px-2 outline-none data-[highlighted]:bg-lab-accent/[0.18]"
             >
