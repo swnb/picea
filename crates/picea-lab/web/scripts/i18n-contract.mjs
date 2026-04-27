@@ -42,7 +42,7 @@ assert.equal(t("zh-CN", "timeline.frameAt", { frame: 8 }), "第 8 帧");
 assert.equal(t("en-US", "timeline.frameAt", { frame: 8 }), "frame 8");
 assert.equal(bodyTypeLabel("zh-CN", "dynamic"), "动态");
 assert.equal(statusLabel("zh-CN", "playing"), "播放中");
-assert.equal(sourceLabel("en-US", "server"), "server");
+assert.equal(sourceLabel("en-US", "server"), "Rust replay");
 assert.equal(layerLabel("zh-CN", "contacts"), "接触点");
 assert.equal(entityLabel("zh-CN", "body", 2), "物体 2");
 assert.equal(dynamicValueLabel("zh-CN", "generic_convex_fallback"), "通用凸形回退");

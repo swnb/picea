@@ -66,3 +66,23 @@ assert.match(
   /fact\.epa/,
   "Contact inspector should label EPA termination and iteration facts.",
 );
+assert.match(
+  appSource,
+  /tree\.joints/,
+  "Scene hierarchy should expose joints as selectable replay artifacts.",
+);
+assert.match(
+  appSource,
+  /frame\.snapshot\.joints\.map/,
+  "Scene hierarchy should render joint rows from the debug snapshot.",
+);
+assert.match(
+  appSource,
+  /log\.sseIdle/,
+  "Workbench logs should distinguish an empty SSE queue from a failed run.",
+);
+assert.match(
+  appSource,
+  /final_snapshot_artifact/,
+  "Workbench should surface final_snapshot artifact provenance from the server session.",
+);

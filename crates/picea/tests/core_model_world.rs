@@ -1,8 +1,8 @@
 use picea::prelude::{
     BodyBundle, BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderBundle, ColliderDesc,
-    ColliderPatch, CollisionFilter, DistanceJointDesc, DistanceJointPatch, JointDesc, JointPatch,
-    Material, Pose, SharedShape, SimulationPipeline, StepConfig, World, WorldAnchorJointDesc,
-    WorldCommand, WorldCommandEvent, WorldCommandKind, WorldDesc, WorldError,
+    ColliderPatch, CollisionFilter, DistanceJointDesc, DistanceJointPatch, JointBundle, JointDesc,
+    JointPatch, Material, Pose, SharedShape, SimulationPipeline, StepConfig, World,
+    WorldAnchorJointDesc, WorldCommand, WorldCommandEvent, WorldCommandKind, WorldDesc, WorldError,
 };
 use picea::world::HandleError;
 
@@ -394,6 +394,53 @@ fn world_commands_do_not_mutate_when_batch_create_validation_fails() {
         world.bodies().count(),
         0,
         "rejected batch must not partially create earlier bodies"
+    );
+}
+
+#[test]
+fn world_commands_create_recipe_joints_atomically() {
+    let mut world = World::new(WorldDesc::default());
+    let report = world
+        .commands()
+        .create_recipe(
+            [
+                BodyBundle::static_body(),
+                BodyBundle::dynamic().with_pose(Pose::from_xy_angle(2.0, 0.0, 0.0)),
+            ],
+            [JointBundle::distance(0, 1).with_rest_length(2.0)],
+        )
+        .expect("valid recipe command batch should create bodies and joints");
+
+    assert_eq!(report.body_handles.len(), 2);
+    assert_eq!(report.joint_handles.len(), 1);
+    assert_eq!(world.joints().collect::<Vec<_>>(), report.joint_handles);
+    assert!(matches!(
+        report.events.as_slice(),
+        [
+            WorldCommandEvent::BodyCreated { .. },
+            WorldCommandEvent::BodyCreated { .. },
+            WorldCommandEvent::JointCreated { .. },
+        ]
+    ));
+}
+
+#[test]
+fn world_commands_reject_invalid_recipe_joint_without_partial_bodies() {
+    let mut world = World::new(WorldDesc::default());
+    let revision = world.revision();
+
+    let error = world
+        .commands()
+        .create_recipe([BodyBundle::dynamic()], [JointBundle::world_anchor(5)])
+        .expect_err("invalid recipe joint body index should reject the whole batch");
+
+    assert_eq!(error.command_index, 1);
+    assert_eq!(error.kind, WorldCommandKind::CreateJoint);
+    assert_eq!(world.revision(), revision);
+    assert_eq!(
+        world.bodies().count(),
+        0,
+        "rejected recipe batch must not partially create earlier bodies"
     );
 }
 

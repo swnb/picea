@@ -1,5 +1,11 @@
 # Picea Physics Engine TODO
 
+> 当前文件是升级 backlog/archive。实际执行顺序和完成状态以
+> `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md` 为准；
+> M1-M9 的第一生产切片已经落地，M10 正在做架构收束和产品面清理。
+> 下面保留未扩展的后续方向，避免把已完成的 known-red / island sleep
+> 基础项误当成本轮阻塞。
+
 ## 未完成任务清单
 
 ### 1. Broadphase 生产化
@@ -57,30 +63,31 @@
 
 ### 7. Island Sleep
 
-- [ ] 基于 contact / joint graph 构建 island。
-- [ ] 实现 island 级 sleep，而不是只看单个 body。
-- [ ] 实现 wake-on-impact。
-- [ ] 实现 wake reason：contact、joint、user patch、transform edit、velocity edit。
-- [ ] 增加 resting stack sleep / wake 回归测试。
+- [x] 基于 contact / joint graph 构建 deterministic island。
+- [x] 实现 island 级 sleep，而不是只看单个 body。
+- [x] 实现 wake-on-impact。
+- [x] 实现 wake reason：contact、joint、user patch、transform edit、velocity edit。
+- [x] 增加 resting stack sleep / wake 回归测试。
 
 ### 8. CCD TOI
 
-- [ ] 实现 swept AABB broadphase。
-- [ ] 先支持 fast circle vs static thin wall TOI。
-- [ ] 扩展到 circle / convex static TOI。
+- [x] 实现 swept AABB broadphase。
+- [x] 先支持 fast circle vs static thin wall TOI。
+- [x] 扩展到 dynamic circle / static convex TOI 的第一生产切片。
 - [ ] 引入 conservative advancement。
-- [ ] 明确 substep 和 contact event 语义。
-- [ ] 将当前 ignored CCD known-red 测试推进为正式通过项。
+- [x] 明确当前 CCD 是 pose-clamping phase，contact event 保留 `ccd_trace`。
+- [x] 将当前 ignored CCD known-red 测试推进为正式通过项。
 
 ### 9. API Bundles / Recipes
 
-- [ ] 增加 `BodyBundle`。
-- [ ] 增加 `ColliderBundle`。
-- [ ] 增加 `SceneRecipe`，用于声明式测试场景和示例。
-- [ ] 增加 `WorldCommands` 批处理 create / destroy / patch。
-- [ ] 增加 material presets。
-- [ ] 增加 collision layer presets。
-- [ ] 返回结构化创建结果：handles、events、validation errors。
+- [x] 增加 `BodyBundle`。
+- [x] 增加 `ColliderBundle`。
+- [x] 增加 `WorldRecipe`，用于声明式测试场景和示例。
+- [x] 增加 `JointBundle` / `WorldRecipe::with_joint`。
+- [x] 增加 `WorldCommands` 批处理 create / destroy / patch。
+- [x] 增加 material presets。
+- [x] 增加 collision layer presets。
+- [x] 返回结构化创建结果：handles、events、validation errors。
 
 ### 10. Observability / Debug Facts
 
@@ -111,4 +118,3 @@
 - [ ] Wake-on-impact。
 - [ ] CCD bullet。
 - [ ] API recipe / batch 场景测试。
-

@@ -9,8 +9,9 @@ use crate::{
     body::{BodyDesc, BodyPatch, BodyType, Pose},
     collider::{ColliderDesc, ColliderPatch, CollisionFilter, Material, SharedShape},
     handles::{BodyHandle, ColliderHandle, JointHandle},
-    joint::{JointDesc, JointPatch},
-    world::{World, WorldDesc, WorldError},
+    joint::{DistanceJointDesc, JointDesc, JointPatch, WorldAnchorJointDesc},
+    math::point::Point,
+    world::{HandleError, World, WorldDesc, WorldError},
 };
 
 /// Material presets for scenario recipes and examples.
@@ -290,6 +291,86 @@ impl From<BodyDesc> for BodyBundle {
     }
 }
 
+/// Joint creation bundle whose body endpoints refer to recipe body indices.
+///
+/// Recipes allocate real `BodyHandle`s only during instantiation. Keeping joints
+/// in index space makes scene setup declarative while the command layer still
+/// resolves and validates concrete handles on a scratch world before commit.
+#[derive(Clone, Debug, PartialEq)]
+pub enum JointBundle {
+    /// Distance joint between two recipe bodies.
+    Distance {
+        /// Index of the first body bundle in `WorldRecipe::bodies`.
+        body_a: usize,
+        /// Index of the second body bundle in `WorldRecipe::bodies`.
+        body_b: usize,
+        /// Low-level descriptor fields not including resolved body handles.
+        desc: DistanceJointDesc,
+    },
+    /// World-anchor joint attached to one recipe body.
+    WorldAnchor {
+        /// Index of the body bundle in `WorldRecipe::bodies`.
+        body: usize,
+        /// Low-level descriptor fields not including the resolved body handle.
+        desc: WorldAnchorJointDesc,
+    },
+}
+
+impl JointBundle {
+    /// Creates a distance joint between two recipe body indices.
+    pub fn distance(body_a: usize, body_b: usize) -> Self {
+        Self::Distance {
+            body_a,
+            body_b,
+            desc: DistanceJointDesc::default(),
+        }
+    }
+
+    /// Creates a world-anchor joint attached to one recipe body index.
+    pub fn world_anchor(body: usize) -> Self {
+        Self::WorldAnchor {
+            body,
+            desc: WorldAnchorJointDesc::default(),
+        }
+    }
+
+    /// Sets the distance joint's rest length when this bundle is a distance joint.
+    pub fn with_rest_length(mut self, rest_length: crate::math::FloatNum) -> Self {
+        if let Self::Distance { desc, .. } = &mut self {
+            desc.rest_length = rest_length;
+        }
+        self
+    }
+
+    /// Sets the world-space anchor when this bundle is a world-anchor joint.
+    pub fn with_world_anchor(mut self, world_anchor: Point) -> Self {
+        if let Self::WorldAnchor { desc, .. } = &mut self {
+            desc.world_anchor = world_anchor;
+        }
+        self
+    }
+
+    fn resolve(&self, body_handles: &[BodyHandle]) -> Result<JointDesc, WorldError> {
+        match self {
+            Self::Distance {
+                body_a,
+                body_b,
+                desc,
+            } => {
+                let mut desc = desc.clone();
+                desc.body_a = resolve_recipe_body(*body_a, body_handles)?;
+                desc.body_b = resolve_recipe_body(*body_b, body_handles)?;
+                Ok(JointDesc::Distance(desc))
+            }
+            Self::WorldAnchor { body, desc } => {
+                let mut desc = desc.clone();
+                desc.body = resolve_recipe_body(*body, body_handles)?;
+                Ok(JointDesc::WorldAnchor(desc))
+            }
+        }
+    }
+}
+
 /// Declarative world recipe for tests, examples, and benchmarks.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WorldRecipe {
@@ -297,6 +378,8 @@ pub struct WorldRecipe {
     pub desc: WorldDesc,
     /// Body bundles created in deterministic order.
     pub bodies: Vec<BodyBundle>,
+    /// Joint bundles resolved after recipe bodies are allocated.
+    pub joints: Vec<JointBundle>,
 }
 
 impl WorldRecipe {
@@ -305,6 +388,7 @@ impl WorldRecipe {
         Self {
             desc,
             bodies: Vec::new(),
+            joints: Vec::new(),
         }
     }
 
@@ -314,10 +398,16 @@ impl WorldRecipe {
         self
     }
 
+    /// Adds one joint bundle to the recipe.
+    pub fn with_joint(mut self, joint: JointBundle) -> Self {
+        self.joints.push(joint);
+        self
+    }
+
     /// Instantiates the recipe into a concrete world.
     pub fn instantiate(self) -> Result<WorldRecipeResult, WorldCommandError> {
         let mut world = World::new(self.desc);
-        let created = world.commands().create_bodies(self.bodies)?;
+        let created = world.commands().create_recipe(self.bodies, self.joints)?;
         Ok(WorldRecipeResult { world, created })
     }
 }
@@ -348,6 +438,47 @@ impl<'a> WorldCommands<'a> {
         I: IntoIterator<Item = BodyBundle>,
     {
         self.apply(bodies.into_iter().map(WorldCommand::CreateBody))
+    }
+
+    /// Creates recipe bodies and recipe-indexed joints atomically.
+    pub fn create_recipe<I, J>(
+        &mut self,
+        bodies: I,
+        joints: J,
+    ) -> Result<WorldCommandReport, WorldCommandError>
+    where
+        I: IntoIterator<Item = BodyBundle>,
+        J: IntoIterator<Item = JointBundle>,
+    {
+        let mut scratch = self.world.clone();
+        let mut report = WorldCommandReport::default();
+        let mut command_index = 0;
+
+        for body in bodies {
+            apply_command(
+                &mut scratch,
+                &mut report,
+                command_index,
+                WorldCommand::CreateBody(body),
+            )?;
+            command_index += 1;
+        }
+
+        for joint in joints {
+            let desc = joint.resolve(&report.body_handles).map_err(|error| {
+                command_error(command_index, None, WorldCommandKind::CreateJoint, error)
+            })?;
+            apply_command(
+                &mut scratch,
+                &mut report,
+                command_index,
+                WorldCommand::CreateJoint { desc },
+            )?;
+            command_index += 1;
+        }
+
+        *self.world = scratch;
+        Ok(report)
     }
 
     /// Applies one command atomically.
@@ -628,4 +759,16 @@ fn command_error(
         kind,
         error,
     }
+}
+
+fn resolve_recipe_body(
+    index: usize,
+    body_handles: &[BodyHandle],
+) -> Result<BodyHandle, WorldError> {
+    body_handles
+        .get(index)
+        .copied()
+        .ok_or(WorldError::Handle(HandleError::MissingBody {
+            handle: BodyHandle::INVALID,
+        }))
 }

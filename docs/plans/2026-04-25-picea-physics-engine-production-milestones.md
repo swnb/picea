@@ -27,6 +27,35 @@ live in `crates/picea` unit, integration, and deterministic scenario tests.
 `picea-lab` should make those results explainable through artifacts, snapshots,
 debug render data, and later benchmark summaries.
 
+## Post-M9 Design Target
+
+After M1-M9, Picea has most of the originally planned physical capability slices:
+persistent broadphase, SAT manifolds, mass properties, warm-start facts,
+sequential impulses, island sleep behavior, GJK/EPA fallback, narrow CCD, recipes,
+debug facts, lab artifacts, and baseline benches. The next risk is no longer one
+missing algorithm; it is architectural drift from several fast production slices.
+
+The next design target is therefore architecture consolidation:
+
+- Make step orchestration explicit. Each step should have one transient
+  `StepContext`-style owner for previous poses, CCD results, wake reasons,
+  broadphase/contact/solver facts, numeric warnings, and final stats.
+- Keep phase responsibilities narrow. CCD should propose or apply TOI state in a
+  clearly named phase; contact gathering, contact solving, and contact event
+  emission should not live as one growing module.
+- Pick a canonical source of truth for per-step facts, then derive `StepStats`,
+  debug snapshots, events, and lab artifacts from that source instead of manually
+  mirroring fields across layers.
+- Treat public ergonomics as a product surface. `recipe` is exported from core,
+  so bundles, command errors, and authoring helpers should be designed as stable
+  setup APIs, not as hot-path mutation shortcuts.
+- Treat `picea-lab` as a replay/evidence workbench unless and until live
+  simulation semantics are intentionally designed. Its UI should make artifact
+  provenance, final snapshots, joints, and backend/demo state explicit.
+
+The concrete consequence is that M10 should come before broadening CCD coverage
+or adding stricter benchmark thresholds.
+
 ## Common Acceptance Rules
 
 Each implementation milestone must include:
@@ -377,6 +406,24 @@ rtk proxy cargo test -p picea --test world_step_review_regressions
 
 ## M6 Island Sleep And Wake Reasons
 
+> Status: completed 2026-04-27.
+>
+> Completion notes: sleep now operates on deterministic contact/joint islands
+> rather than isolated body checks. Sleep events carry island ids and transition
+> reasons; pending wake reasons are recorded for contact impulses, joint
+> correction, user patches, transform edits, velocity edits, and impact-style
+> wakeups. Core behavior tests cover stability-window sleep, island-level sleep,
+> transform wake, static-contact non-bridging, impact wake, unrelated sleeping
+> islands, and resting-contact stay-asleep behavior. Debug snapshots and lab
+> artifacts expose island membership and the most recent island sleep/wake
+> reason.
+>
+> Residual risk: island membership is currently rebuilt from contact/joint facts
+> during the step rather than stored as a first-class retained island graph. That
+> is acceptable for behavior correctness now, but M10 should make the per-step
+> transient ownership explicit so event/debug ordering cannot silently become the
+> island source of truth.
+
 ### Goal
 
 Move from body-local sleep checks to island-level sleeping and explicit wake
@@ -480,20 +527,25 @@ rtk proxy cargo test -p picea --test physics_realism_acceptance
 
 ## M8 CCD TOI
 
-> Status: lab/docs evidence surfaces updated 2026-04-27.
+> Status: completed narrow core CCD slice 2026-04-27.
 >
-> Completion notes: core now exports CCD counters through `StepStats` /
-> `DebugStats` and attaches `ccd_trace: Option<CcdTrace>` to contact events and
-> debug contacts. `picea-lab` keeps those facts on the existing
-> `frames.jsonl` / `final_snapshot.json` path, adds a `ccd_fast_circle_wall`
-> builtin scenario, and the web workbench can inspect selected contact TOI,
-> advancement, clamp/slop, swept start/end, and TOI point. The canvas renders
-> generic `snapshot.primitives`, so core-provided swept path, TOI marker, or
-> label primitives are visible without another lab schema change.
+> Completion notes: the previous CCD known-red has been promoted into normal
+> behavior tests. Core supports the intended first production slice:
+> dynamic circle vs static thin wall / static convex, with swept AABB
+> candidate filtering, TOI hit/miss accounting, pose clamping, and generated
+> contact events carrying `ccd_trace`. Core exports CCD counters through
+> `StepStats` / `DebugStats` and attaches `ccd_trace: Option<CcdTrace>` to
+> contact events and debug contacts. `picea-lab` keeps those facts on the
+> existing `frames.jsonl` / `final_snapshot.json` path, adds a
+> `ccd_fast_circle_wall` builtin scenario, and the web workbench can inspect
+> selected contact TOI, advancement, clamp/slop, swept start/end, and TOI point.
+> The canvas renders generic `snapshot.primitives`, so core-provided swept path,
+> TOI marker, or label primitives are visible without another lab schema change.
 >
 > Residual risks: dynamic-vs-dynamic CCD and full generic all-shape CCD remain
-> out of scope. Lab evidence is explanatory only; core CCD correctness still
-> belongs in `crates/picea` behavior tests.
+> out of scope. The current CCD phase is also a mutating phase: it computes TOI
+> and clamps poses before contact generation. M10 should clarify that boundary
+> before CCD is generalized.
 
 ### Goal
 
@@ -602,6 +654,83 @@ rtk proxy cargo test -p picea-lab
 rtk proxy cargo bench -p picea --no-run
 ```
 
+## M10 Architecture Consolidation And Product Surface Cleanup
+
+### Goal
+
+Consolidate the post-M9 engine architecture before adding broader capabilities.
+The target is not new physics behavior; it is clearer ownership, smaller phase
+boundaries, less duplicated fact plumbing, and a more honest authoring/debugging
+surface.
+
+### Design Goals
+
+- Make `SimulationPipeline::step` read like a real pipeline, with one explicit
+  transient step context carrying all temporary facts between phases.
+- Move contact solving toward the `solver` module so `pipeline/contacts.rs`
+  stops owning solver rows, warm-start application, residual correction, and
+  event emission at the same time.
+- Make CCD phase ownership explicit: either output a `CcdResolution` proposal
+  applied by the step context, or clearly name CCD as the pose-clamping phase.
+- Reduce schema duplication by deriving `StepStats`, debug stats, contact debug
+  facts, and lab artifact counters from one canonical step fact set.
+- Keep `recipe` ergonomic but honest: it is an authoring/setup API with atomic
+  clone-and-commit semantics, not a hot-path mutation API.
+- Make `picea-lab` visibly replay/evidence-oriented unless live simulation is
+  separately designed.
+- Update routing docs and `todo.md` so future sessions do not reopen completed
+  known-red items.
+
+### In Scope
+
+- Introduce an internal `StepContext` or equivalent transient step-state
+  structure.
+- Split `pipeline/contacts.rs` into smaller gather / solve / emit modules, or
+  move solver-specific code under `solver`.
+- Refactor CCD output/application boundaries without broadening CCD shape
+  coverage.
+- Centralize per-step fact aggregation for stats, debug, events, and artifacts.
+- Add recipe joint authoring support if it fits without reopening low-level
+  `World` semantics.
+- Tighten `picea-lab` replay semantics: final snapshot visibility, joint
+  selection/inspection, backend/demo state clarity, and misleading empty-SSE
+  failure handling.
+- Synchronize `todo.md`, `docs/ai/index.md`, and `docs/ai/repo-map.md` with the
+  current milestone reality and verification commands.
+
+### Out Of Scope
+
+- Dynamic-vs-dynamic CCD.
+- Full generic all-shape CCD.
+- New physics features beyond preserving existing behavior.
+- Absolute benchmark thresholds.
+- Turning `picea-lab` into a real-time simulator.
+
+### Acceptance Method
+
+- Start with characterization tests or existing gates that lock current behavior
+  before refactoring phase boundaries.
+- Keep public API behavior stable unless a change is explicitly part of product
+  surface cleanup.
+- Show that `StepStats`, `DebugSnapshot`, contact events, and lab artifacts still
+  expose the same facts after consolidation.
+- Add focused tests for recipe joint authoring and lab UI/server semantics when
+  those slices are touched.
+- Document residual risks where the cleanup intentionally leaves a broader
+  design decision for a later milestone.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --lib
+rtk proxy cargo test -p picea --tests
+rtk proxy cargo test -p picea-lab
+cd crates/picea-lab/web && rtk proxy npm run build
+rtk proxy cargo bench -p picea --no-run
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
 ## Picea Lab Role Across Milestones
 
 `picea-lab` should help AI and humans inspect real behavior. Its role grows by
@@ -624,6 +753,8 @@ milestone:
   contact events.
 - M9: host benchmark scenario definitions, artifact schema checks, and Criterion
   baseline summaries.
+- M10: make replay provenance, final snapshots, joints, and backend/demo state
+  explicit while preserving the same artifact fact surface.
 
 The lab should not run physics independently from `crates/picea`, and it should
 not be the only pass/fail signal for physics correctness.

@@ -212,8 +212,8 @@
   status: active
   owner: supervisor
   applies_to: [milestone, scope, acceptance, productionization, physics-upgrade]
-  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, worldrecipe, picea-lab, observability, benchmarks]
-  last_reviewed: 2026-04-25
+  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks]
+  last_reviewed: 2026-04-27
 - path: crates/picea/src/lib.rs
   title: Picea core entrypoint
   kind: code
@@ -230,7 +230,25 @@
   status: active
   owner: picea-core
   applies_to: [core, public-api, recipes, world-commands, benchmarks]
-  keywords: [recipe, bodybundle, colliderbundle, worldrecipe, worldcommands, material-preset, collision-layer, batch-create, atomic]
+  keywords: [recipe, bodybundle, colliderbundle, jointbundle, worldrecipe, worldcommands, material-preset, collision-layer, batch-create, atomic]
+  last_reviewed: 2026-04-27
+- path: crates/picea/src/pipeline/step.rs
+  title: Picea Step Context Orchestration
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [core, pipeline, step-context, stats, events]
+  keywords: [stepcontext, transient-facts, stepstats, wake-reasons, numeric-warnings, ccd-pose-clamp]
+  last_reviewed: 2026-04-27
+- path: crates/picea/src/solver/contact.rs
+  title: Internal Contact Solver
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [core, solver, contacts, sequential-impulse]
+  keywords: [contact-solver, solver-row, effective-mass, warm-start, residual-correction, wake-reasons]
   last_reviewed: 2026-04-27
 - path: crates/picea/benches/physics_scenarios.rs
   title: Picea Criterion Physics Scenario Baselines
@@ -265,9 +283,9 @@
   authority: medium
   status: active
   owner: picea-lab
-  applies_to: [lab, viewer, react, canvas, inspector, timeline]
-  keywords: [react, canvas, tailwind, workbench, hierarchy, inspector, timeline]
-  last_reviewed: 2026-04-24
+  applies_to: [lab, viewer, react, canvas, inspector, timeline, replay]
+  keywords: [react, canvas, tailwind, workbench, hierarchy, inspector, timeline, joints, replay-artifacts]
+  last_reviewed: 2026-04-27
 - path: crates/macro-tools/src/lib.rs
   title: Proc macro helpers
   kind: code

@@ -79,6 +79,14 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
         .as_str()
         .unwrap()
         .to_owned();
+    assert_eq!(
+        created_body["session"]["manifest_artifact"],
+        "manifest.json"
+    );
+    assert_eq!(
+        created_body["session"]["final_snapshot_artifact"],
+        "final_snapshot.json"
+    );
 
     let fetched = app
         .clone()
@@ -188,8 +196,25 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
     );
     let events_body = body_text(events).await;
     assert!(
-        events_body.contains("event: frame") || events_body.contains("event: failed"),
-        "SSE endpoint should emit at least a frame or failed event, got {events_body:?}"
+        events_body.contains("event: frame"),
+        "initial SSE endpoint should replay frame events, got {events_body:?}"
+    );
+
+    let drained_events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/sessions/{session_id}/events"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let drained_body = body_text(drained_events).await;
+    assert!(
+        drained_body.contains("event: idle") && !drained_body.contains("event: failed"),
+        "drained SSE queue should be idle instead of failed, got {drained_body:?}"
     );
 
     for action in ["pause"] {
@@ -213,6 +238,7 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
     }
 
     let manifest = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method(Method::GET)
@@ -227,6 +253,27 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
     assert_eq!(
         manifest_body["scenario_id"],
         serde_json::to_value(ScenarioId::FallingBoxContact).unwrap()
+    );
+
+    let final_snapshot = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!(
+                    "/api/runs/{}/artifacts/final_snapshot.json",
+                    reset_body["session"]["run_id"]
+                        .as_str()
+                        .expect("reset should produce a run")
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(final_snapshot.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(final_snapshot).await["stats"]["step_index"],
+        reset_body["session"]["frame_count"]
     );
 }
 

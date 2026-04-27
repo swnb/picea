@@ -16,13 +16,13 @@ const CCD_TOI_EPSILON: FloatNum = 1.0e-5;
 const CCD_CLAMP_SLOP: FloatNum = 1.0e-3;
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct CcdPhaseOutcome {
-    pub(crate) stats: CcdPhaseStats,
+pub(crate) struct CcdPoseClampOutcome {
+    pub(crate) stats: CcdPoseClampStats,
     pub(crate) traces: Vec<CcdTrace>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct CcdPhaseStats {
+pub(crate) struct CcdPoseClampStats {
     pub(crate) candidate_count: usize,
     pub(crate) hit_count: usize,
     pub(crate) miss_count: usize,
@@ -78,10 +78,10 @@ struct CcdHit {
     normal: Vector,
 }
 
-pub(crate) fn run_ccd_phase(
+pub(crate) fn run_pose_clamp_phase(
     world: &mut World,
     previous_body_poses: &BTreeMap<BodyHandle, Pose>,
-) -> CcdPhaseOutcome {
+) -> CcdPoseClampOutcome {
     let snapshots = collect_snapshots(world, previous_body_poses);
     let moving_circles = snapshots
         .iter()
@@ -91,7 +91,7 @@ pub(crate) fn run_ccd_phase(
         .iter()
         .filter_map(static_convex)
         .collect::<Vec<_>>();
-    let mut stats = CcdPhaseStats::default();
+    let mut stats = CcdPoseClampStats::default();
     let mut hits = Vec::new();
 
     for moving in &moving_circles {
@@ -144,7 +144,7 @@ pub(crate) fn run_ccd_phase(
         }
     }
 
-    CcdPhaseOutcome { stats, traces }
+    CcdPoseClampOutcome { stats, traces }
 }
 
 fn collect_snapshots(

@@ -21,7 +21,7 @@ import {
   Waypoints,
 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { controlSession, createSession, fetchFrames, fetchScenarios, openSessionEvents } from "./api";
+import { controlSession, createSession, fetchFinalSnapshot, fetchFrames, fetchScenarios, openSessionEvents } from "./api";
 import { WorldCanvas } from "./components/workbench/WorldCanvas";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -48,7 +48,7 @@ import {
   type Locale,
   type StatusKind,
 } from "./i18n";
-import type { DebugBody, DebugCollider, FrameRecord, ScenarioDescriptor, SelectedEntity, WorkbenchLog } from "./types";
+import type { DebugBody, DebugCollider, DebugSnapshot, FrameRecord, ScenarioDescriptor, SelectedEntity, WorkbenchLog } from "./types";
 import { cn } from "./lib/utils";
 
 function warmStartTriplet(stats: FrameRecord["snapshot"]["stats"]) {
@@ -89,6 +89,9 @@ export function App() {
   const [selectedEntity, setSelectedEntity] = useState<SelectedEntity | null>({ kind: "collider", id: 2 });
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
+  const [manifestArtifact, setManifestArtifact] = useState<string | null>(null);
+  const [finalSnapshotArtifact, setFinalSnapshotArtifact] = useState<string | null>(null);
+  const [finalSnapshot, setFinalSnapshot] = useState<DebugSnapshot | null>(null);
   const [source, setSource] = useState<"server" | "demo">("demo");
   const [status, setStatus] = useState<StatusKind>("idle");
   const [logs, setLogs] = useState<WorkbenchLog[]>([
@@ -115,7 +118,6 @@ export function App() {
           return;
         }
         setScenarios(next);
-        setSource("server");
         setLogs((prev) => [log("info", t(locale, "log.connectedScenarios")), ...prev].slice(0, 80));
       })
       .catch((error: Error) => {
@@ -178,14 +180,26 @@ export function App() {
       if (nextFrames.length === 0) {
         throw new Error(t(locale, "error.emptyFrames"));
       }
+      const nextFinalSnapshot = await fetchFinalSnapshot(completedRunId);
       setSessionId(session.id);
       setRunId(completedRunId);
+      setManifestArtifact(session.manifest_artifact ?? "manifest.json");
+      setFinalSnapshotArtifact(session.final_snapshot_artifact ?? "final_snapshot.json");
+      setFinalSnapshot(nextFinalSnapshot);
       setFrames(nextFrames);
       setSource("server");
       setStatus("paused");
       setLogs((prev) =>
         [
           log("info", t(locale, "log.loadedFrames", { count: nextFrames.length, runId: completedRunId })),
+          log("info", t(locale, "log.finalSnapshotLoaded", { step: nextFinalSnapshot.stats.step_index })),
+          log(
+            "info",
+            t(locale, "log.artifactsAvailable", {
+              manifest: session.manifest_artifact ?? "manifest.json",
+              finalSnapshot: session.final_snapshot_artifact ?? "final_snapshot.json",
+            }),
+          ),
           log("info", t(locale, "log.sessionStatus", { sessionId: session.id, status: statusLabel(locale, session.status) })),
           ...prev,
         ].slice(0, 80),
@@ -196,6 +210,9 @@ export function App() {
       setFrames(nextFrames);
       setSessionId(null);
       setRunId(null);
+      setManifestArtifact(null);
+      setFinalSnapshotArtifact(null);
+      setFinalSnapshot(null);
       setSource("demo");
       setStatus("paused");
       setLogs((prev) =>
@@ -217,6 +234,9 @@ export function App() {
       events.addEventListener("failed", (event) => {
         setLogs((prev) => [log("error", t(locale, "log.sseFailed", { data: event.data })), ...prev].slice(0, 80));
       });
+      events.addEventListener("idle", (event) => {
+        setLogs((prev) => [log("info", t(locale, "log.sseIdle", { data: event.data })), ...prev].slice(0, 80));
+      });
       window.setTimeout(() => events.close(), 2000);
     } catch (error) {
       setLogs((prev) => [log("warn", t(locale, "log.sseUnavailable", { message: messageOf(error) })), ...prev].slice(0, 80));
@@ -225,10 +245,15 @@ export function App() {
 
   function changeScenario(nextScenario: string) {
     setSelectedScenario(nextScenario);
-    const nextFrames = source === "demo" ? makeDemoFrames(nextScenario, frameCount) : frames;
-    setFrames(nextFrames);
+    setFrames(makeDemoFrames(nextScenario, frameCount));
     setFrameIndex(0);
     setSelectedEntity(null);
+    setSessionId(null);
+    setRunId(null);
+    setManifestArtifact(null);
+    setFinalSnapshotArtifact(null);
+    setFinalSnapshot(null);
+    setSource("demo");
   }
 
   async function handleControl(action: "play" | "pause" | "step" | "reset") {
@@ -289,6 +314,9 @@ export function App() {
         source={source}
         sessionId={sessionId}
         runId={runId}
+        manifestArtifact={manifestArtifact}
+        finalSnapshotArtifact={finalSnapshotArtifact}
+        finalSnapshotStep={finalSnapshot?.stats.step_index ?? null}
         onRun={runScenario}
         onPlay={() => void handleControl("play")}
         onPause={() => void handleControl("pause")}
@@ -357,6 +385,9 @@ function Toolbar({
   source,
   sessionId,
   runId,
+  manifestArtifact,
+  finalSnapshotArtifact,
+  finalSnapshotStep,
   onRun,
   onPlay,
   onPause,
@@ -375,6 +406,9 @@ function Toolbar({
   source: "server" | "demo";
   sessionId: string | null;
   runId: string | null;
+  manifestArtifact: string | null;
+  finalSnapshotArtifact: string | null;
+  finalSnapshotStep: number | null;
   onRun: () => void;
   onPlay: () => void;
   onPause: () => void;
@@ -433,9 +467,11 @@ function Toolbar({
         <LanguageMenu locale={locale} onLocaleChange={onLocaleChange} />
       </div>
 
-      <div className="hidden min-w-[220px] flex-col text-right text-[11px] text-lab-muted xl:flex">
-        <span>{sessionId ?? t(locale, "app.noSession")}</span>
-        <span>{runId ?? t(locale, "app.noRunArtifact")}</span>
+      <div className="hidden min-w-[260px] flex-col text-right text-[11px] text-lab-muted xl:flex">
+        <span>{t(locale, "app.session")}: {sessionId ?? t(locale, "app.noSession")}</span>
+        <span>{t(locale, "app.runArtifact")}: {runId ?? t(locale, "app.noRunArtifact")}</span>
+        <span>{t(locale, "app.manifestArtifact")}: {manifestArtifact ?? t(locale, "app.noRunArtifact")}</span>
+        <span>{t(locale, "app.finalSnapshot")}: {finalSnapshotArtifact ?? t(locale, "app.noRunArtifact")} / {finalSnapshotStep ?? t(locale, "common.unknown")}</span>
       </div>
     </header>
   );
@@ -643,6 +679,18 @@ function SceneHierarchy({
               label={entityLabel(locale, "contact", contact.id)}
               meta={`${t(locale, "fact.depth")} ${contact.depth.toFixed(3)}`}
               onClick={() => onSelect({ kind: "contact", id: contact.id })}
+            />
+          ))}
+        </TreeGroup>
+        <TreeGroup icon={<Braces className="h-4 w-4" />} label={t(locale, "tree.joints")} count={frame.snapshot.joints.length} locale={locale}>
+          {frame.snapshot.joints.map((joint) => (
+            <TreeRow
+              key={joint.handle}
+              active={selected?.kind === "joint" && selected.id === joint.handle}
+              icon={<Settings2 className="h-3.5 w-3.5" />}
+              label={entityLabel(locale, "joint", joint.handle)}
+              meta={dynamicValueLabel(locale, joint.kind)}
+              onClick={() => onSelect({ kind: "joint", id: joint.handle })}
             />
           ))}
         </TreeGroup>

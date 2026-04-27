@@ -1,4 +1,4 @@
-import type { FrameRecord, ScenarioDescriptor, SessionRecord } from "./types";
+import type { DebugSnapshot, FrameRecord, ScenarioDescriptor, SessionRecord } from "./types";
 
 const apiBase = import.meta.env.VITE_PICEA_LAB_API_BASE ?? "";
 
@@ -66,7 +66,7 @@ export async function fetchFrames(runId: string): Promise<FrameRecord[]> {
     .map((line) => JSON.parse(line) as FrameRecord);
 }
 
-export async function fetchFinalSnapshot(runId: string) {
+export async function fetchFinalSnapshot(runId: string): Promise<DebugSnapshot> {
   return requestJson(`/api/runs/${runId}/artifacts/final_snapshot.json`);
 }
 

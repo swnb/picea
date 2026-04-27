@@ -62,6 +62,8 @@ pub struct SessionRecord {
     pub current_frame_index: usize,
     pub overrides: ScenarioOverrides,
     pub final_state_hash: Option<String>,
+    pub manifest_artifact: Option<String>,
+    pub final_snapshot_artifact: Option<String>,
     pub last_error: Option<String>,
     #[serde(skip)]
     events: Vec<SessionEvent>,
@@ -145,6 +147,8 @@ async fn create_session(
             current_frame_index: 0,
             overrides: request.overrides,
             final_state_hash: None,
+            manifest_artifact: None,
+            final_snapshot_artifact: None,
             last_error: None,
             events: Vec::new(),
         }
@@ -264,17 +268,31 @@ async fn session_events(
     State(state): State<LabServerState>,
     Path(id): Path<String>,
 ) -> Result<Response, LabHttpError> {
-    let session = state
-        .inner
-        .lock()
-        .expect("lab state mutex should not poison")
-        .sessions
-        .get(&id)
-        .cloned()
-        .ok_or_else(|| LabError::SessionNotFound(id))?;
+    let events = {
+        let mut inner = state
+            .inner
+            .lock()
+            .expect("lab state mutex should not poison");
+        let session = inner
+            .sessions
+            .get_mut(&id)
+            .ok_or_else(|| LabError::SessionNotFound(id))?;
+        std::mem::take(&mut session.events)
+    };
 
+    let body = format_session_events(events);
+
+    let mut response = Response::new(Body::from(body));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream"),
+    );
+    Ok(response)
+}
+
+fn format_session_events(events: Vec<SessionEvent>) -> String {
     let mut body = String::new();
-    for event in session.events {
+    for event in events {
         match event {
             SessionEvent::Frame {
                 frame_index,
@@ -297,16 +315,10 @@ async fn session_events(
         }
     }
     if body.is_empty() {
-        body.push_str("event: failed\n");
+        body.push_str("event: idle\n");
         body.push_str("data: {\"message\":\"no events available\"}\n\n");
     }
-
-    let mut response = Response::new(Body::from(body));
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/event-stream"),
-    );
-    Ok(response)
+    body
 }
 
 async fn get_artifact(
@@ -351,6 +363,9 @@ fn run_session(store: &ArtifactStore, session: &mut SessionRecord) {
             session.frame_count = result.manifest.frame_count;
             session.current_frame_index = 0;
             session.final_state_hash = Some(result.manifest.final_state_hash);
+            session.manifest_artifact = Some(ArtifactFile::Manifest.file_name().to_owned());
+            session.final_snapshot_artifact =
+                Some(ArtifactFile::FinalSnapshot.file_name().to_owned());
             session.last_error = None;
             session.events = result
                 .frames
@@ -367,6 +382,8 @@ fn run_session(store: &ArtifactStore, session: &mut SessionRecord) {
             session.run_id = None;
             session.current_frame_index = 0;
             session.final_state_hash = None;
+            session.manifest_artifact = None;
+            session.final_snapshot_artifact = None;
             session.last_error = Some(message.clone());
             session.events = vec![SessionEvent::Failed { message }];
         }
@@ -402,5 +419,21 @@ impl IntoResponse for LabHttpError {
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (status, Json(json!({ "error": self.0.to_string() }))).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_session_events, SessionEvent};
+
+    #[test]
+    fn empty_sse_stream_is_idle_not_failed() {
+        let body = format_session_events(Vec::<SessionEvent>::new());
+
+        assert!(body.contains("event: idle"));
+        assert!(
+            !body.contains("event: failed"),
+            "an empty event queue is not a failed simulation"
+        );
     }
 }

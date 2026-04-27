@@ -1717,6 +1717,11 @@ fn assert_fast_small_body_does_not_tunnel_through_thin_wall() {
     assert_eq!(report.stats.ccd_hit_count, 1);
     assert_eq!(report.stats.ccd_miss_count, 0);
     assert_eq!(report.stats.ccd_clamp_count, 1);
+    assert_eq!(
+        report.stats.contact_count,
+        active_contact_events(&report).len(),
+        "StepStats contact count should match the active contact events emitted by the step"
+    );
     assert_eq!(trace.moving_body, bullet);
     assert_eq!(trace.static_body, wall);
     assert_eq!(trace.moving_collider, bullet_collider);
@@ -1743,6 +1748,7 @@ fn assert_fast_small_body_does_not_tunnel_through_thin_wall() {
     assert_eq!(snapshot.stats.ccd_hit_count, 1);
     assert_eq!(snapshot.stats.ccd_miss_count, 0);
     assert_eq!(snapshot.stats.ccd_clamp_count, 1);
+    assert_eq!(snapshot.stats.contact_count, report.stats.contact_count);
     assert!(
         snapshot
             .contacts

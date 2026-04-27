@@ -1,8 +1,8 @@
 use picea::prelude::{
     BodyBundle, BodyDesc, BodyType, ColliderBundle, ColliderDesc, CollisionFilter,
-    CollisionLayerPreset, DebugSnapshotOptions, DistanceJointDesc, JointDesc, Material,
-    MaterialPreset, Pose, QueryFilter, QueryPipeline, SharedShape, SimulationPipeline, StepConfig,
-    World, WorldAnchorJointDesc, WorldDesc, WorldRecipe,
+    CollisionLayerPreset, DebugSnapshotOptions, DistanceJointDesc, JointBundle, JointDesc,
+    Material, MaterialPreset, Pose, QueryFilter, QueryPipeline, SharedShape, SimulationPipeline,
+    StepConfig, World, WorldAnchorJointDesc, WorldDesc, WorldRecipe,
 };
 
 #[test]
@@ -146,4 +146,29 @@ fn recipe_api_creates_a_world_that_can_step_query_and_debug() {
         .debug_snapshot(&DebugSnapshotOptions::default());
     assert_eq!(snapshot.bodies.len(), 2);
     assert_eq!(snapshot.colliders.len(), 2);
+}
+
+#[test]
+fn recipe_api_can_declare_joints_between_recipe_bodies() {
+    let recipe = WorldRecipe::new(WorldDesc::default())
+        .with_body(BodyBundle::static_body().with_pose(Pose::from_xy_angle(0.0, -1.0, 0.0)))
+        .with_body(BodyBundle::dynamic().with_pose(Pose::from_xy_angle(0.0, 1.0, 0.0)))
+        .with_joint(JointBundle::distance(0, 1).with_rest_length(2.0))
+        .with_joint(JointBundle::world_anchor(1).with_world_anchor((0.0, 1.5).into()));
+
+    let created = recipe
+        .instantiate()
+        .expect("valid recipe joints should instantiate");
+
+    assert_eq!(created.created.body_handles.len(), 2);
+    assert_eq!(created.created.joint_handles.len(), 2);
+    assert_eq!(created.world.joints().count(), 2);
+    assert_eq!(
+        created
+            .world
+            .debug_snapshot(&DebugSnapshotOptions::default())
+            .stats
+            .active_joint_count,
+        2
+    );
 }

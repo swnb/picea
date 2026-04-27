@@ -251,6 +251,8 @@ export type SessionRecord = {
     gravity?: [number, number] | null;
   };
   final_state_hash: string | null;
+  manifest_artifact?: string | null;
+  final_snapshot_artifact?: string | null;
   last_error: string | null;
 };
 

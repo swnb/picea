@@ -14,6 +14,10 @@ const storageKey = "picea-lab.locale";
 const enMessages = {
   "app.name": "picea-lab-web",
   "app.language": "Language",
+  "app.session": "session",
+  "app.runArtifact": "run artifact",
+  "app.manifestArtifact": "manifest",
+  "app.finalSnapshot": "final snapshot",
   "app.noSession": "no session",
   "app.noRunArtifact": "no run artifact",
   "tooltip.runScenario": "Run selected scenario",
@@ -28,6 +32,7 @@ const enMessages = {
   "tree.bodies": "Bodies",
   "tree.colliders": "Colliders",
   "tree.contacts": "Contacts",
+  "tree.joints": "Joints",
   "tree.empty": "empty",
   "metric.bodies": "bodies",
   "metric.contacts": "contacts",
@@ -111,8 +116,11 @@ const enMessages = {
   "log.sessionStatus": "Session {sessionId} status: {status}.",
   "log.serverRunFailed": "Server run failed; switched to demo fallback ({message}).",
   "log.generatedDemoFrames": "Generated {count} local demo frames for {scenarioId}.",
+  "log.artifactsAvailable": "Replay artifacts: {manifest}, {finalSnapshot}.",
+  "log.finalSnapshotLoaded": "Final snapshot loaded at step {step}.",
   "log.sseFrame": "SSE frame {data}",
   "log.sseFailed": "SSE failed {data}",
+  "log.sseIdle": "SSE idle {data}",
   "log.sseUnavailable": "SSE unavailable: {message}",
   "log.serverAccepted": "Server accepted {action}: {status}.",
   "log.serverControlFailed": "Server {action} failed: {message}.",
@@ -123,6 +131,10 @@ export type MessageKey = keyof typeof enMessages;
 const zhMessages: Record<MessageKey, string> = {
   "app.name": "picea-lab-web",
   "app.language": "语言",
+  "app.session": "会话",
+  "app.runArtifact": "运行产物",
+  "app.manifestArtifact": "manifest",
+  "app.finalSnapshot": "final_snapshot",
   "app.noSession": "无会话",
   "app.noRunArtifact": "无运行产物",
   "tooltip.runScenario": "运行当前场景",
@@ -137,6 +149,7 @@ const zhMessages: Record<MessageKey, string> = {
   "tree.bodies": "物体",
   "tree.colliders": "碰撞体",
   "tree.contacts": "接触点",
+  "tree.joints": "关节",
   "tree.empty": "空",
   "metric.bodies": "物体",
   "metric.contacts": "接触点",
@@ -220,8 +233,11 @@ const zhMessages: Record<MessageKey, string> = {
   "log.sessionStatus": "会话 {sessionId} 状态：{status}。",
   "log.serverRunFailed": "Server 运行失败；已切换到演示回退（{message}）。",
   "log.generatedDemoFrames": "已为 {scenarioId} 生成 {count} 个本地演示帧。",
+  "log.artifactsAvailable": "回放产物：{manifest}、{finalSnapshot}。",
+  "log.finalSnapshotLoaded": "已加载 final_snapshot，第 {step} 步。",
   "log.sseFrame": "SSE 帧 {data}",
   "log.sseFailed": "SSE 失败 {data}",
+  "log.sseIdle": "SSE 空队列 {data}",
   "log.sseUnavailable": "SSE 不可用：{message}",
   "log.serverAccepted": "Server 已接受 {action}：{status}。",
   "log.serverControlFailed": "Server {action} 失败：{message}。",
@@ -272,8 +288,8 @@ const layerLabels: Record<Locale, Record<LayerKey, string>> = {
 };
 
 const sourceLabels: Record<Locale, Record<SourceKind, string>> = {
-  "zh-CN": { server: "server", demo: "演示" },
-  "en-US": { server: "server", demo: "demo" },
+  "zh-CN": { server: "Rust 回放", demo: "演示回放" },
+  "en-US": { server: "Rust replay", demo: "demo replay" },
 };
 
 const statusLabels: Record<Locale, Record<StatusKind, string>> = {
