@@ -1,8 +1,9 @@
 use picea::prelude::{
-    BodyBundle, BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderBundle, ColliderDesc,
+    BodyAsset, BodyBundle, BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderBundle, ColliderDesc,
     ColliderPatch, CollisionFilter, DistanceJointDesc, DistanceJointPatch, JointBundle, JointDesc,
-    JointPatch, Material, Pose, SharedShape, SimulationPipeline, StepConfig, World,
-    WorldAnchorJointDesc, WorldCommand, WorldCommandEvent, WorldCommandKind, WorldDesc, WorldError,
+    JointPatch, Material, Pose, SharedShape, SimulationPipeline, StepConfig, ValidationError,
+    World, WorldAnchorJointDesc, WorldCommand, WorldCommandError, WorldCommandEvent,
+    WorldCommandKind, WorldDesc, WorldError, WorldRecipe,
 };
 use picea::world::HandleError;
 
@@ -364,6 +365,44 @@ fn world_commands_create_bundles_with_structured_handles_and_events() {
 }
 
 #[test]
+fn world_commands_create_placed_scene_assets() {
+    let mut world = World::new(WorldDesc::default());
+    let report = world
+        .commands()
+        .create_scene_bodies([
+            BodyAsset::static_rect(10.0, 1.0).at(Pose::from_xy_angle(0.0, 2.0, 0.0)),
+            BodyAsset::dynamic_circle(0.5).at(Pose::from_xy_angle(0.0, 0.0, 0.0)),
+        ])
+        .expect("valid scene body batch should create all requested objects");
+
+    assert_eq!(report.body_handles.len(), 2);
+    assert_eq!(report.collider_handles.len(), 2);
+    assert_eq!(
+        world
+            .body(report.body_handles[0])
+            .expect("floor body should resolve")
+            .pose(),
+        Pose::from_xy_angle(0.0, 2.0, 0.0)
+    );
+}
+
+#[test]
+fn world_command_error_struct_literal_shape_stays_compatible() {
+    let error = WorldCommandError {
+        command_index: 7,
+        collider_index: None,
+        kind: WorldCommandKind::CreateBody,
+        error: WorldError::Handle(HandleError::MissingBody {
+            handle: BodyHandle::INVALID,
+        }),
+    };
+
+    assert_eq!(error.command_index, 7);
+    assert_eq!(error.collider_index, None);
+    assert_eq!(error.kind, WorldCommandKind::CreateBody);
+}
+
+#[test]
 fn world_commands_do_not_mutate_when_batch_create_validation_fails() {
     let mut world = World::new(WorldDesc::default());
     let revision = world.revision();
@@ -442,6 +481,43 @@ fn world_commands_reject_invalid_recipe_joint_without_partial_bodies() {
         0,
         "rejected recipe batch must not partially create earlier bodies"
     );
+}
+
+#[test]
+fn world_recipe_errors_include_nested_body_collider_and_joint_paths() {
+    let collider_error = WorldRecipe::new(WorldDesc::default())
+        .with_body(BodyBundle::dynamic().with_collider(ColliderBundle::circle(-1.0)))
+        .instantiate_with_context()
+        .expect_err("invalid nested collider should reject the recipe");
+
+    assert_eq!(
+        collider_error.path.as_str(),
+        "recipe.bodies[0].colliders[0].desc.shape.radius"
+    );
+    assert_eq!(collider_error.error.command_index, 0);
+    assert_eq!(collider_error.error.collider_index, Some(0));
+    assert_eq!(collider_error.error.kind, WorldCommandKind::CreateCollider);
+    assert!(matches!(
+        collider_error.error.error,
+        WorldError::Validation(ValidationError::ColliderDesc {
+            field: "shape.radius"
+        })
+    ));
+
+    let joint_error = WorldRecipe::new(WorldDesc::default())
+        .with_body(BodyBundle::dynamic())
+        .with_joint(JointBundle::distance(0, 2))
+        .instantiate_with_context()
+        .expect_err("invalid recipe joint endpoint should reject the recipe");
+
+    assert_eq!(joint_error.path.as_str(), "recipe.joints[0].desc.body_b");
+    assert_eq!(joint_error.error.command_index, 1);
+    assert_eq!(joint_error.error.collider_index, None);
+    assert_eq!(joint_error.error.kind, WorldCommandKind::CreateJoint);
+    assert!(matches!(
+        joint_error.error.error,
+        WorldError::Handle(HandleError::MissingBody { .. })
+    ));
 }
 
 #[test]

@@ -5,13 +5,15 @@
 //! it preserves the existing lifecycle contracts and gives callers an atomic
 //! "all commands applied or no visible mutation" boundary.
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     body::{BodyDesc, BodyPatch, BodyType, Pose},
     collider::{ColliderDesc, ColliderPatch, CollisionFilter, Material, SharedShape},
     handles::{BodyHandle, ColliderHandle, JointHandle},
     joint::{DistanceJointDesc, JointDesc, JointPatch, WorldAnchorJointDesc},
-    math::point::Point,
-    world::{HandleError, World, WorldDesc, WorldError},
+    math::{point::Point, FloatNum},
+    world::{HandleError, ValidationError, World, WorldDesc, WorldError},
 };
 
 /// Material presets for scenario recipes and examples.
@@ -19,7 +21,8 @@ use crate::{
 /// These are named defaults, not physical constants. They keep common scenes
 /// readable while still allowing direct `Material` values when a test needs
 /// precise friction or restitution.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MaterialPreset {
     /// Matches `Material::default()`.
     #[default]
@@ -85,7 +88,8 @@ impl CollisionLayers {
 }
 
 /// Named collision-layer presets for recipes and example scenes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CollisionLayerPreset {
     /// Fully permissive filter, matching `CollisionFilter::default()`.
     #[default]
@@ -163,6 +167,16 @@ impl ColliderBundle {
                 ..ColliderDesc::default()
             },
         }
+    }
+
+    /// Creates a circle collider bundle with default descriptor values.
+    pub fn circle(radius: FloatNum) -> Self {
+        Self::new(SharedShape::circle(radius))
+    }
+
+    /// Creates an axis-aligned rectangle collider bundle with default descriptor values.
+    pub fn rect(width: FloatNum, height: FloatNum) -> Self {
+        Self::new(SharedShape::rect(width, height))
     }
 
     /// Wraps a fully specified collider descriptor.
@@ -291,6 +305,100 @@ impl From<BodyDesc> for BodyBundle {
     }
 }
 
+/// Reusable body-and-collider asset for scene recipes.
+///
+/// A body asset is still just recipe data: placing it in a scene clones the
+/// stored [`BodyBundle`] and writes a pose before `WorldCommands` validates the
+/// low-level descriptors on a scratch world. That keeps this layer convenient
+/// for examples and fixtures without turning it into a separate runtime object
+/// model.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BodyAsset {
+    /// Template bundle cloned whenever the asset is placed into a scene.
+    pub bundle: BodyBundle,
+}
+
+impl BodyAsset {
+    /// Wraps any body bundle as a reusable scene asset.
+    pub fn from_bundle(bundle: impl Into<BodyBundle>) -> Self {
+        Self {
+            bundle: bundle.into(),
+        }
+    }
+
+    /// Creates a static rectangle body asset with one rectangle collider.
+    pub fn static_rect(width: FloatNum, height: FloatNum) -> Self {
+        Self::from_bundle(
+            BodyBundle::static_body().with_collider(ColliderBundle::rect(width, height)),
+        )
+    }
+
+    /// Creates a dynamic rectangle body asset with one rectangle collider.
+    pub fn dynamic_rect(width: FloatNum, height: FloatNum) -> Self {
+        Self::from_bundle(BodyBundle::dynamic().with_collider(ColliderBundle::rect(width, height)))
+    }
+
+    /// Creates a static circle body asset with one circle collider.
+    pub fn static_circle(radius: FloatNum) -> Self {
+        Self::from_bundle(BodyBundle::static_body().with_collider(ColliderBundle::circle(radius)))
+    }
+
+    /// Creates a dynamic circle body asset with one circle collider.
+    pub fn dynamic_circle(radius: FloatNum) -> Self {
+        Self::from_bundle(BodyBundle::dynamic().with_collider(ColliderBundle::circle(radius)))
+    }
+
+    /// Applies material coefficients or a named material preset to every collider in the asset.
+    pub fn with_material(mut self, material: impl Into<Material>) -> Self {
+        let material = material.into();
+        for collider in &mut self.bundle.colliders {
+            collider.desc.material = material;
+        }
+        self
+    }
+
+    /// Applies collision filtering bits or a named layer preset to every collider in the asset.
+    pub fn with_filter(mut self, filter: impl Into<CollisionFilter>) -> Self {
+        let filter = filter.into();
+        for collider in &mut self.bundle.colliders {
+            collider.desc.filter = filter;
+        }
+        self
+    }
+
+    /// Applies the collider density to every collider in the asset.
+    pub fn with_density(mut self, density: FloatNum) -> Self {
+        for collider in &mut self.bundle.colliders {
+            collider.desc.density = density;
+        }
+        self
+    }
+
+    /// Applies the sensor flag to every collider in the asset.
+    pub fn with_sensor(mut self, is_sensor: bool) -> Self {
+        for collider in &mut self.bundle.colliders {
+            collider.desc.is_sensor = is_sensor;
+        }
+        self
+    }
+
+    /// Places this asset at a world-space pose and returns a concrete body bundle.
+    pub fn at(&self, pose: Pose) -> BodyBundle {
+        self.bundle.clone().with_pose(pose)
+    }
+
+    /// Consumes the asset and returns its underlying body bundle template.
+    pub fn into_bundle(self) -> BodyBundle {
+        self.bundle
+    }
+}
+
+impl From<BodyBundle> for BodyAsset {
+    fn from(value: BodyBundle) -> Self {
+        Self::from_bundle(value)
+    }
+}
+
 /// Joint creation bundle whose body endpoints refer to recipe body indices.
 ///
 /// Recipes allocate real `BodyHandle`s only during instantiation. Keeping joints
@@ -350,7 +458,7 @@ impl JointBundle {
         self
     }
 
-    fn resolve(&self, body_handles: &[BodyHandle]) -> Result<JointDesc, WorldError> {
+    fn resolve(&self, body_handles: &[BodyHandle]) -> Result<JointDesc, RecipeBodyResolveError> {
         match self {
             Self::Distance {
                 body_a,
@@ -358,13 +466,13 @@ impl JointBundle {
                 desc,
             } => {
                 let mut desc = desc.clone();
-                desc.body_a = resolve_recipe_body(*body_a, body_handles)?;
-                desc.body_b = resolve_recipe_body(*body_b, body_handles)?;
+                desc.body_a = resolve_recipe_body(*body_a, body_handles, "body_a")?;
+                desc.body_b = resolve_recipe_body(*body_b, body_handles, "body_b")?;
                 Ok(JointDesc::Distance(desc))
             }
             Self::WorldAnchor { body, desc } => {
                 let mut desc = desc.clone();
-                desc.body = resolve_recipe_body(*body, body_handles)?;
+                desc.body = resolve_recipe_body(*body, body_handles, "body")?;
                 Ok(JointDesc::WorldAnchor(desc))
             }
         }
@@ -398,6 +506,15 @@ impl WorldRecipe {
         self
     }
 
+    /// Adds one placed scene body to the recipe.
+    ///
+    /// This is an ergonomic alias for `with_body`: scene bodies still become
+    /// normal body bundles before instantiation, so low-level world creation
+    /// remains the single validation and allocation path.
+    pub fn with_scene_body(self, body: impl Into<BodyBundle>) -> Self {
+        self.with_body(body)
+    }
+
     /// Adds one joint bundle to the recipe.
     pub fn with_joint(mut self, joint: JointBundle) -> Self {
         self.joints.push(joint);
@@ -406,8 +523,15 @@ impl WorldRecipe {
 
     /// Instantiates the recipe into a concrete world.
     pub fn instantiate(self) -> Result<WorldRecipeResult, WorldCommandError> {
+        self.instantiate_with_context().map_err(|error| error.error)
+    }
+
+    /// Instantiates the recipe and returns a nested recipe path when setup fails.
+    pub fn instantiate_with_context(self) -> Result<WorldRecipeResult, WorldCommandContextError> {
         let mut world = World::new(self.desc);
-        let created = world.commands().create_recipe(self.bodies, self.joints)?;
+        let created = world
+            .commands()
+            .create_recipe_with_context(self.bodies, self.joints)?;
         Ok(WorldRecipeResult { world, created })
     }
 }
@@ -437,7 +561,48 @@ impl<'a> WorldCommands<'a> {
     where
         I: IntoIterator<Item = BodyBundle>,
     {
-        self.apply(bodies.into_iter().map(WorldCommand::CreateBody))
+        self.create_bodies_with_context(bodies)
+            .map_err(|error| error.error)
+    }
+
+    /// Creates several body bundles atomically and returns a nested path on failure.
+    pub fn create_bodies_with_context<I>(
+        &mut self,
+        bodies: I,
+    ) -> Result<WorldCommandReport, WorldCommandContextError>
+    where
+        I: IntoIterator<Item = BodyBundle>,
+    {
+        self.create_body_bundles(bodies, "bodies")
+    }
+
+    /// Creates placed scene bodies atomically.
+    ///
+    /// This is a readability wrapper for setup code. It uses the same
+    /// clone-and-commit transaction boundary as `create_bodies`, so callers do
+    /// not accidentally get a hot-path mutation API with different semantics.
+    pub fn create_scene_bodies<I, B>(
+        &mut self,
+        bodies: I,
+    ) -> Result<WorldCommandReport, WorldCommandError>
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<BodyBundle>,
+    {
+        self.create_scene_bodies_with_context(bodies)
+            .map_err(|error| error.error)
+    }
+
+    /// Creates placed scene bodies atomically and returns a nested path on failure.
+    pub fn create_scene_bodies_with_context<I, B>(
+        &mut self,
+        bodies: I,
+    ) -> Result<WorldCommandReport, WorldCommandContextError>
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<BodyBundle>,
+    {
+        self.create_body_bundles(bodies.into_iter().map(Into::into), "scene.bodies")
     }
 
     /// Creates recipe bodies and recipe-indexed joints atomically.
@@ -450,29 +615,53 @@ impl<'a> WorldCommands<'a> {
         I: IntoIterator<Item = BodyBundle>,
         J: IntoIterator<Item = JointBundle>,
     {
+        self.create_recipe_with_context(bodies, joints)
+            .map_err(|error| error.error)
+    }
+
+    /// Creates recipe bodies and recipe-indexed joints atomically with nested error paths.
+    pub fn create_recipe_with_context<I, J>(
+        &mut self,
+        bodies: I,
+        joints: J,
+    ) -> Result<WorldCommandReport, WorldCommandContextError>
+    where
+        I: IntoIterator<Item = BodyBundle>,
+        J: IntoIterator<Item = JointBundle>,
+    {
         let mut scratch = self.world.clone();
         let mut report = WorldCommandReport::default();
         let mut command_index = 0;
 
-        for body in bodies {
+        for (body_index, body) in bodies.into_iter().enumerate() {
+            let path = format!("recipe.bodies[{body_index}]");
             apply_command(
                 &mut scratch,
                 &mut report,
                 command_index,
                 WorldCommand::CreateBody(body),
+                &path,
             )?;
             command_index += 1;
         }
 
-        for joint in joints {
+        for (joint_index, joint) in joints.into_iter().enumerate() {
+            let path = format!("recipe.joints[{joint_index}]");
             let desc = joint.resolve(&report.body_handles).map_err(|error| {
-                command_error(command_index, None, WorldCommandKind::CreateJoint, error)
+                command_context_error(
+                    command_index,
+                    None,
+                    WorldCommandKind::CreateJoint,
+                    error.error,
+                    format!("{path}.desc.{}", error.field),
+                )
             })?;
             apply_command(
                 &mut scratch,
                 &mut report,
                 command_index,
                 WorldCommand::CreateJoint { desc },
+                &path,
             )?;
             command_index += 1;
         }
@@ -486,7 +675,16 @@ impl<'a> WorldCommands<'a> {
         &mut self,
         command: WorldCommand,
     ) -> Result<WorldCommandReport, WorldCommandError> {
-        self.apply([command])
+        self.apply_one_with_context(command)
+            .map_err(|error| error.error)
+    }
+
+    /// Applies one command atomically and returns a nested path on failure.
+    pub fn apply_one_with_context(
+        &mut self,
+        command: WorldCommand,
+    ) -> Result<WorldCommandReport, WorldCommandContextError> {
+        self.apply_with_context([command])
     }
 
     /// Applies a batch atomically.
@@ -499,10 +697,47 @@ impl<'a> WorldCommands<'a> {
     where
         I: IntoIterator<Item = WorldCommand>,
     {
+        self.apply_with_context(commands)
+            .map_err(|error| error.error)
+    }
+
+    /// Applies a batch atomically and returns a nested path on failure.
+    pub fn apply_with_context<I>(
+        &mut self,
+        commands: I,
+    ) -> Result<WorldCommandReport, WorldCommandContextError>
+    where
+        I: IntoIterator<Item = WorldCommand>,
+    {
         let mut scratch = self.world.clone();
         let mut report = WorldCommandReport::default();
         for (command_index, command) in commands.into_iter().enumerate() {
-            apply_command(&mut scratch, &mut report, command_index, command)?;
+            let path = format!("commands[{command_index}]");
+            apply_command(&mut scratch, &mut report, command_index, command, &path)?;
+        }
+        *self.world = scratch;
+        Ok(report)
+    }
+
+    fn create_body_bundles<I>(
+        &mut self,
+        bodies: I,
+        path_root: &str,
+    ) -> Result<WorldCommandReport, WorldCommandContextError>
+    where
+        I: IntoIterator<Item = BodyBundle>,
+    {
+        let mut scratch = self.world.clone();
+        let mut report = WorldCommandReport::default();
+        for (body_index, body) in bodies.into_iter().enumerate() {
+            let path = format!("{path_root}[{body_index}]");
+            apply_command(
+                &mut scratch,
+                &mut report,
+                body_index,
+                WorldCommand::CreateBody(body),
+                &path,
+            )?;
         }
         *self.world = scratch;
         Ok(report)
@@ -584,6 +819,15 @@ pub struct WorldCommandError {
     pub error: WorldError,
 }
 
+/// Structured command failure with a nested recipe or command path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorldCommandContextError {
+    /// Human-readable path to the nested recipe, command, or descriptor value that failed.
+    pub path: String,
+    /// Existing command failure payload kept intact for compatibility.
+    pub error: WorldCommandError,
+}
+
 /// Structured command event returned by successful batch commands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorldCommandEvent {
@@ -628,14 +872,28 @@ fn apply_command(
     report: &mut WorldCommandReport,
     command_index: usize,
     command: WorldCommand,
-) -> Result<(), WorldCommandError> {
+    path: &str,
+) -> Result<(), WorldCommandContextError> {
     match command {
-        WorldCommand::CreateBody(bundle) => apply_create_body(world, report, command_index, bundle),
+        WorldCommand::CreateBody(bundle) => {
+            apply_create_body(world, report, command_index, bundle, path)
+        }
         WorldCommand::CreateCollider { body, collider } => {
             let collider = world
                 .create_collider(body, collider.desc)
                 .map_err(|error| {
-                    command_error(command_index, None, WorldCommandKind::CreateCollider, error)
+                    let error_path = if matches!(error, WorldError::Validation(_)) {
+                        validation_path(&format!("{path}.collider.desc"), &error)
+                    } else {
+                        format!("{path}.body")
+                    };
+                    command_context_error(
+                        command_index,
+                        None,
+                        WorldCommandKind::CreateCollider,
+                        error,
+                        error_path,
+                    )
                 })?;
             report.collider_handles.push(collider);
             report
@@ -645,7 +903,14 @@ fn apply_command(
         }
         WorldCommand::CreateJoint { desc } => {
             let joint = world.create_joint(desc).map_err(|error| {
-                command_error(command_index, None, WorldCommandKind::CreateJoint, error)
+                let error_path = validation_path(&format!("{path}.desc"), &error);
+                command_context_error(
+                    command_index,
+                    None,
+                    WorldCommandKind::CreateJoint,
+                    error,
+                    error_path,
+                )
             })?;
             report.joint_handles.push(joint);
             report
@@ -655,7 +920,18 @@ fn apply_command(
         }
         WorldCommand::PatchBody { body, patch } => {
             world.apply_body_patch(body, patch).map_err(|error| {
-                command_error(command_index, None, WorldCommandKind::PatchBody, error)
+                let error_path = if matches!(error, WorldError::Validation(_)) {
+                    validation_path(&format!("{path}.patch"), &error)
+                } else {
+                    format!("{path}.body")
+                };
+                command_context_error(
+                    command_index,
+                    None,
+                    WorldCommandKind::PatchBody,
+                    error,
+                    error_path,
+                )
             })?;
             report.events.push(WorldCommandEvent::BodyPatched { body });
             Ok(())
@@ -664,7 +940,18 @@ fn apply_command(
             world
                 .apply_collider_patch(collider, patch)
                 .map_err(|error| {
-                    command_error(command_index, None, WorldCommandKind::PatchCollider, error)
+                    let error_path = if matches!(error, WorldError::Validation(_)) {
+                        validation_path(&format!("{path}.patch"), &error)
+                    } else {
+                        format!("{path}.collider")
+                    };
+                    command_context_error(
+                        command_index,
+                        None,
+                        WorldCommandKind::PatchCollider,
+                        error,
+                        error_path,
+                    )
                 })?;
             report
                 .events
@@ -673,7 +960,18 @@ fn apply_command(
         }
         WorldCommand::PatchJoint { joint, patch } => {
             world.apply_joint_patch(joint, patch).map_err(|error| {
-                command_error(command_index, None, WorldCommandKind::PatchJoint, error)
+                let error_path = if matches!(error, WorldError::Validation(_)) {
+                    validation_path(&format!("{path}.patch"), &error)
+                } else {
+                    format!("{path}.joint")
+                };
+                command_context_error(
+                    command_index,
+                    None,
+                    WorldCommandKind::PatchJoint,
+                    error,
+                    error_path,
+                )
             })?;
             report
                 .events
@@ -682,7 +980,13 @@ fn apply_command(
         }
         WorldCommand::DestroyBody { body } => {
             world.destroy_body(body).map_err(|error| {
-                command_error(command_index, None, WorldCommandKind::DestroyBody, error)
+                command_context_error(
+                    command_index,
+                    None,
+                    WorldCommandKind::DestroyBody,
+                    error,
+                    format!("{path}.body"),
+                )
             })?;
             report
                 .events
@@ -691,11 +995,12 @@ fn apply_command(
         }
         WorldCommand::DestroyCollider { collider } => {
             world.destroy_collider(collider).map_err(|error| {
-                command_error(
+                command_context_error(
                     command_index,
                     None,
                     WorldCommandKind::DestroyCollider,
                     error,
+                    format!("{path}.collider"),
                 )
             })?;
             report
@@ -705,7 +1010,13 @@ fn apply_command(
         }
         WorldCommand::DestroyJoint { joint } => {
             world.destroy_joint(joint).map_err(|error| {
-                command_error(command_index, None, WorldCommandKind::DestroyJoint, error)
+                command_context_error(
+                    command_index,
+                    None,
+                    WorldCommandKind::DestroyJoint,
+                    error,
+                    format!("{path}.joint"),
+                )
             })?;
             report
                 .events
@@ -720,10 +1031,18 @@ fn apply_create_body(
     report: &mut WorldCommandReport,
     command_index: usize,
     bundle: BodyBundle,
-) -> Result<(), WorldCommandError> {
-    let body = world
-        .create_body(bundle.desc)
-        .map_err(|error| command_error(command_index, None, WorldCommandKind::CreateBody, error))?;
+    path: &str,
+) -> Result<(), WorldCommandContextError> {
+    let body = world.create_body(bundle.desc).map_err(|error| {
+        let error_path = validation_path(&format!("{path}.desc"), &error);
+        command_context_error(
+            command_index,
+            None,
+            WorldCommandKind::CreateBody,
+            error,
+            error_path,
+        )
+    })?;
     report.body_handles.push(body);
     report.events.push(WorldCommandEvent::BodyCreated { body });
 
@@ -731,11 +1050,14 @@ fn apply_create_body(
         let collider = world
             .create_collider(body, collider.desc)
             .map_err(|error| {
-                command_error(
+                let error_path =
+                    validation_path(&format!("{path}.colliders[{collider_index}].desc"), &error);
+                command_context_error(
                     command_index,
                     Some(collider_index),
                     WorldCommandKind::CreateCollider,
                     error,
+                    error_path,
                 )
             })?;
         report.collider_handles.push(collider);
@@ -761,14 +1083,55 @@ fn command_error(
     }
 }
 
+fn command_context_error(
+    command_index: usize,
+    collider_index: Option<usize>,
+    kind: WorldCommandKind,
+    error: WorldError,
+    path: impl Into<String>,
+) -> WorldCommandContextError {
+    WorldCommandContextError {
+        path: path.into(),
+        error: command_error(command_index, collider_index, kind, error),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RecipeBodyResolveError {
+    field: &'static str,
+    error: WorldError,
+}
+
 fn resolve_recipe_body(
     index: usize,
     body_handles: &[BodyHandle],
-) -> Result<BodyHandle, WorldError> {
+    field: &'static str,
+) -> Result<BodyHandle, RecipeBodyResolveError> {
     body_handles
         .get(index)
         .copied()
-        .ok_or(WorldError::Handle(HandleError::MissingBody {
-            handle: BodyHandle::INVALID,
-        }))
+        .ok_or(RecipeBodyResolveError {
+            field,
+            error: WorldError::Handle(HandleError::MissingBody {
+                handle: BodyHandle::INVALID,
+            }),
+        })
+}
+
+fn validation_path(base: &str, error: &WorldError) -> String {
+    validation_field(error)
+        .map(|field| format!("{base}.{field}"))
+        .unwrap_or_else(|| base.to_owned())
+}
+
+fn validation_field(error: &WorldError) -> Option<&'static str> {
+    match error {
+        WorldError::Validation(ValidationError::BodyDesc { field })
+        | WorldError::Validation(ValidationError::BodyPatch { field })
+        | WorldError::Validation(ValidationError::ColliderDesc { field })
+        | WorldError::Validation(ValidationError::ColliderPatch { field })
+        | WorldError::Validation(ValidationError::JointDesc { field })
+        | WorldError::Validation(ValidationError::JointPatch { field }) => Some(field),
+        WorldError::Handle(_) | WorldError::Topology(_) => None,
+    }
 }

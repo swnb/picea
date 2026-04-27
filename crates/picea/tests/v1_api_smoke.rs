@@ -1,5 +1,5 @@
 use picea::prelude::{
-    BodyBundle, BodyDesc, BodyType, ColliderBundle, ColliderDesc, CollisionFilter,
+    BodyAsset, BodyBundle, BodyDesc, BodyType, ColliderBundle, ColliderDesc, CollisionFilter,
     CollisionLayerPreset, DebugSnapshotOptions, DistanceJointDesc, JointBundle, JointDesc,
     Material, MaterialPreset, Pose, QueryFilter, QueryPipeline, SharedShape, SimulationPipeline,
     StepConfig, World, WorldAnchorJointDesc, WorldDesc, WorldRecipe,
@@ -171,4 +171,38 @@ fn recipe_api_can_declare_joints_between_recipe_bodies() {
             .active_joint_count,
         2
     );
+}
+
+#[test]
+fn scene_asset_recipe_api_places_reusable_body_assets() {
+    let floor = BodyAsset::static_rect(8.0, 1.0)
+        .with_material(MaterialPreset::Rough)
+        .with_filter(CollisionLayerPreset::StaticGeometry);
+    let ball = BodyAsset::dynamic_circle(0.5)
+        .with_material(MaterialPreset::Bouncy)
+        .with_filter(CollisionLayerPreset::DynamicBody);
+
+    let mut created = WorldRecipe::new(WorldDesc::default())
+        .with_scene_body(floor.at(Pose::from_xy_angle(0.0, -2.0, 0.0)))
+        .with_scene_body(ball.at(Pose::from_xy_angle(0.0, 0.0, 0.0)))
+        .with_joint(JointBundle::world_anchor(1).with_world_anchor((0.0, 1.0).into()))
+        .instantiate()
+        .expect("valid scene assets should instantiate");
+
+    assert_eq!(created.created.body_handles.len(), 2);
+    assert_eq!(created.created.collider_handles.len(), 2);
+    assert_eq!(created.created.joint_handles.len(), 1);
+    assert_eq!(
+        created
+            .world
+            .collider(created.created.collider_handles[1])
+            .expect("ball collider should resolve")
+            .material(),
+        Material::preset(MaterialPreset::Bouncy)
+    );
+
+    let mut pipeline = SimulationPipeline::new(StepConfig::default());
+    let report = pipeline.step(&mut created.world);
+    assert_eq!(report.stats.body_count, 2);
+    assert_eq!(report.stats.collider_count, 2);
 }

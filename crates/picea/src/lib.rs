@@ -38,9 +38,10 @@ pub mod prelude {
     pub use super::pipeline::{SimulationPipeline, StepConfig, StepReport, StepStats};
     pub use super::query::{AabbHit, PointHit, QueryFilter, QueryPipeline, RayHit};
     pub use super::recipe::{
-        BodyBundle, ColliderBundle, CollisionLayerPreset, CollisionLayers, JointBundle,
-        MaterialPreset, WorldCommand, WorldCommandError, WorldCommandEvent, WorldCommandKind,
-        WorldCommandReport, WorldCommands, WorldRecipe, WorldRecipeResult,
+        BodyAsset, BodyBundle, ColliderBundle, CollisionLayerPreset, CollisionLayers, JointBundle,
+        MaterialPreset, WorldCommand, WorldCommandContextError, WorldCommandError,
+        WorldCommandEvent, WorldCommandKind, WorldCommandReport, WorldCommands, WorldRecipe,
+        WorldRecipeResult,
     };
     pub use super::world::{
         HandleError, TopologyError, ValidationError, World, WorldDesc, WorldError,
