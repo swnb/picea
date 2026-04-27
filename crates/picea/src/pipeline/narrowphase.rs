@@ -532,7 +532,11 @@ fn clip_incident_edge(
             let separation = (clipped.point - ref_start).dot(reference_to_incident);
             let depth = (-separation).max(0.0).min(manifold_depth);
             (separation <= CLIP_EPSILON).then_some(ContactPointGeometry {
-                point: clipped.point - output_normal * (separation.min(0.0) * 0.5),
+                // Box2D stores clipped incident features, then builds a world
+                // contact point between both surfaces. Keep the exported point
+                // on that mid-plane so solver anchors are not biased outside
+                // the overlapping faces.
+                point: clipped.point + output_normal * (separation.min(0.0) * 0.5),
                 depth,
                 feature_id: clipped.feature_id,
             })
@@ -965,6 +969,28 @@ mod tests {
                 .map(|point| point.feature_id)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn polygon_clipping_places_points_between_reference_and_incident_faces() {
+        let shape_a = SharedShape::rect(2.0, 2.0);
+        let shape_b = SharedShape::rect(2.0, 2.0);
+        let contact = contact_from_shapes(
+            &shape_a,
+            Pose::default(),
+            aabb(-1.0, -1.0, 1.0, 1.0),
+            &shape_b,
+            Pose::from_xy_angle(1.5, 0.0, 0.0),
+            aabb(0.5, -1.0, 2.5, 1.0),
+        )
+        .expect("overlapping rectangles should produce a clipped manifold");
+
+        assert_eq!(contact.normal, Vector::new(-1.0, 0.0));
+        assert_eq!(contact.points.len(), 2);
+        for point in &contact.points {
+            assert!((point.point.x() - 0.75).abs() < 1.0e-4);
+            assert!((point.depth - 0.5).abs() < 1.0e-4);
+        }
     }
 
     #[test]
