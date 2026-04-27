@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     events::SleepTransitionReason,
@@ -44,14 +44,30 @@ struct ContactSolverRow {
     restitution_applied: bool,
 }
 
+struct ContactSolveBatch {
+    contact_indices: Vec<usize>,
+}
+
 pub(crate) fn resolve_contacts(
     world: &mut World,
     contacts: &mut [ContactObservation],
     config: &StepConfig,
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
 ) {
-    let mut solver_bodies = solver_body_cache(world, contacts);
-    let mut rows = contact_solver_rows(contacts, &solver_bodies, config);
+    let islands = sleep::build_active_solver_islands(
+        world,
+        contacts
+            .iter()
+            .filter(|contact| !contact.is_sensor)
+            .map(|contact| (contact.body_a, contact.body_b)),
+        wake_reasons,
+    );
+    let body_islands = solver_body_islands(&islands);
+    let active_islands = active_solver_island_ids(&islands);
+    let batches = contact_solve_batches(contacts, &body_islands, &active_islands);
+    let active_contacts = batch_contact_indices(&batches);
+    let mut solver_bodies = solver_body_cache(world, contacts, &active_contacts);
+    let mut batches = contact_solver_row_batches(contacts, &batches, &solver_bodies, config);
     for contact in contacts.iter_mut() {
         contact.normal_impulse = 0.0;
         contact.tangent_impulse = 0.0;
@@ -61,27 +77,33 @@ pub(crate) fn resolve_contacts(
         contact.restitution_applied = false;
     }
 
-    for row in &rows {
-        let warm_start_impulse =
-            row.normal * row.normal_impulse + row.tangent * row.tangent_impulse;
-        apply_solver_impulse(&mut solver_bodies, row, warm_start_impulse);
-    }
-
-    for _ in 0..config.velocity_iterations {
-        for row in &mut rows {
-            solve_normal_impulse(&mut solver_bodies, row);
-            solve_tangent_impulse(&mut solver_bodies, row);
+    for batch in &batches {
+        for row in &batch.rows {
+            let warm_start_impulse =
+                row.normal * row.normal_impulse + row.tangent * row.tangent_impulse;
+            apply_solver_impulse(&mut solver_bodies, row, warm_start_impulse);
         }
     }
 
-    for row in rows {
-        let contact = &mut contacts[row.contact_index];
-        contact.normal_impulse = row.normal_impulse.max(0.0);
-        contact.tangent_impulse = row.tangent_impulse;
-        contact.normal_impulse_clamped = row.normal_impulse_clamped;
-        contact.tangent_impulse_clamped = row.tangent_impulse_clamped;
-        contact.restitution_velocity_threshold = row.restitution_velocity_threshold;
-        contact.restitution_applied = row.restitution_applied;
+    for _ in 0..config.velocity_iterations {
+        for batch in &mut batches {
+            for row in &mut batch.rows {
+                solve_normal_impulse(&mut solver_bodies, row);
+                solve_tangent_impulse(&mut solver_bodies, row);
+            }
+        }
+    }
+
+    for batch in batches {
+        for row in batch.rows {
+            let contact = &mut contacts[row.contact_index];
+            contact.normal_impulse = row.normal_impulse.max(0.0);
+            contact.tangent_impulse = row.tangent_impulse;
+            contact.normal_impulse_clamped = row.normal_impulse_clamped;
+            contact.tangent_impulse_clamped = row.tangent_impulse_clamped;
+            contact.restitution_velocity_threshold = row.restitution_velocity_threshold;
+            contact.restitution_applied = row.restitution_applied;
+        }
     }
 
     record_contact_impulse_wakes(world, contacts, wake_reasons);
@@ -94,12 +116,91 @@ pub(crate) fn resolve_contacts(
     );
 }
 
+fn active_solver_island_ids(islands: &[sleep::SolverIsland]) -> BTreeSet<u32> {
+    islands
+        .iter()
+        .filter(|island| island.active)
+        .map(|island| island.id)
+        .collect()
+}
+
+fn solver_body_islands(islands: &[sleep::SolverIsland]) -> BTreeMap<BodyHandle, u32> {
+    islands
+        .iter()
+        .flat_map(|island| island.bodies.iter().map(|body| (*body, island.id)))
+        .collect()
+}
+
+fn contact_solve_batches(
+    contacts: &[ContactObservation],
+    body_islands: &BTreeMap<BodyHandle, u32>,
+    active_islands: &BTreeSet<u32>,
+) -> Vec<ContactSolveBatch> {
+    let mut batches = BTreeMap::<u32, Vec<usize>>::new();
+    for (index, contact) in contacts.iter().enumerate() {
+        let island_a = body_islands.get(&contact.body_a).copied();
+        let island_b = body_islands.get(&contact.body_b).copied();
+        let island = match (island_a, island_b) {
+            (Some(a), Some(b)) if a == b => Some(a),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            _ => None,
+        };
+        if let Some(island) = island.filter(|island| active_islands.contains(island)) {
+            batches.entry(island).or_default().push(index);
+        }
+    }
+
+    batches
+        .into_values()
+        .map(|contact_indices| ContactSolveBatch { contact_indices })
+        .collect()
+}
+
+fn batch_contact_indices(batches: &[ContactSolveBatch]) -> BTreeSet<usize> {
+    batches
+        .iter()
+        .flat_map(|batch| batch.contact_indices.iter().copied())
+        .collect()
+}
+
+struct ContactSolverBatch {
+    rows: Vec<ContactSolverRow>,
+}
+
+fn contact_solver_row_batches(
+    contacts: &[ContactObservation],
+    batches: &[ContactSolveBatch],
+    bodies: &BTreeMap<BodyHandle, SolverBody>,
+    config: &StepConfig,
+) -> Vec<ContactSolverBatch> {
+    batches
+        .iter()
+        .filter_map(|batch| {
+            let rows = batch
+                .contact_indices
+                .iter()
+                .filter_map(|contact_index| {
+                    contact_solver_row(*contact_index, &contacts[*contact_index], bodies, config)
+                })
+                .collect::<Vec<_>>();
+            (!rows.is_empty()).then_some(ContactSolverBatch { rows })
+        })
+        .collect()
+}
+
 fn solver_body_cache(
     world: &World,
     contacts: &[ContactObservation],
+    active_contacts: &BTreeSet<usize>,
 ) -> BTreeMap<BodyHandle, SolverBody> {
     let mut bodies = BTreeMap::new();
-    for contact in contacts.iter().filter(|contact| !contact.is_sensor) {
+    for contact in contacts
+        .iter()
+        .enumerate()
+        .filter(|(index, contact)| active_contacts.contains(index) && !contact.is_sensor)
+        .map(|(_, contact)| contact)
+    {
         for handle in [contact.body_a, contact.body_b] {
             bodies.entry(handle).or_insert_with(|| {
                 let record = world
@@ -120,82 +221,75 @@ fn solver_body_cache(
     bodies
 }
 
-fn contact_solver_rows(
-    contacts: &[ContactObservation],
+fn contact_solver_row(
+    contact_index: usize,
+    contact: &ContactObservation,
     bodies: &BTreeMap<BodyHandle, SolverBody>,
     config: &StepConfig,
-) -> Vec<ContactSolverRow> {
-    contacts
-        .iter()
-        .enumerate()
-        .filter_map(|(contact_index, contact)| {
-            if contact.is_sensor {
-                return None;
-            }
-            let body_a = *bodies.get(&contact.body_a)?;
-            let body_b = *bodies.get(&contact.body_b)?;
-            let normal = contact.normal.normalized_or_zero();
-            let tangent = normal.perp().normalized_or_zero();
-            if normal.length() <= FloatNum::EPSILON || tangent.length() <= FloatNum::EPSILON {
-                return None;
-            }
-            let anchor_a = contact.point - body_a.center;
-            let anchor_b = contact.point - body_b.center;
-            let normal_mass = effective_mass(body_a, body_b, anchor_a, anchor_b, normal);
-            let tangent_mass = effective_mass(body_a, body_b, anchor_a, anchor_b, tangent);
-            if normal_mass <= 0.0 && tangent_mass <= 0.0 {
-                return None;
-            }
+) -> Option<ContactSolverRow> {
+    if contact.is_sensor {
+        return None;
+    }
+    let body_a = *bodies.get(&contact.body_a)?;
+    let body_b = *bodies.get(&contact.body_b)?;
+    let normal = contact.normal.normalized_or_zero();
+    let tangent = normal.perp().normalized_or_zero();
+    if normal.length() <= FloatNum::EPSILON || tangent.length() <= FloatNum::EPSILON {
+        return None;
+    }
+    let anchor_a = contact.point - body_a.center;
+    let anchor_b = contact.point - body_b.center;
+    let normal_mass = effective_mass(body_a, body_b, anchor_a, anchor_b, normal);
+    let tangent_mass = effective_mass(body_a, body_b, anchor_a, anchor_b, tangent);
+    if normal_mass <= 0.0 && tangent_mass <= 0.0 {
+        return None;
+    }
 
-            let relative_normal_speed =
-                relative_contact_velocity(body_a, body_b, anchor_a, anchor_b).dot(normal);
-            let restitution_threshold = config.restitution_velocity_threshold;
-            let restitution_applied = -relative_normal_speed > restitution_threshold
-                && contact.material.restitution > 0.0;
-            let restitution_bias = if restitution_applied {
-                contact.material.restitution.clamp(0.0, 1.0) * -relative_normal_speed
-            } else {
-                0.0
-            };
-            // Penetration velocity bias gives resting overlap a support impulse during the
-            // velocity solve, so Coulomb friction has a real normal budget to clamp against.
-            let position_bias = if relative_normal_speed.abs() <= 1.0e-4 {
-                (contact.depth - POSITION_CORRECTION_SLOP).max(0.0) * CONTACT_VELOCITY_BIAS
-                    / config.dt
-            } else {
-                0.0
-            };
-            let friction = contact.material.friction.max(0.0);
-            let normal_impulse = contact.warm_start_normal_impulse.max(0.0);
-            let max_friction = friction * normal_impulse;
-            let tangent_impulse = contact
-                .warm_start_tangent_impulse
-                .clamp(-max_friction, max_friction);
+    let relative_normal_speed =
+        relative_contact_velocity(body_a, body_b, anchor_a, anchor_b).dot(normal);
+    let restitution_threshold = config.restitution_velocity_threshold;
+    let restitution_applied =
+        -relative_normal_speed > restitution_threshold && contact.material.restitution > 0.0;
+    let restitution_bias = if restitution_applied {
+        contact.material.restitution.clamp(0.0, 1.0) * -relative_normal_speed
+    } else {
+        0.0
+    };
+    // Penetration velocity bias gives resting overlap a support impulse during the
+    // velocity solve, so Coulomb friction has a real normal budget to clamp against.
+    let position_bias = if relative_normal_speed.abs() <= 1.0e-4 {
+        (contact.depth - POSITION_CORRECTION_SLOP).max(0.0) * CONTACT_VELOCITY_BIAS / config.dt
+    } else {
+        0.0
+    };
+    let friction = contact.material.friction.max(0.0);
+    let normal_impulse = contact.warm_start_normal_impulse.max(0.0);
+    let max_friction = friction * normal_impulse;
+    let tangent_impulse = contact
+        .warm_start_tangent_impulse
+        .clamp(-max_friction, max_friction);
 
-            Some(ContactSolverRow {
-                contact_index,
-                body_a: contact.body_a,
-                body_b: contact.body_b,
-                normal,
-                tangent,
-                anchor_a,
-                anchor_b,
-                normal_mass,
-                tangent_mass,
-                friction,
-                restitution_bias,
-                position_bias,
-                normal_impulse,
-                tangent_impulse,
-                normal_impulse_clamped: false,
-                tangent_impulse_clamped: (tangent_impulse - contact.warm_start_tangent_impulse)
-                    .abs()
-                    > FloatNum::EPSILON,
-                restitution_velocity_threshold: restitution_threshold,
-                restitution_applied,
-            })
-        })
-        .collect()
+    Some(ContactSolverRow {
+        contact_index,
+        body_a: contact.body_a,
+        body_b: contact.body_b,
+        normal,
+        tangent,
+        anchor_a,
+        anchor_b,
+        normal_mass,
+        tangent_mass,
+        friction,
+        restitution_bias,
+        position_bias,
+        normal_impulse,
+        tangent_impulse,
+        normal_impulse_clamped: false,
+        tangent_impulse_clamped: (tangent_impulse - contact.warm_start_tangent_impulse).abs()
+            > FloatNum::EPSILON,
+        restitution_velocity_threshold: restitution_threshold,
+        restitution_applied,
+    })
 }
 
 fn write_solver_velocities(

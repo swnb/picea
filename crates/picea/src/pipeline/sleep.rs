@@ -19,6 +19,18 @@ struct Island {
     bodies: Vec<BodyHandle>,
 }
 
+/// Internal solve batch identity for M12 active islands.
+///
+/// An island is a deterministic group of non-static bodies linked by contacts
+/// or joints. Sleeping islands stay visible to events/debug, but inactive
+/// islands should not allocate contact or joint rows in the hot solver phase.
+#[derive(Clone, Debug)]
+pub(crate) struct SolverIsland {
+    pub(crate) id: u32,
+    pub(crate) bodies: Vec<BodyHandle>,
+    pub(crate) active: bool,
+}
+
 pub(crate) fn record_wake_reason(
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     body: BodyHandle,
@@ -42,6 +54,32 @@ pub(crate) fn refresh_sleep_phase(
     step_events: &[WorldEvent],
 ) -> (Vec<WorldEvent>, usize, usize) {
     world.refresh_sleep_states(config, previous_sleep_states, wake_reasons, step_events)
+}
+
+pub(crate) fn build_active_solver_islands<I>(
+    world: &World,
+    contact_pairs: I,
+    wake_reasons: &BTreeMap<BodyHandle, SleepTransitionReason>,
+) -> Vec<SolverIsland>
+where
+    I: IntoIterator<Item = (BodyHandle, BodyHandle)>,
+{
+    build_islands_from_pairs(world, contact_pairs)
+        .into_iter()
+        .map(|island| {
+            let active = island.bodies.iter().any(|body| {
+                world
+                    .body_record(*body)
+                    .map(|record| !record.sleeping || wake_reasons.contains_key(body))
+                    .unwrap_or(false)
+            });
+            SolverIsland {
+                id: island.id,
+                bodies: island.bodies,
+                active,
+            }
+        })
+        .collect()
 }
 
 impl World {
@@ -202,6 +240,13 @@ impl World {
 }
 
 fn build_islands(world: &World, step_events: &[WorldEvent]) -> Vec<Island> {
+    build_islands_from_pairs(world, step_events.iter().filter_map(active_contact_bodies))
+}
+
+fn build_islands_from_pairs<I>(world: &World, contact_pairs: I) -> Vec<Island>
+where
+    I: IntoIterator<Item = (BodyHandle, BodyHandle)>,
+{
     let bodies = world
         .bodies()
         .filter(|handle| {
@@ -213,8 +258,8 @@ fn build_islands(world: &World, step_events: &[WorldEvent]) -> Vec<Island> {
         .collect::<Vec<_>>();
     let mut union = UnionFind::new(&bodies);
 
-    for event in step_events.iter().filter_map(active_contact_event) {
-        union_if_non_static(world, &mut union, event.body_a, event.body_b);
+    for (body_a, body_b) in contact_pairs {
+        union_if_non_static(world, &mut union, body_a, body_b);
     }
 
     for (_, joint) in world.joint_records() {
@@ -241,6 +286,10 @@ fn build_islands(world: &World, step_events: &[WorldEvent]) -> Vec<Island> {
             }
         })
         .collect()
+}
+
+fn active_contact_bodies(event: &WorldEvent) -> Option<(BodyHandle, BodyHandle)> {
+    active_contact_event(event).map(|contact| (contact.body_a, contact.body_b))
 }
 
 fn union_if_non_static(

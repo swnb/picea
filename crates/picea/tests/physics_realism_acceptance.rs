@@ -1667,6 +1667,97 @@ fn sleeping_body_resting_on_static_contact_stays_asleep() {
 }
 
 #[test]
+fn sleeping_unrelated_island_keeps_contact_facts_but_skips_solver_rows() {
+    let mut world = no_gravity_world();
+    let active = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -2.0,
+        0.0,
+        Vector::new(1.0, 0.0),
+    );
+    let active_support = create_body(&mut world, BodyType::Static, -1.25, 0.0, Vector::default());
+    let sleeper = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(2.0, 0.0, 0.0),
+            can_sleep: true,
+            sleeping: true,
+            ..BodyDesc::default()
+        })
+        .expect("sleeping body should be created");
+    let sleeper_support = create_body(&mut world, BodyType::Static, 2.75, 0.0, Vector::default());
+    for body in [active, active_support, sleeper, sleeper_support] {
+        attach_shape(
+            &mut world,
+            body,
+            SharedShape::circle(0.5),
+            Material::default(),
+        );
+    }
+
+    let report = step_world(&mut world, 1);
+    let contacts = active_contact_events(&report);
+    let active_contacts = contacts
+        .iter()
+        .filter(|contact| contact.body_a == active || contact.body_b == active)
+        .collect::<Vec<_>>();
+    let sleeping_contacts = contacts
+        .iter()
+        .filter(|contact| contact.body_a == sleeper || contact.body_b == sleeper)
+        .collect::<Vec<_>>();
+
+    assert!(
+        active_contacts
+            .iter()
+            .any(|contact| contact.solver_normal_impulse > 0.0),
+        "the active island should still solve its contact row: {active_contacts:?}"
+    );
+    assert_eq!(
+        sleeping_contacts.len(),
+        1,
+        "the sleeping island should keep deterministic contact facts"
+    );
+    assert_eq!(sleeping_contacts[0].solver_normal_impulse, 0.0);
+    assert_eq!(sleeping_contacts[0].solver_tangent_impulse, 0.0);
+    assert!(
+        world.try_body(sleeper).expect("sleeper exists").sleeping(),
+        "an unrelated sleeping island must remain asleep"
+    );
+    assert_eq!(
+        report.stats.contact_count,
+        contacts.len(),
+        "StepStats contact count should still match emitted active contact facts"
+    );
+
+    let snapshot = DebugSnapshot::from_world_with_step_report(
+        &world,
+        &report,
+        &DebugSnapshotOptions::default(),
+    );
+    let sleeper_island = snapshot
+        .bodies
+        .iter()
+        .find(|body| body.handle == sleeper)
+        .and_then(|body| body.island_id)
+        .expect("sleeping dynamic body should keep an island fact");
+    assert!(
+        snapshot
+            .islands
+            .iter()
+            .any(|island| island.id == sleeper_island && island.sleeping),
+        "DebugSnapshot should keep the unrelated sleeping island visible"
+    );
+    let snapshot_sleep_contact = snapshot
+        .contacts
+        .iter()
+        .find(|contact| contact.bodies.contains(&sleeper))
+        .expect("DebugSnapshot should retain the sleeping island contact fact");
+    assert_eq!(snapshot_sleep_contact.solver_normal_impulse, 0.0);
+    assert_eq!(snapshot_sleep_contact.solver_tangent_impulse, 0.0);
+}
+
+#[test]
 fn fast_small_body_does_not_tunnel_through_thin_wall() {
     assert_fast_small_body_does_not_tunnel_through_thin_wall();
 }
