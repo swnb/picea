@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::{
     events::{NumericsWarningEvent, SleepTransitionReason},
     handles::BodyHandle,
-    joint::JointDesc,
+    joint::{DistanceJointDesc, WorldAnchorJointDesc},
     math::{vector::Vector, FloatNum},
     world::World,
 };
@@ -11,11 +11,20 @@ use crate::{
 use super::integrate::is_finite_vector;
 
 struct JointSolveBatch {
+    body_slots: Vec<BodyHandle>,
     rows: Vec<JointSolverRow>,
 }
 
-struct JointSolverRow {
-    desc: JointDesc,
+enum JointSolverRow {
+    Distance {
+        desc: DistanceJointDesc,
+        body_a_slot: usize,
+        body_b_slot: usize,
+    },
+    WorldAnchor {
+        desc: WorldAnchorJointDesc,
+        body_slot: usize,
+    },
 }
 
 pub(crate) fn solve_joint_phase(
@@ -43,14 +52,20 @@ impl World {
     ) {
         for batch in batches {
             for row in batch.rows {
-                match row.desc {
-                    JointDesc::Distance(desc) => {
+                match row {
+                    JointSolverRow::Distance {
+                        desc,
+                        body_a_slot,
+                        body_b_slot,
+                    } => {
+                        let body_a = batch.body_slots[body_a_slot];
+                        let body_b = batch.body_slots[body_b_slot];
                         let pose_a = self
-                            .body_record(desc.body_a)
+                            .body_record(body_a)
                             .expect("joint endpoints must stay live during step")
                             .pose;
                         let pose_b = self
-                            .body_record(desc.body_b)
+                            .body_record(body_b)
                             .expect("joint endpoints must stay live during step")
                             .pose;
                         let anchor_a = pose_a.transform_point(desc.local_anchor_a);
@@ -70,16 +85,12 @@ impl World {
                             });
                             continue;
                         }
-                        self.apply_body_pair_correction(
-                            desc.body_a,
-                            desc.body_b,
-                            correction,
-                            wake_reasons,
-                        );
+                        self.apply_body_pair_correction(body_a, body_b, correction, wake_reasons);
                     }
-                    JointDesc::WorldAnchor(desc) => {
+                    JointSolverRow::WorldAnchor { desc, body_slot } => {
+                        let body = batch.body_slots[body_slot];
                         let pose = self
-                            .body_record(desc.body)
+                            .body_record(body)
                             .expect("joint endpoint must stay live during step")
                             .pose;
                         let anchor = pose.transform_point(desc.local_anchor);
@@ -92,7 +103,7 @@ impl World {
                             });
                             continue;
                         }
-                        self.apply_single_body_correction(desc.body, correction, wake_reasons);
+                        self.apply_single_body_correction(body, correction, wake_reasons);
                     }
                 }
             }
@@ -104,48 +115,39 @@ fn joint_solve_batches(
     world: &World,
     islands: &[crate::pipeline::sleep::SolverIsland],
 ) -> Vec<JointSolveBatch> {
-    let body_islands = islands
-        .iter()
-        .flat_map(|island| island.bodies.iter().map(|body| (*body, island.id)))
-        .collect::<BTreeMap<_, _>>();
-    let active_islands = islands
-        .iter()
-        .filter(|island| island.active)
-        .map(|island| island.id)
-        .collect::<BTreeSet<_>>();
-    let mut batches = BTreeMap::<u32, Vec<JointSolverRow>>::new();
+    let plan = crate::pipeline::island::build_island_solve_plan(
+        islands,
+        std::iter::empty(),
+        world.joint_records().map(|(_, record)| record.desc.clone()),
+    );
 
-    for (_, record) in world.joint_records() {
-        let desc = record.desc.clone();
-        if let Some(island) =
-            joint_island(&desc, &body_islands).filter(|island| active_islands.contains(island))
-        {
-            batches
-                .entry(island)
-                .or_default()
-                .push(JointSolverRow { desc });
-        }
-    }
-
-    batches
-        .into_values()
-        .map(|rows| JointSolveBatch { rows })
+    plan.islands
+        .into_iter()
+        .filter_map(|island| {
+            let rows = island
+                .joint_rows
+                .into_iter()
+                .map(|row| match row {
+                    crate::pipeline::island::JointSolvePlanRow::Distance {
+                        desc,
+                        body_a_slot,
+                        body_b_slot,
+                    } => JointSolverRow::Distance {
+                        desc,
+                        body_a_slot,
+                        body_b_slot,
+                    },
+                    crate::pipeline::island::JointSolvePlanRow::WorldAnchor { desc, body_slot } => {
+                        JointSolverRow::WorldAnchor { desc, body_slot }
+                    }
+                })
+                .collect::<Vec<_>>();
+            (!rows.is_empty()).then_some(JointSolveBatch {
+                body_slots: island.body_slots,
+                rows,
+            })
+        })
         .collect()
-}
-
-fn joint_island(desc: &JointDesc, body_islands: &BTreeMap<BodyHandle, u32>) -> Option<u32> {
-    match desc {
-        JointDesc::Distance(desc) => match (
-            body_islands.get(&desc.body_a).copied(),
-            body_islands.get(&desc.body_b).copied(),
-        ) {
-            (Some(a), Some(b)) if a == b => Some(a),
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-            _ => None,
-        },
-        JointDesc::WorldAnchor(desc) => body_islands.get(&desc.body).copied(),
-    }
 }
 
 fn normalized_or_x_axis(vector: Vector) -> Vector {

@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::{
     events::SleepTransitionReason,
     handles::BodyHandle,
     math::{point::Point, vector::Vector, FloatNum},
-    pipeline::{contacts::ContactObservation, sleep, StepConfig},
+    pipeline::{contacts::ContactObservation, island, sleep, StepConfig},
     world::World,
 };
 
@@ -25,8 +25,8 @@ struct SolverBody {
 #[derive(Clone, Debug)]
 struct ContactSolverRow {
     contact_index: usize,
-    body_a: BodyHandle,
-    body_b: BodyHandle,
+    body_a_slot: usize,
+    body_b_slot: usize,
     normal: Vector,
     tangent: Vector,
     anchor_a: Vector,
@@ -45,7 +45,8 @@ struct ContactSolverRow {
 }
 
 struct ContactSolveBatch {
-    contact_indices: Vec<usize>,
+    body_slots: Vec<BodyHandle>,
+    rows: Vec<ContactSolverRow>,
 }
 
 pub(crate) fn resolve_contacts(
@@ -62,12 +63,15 @@ pub(crate) fn resolve_contacts(
             .map(|contact| (contact.body_a, contact.body_b)),
         wake_reasons,
     );
-    let body_islands = solver_body_islands(&islands);
-    let active_islands = active_solver_island_ids(&islands);
-    let batches = contact_solve_batches(contacts, &body_islands, &active_islands);
-    let active_contacts = batch_contact_indices(&batches);
-    let mut solver_bodies = solver_body_cache(world, contacts, &active_contacts);
-    let mut batches = contact_solver_row_batches(contacts, &batches, &solver_bodies, config);
+    let plan = island::build_island_solve_plan(
+        &islands,
+        contacts
+            .iter()
+            .enumerate()
+            .filter(|(_, contact)| !contact.is_sensor)
+            .map(|(index, contact)| (index, contact.body_a, contact.body_b)),
+        std::iter::empty(),
+    );
     for contact in contacts.iter_mut() {
         contact.normal_impulse = 0.0;
         contact.tangent_impulse = 0.0;
@@ -77,25 +81,24 @@ pub(crate) fn resolve_contacts(
         contact.restitution_applied = false;
     }
 
-    for batch in &batches {
+    let mut batches = contact_solver_row_batches(world, contacts, plan, config);
+
+    for batch in &mut batches {
+        let mut solver_bodies = solver_body_cache(world, &batch.body_slots);
         for row in &batch.rows {
             let warm_start_impulse =
                 row.normal * row.normal_impulse + row.tangent * row.tangent_impulse;
             apply_solver_impulse(&mut solver_bodies, row, warm_start_impulse);
         }
-    }
 
-    for _ in 0..config.velocity_iterations {
-        for batch in &mut batches {
+        for _ in 0..config.velocity_iterations {
             for row in &mut batch.rows {
                 solve_normal_impulse(&mut solver_bodies, row);
                 solve_tangent_impulse(&mut solver_bodies, row);
             }
         }
-    }
 
-    for batch in batches {
-        for row in batch.rows {
+        for row in &batch.rows {
             let contact = &mut contacts[row.contact_index];
             contact.normal_impulse = row.normal_impulse.max(0.0);
             contact.tangent_impulse = row.tangent_impulse;
@@ -104,10 +107,10 @@ pub(crate) fn resolve_contacts(
             contact.restitution_velocity_threshold = row.restitution_velocity_threshold;
             contact.restitution_applied = row.restitution_applied;
         }
+        record_contact_impulse_wakes_for_rows(world, contacts, &batch.rows, wake_reasons);
+        write_solver_velocities(world, &batch.body_slots, &solver_bodies, wake_reasons);
     }
 
-    record_contact_impulse_wakes(world, contacts, wake_reasons);
-    write_solver_velocities(world, &solver_bodies, wake_reasons);
     apply_residual_contact_position_correction(
         world,
         contacts,
@@ -116,122 +119,71 @@ pub(crate) fn resolve_contacts(
     );
 }
 
-fn active_solver_island_ids(islands: &[sleep::SolverIsland]) -> BTreeSet<u32> {
-    islands
-        .iter()
-        .filter(|island| island.active)
-        .map(|island| island.id)
-        .collect()
-}
-
-fn solver_body_islands(islands: &[sleep::SolverIsland]) -> BTreeMap<BodyHandle, u32> {
-    islands
-        .iter()
-        .flat_map(|island| island.bodies.iter().map(|body| (*body, island.id)))
-        .collect()
-}
-
-fn contact_solve_batches(
-    contacts: &[ContactObservation],
-    body_islands: &BTreeMap<BodyHandle, u32>,
-    active_islands: &BTreeSet<u32>,
-) -> Vec<ContactSolveBatch> {
-    let mut batches = BTreeMap::<u32, Vec<usize>>::new();
-    for (index, contact) in contacts.iter().enumerate() {
-        let island_a = body_islands.get(&contact.body_a).copied();
-        let island_b = body_islands.get(&contact.body_b).copied();
-        let island = match (island_a, island_b) {
-            (Some(a), Some(b)) if a == b => Some(a),
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-            _ => None,
-        };
-        if let Some(island) = island.filter(|island| active_islands.contains(island)) {
-            batches.entry(island).or_default().push(index);
-        }
-    }
-
-    batches
-        .into_values()
-        .map(|contact_indices| ContactSolveBatch { contact_indices })
-        .collect()
-}
-
-fn batch_contact_indices(batches: &[ContactSolveBatch]) -> BTreeSet<usize> {
-    batches
-        .iter()
-        .flat_map(|batch| batch.contact_indices.iter().copied())
-        .collect()
-}
-
-struct ContactSolverBatch {
-    rows: Vec<ContactSolverRow>,
-}
-
 fn contact_solver_row_batches(
+    world: &World,
     contacts: &[ContactObservation],
-    batches: &[ContactSolveBatch],
-    bodies: &BTreeMap<BodyHandle, SolverBody>,
+    plan: island::IslandSolvePlan,
     config: &StepConfig,
-) -> Vec<ContactSolverBatch> {
-    batches
-        .iter()
-        .filter_map(|batch| {
-            let rows = batch
-                .contact_indices
+) -> Vec<ContactSolveBatch> {
+    plan.islands
+        .into_iter()
+        .filter_map(|island| {
+            let bodies = solver_body_cache(world, &island.body_slots);
+            let rows = island
+                .contact_rows
                 .iter()
-                .filter_map(|contact_index| {
-                    contact_solver_row(*contact_index, &contacts[*contact_index], bodies, config)
+                .filter_map(|row| {
+                    contact_solver_row(
+                        row.contact_index,
+                        row.body_a_slot,
+                        row.body_b_slot,
+                        &contacts[row.contact_index],
+                        &bodies,
+                        config,
+                    )
                 })
                 .collect::<Vec<_>>();
-            (!rows.is_empty()).then_some(ContactSolverBatch { rows })
+            (!rows.is_empty()).then_some(ContactSolveBatch {
+                body_slots: island.body_slots,
+                rows,
+            })
         })
         .collect()
 }
 
-fn solver_body_cache(
-    world: &World,
-    contacts: &[ContactObservation],
-    active_contacts: &BTreeSet<usize>,
-) -> BTreeMap<BodyHandle, SolverBody> {
-    let mut bodies = BTreeMap::new();
-    for contact in contacts
+fn solver_body_cache(world: &World, body_slots: &[BodyHandle]) -> Vec<SolverBody> {
+    body_slots
         .iter()
-        .enumerate()
-        .filter(|(index, contact)| active_contacts.contains(index) && !contact.is_sensor)
-        .map(|(_, contact)| contact)
-    {
-        for handle in [contact.body_a, contact.body_b] {
-            bodies.entry(handle).or_insert_with(|| {
-                let record = world
-                    .body_record(handle)
-                    .expect("live contact body handles must resolve");
-                let mass = record.mass_properties;
-                SolverBody {
-                    dynamic: record.body_type.is_dynamic(),
-                    inverse_mass: mass.inverse_mass,
-                    inverse_inertia: mass.inverse_inertia,
-                    center: record.pose.transform_point(mass.local_center_of_mass),
-                    linear_velocity: record.linear_velocity,
-                    angular_velocity: record.angular_velocity,
-                }
-            });
-        }
-    }
-    bodies
+        .map(|handle| {
+            let record = world
+                .body_record(*handle)
+                .expect("live contact body handles must resolve");
+            let mass = record.mass_properties;
+            SolverBody {
+                dynamic: record.body_type.is_dynamic(),
+                inverse_mass: mass.inverse_mass,
+                inverse_inertia: mass.inverse_inertia,
+                center: record.pose.transform_point(mass.local_center_of_mass),
+                linear_velocity: record.linear_velocity,
+                angular_velocity: record.angular_velocity,
+            }
+        })
+        .collect()
 }
 
 fn contact_solver_row(
     contact_index: usize,
+    body_a_slot: usize,
+    body_b_slot: usize,
     contact: &ContactObservation,
-    bodies: &BTreeMap<BodyHandle, SolverBody>,
+    bodies: &[SolverBody],
     config: &StepConfig,
 ) -> Option<ContactSolverRow> {
     if contact.is_sensor {
         return None;
     }
-    let body_a = *bodies.get(&contact.body_a)?;
-    let body_b = *bodies.get(&contact.body_b)?;
+    let body_a = *bodies.get(body_a_slot)?;
+    let body_b = *bodies.get(body_b_slot)?;
     let normal = contact.normal.normalized_or_zero();
     let tangent = normal.perp().normalized_or_zero();
     if normal.length() <= FloatNum::EPSILON || tangent.length() <= FloatNum::EPSILON {
@@ -271,8 +223,8 @@ fn contact_solver_row(
 
     Some(ContactSolverRow {
         contact_index,
-        body_a: contact.body_a,
-        body_b: contact.body_b,
+        body_a_slot,
+        body_b_slot,
         normal,
         tangent,
         anchor_a,
@@ -294,10 +246,11 @@ fn contact_solver_row(
 
 fn write_solver_velocities(
     world: &mut World,
-    bodies: &BTreeMap<BodyHandle, SolverBody>,
+    body_slots: &[BodyHandle],
+    bodies: &[SolverBody],
     wake_reasons: &BTreeMap<BodyHandle, SleepTransitionReason>,
 ) {
-    for (handle, body) in bodies {
+    for (handle, body) in body_slots.iter().zip(bodies.iter()) {
         if !body.dynamic {
             continue;
         };
@@ -312,13 +265,15 @@ fn write_solver_velocities(
     }
 }
 
-fn record_contact_impulse_wakes(
+fn record_contact_impulse_wakes_for_rows(
     world: &World,
     contacts: &[ContactObservation],
+    rows: &[ContactSolverRow],
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
 ) {
-    for contact in contacts
+    for contact in rows
         .iter()
+        .map(|row| &contacts[row.contact_index])
         .filter(|contact| !contact.is_sensor && contact.normal_impulse > FloatNum::EPSILON)
     {
         record_contact_wake_if_sleeping(world, contact.body_a, contact.body_b, wake_reasons);
@@ -417,7 +372,7 @@ fn apply_position_translation(
     }
 }
 
-fn solve_normal_impulse(bodies: &mut BTreeMap<BodyHandle, SolverBody>, row: &mut ContactSolverRow) {
+fn solve_normal_impulse(bodies: &mut [SolverBody], row: &mut ContactSolverRow) {
     if row.normal_mass <= 0.0 {
         return;
     }
@@ -437,10 +392,7 @@ fn solve_normal_impulse(bodies: &mut BTreeMap<BodyHandle, SolverBody>, row: &mut
     apply_solver_impulse(bodies, row, row.normal * delta);
 }
 
-fn solve_tangent_impulse(
-    bodies: &mut BTreeMap<BodyHandle, SolverBody>,
-    row: &mut ContactSolverRow,
-) {
+fn solve_tangent_impulse(bodies: &mut [SolverBody], row: &mut ContactSolverRow) {
     if row.tangent_mass <= 0.0 {
         return;
     }
@@ -460,29 +412,17 @@ fn solve_tangent_impulse(
     apply_solver_impulse(bodies, row, row.tangent * delta);
 }
 
-fn solver_pair(
-    bodies: &BTreeMap<BodyHandle, SolverBody>,
-    row: &ContactSolverRow,
-) -> Option<(SolverBody, SolverBody)> {
-    Some((*bodies.get(&row.body_a)?, *bodies.get(&row.body_b)?))
+fn solver_pair(bodies: &[SolverBody], row: &ContactSolverRow) -> Option<(SolverBody, SolverBody)> {
+    Some((*bodies.get(row.body_a_slot)?, *bodies.get(row.body_b_slot)?))
 }
 
-fn apply_solver_impulse(
-    bodies: &mut BTreeMap<BodyHandle, SolverBody>,
-    row: &ContactSolverRow,
-    impulse: Vector,
-) {
-    apply_impulse_to_body(bodies, row.body_a, row.anchor_a, impulse);
-    apply_impulse_to_body(bodies, row.body_b, row.anchor_b, -impulse);
+fn apply_solver_impulse(bodies: &mut [SolverBody], row: &ContactSolverRow, impulse: Vector) {
+    apply_impulse_to_body(bodies, row.body_a_slot, row.anchor_a, impulse);
+    apply_impulse_to_body(bodies, row.body_b_slot, row.anchor_b, -impulse);
 }
 
-fn apply_impulse_to_body(
-    bodies: &mut BTreeMap<BodyHandle, SolverBody>,
-    handle: BodyHandle,
-    anchor: Vector,
-    impulse: Vector,
-) {
-    let Some(body) = bodies.get_mut(&handle) else {
+fn apply_impulse_to_body(bodies: &mut [SolverBody], slot: usize, anchor: Vector, impulse: Vector) {
+    let Some(body) = bodies.get_mut(slot) else {
         return;
     };
     if !body.dynamic {

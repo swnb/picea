@@ -1,6 +1,6 @@
 ---
 name: picea-milestone-runner
-description: Execute, review, or supervise one Picea physics-engine milestone under the repository milestone gates. Use when the user asks to implement, continue, validate, review, or strictly stop at a named Picea milestone, or when work must follow the docs/plans/2026-04-18-picea-physics-engine-milestones.md boundary, test-first behavior locks, and supervisor acceptance flow.
+description: Execute, review, or supervise one Picea physics-engine milestone under the repository milestone gates. Use when the user asks to implement, continue, validate, review, or strictly stop at a named Picea milestone, or when work must follow the docs/plans/2026-04-25-picea-physics-engine-production-milestones.md boundary, test-first behavior locks, and supervisor acceptance flow.
 ---
 
 # Picea Milestone Runner
@@ -12,10 +12,13 @@ Run exactly one Picea milestone without drifting into adjacent physics-engine wo
 ## Read Order
 
 1. `AGENTS.md`
-2. `docs/plans/2026-04-18-picea-physics-engine-milestones.md`
+2. `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`
 3. `docs/ai/repo-map.md`
 4. `docs/ai/debug-playbook.md` when the task is a bug or regression
 5. The smallest code module needed for the named milestone
+
+`docs/plans/2026-04-18-picea-physics-engine-milestones.md` is archive/history
+only; do not use its old milestone labels as current routing authority.
 
 ## Workflow
 

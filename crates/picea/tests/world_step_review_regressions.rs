@@ -807,3 +807,128 @@ fn world_anchor_joints_affect_body_motion_during_step() {
         "world-anchor joint should move the body toward the anchor"
     );
 }
+
+#[test]
+fn dynamic_static_distance_joints_solve_through_dense_island_slots() {
+    let mut world = World::new(WorldDesc {
+        gravity: (0.0, 0.0).into(),
+        enable_sleep: false,
+    });
+    let static_right = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(4.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("right static endpoint should be created");
+    let dynamic_to_right = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("dynamic endpoint should be created");
+    let static_left = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(-4.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("left static endpoint should be created");
+    let dynamic_to_left = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("dynamic endpoint should be created");
+
+    world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: dynamic_to_right,
+            body_b: static_right,
+            rest_length: 1.0,
+            stiffness: 1.0,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("dynamic-static distance joint should be created");
+    world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: static_left,
+            body_b: dynamic_to_left,
+            rest_length: 1.0,
+            stiffness: 1.0,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("static-dynamic distance joint should be created");
+
+    let right_before = world
+        .try_body(dynamic_to_right)
+        .expect("dynamic endpoint must resolve")
+        .pose()
+        .translation()
+        .x();
+    let left_before = world
+        .try_body(dynamic_to_left)
+        .expect("dynamic endpoint must resolve")
+        .pose()
+        .translation()
+        .x();
+    let static_right_before = world
+        .try_body(static_right)
+        .expect("static endpoint must resolve")
+        .pose()
+        .translation()
+        .x();
+    let static_left_before = world
+        .try_body(static_left)
+        .expect("static endpoint must resolve")
+        .pose()
+        .translation()
+        .x();
+
+    let mut pipeline = SimulationPipeline::new(StepConfig::default());
+    let report = pipeline.step(&mut world);
+
+    let right_after = world
+        .try_body(dynamic_to_right)
+        .expect("dynamic endpoint must resolve")
+        .pose()
+        .translation()
+        .x();
+    let left_after = world
+        .try_body(dynamic_to_left)
+        .expect("dynamic endpoint must resolve")
+        .pose()
+        .translation()
+        .x();
+    assert_eq!(report.stats.joint_count, 2);
+    assert!(
+        right_after > right_before,
+        "dynamic body_a should move toward its static distance-joint endpoint"
+    );
+    assert!(
+        left_after < left_before,
+        "dynamic body_b should move toward its static distance-joint endpoint"
+    );
+    assert_eq!(
+        world
+            .try_body(static_right)
+            .expect("static endpoint must resolve")
+            .pose()
+            .translation()
+            .x(),
+        static_right_before,
+        "static endpoint must remain fixed while the dense island row solves"
+    );
+    assert_eq!(
+        world
+            .try_body(static_left)
+            .expect("static endpoint must resolve")
+            .pose()
+            .translation()
+            .x(),
+        static_left_before,
+        "static endpoint must remain fixed while the dense island row solves"
+    );
+}

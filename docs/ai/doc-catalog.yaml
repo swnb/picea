@@ -113,8 +113,8 @@
   status: active
   owner: architecture
   applies_to: [engine, physics-upgrade, broadphase, narrowphase, solver, sleep, ccd, api, performance]
-  keywords: [post-m10, dynamic-aabb-tree, sat, gjk, vclip, manifold, sequential-impulse, active-island-solver, ccd-generalization, performance-substrate, shape-cache, query-reuse, ergonomics]
-  last_reviewed: 2026-04-27
+  keywords: [post-m10, post-m14, post-m15, dynamic-aabb-tree, sat, gjk, vclip, manifold, sequential-impulse, active-island-solver, dense-island-execution, ccd-generalization, performance-substrate, performance-data-path, shape-cache, query-reuse, ergonomics]
+  last_reviewed: 2026-04-28
 - path: docs/design/debug-observability-design.md
   title: Debug Observability Design
   kind: design
@@ -168,7 +168,7 @@
   owner: ai-context
   applies_to: [milestone, implementation, validation, review]
   keywords: [skill, milestone, behavior-lock, gates, supervisor]
-  last_reviewed: 2026-04-20
+  last_reviewed: 2026-04-28
 - path: docs/ai/debug-playbook.md
   title: Picea Debug Playbook
   kind: runbook
@@ -212,17 +212,17 @@
   status: active
   owner: supervisor
   applies_to: [milestone, scope, acceptance, productionization, physics-upgrade]
-  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks, m10-5, m11, m12, m13, m14, m15, post-m14, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, ccd-generalization, ergonomic-api-v2]
-  last_reviewed: 2026-04-27
+  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks, m10-5, m11, m12, m13, m14, m15, m16, post-m14, post-m15, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, ccd-generalization, ergonomic-api-v2]
+  last_reviewed: 2026-04-28
 - path: todo.md
   title: Picea Physics Engine Backlog Archive
   kind: backlog
   authority: medium
   status: active
   owner: supervisor
-  applies_to: [backlog, archive, post-m10, post-m14, future-work]
-  keywords: [m10-5, m11, m12, m13, m14, m15, completed-baseline, post-m14, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, ccd-generalization, ergonomic-api-v2]
-  last_reviewed: 2026-04-27
+  applies_to: [backlog, archive, post-m10, post-m14, post-m15, future-work]
+  keywords: [m10-5, m11, m12, m13, m14, m15, m16, completed-baseline, post-m14, post-m15, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, ccd-generalization, ergonomic-api-v2]
+  last_reviewed: 2026-04-28
 - path: crates/picea/src/lib.rs
   title: Picea core entrypoint
   kind: code
@@ -250,6 +250,15 @@
   applies_to: [core, pipeline, step-context, stats, events]
   keywords: [stepcontext, transient-facts, stepstats, wake-reasons, numeric-warnings, ccd-pose-clamp]
   last_reviewed: 2026-04-27
+- path: crates/picea/src/pipeline/island.rs
+  title: Internal Island Solve Plan
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [core, pipeline, solver, dense-island-execution, active-island-solver]
+  keywords: [island-solve-plan, body-slots, contact-row-indices, joint-rows, solver-data-layout, m16]
+  last_reviewed: 2026-04-28
 - path: crates/picea/src/solver/contact.rs
   title: Internal Contact Solver
   kind: code
@@ -258,7 +267,7 @@
   owner: picea-core
   applies_to: [core, solver, contacts, sequential-impulse]
   keywords: [contact-solver, solver-row, effective-mass, warm-start, residual-correction, wake-reasons]
-  last_reviewed: 2026-04-27
+  last_reviewed: 2026-04-28
 - path: crates/picea/benches/physics_scenarios.rs
   title: Picea Criterion Physics Scenario Baselines
   kind: code

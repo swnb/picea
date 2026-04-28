@@ -1111,18 +1111,192 @@ rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); p
 rtk proxy git diff --check
 ```
 
-## Post-M14 Follow-Up / Remaining Risks
+## M16 Dense Island Execution
+
+> Status: completed 2026-04-28.
+>
+> Completion notes: `pipeline::island::IslandSolvePlan` now turns accepted M12
+> active-island facts into deterministic island-local body slots, contact row
+> indices, and joint rows. Contact solver velocity rows use dense slot indices
+> during impulse iteration, joint batching uses the same solve-plan surface, and
+> contact-impact wake recording now happens before sleeping-body velocity
+> writeback so M12/M16 wake semantics stay stable. Public handles, contact
+> events, `StepStats`, `DebugSnapshot`, lab artifact semantics, and the live
+> separate contact/joint phase order are unchanged.
+
+### Goal
+
+Replace the current map/set-heavy active-island solver staging with a
+deterministic per-island solve plan. Each active island should own compact body
+slots, contact row indices, joint rows, and the temporary handle-to-slot lookup
+needed by the solver. The public world model still uses stable handles; dense
+slots are an internal hot-path representation.
+
+### Design Goals
+
+- Build a deterministic `IslandSolvePlan` from the existing `SolverIsland`
+  facts, contact observations, and joint records.
+- Use island-local body slots for contact solver velocity reads/writes instead
+  of repeatedly looking up `BodyHandle` in map-heavy hot paths.
+- Batch joint rows through the same island plan while preserving the current
+  separate-phase behavior and live step order.
+- Keep sleeping islands out of row construction and keep wake reasons explicit.
+- Preserve warm-start impulse transfer, contact ids, manifold ids, `StepStats`,
+  `DebugSnapshot`, and `picea-lab` artifact semantics.
+- Add allocation/counter evidence only where it is cheap and directly tied to
+  the new solver layout; do not set brittle timing thresholds yet.
+
+### In Scope
+
+- Internal island solve-plan data structures and deterministic ordering tests.
+- Contact solver body slots, contact row batches, and velocity writeback through
+  island-local slot indices.
+- Joint row batching through the same island plan, without changing joint
+  behavior or phase order.
+- Tests proving sleeping islands do not build hot rows and unrelated islands do
+  not affect each other.
+- Focused stack, sleep, warm-start, and joint regression coverage.
+
+### Out Of Scope
+
+- Multithreaded island solving.
+- A unified contact/joint solver phase or new joint types.
+- Dynamic-vs-dynamic CCD, rotational CCD, or all-shape CCD expansion.
+- Public API changes, public scene schema stabilization, or live lab editing.
+- Absolute performance pass/fail thresholds before baseline variance is clear.
+
+### Acceptance Method
+
+- Start with behavior locks for current stack, friction, warm-start, sleep, and
+  jointed-island behavior.
+- Add layout-specific tests proving the solve plan has deterministic island
+  order, stable body slot assignment, and no row construction for sleeping
+  islands.
+- Keep existing `StepStats`, `DebugSnapshot`, contact events, and lab artifacts
+  semantically stable unless explicitly adding new counters.
+- Build Criterion benches without making timing variance a pass/fail gate.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --test physics_realism_acceptance stack
+rtk proxy cargo test -p picea --test physics_realism_acceptance sleep
+rtk proxy cargo test -p picea --test world_step_review_regressions
+rtk proxy cargo test -p picea --lib pipeline::island
+rtk proxy cargo test -p picea --lib pipeline::sleep
+rtk proxy cargo bench -p picea --no-run
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
+## M17 Performance Evidence And Tuning Gate
+
+> Status: planned / next after M16.
+>
+> M17 is the measurement gate after the accepted performance data-layout work.
+> M15 made query and geometry reuse real, and M16 made island solver rows dense.
+> M17 should turn those structural improvements into explicit evidence before
+> the roadmap spends more complexity budget on CCD expansion, broadphase tuning,
+> or public scene-schema work.
+
+### Background
+
+Picea's current advantage is not just "has the same checklist as Box2D/Rapier".
+The intended advantage is an engine that is easier to author, easier to inspect,
+and fast for the right reasons. M11-M16 have moved the internals toward that:
+direct broadphase lookup, indexed query candidates, transform/revision-backed
+geometry caches, and dense island-local solver data. What is still missing is a
+stable evidence layer that shows where time and work go.
+
+Without that evidence, future sessions can make plausible but unproven
+performance claims, or choose the wrong next optimization. M17 should make the
+next choices measurable: broadphase/query tuning, CCD expansion, solver layout
+deepening, and lab/schema work should all be prioritized from counters and
+baseline variance rather than intuition.
+
+### Goal
+
+Create a performance evidence gate for Picea's post-M16 engine. The milestone
+should add deterministic counters, artifact summaries, and Criterion baseline
+coverage that explain the cost shape of query, broadphase, solver-island, and
+contact/CCD-heavy scenarios. It should not turn timing into brittle CI pass/fail
+thresholds yet.
+
+### Design Goals
+
+- Expose cheap, deterministic counters for query traversal, candidate pruning,
+  contact/joint row construction, active/sleeping island work, and solver body
+  slots where those facts already exist or are cheap to collect.
+- Keep `picea-lab` as an evidence/artifact layer, not a timing oracle.
+- Preserve `StepStats`, `DebugSnapshot`, and artifact compatibility; if new
+  fields are serialized, older fixtures should still deserialize through
+  defaulted fields.
+- Extend Criterion coverage around representative scenarios: sparse/dense
+  broadphase, query-heavy scenes, many small islands, one large island, stacked
+  contacts, CCD bullets, and large recipe creation.
+- Record baseline variance and expected counter shapes before setting hard
+  performance thresholds.
+- Use the evidence to decide the next optimization milestone instead of bundling
+  broadphase tuning, CCD expansion, and scene schema work together.
+
+### In Scope
+
+- Query/broadphase counters such as candidate count, tree traversal count,
+  pruned candidate count, filtered hit count, and hit ordering stability.
+- Solver/island counters such as island count, active island count, sleeping
+  island skip count, body slot count, contact row count, and joint row count.
+- `picea-lab` artifact/perf summaries that surface the new counters for saved
+  runs without treating wall-clock timing as authoritative.
+- Criterion benchmark coverage for the accepted post-M16 hot paths.
+- Documentation of baseline variance, counter interpretation, and which future
+  milestone the evidence points toward.
+
+### Out Of Scope
+
+- Hard absolute timing thresholds in CI.
+- Broadphase insertion/balancing rewrites; those belong to a later tuning
+  milestone once M17 evidence says they are worth doing.
+- Dynamic-vs-dynamic CCD, rotational CCD, or broader all-shape CCD.
+- Public scene schema stabilization or live `picea-lab` editing.
+- Public API changes beyond additive debug/stat fields.
+
+### Acceptance Method
+
+- Add deterministic tests for any new counters so small scenes prove the exact
+  query, island, row, and skipped-work facts being reported.
+- If serialized stats/artifacts change, add backward-compatible serde tests for
+  older payloads and schema checks for new payloads.
+- Build and, where practical, run focused Criterion scenarios to capture local
+  baseline variance; do not fail the milestone on absolute timings.
+- Update `picea-lab` artifact tests if new perf/debug summaries are emitted.
+- Update routing docs if new counter fields, benchmark names, or artifact files
+  become the preferred entry points for future optimization work.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --test query_debug_contract
+rtk proxy cargo test -p picea --test world_step_review_regressions
+rtk proxy cargo test -p picea --test physics_realism_acceptance stack
+rtk proxy cargo test -p picea --lib pipeline::island
+rtk proxy cargo test -p picea-lab --test artifact_run
+rtk proxy cargo bench -p picea --no-run
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
+## Post-M16 Follow-Up / Remaining Risks
 
 These items are real follow-up work, but they are no longer blockers for
-marking M11-M14 completed in the current milestone line.
+marking M11-M16 completed in the current milestone line.
 
-- Post-M15 performance follow-up: add stronger query allocation/perf counters
-  before broad solver-data rewrites, deepen solver allocation work separately,
-  and keep Criterion evidence grounded in baseline variance.
-- M12 follow-up: move from the current accepted active-island batching to denser
-  island-local execution, keep exploring whether contact and joint solving
-  should share a stronger island-owned ordering contract, and add ramp-specific
-  friction regression coverage.
+- M17 focus: add stronger query/broadphase/solver-island performance counters,
+  artifact summaries, and Criterion baseline variance before choosing the next
+  optimization milestone.
+- Post-M16 solver follow-up: only later explore whether contact and joint
+  solving should share a stronger island-owned ordering contract or expose
+  denser debug/lab facts beyond the current accepted slice.
+- Realism follow-up: add ramp-specific friction regression coverage.
 - M13 follow-up: extend CCD beyond the accepted dynamic-vs-static translational
   convex slice into dynamic-vs-dynamic, rotational casts, and broader all-shape
   coverage only when behavior locks and benchmarks justify the cost.
@@ -1165,6 +1339,12 @@ milestone:
 - M15: surface available query/cache/recomputation facts and benchmark variance
   evidence for the performance data path; stronger allocation counters remain
   Post-M15.
+- M16: show island-local body slots, contact row indices, joint rows, and skipped
+  sleeping-island row construction when those facts are added to debug/lab
+  artifacts.
+- M17: show performance evidence summaries for query, broadphase, island, solver
+  row, CCD-heavy, and recipe-heavy scenarios while keeping wall-clock benchmark
+  timing outside lab pass/fail semantics.
 
 The lab should not run physics independently from `crates/picea`, and it should
 not be the only pass/fail signal for physics correctness.

@@ -9,6 +9,7 @@ pub(crate) mod ccd;
 pub(crate) mod contacts;
 pub(crate) mod gjk;
 pub(crate) mod integrate;
+pub(crate) mod island;
 pub(crate) mod joints;
 pub(crate) mod narrowphase;
 pub(crate) mod sleep;

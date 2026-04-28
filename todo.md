@@ -3,7 +3,7 @@
 > 当前文件是升级 backlog/archive。实际执行顺序、范围和验收门以
 > `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md` 为准。
 > M1-M10 的第一生产能力线已经落地；后续重点从“补齐基础算法”转向
-> Post-M14 的系统质量深化：性能承载层、dense island-local execution、
+> Post-M15 的系统质量深化：dense island-local execution、
 > 更广的 CCD 覆盖，以及 scene schema / authoring 稳定化。
 
 ## 已完成生产基线
@@ -146,25 +146,39 @@ all-shape CCD 覆盖转入 Post-M14。
 注：M14 当前 milestone scope 已完成；live lab editing 与公共 scene schema
 稳定化转入 Post-M14。
 
-## Post-M14 / 保留风险 / 下一阶段
+## Post-M15 / 保留风险 / 下一阶段
 
 ### M15 Performance Data Path
 
-- [ ] 复用 broadphase-style spatial index 做 ray cast、AABB query、region query
+- [x] 复用 broadphase-style spatial index 做 ray cast、AABB query、region query
   的候选遍历，但不向 public API 泄漏 proxy / leaf id。
-- [ ] 缓存 world-space vertices / AABB / support data，并用 transform revision
+- [x] 缓存 world-space vertices / AABB / support data，并用 transform revision
   做失效与 stale-cache 行为锁。
-- [ ] 减少 contact gathering、sleep island、solver setup 的 per-step allocation，
-  只推进能被测试、counter 或 benchmark baseline 解释的改动。
-- [ ] 为 query ordering、filter semantics、recycled handle、tree rebuild、body
+- [x] 减少 contact gathering、CCD、GJK/support-map 路径的重复几何重建，并做
+  当前代码能解释的 conservative pre-sizing。
+- [x] 为 query ordering、filter semantics、recycled handle、tree rebuild、body
   transform patch 补行为锁。
-- [ ] 保持 Criterion baseline，以 counter 和 variance 解释性能变化；暂不设置
+- [x] 保持 Criterion baseline，以 counter 和 variance 解释性能变化；暂不设置
   absolute perf threshold。
 
-### Later Post-M15
+注：M15 当前 milestone scope 已完成；query allocation/perf counters 与更深
+solver allocation work 转入 Post-M15。
+
+### M16 Dense Island Execution
+
+- [x] 设计 `IslandSolvePlan`，把 active island 的 body slots、contact row
+  indices、joint rows 收敛到 deterministic island-local data。
+- [x] 将 contact solver 的 hot path 从 `BTreeMap<BodyHandle, SolverBody>` /
+  `BTreeSet<usize>` 查找迁移到 island-local slot index。
+- [x] 让 joint rows 复用同一个 island plan，同时保留当前 separate phase /
+  live step order。
+- [x] 证明 sleeping islands 不构建 hot rows，unrelated islands 不相互影响。
+- [x] 保持 warm-start、wake reason、contact/debug facts 和 lab artifact 语义稳定。
+
+### Later Post-M16
 
 - [ ] 改进 dynamic AABB tree 插入、平衡和 rebuild 策略。
-- [ ] 将当前 map/set-heavy batching 收敛为真正 dense per-island arrays。
+- [ ] 增加 query allocation/perf counters，并用 Criterion baseline variance 解释。
 - [ ] 增加 ramp-specific friction 回归测试。
 - [ ] 仅在 benchmark 和行为锁支持后再考虑 dynamic-vs-dynamic CCD。
 - [ ] 扩展 rotational CCD 和更广的 all-shape CCD 覆盖。

@@ -17,35 +17,40 @@ The bias is ease of use first, with performance designed into the internal layou
 
 The current production line has moved Picea past the "missing core algorithms"
 stage. Current `World` + `SimulationPipeline` already has persistent broadphase
-proxies, SAT + clipping manifolds, mass/inertia facts, warm-started sequential
-impulses, island sleep/wake reasons, GJK/EPA fallback, active-island batching
-for contact/joint rows, a dynamic-vs-static convex CCD pose-clamping phase with
-multi-hit ordering/budget traces, scene/asset recipe helpers, nested recipe
-error paths, serializable lab fixture flows, debug facts, lab artifacts, and
-Criterion baseline benches.
+proxies with direct leaf lookup, SAT + clipping manifolds, mass/inertia facts,
+warm-started sequential impulses, island sleep/wake reasons, GJK/EPA fallback,
+active-island batching for contact/joint rows, a dynamic-vs-static convex CCD
+pose-clamping phase with multi-hit ordering/budget traces, scene/asset recipe
+helpers, nested recipe error paths, serializable lab fixture flows, an internal
+query spatial index, transform/revision-backed collider geometry caches, debug
+facts, lab artifacts, and Criterion baseline benches.
 
 The remaining gap to top production 2D engines is now system quality:
 
-- broadphase now has direct collider-handle to leaf lookup, but still needs tree
-  query reuse, stronger insertion/balancing heuristics, and fewer per-step
-  temporary collections;
-- queries are stable and easy to use, but still rebuild from debug snapshots and
-  scan cached colliders rather than reusing an indexed spatial structure;
+- broadphase now has direct collider-handle to leaf lookup and the M15 query
+  path has an internal broadphase-style index, but the persistent tree still
+  needs stronger insertion/balancing heuristics and better query/perf counters;
+- queries are stable, ordered, and use indexed candidate traversal internally,
+  but allocation/counter evidence is still shallow and public distance-query
+  stabilization remains outside the landed slice;
 - the contact solver now batches active-island contact and joint rows and keeps
   sleeping islands out of hot solver arrays, but contact and joint phases are
-  still separate and multithreaded solving remains out of scope;
+  still map/set-heavy internally; denser island-local execution is the next
+  solver data-layout milestone, while multithreaded solving remains out of
+  scope;
 - CCD now covers the first staged dynamic-vs-static convex slice for
   rectangles, regular polygons, and convex polygons with multi-hit ordering and
   budget traces, but not rotational casts, dynamic-vs-dynamic motion, or
   all-shape coverage;
-- shape geometry and support data are still recomputed in several hot paths
-  instead of being cached behind transform revision;
+- shape AABBs and convex world vertices are now cached behind transform/revision
+  keys and reused by query/contact/CCD/GJK paths, but broader support-map
+  counters and allocation evidence remain follow-up;
 - public authoring now has scene/asset recipe helpers, nested path context, and
   serializable lab fixture flows, but live lab editing and full public schema
   stabilization remain outside the landed slice.
 
 This means the next upgrade line should optimize and deepen the system around
-the accepted M11-M14 capabilities, not treat those milestones as still open.
+the accepted M11-M16 capabilities, not treat those milestones as still open.
 
 ## Broadphase Decision
 
@@ -65,8 +70,9 @@ Tradeoff:
 - The persistent tree now uses fat AABBs, incremental moves, stale cleanup,
   deterministic rebuild/compaction, step/debug metrics, and benchmark
   scenarios. The first performance-substrate slice added direct
-  handle-to-leaf lookup; the next broadphase work is query reuse and better
-  balancing/insertion heuristics.
+  handle-to-leaf lookup, and M15 added internal query-index reuse. The next
+  broadphase work is better balancing/insertion heuristics and stronger
+  query/perf counters.
 
 Sources:
 
@@ -229,10 +235,14 @@ flow rather than micro-optimizing isolated helpers:
    world vertices are cached behind transform/revision keys, and contact/CCD/GJK
    paths now reduce repeated geometry rebuilding with conservative pre-sizing
    where behavior locks make it visible.
+7. M16 dense island execution (completed 2026-04-28): replace the current map/set-heavy
+   active-island solver staging with deterministic per-island dense body slots,
+   contact row indices, and joint rows while preserving current separate-phase
+   behavior, live step order, and public handles.
 
-## Post-M14 Deepening
+## Post-M14 / Post-M15 Deepening
 
-The next line is no longer "finish M11-M14". M15 Performance Data Path has now
+The next line is no longer "finish M11-M16". M15 Performance Data Path has
 landed as the first concrete follow-up:
 
 - `QueryPipeline` now reuses an internal spatial index for semantic-match query
@@ -244,9 +254,18 @@ landed as the first concrete follow-up:
   Post-M15 and should move only with counter evidence;
 - keep Criterion as baseline evidence until variance is understood.
 
-After M15, the remaining Post-M14 deepening line is:
+M16 Dense Island Execution is now the accepted dense solver-layout slice:
 
-- move active-island batching toward denser island-local execution;
+- active-island batching now has deterministic island-local body slots,
+  contact row indices, and joint rows;
+- preserve the current separate-phase behavior and live step order until a
+  unified island-owned ordering contract is proven safe;
+- keep public handles stable while hot solver state uses island-local slot
+  indices;
+- carry warm-start, wake reason, and debug facts through the layout change.
+
+After M16, the remaining Post-M15 deepening line is:
+
 - extend CCD toward dynamic-vs-dynamic, rotational, and broader all-shape
   coverage only when behavior locks and benchmarks justify it;
 - add focused ramp-friction coverage and other realism regressions where the

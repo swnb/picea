@@ -1623,6 +1623,11 @@ fn sleeping_body_wakes_on_contact_solver_impact() {
         .iter()
         .all(|event| event.reason == picea::events::SleepTransitionReason::Impact));
     assert_eq!(wake_events[0].island_id, wake_events[1].island_id);
+    let target_velocity = body_velocity(&world, target);
+    assert!(
+        target_velocity.length() > 1.0e-4,
+        "impact wake should write solved contact velocity back to the sleeping target; got {target_velocity:?}"
+    );
 }
 
 #[test]
