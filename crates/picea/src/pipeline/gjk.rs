@@ -58,14 +58,34 @@ struct SupportPoint {
     point_b: Point,
 }
 
+#[allow(dead_code)]
 pub(crate) fn gjk_distance(
     shape_a: &SharedShape,
     pose_a: Pose,
     shape_b: &SharedShape,
     pose_b: Pose,
 ) -> GjkResult {
+    gjk_distance_with_cached_vertices(shape_a, pose_a, None, shape_b, pose_b, None)
+}
+
+fn gjk_distance_with_cached_vertices(
+    shape_a: &SharedShape,
+    pose_a: Pose,
+    cached_vertices_a: Option<&[Point]>,
+    shape_b: &SharedShape,
+    pose_b: Pose,
+    cached_vertices_b: Option<&[Point]>,
+) -> GjkResult {
     let mut direction = initial_direction(pose_a, pose_b);
-    let Some(first) = support(shape_a, pose_a, shape_b, pose_b, direction) else {
+    let Some(first) = support(
+        shape_a,
+        pose_a,
+        cached_vertices_a,
+        shape_b,
+        pose_b,
+        cached_vertices_b,
+        direction,
+    ) else {
         return gjk_failure(GjkTerminationReason::InvalidSupport, 0, Vec::new());
     };
     let mut simplex = vec![first];
@@ -75,7 +95,15 @@ pub(crate) fn gjk_distance(
     }
 
     for iteration in 1..=GJK_MAX_ITERATIONS {
-        let Some(next) = support(shape_a, pose_a, shape_b, pose_b, direction) else {
+        let Some(next) = support(
+            shape_a,
+            pose_a,
+            cached_vertices_a,
+            shape_b,
+            pose_b,
+            cached_vertices_b,
+            direction,
+        ) else {
             return gjk_failure(GjkTerminationReason::InvalidSupport, iteration, simplex);
         };
         let progress = next.v.dot(direction);
@@ -128,13 +156,32 @@ pub(crate) fn gjk_distance(
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn epa_penetration(
     shape_a: &SharedShape,
     pose_a: Pose,
     shape_b: &SharedShape,
     pose_b: Pose,
 ) -> Result<EpaPenetration, EpaFailure> {
-    let gjk = gjk_distance(shape_a, pose_a, shape_b, pose_b);
+    epa_penetration_with_cached_vertices(shape_a, pose_a, None, shape_b, pose_b, None)
+}
+
+fn epa_penetration_with_cached_vertices(
+    shape_a: &SharedShape,
+    pose_a: Pose,
+    cached_vertices_a: Option<&[Point]>,
+    shape_b: &SharedShape,
+    pose_b: Pose,
+    cached_vertices_b: Option<&[Point]>,
+) -> Result<EpaPenetration, EpaFailure> {
+    let gjk = gjk_distance_with_cached_vertices(
+        shape_a,
+        pose_a,
+        cached_vertices_a,
+        shape_b,
+        pose_b,
+        cached_vertices_b,
+    );
     if !gjk.intersects {
         return Err(EpaFailure {
             termination: EpaTerminationReason::GjkDidNotIntersect,
@@ -166,7 +213,15 @@ pub(crate) fn epa_penetration(
                 &gjk,
             ));
         };
-        let Some(candidate) = support(shape_a, pose_a, shape_b, pose_b, edge.normal) else {
+        let Some(candidate) = support(
+            shape_a,
+            pose_a,
+            cached_vertices_a,
+            shape_b,
+            pose_b,
+            cached_vertices_b,
+            edge.normal,
+        ) else {
             return Err(epa_failure(
                 EpaTerminationReason::InvalidSupport,
                 iteration,
@@ -196,10 +251,10 @@ pub(crate) fn epa_penetration(
             }
             let depth = edge.distance.max(0.0);
             let point_a = shape_a
-                .support_point(pose_a, -normal)
+                .support_point_with_cached_vertices(pose_a, -normal, cached_vertices_a)
                 .unwrap_or(edge.a.point_a);
             let point_b = shape_b
-                .support_point(pose_b, normal)
+                .support_point_with_cached_vertices(pose_b, normal, cached_vertices_b)
                 .unwrap_or(edge.a.point_b);
             let contact_point = Point::from((Vector::from(point_a) + Vector::from(point_b)) * 0.5);
             return Ok(EpaPenetration {
@@ -231,13 +286,32 @@ pub(crate) fn epa_penetration(
     ))
 }
 
+#[allow(dead_code)]
 pub(crate) fn generic_convex_contact(
     shape_a: &SharedShape,
     pose_a: Pose,
     shape_b: &SharedShape,
     pose_b: Pose,
 ) -> Option<GenericConvexContact> {
-    match epa_penetration(shape_a, pose_a, shape_b, pose_b) {
+    generic_convex_contact_with_cached_vertices(shape_a, pose_a, None, shape_b, pose_b, None)
+}
+
+pub(crate) fn generic_convex_contact_with_cached_vertices(
+    shape_a: &SharedShape,
+    pose_a: Pose,
+    cached_vertices_a: Option<&[Point]>,
+    shape_b: &SharedShape,
+    pose_b: Pose,
+    cached_vertices_b: Option<&[Point]>,
+) -> Option<GenericConvexContact> {
+    match epa_penetration_with_cached_vertices(
+        shape_a,
+        pose_a,
+        cached_vertices_a,
+        shape_b,
+        pose_b,
+        cached_vertices_b,
+    ) {
         Ok(penetration) => Some(GenericConvexContact {
             normal: penetration.normal,
             depth: penetration.depth,
@@ -252,7 +326,15 @@ pub(crate) fn generic_convex_contact(
             },
         }),
         Err(failure) if failure.gjk_termination == GjkTerminationReason::Intersect => {
-            contained_epa_contact(shape_a, pose_a, shape_b, pose_b, failure)
+            contained_epa_contact(
+                shape_a,
+                pose_a,
+                cached_vertices_a,
+                shape_b,
+                pose_b,
+                cached_vertices_b,
+                failure,
+            )
         }
         Err(_) => None,
     }
@@ -261,13 +343,15 @@ pub(crate) fn generic_convex_contact(
 fn contained_epa_contact(
     shape_a: &SharedShape,
     pose_a: Pose,
+    cached_vertices_a: Option<&[Point]>,
     shape_b: &SharedShape,
     pose_b: Pose,
+    cached_vertices_b: Option<&[Point]>,
     failure: EpaFailure,
 ) -> Option<GenericConvexContact> {
     let normal = contained_fallback_normal(pose_a, pose_b);
-    let point_a = shape_a.support_point(pose_a, -normal)?;
-    let point_b = shape_b.support_point(pose_b, normal)?;
+    let point_a = shape_a.support_point_with_cached_vertices(pose_a, -normal, cached_vertices_a)?;
+    let point_b = shape_b.support_point_with_cached_vertices(pose_b, normal, cached_vertices_b)?;
     let point = Point::from((Vector::from(point_a) + Vector::from(point_b)) * 0.5);
     let depth = (point_a - point_b).dot(normal).max(0.0);
     (normal.x().is_finite()
@@ -305,12 +389,16 @@ fn contained_fallback_normal(pose_a: Pose, pose_b: Pose) -> Vector {
 fn support(
     shape_a: &SharedShape,
     pose_a: Pose,
+    cached_vertices_a: Option<&[Point]>,
     shape_b: &SharedShape,
     pose_b: Pose,
+    cached_vertices_b: Option<&[Point]>,
     direction: Vector,
 ) -> Option<SupportPoint> {
-    let point_a = shape_a.support_point(pose_a, direction)?;
-    let point_b = shape_b.support_point(pose_b, -direction)?;
+    let point_a =
+        shape_a.support_point_with_cached_vertices(pose_a, direction, cached_vertices_a)?;
+    let point_b =
+        shape_b.support_point_with_cached_vertices(pose_b, -direction, cached_vertices_b)?;
     let v = point_a - point_b;
     (v.x().is_finite() && v.y().is_finite()).then_some(SupportPoint {
         v,

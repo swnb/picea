@@ -5,13 +5,14 @@
 //! wasm, and future client/server consumers.
 
 use crate::{
-    collider::CollisionFilter,
+    collider::{CollisionFilter, ShapeAabb},
     debug::{
         sanitize_point, sanitize_scalar, sanitize_vector, DebugAabb, DebugCollider, DebugShape,
         DebugSnapshot, DebugSnapshotOptions,
     },
     handles::{BodyHandle, ColliderHandle, WorldRevision},
     math::{point::Point, vector::Vector, FloatNum},
+    pipeline::broadphase::{ColliderProxy, DynamicAabbTree},
     world::World,
 };
 
@@ -186,6 +187,7 @@ struct QueryColliderRecord {
 pub struct QueryPipeline {
     cached_revision: Option<WorldRevision>,
     colliders: Vec<QueryColliderRecord>,
+    broadphase: DynamicAabbTree,
 }
 
 impl QueryPipeline {
@@ -211,6 +213,15 @@ impl QueryPipeline {
             .into_iter()
             .filter_map(QueryColliderRecord::from_debug_collider)
             .collect();
+        let proxies = self
+            .colliders
+            .iter()
+            .map(|collider| ColliderProxy {
+                handle: collider.handle,
+                aabb: collider.bounds.into(),
+            })
+            .collect::<Vec<_>>();
+        self.broadphase = DynamicAabbTree::from_proxies(&proxies);
     }
 
     /// Casts a ray against the cached colliders.
@@ -225,10 +236,18 @@ impl QueryPipeline {
         let direction = sanitize_vector(direction);
         let max_toi = sanitize_scalar(max_toi).max(0.0);
 
-        self.colliders
-            .iter()
-            .filter(|collider| filter.matches(collider))
-            .filter_map(|collider| {
+        let mut best_hit: Option<RayHit> = None;
+        for index in self
+            .broadphase
+            .query_ray_proxy_indices(origin, direction, max_toi)
+        {
+            let Some(collider) = self.colliders.get(index) else {
+                continue;
+            };
+            if !filter.matches(collider) {
+                continue;
+            }
+            let Some(hit) =
                 ray_cast_shape(origin, direction, max_toi, &collider.shape, collider.bounds).map(
                     |(toi, point, normal)| RayHit {
                         body: collider.body,
@@ -238,16 +257,25 @@ impl QueryPipeline {
                         normal,
                     },
                 )
-            })
-            .min_by(|lhs, rhs| lhs.toi.total_cmp(&rhs.toi))
+            else {
+                continue;
+            };
+            match &best_hit {
+                Some(current) if hit.toi >= current.toi => {}
+                _ => best_hit = Some(hit),
+            }
+        }
+        best_hit
     }
 
     /// Finds colliders that contain the given point.
     pub fn intersect_point(&self, point: Point, filter: QueryFilter) -> Vec<PointHit> {
         let point = sanitize_point(point);
 
-        self.colliders
-            .iter()
+        self.broadphase
+            .query_point_proxy_indices(point)
+            .into_iter()
+            .filter_map(|index| self.colliders.get(index))
             .filter(|collider| filter.matches(collider))
             .filter(|collider| collider.bounds.contains_point(point))
             .filter_map(|collider| {
@@ -267,8 +295,10 @@ impl QueryPipeline {
     pub fn intersect_aabb(&self, aabb: DebugAabb, filter: QueryFilter) -> Vec<AabbHit> {
         let query_bounds = DebugAabb::new(aabb.min, aabb.max);
 
-        self.colliders
-            .iter()
+        self.broadphase
+            .query_aabb_proxy_indices(query_bounds.into())
+            .into_iter()
+            .filter_map(|index| self.colliders.get(index))
             .filter(|collider| filter.matches(collider))
             .filter(|collider| collider.bounds.overlaps(&query_bounds))
             .map(|collider| AabbHit {
@@ -291,6 +321,15 @@ impl QueryColliderRecord {
             bounds,
             shape: collider.shape,
         })
+    }
+}
+
+impl From<DebugAabb> for ShapeAabb {
+    fn from(value: DebugAabb) -> Self {
+        Self {
+            min: value.min,
+            max: value.max,
+        }
     }
 }
 

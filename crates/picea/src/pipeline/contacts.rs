@@ -11,7 +11,7 @@ use crate::{
     math::{point::Point, vector::Vector, FloatNum},
     pipeline::{
         broadphase::{BroadphaseStats, ColliderProxy},
-        narrowphase::contact_from_shapes,
+        narrowphase::contact_from_shapes_with_cached_vertices,
         StepConfig,
     },
     world::{
@@ -60,6 +60,7 @@ struct ColliderSnapshot {
     shape: SharedShape,
     world_pose: Pose,
     aabb: ShapeAabb,
+    convex_vertices: Option<Vec<Point>>,
     material: Material,
     filter: CollisionFilter,
     is_sensor: bool,
@@ -118,7 +119,7 @@ impl World {
             })
             .collect::<Vec<_>>();
         let mut broadphase = self.update_broadphase(&proxies);
-        let mut observations = Vec::new();
+        let mut observations = Vec::with_capacity(broadphase.candidate_pairs.len());
 
         for (index, other_index) in broadphase.candidate_pairs {
             let collider_a = &colliders[index];
@@ -131,13 +132,15 @@ impl World {
                 broadphase.stats.filter_drop_count += 1;
                 continue;
             }
-            let Some(contact) = contact_from_shapes(
+            let Some(contact) = contact_from_shapes_with_cached_vertices(
                 &collider_a.shape,
                 collider_a.world_pose,
                 collider_a.aabb,
+                collider_a.convex_vertices.as_deref(),
                 &collider_b.shape,
                 collider_b.world_pose,
                 collider_b.aabb,
+                collider_b.convex_vertices.as_deref(),
             ) else {
                 broadphase.stats.narrowphase_drop_count += 1;
                 continue;
@@ -350,12 +353,14 @@ impl World {
             .filter_map(|(handle, record)| {
                 let body = self.body_record(record.body).ok()?;
                 let world_pose = body.pose.compose(record.local_pose);
+                let geometry = record.derived_geometry(body.pose);
                 Some(ColliderSnapshot {
                     handle,
                     body: record.body,
                     shape: record.shape.clone(),
                     world_pose,
-                    aabb: record.shape.aabb(world_pose),
+                    aabb: geometry.aabb,
+                    convex_vertices: geometry.convex_vertices,
                     material: record.material,
                     filter: record.filter,
                     is_sensor: record.is_sensor,

@@ -672,6 +672,99 @@ fn circle_contacts_keep_normals_toward_ordered_body_after_collider_slot_reuse() 
 }
 
 #[test]
+fn contact_gathering_geometry_cache_invalidates_after_body_and_collider_edits() {
+    let mut world = World::new(WorldDesc {
+        gravity: (0.0, 0.0).into(),
+        enable_sleep: false,
+    });
+    let left_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("left body should be created");
+    world
+        .create_collider(
+            left_body,
+            ColliderDesc {
+                shape: SharedShape::rect(2.0, 2.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("left collider should be created");
+    let right_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(1.5, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("right body should be created");
+    let right_collider = world
+        .create_collider(
+            right_body,
+            ColliderDesc {
+                shape: SharedShape::rect(2.0, 2.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("right collider should be created");
+
+    let mut pipeline = SimulationPipeline::new(StepConfig::default());
+    let first = pipeline.step(&mut world);
+    assert!(
+        first.stats.contact_count > 0,
+        "initial overlap should warm the derived geometry cache through contact gathering"
+    );
+
+    world
+        .apply_body_patch(
+            right_body,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(10.0, 0.0, 0.0)),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body pose patch should move the collider away");
+    let after_body_move = pipeline.step(&mut world);
+    assert_eq!(
+        after_body_move.stats.contact_count, 0,
+        "contact gathering must not reuse old world-space AABB/vertices after a body pose edit"
+    );
+
+    world
+        .apply_body_patch(
+            right_body,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(1.5, 0.0, 0.0)),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body pose patch should move the collider back");
+    let warmed_again = pipeline.step(&mut world);
+    assert!(
+        warmed_again.stats.contact_count > 0,
+        "returning to overlap should warm the cache at the new transform"
+    );
+
+    world
+        .apply_collider_patch(
+            right_collider,
+            ColliderPatch {
+                local_pose: Some(Pose::from_xy_angle(20.0, 0.0, 0.0)),
+                shape: Some(SharedShape::rect(1.0, 1.0)),
+                ..ColliderPatch::default()
+            },
+        )
+        .expect("collider geometry patch should move the shape away");
+    let after_collider_edit = pipeline.step(&mut world);
+    assert_eq!(
+        after_collider_edit.stats.contact_count, 0,
+        "contact gathering must not reuse old derived geometry after collider shape/local-pose edits"
+    );
+}
+
+#[test]
 fn world_anchor_joints_affect_body_motion_during_step() {
     let mut world = World::new(WorldDesc {
         gravity: (0.0, 0.0).into(),

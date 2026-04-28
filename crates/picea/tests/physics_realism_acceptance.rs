@@ -2042,6 +2042,91 @@ fn ccd_dynamic_convex_missed_sweep_does_not_false_positive_or_clamp() {
 }
 
 #[test]
+fn ccd_static_convex_cache_invalidates_after_body_and_collider_edits() {
+    fn assert_no_stale_wall_hit(mut world: World) {
+        let bullet = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            -1.0,
+            0.0,
+            Vector::new(200.0, 0.0),
+        );
+        attach_shape(
+            &mut world,
+            bullet,
+            SharedShape::rect(0.1, 0.1),
+            Material::default(),
+        );
+
+        let report = step_world(&mut world, 1);
+        let position = body_position(&world, bullet);
+
+        assert_eq!(report.stats.contact_count, 0);
+        assert_eq!(report.stats.ccd_candidate_count, 0);
+        assert_eq!(report.stats.ccd_hit_count, 0);
+        assert_eq!(report.stats.ccd_clamp_count, 0);
+        assert!(
+            position.x() > 2.0,
+            "stale CCD geometry would clamp the bullet at the old wall; x={}",
+            position.x()
+        );
+    }
+
+    let mut body_edit_world = no_gravity_world();
+    let body_moved_wall = create_body(
+        &mut body_edit_world,
+        BodyType::Static,
+        0.0,
+        0.0,
+        Vector::default(),
+    );
+    attach_shape(
+        &mut body_edit_world,
+        body_moved_wall,
+        SharedShape::rect(0.1, 10.0),
+        Material::default(),
+    );
+    step_world(&mut body_edit_world, 1);
+    body_edit_world
+        .apply_body_patch(
+            body_moved_wall,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(100.0, 0.0, 0.0)),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("static wall body should move away");
+    assert_no_stale_wall_hit(body_edit_world);
+
+    let mut collider_edit_world = no_gravity_world();
+    let collider_moved_wall = create_body(
+        &mut collider_edit_world,
+        BodyType::Static,
+        0.0,
+        0.0,
+        Vector::default(),
+    );
+    let collider = attach_shape(
+        &mut collider_edit_world,
+        collider_moved_wall,
+        SharedShape::rect(0.1, 10.0),
+        Material::default(),
+    );
+    step_world(&mut collider_edit_world, 1);
+    collider_edit_world
+        .apply_collider_patch(
+            collider,
+            ColliderPatch {
+                local_pose: Some(Pose::from_xy_angle(100.0, 0.0, 0.0)),
+                shape: Some(SharedShape::rect(0.05, 10.0)),
+                ..ColliderPatch::default()
+            },
+        )
+        .expect("static wall collider geometry should move away");
+    assert_no_stale_wall_hit(collider_edit_world);
+}
+
+#[test]
 fn ccd_dynamic_convex_multi_hit_budget_selects_earliest_static_hit() {
     let mut world = no_gravity_world();
     let near_wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());

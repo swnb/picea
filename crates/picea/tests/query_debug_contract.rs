@@ -1,13 +1,13 @@
 use picea::debug::DebugStats;
 use picea::math::{point::Point, vector::Vector};
 use picea::prelude::{
-    BodyDesc, BodyHandle, BodyType, ColliderDesc, ColliderHandle, CollisionFilter, ContactEvent,
-    ContactFeatureId, ContactId, ContactReductionReason, DebugBody, DebugContact, DebugIsland,
-    DebugManifold, DebugManifoldPoint, DebugSnapshot, DebugSnapshotOptions, EpaTerminationReason,
-    GenericConvexFallbackReason, GenericConvexTrace, GjkTerminationReason, ManifoldId, Material,
-    Pose, QueryFilter, QueryPipeline, SharedShape, SimulationPipeline, SleepEvent,
-    SleepTransitionReason, StepConfig, StepReport, StepStats, WarmStartCacheReason, World,
-    WorldDesc, WorldEvent,
+    BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderDesc, ColliderHandle, ColliderPatch,
+    CollisionFilter, ContactEvent, ContactFeatureId, ContactId, ContactReductionReason, DebugBody,
+    DebugContact, DebugIsland, DebugManifold, DebugManifoldPoint, DebugSnapshot,
+    DebugSnapshotOptions, EpaTerminationReason, GenericConvexFallbackReason, GenericConvexTrace,
+    GjkTerminationReason, ManifoldId, Material, Pose, QueryFilter, QueryPipeline, SharedShape,
+    SimulationPipeline, SleepEvent, SleepTransitionReason, StepConfig, StepReport, StepStats,
+    WarmStartCacheReason, World, WorldDesc, WorldEvent,
 };
 
 fn step_once(world: &mut World) -> StepReport {
@@ -34,6 +34,13 @@ fn query_pipeline_returns_no_hits_before_sync() {
     assert!(query
         .intersect_point(Point::new(0.0, 0.0), QueryFilter::default())
         .is_empty());
+}
+
+#[test]
+fn world_remains_send_sync_with_internal_query_and_geometry_caches() {
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    assert_send_sync::<World>();
 }
 
 #[test]
@@ -693,4 +700,271 @@ fn query_pipeline_can_filter_by_collision_groups_from_debug_facts() {
 
     assert_eq!(allowed.len(), 1);
     assert!(blocked.is_empty());
+}
+
+#[test]
+fn query_pipeline_preserves_ordering_and_filters_when_candidates_are_pruned() {
+    let mut world = World::new(WorldDesc::default());
+    let body_a = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let body_b = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(2.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let far_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(50.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let sensor_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+
+    let collider_a = world
+        .create_collider(
+            body_a,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created");
+    let collider_b = world
+        .create_collider(
+            body_b,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created");
+    world
+        .create_collider(
+            far_body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("far collider should be created");
+    let sensor_collider = world
+        .create_collider(
+            sensor_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.25),
+                is_sensor: true,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("sensor collider should be created");
+
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+
+    let aabb_hits = query.intersect_aabb(
+        picea::debug::DebugAabb::new(Point::new(-1.5, -1.5), Point::new(3.5, 1.5)),
+        QueryFilter::default(),
+    );
+    assert_eq!(
+        aabb_hits.iter().map(|hit| hit.collider).collect::<Vec<_>>(),
+        vec![collider_a, collider_b]
+    );
+
+    let default_point_hits = query.intersect_point(Point::new(1.0, 0.0), QueryFilter::default());
+    assert_eq!(
+        default_point_hits
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![collider_a, collider_b]
+    );
+
+    let sensor_point_hits = query.intersect_point(
+        Point::new(1.0, 0.0),
+        QueryFilter::default().including_sensors(),
+    );
+    assert_eq!(
+        sensor_point_hits
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![collider_a, collider_b, sensor_collider]
+    );
+
+    let ray_hit = query
+        .cast_ray(
+            Point::new(-3.0, 0.0),
+            Vector::new(1.0, 0.0),
+            10.0,
+            QueryFilter::default(),
+        )
+        .expect("ray should hit the first collider in snapshot order");
+    assert_eq!(ray_hit.collider, collider_a);
+}
+
+#[test]
+fn query_pipeline_aabb_queries_include_touching_bounds_after_index_pruning() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let collider = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::rect(2.0, 2.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created");
+
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+
+    let touching_hits = query.intersect_aabb(
+        picea::debug::DebugAabb::new(Point::new(1.0, -0.5), Point::new(2.0, 0.5)),
+        QueryFilter::default(),
+    );
+
+    assert_eq!(
+        touching_hits
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![collider],
+        "AABB query semantics are inclusive at the boundary; broadphase pruning must not drop touching bounds"
+    );
+}
+
+#[test]
+fn query_pipeline_sync_invalidates_cached_geometry_after_pose_and_shape_changes() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let collider = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created");
+    let mut query = QueryPipeline::new();
+
+    query.sync(&world);
+    assert_eq!(
+        query.intersect_point(Point::new(0.5, 0.0), QueryFilter::default())[0].collider,
+        collider
+    );
+
+    world
+        .apply_body_patch(
+            body,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(10.0, 0.0, 0.0)),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body pose patch should succeed");
+    query.sync(&world);
+    assert!(query
+        .intersect_point(Point::new(0.5, 0.0), QueryFilter::default())
+        .is_empty());
+    assert_eq!(
+        query.intersect_point(Point::new(10.5, 0.0), QueryFilter::default())[0].collider,
+        collider
+    );
+
+    world
+        .apply_collider_patch(
+            collider,
+            ColliderPatch {
+                local_pose: Some(Pose::from_xy_angle(2.0, 0.0, 0.0)),
+                shape: Some(SharedShape::rect(2.0, 2.0)),
+                ..ColliderPatch::default()
+            },
+        )
+        .expect("collider patch should succeed");
+    query.sync(&world);
+    assert!(query
+        .intersect_point(Point::new(10.5, 0.0), QueryFilter::default())
+        .is_empty());
+    assert_eq!(
+        query.intersect_point(Point::new(12.75, 0.0), QueryFilter::default())[0].collider,
+        collider
+    );
+}
+
+#[test]
+fn query_pipeline_sync_does_not_leak_recycled_collider_candidates() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let original = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("original collider should be created");
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+    assert_eq!(
+        query.intersect_point(Point::new(0.0, 0.0), QueryFilter::default())[0].collider,
+        original
+    );
+
+    world
+        .destroy_collider(original)
+        .expect("collider should be destroyed");
+    let recycled = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                local_pose: Pose::from_xy_angle(20.0, 0.0, 0.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should reuse the old slot with a new generation");
+
+    query.sync(&world);
+    assert!(query
+        .intersect_point(Point::new(0.0, 0.0), QueryFilter::default())
+        .is_empty());
+    assert_eq!(
+        query.intersect_point(Point::new(20.0, 0.0), QueryFilter::default())[0].collider,
+        recycled
+    );
+    assert_ne!(original, recycled);
 }

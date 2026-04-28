@@ -99,13 +99,46 @@ struct TreeNode {
 }
 
 impl DynamicAabbTree {
-    #[cfg(test)]
     pub(crate) fn from_proxies(proxies: &[ColliderProxy]) -> Self {
         let mut tree = Self::default();
-        for (proxy_index, proxy) in proxies.iter().enumerate() {
-            tree.insert_leaf(proxy_index, *proxy);
-        }
+        let mut entries = proxies.iter().copied().enumerate().collect::<Vec<_>>();
+        // Query snapshots are built in one shot. Use the same deterministic
+        // balanced builder as rebuilds, but keep exact AABBs instead of fattening
+        // them so query pruning cannot broaden public hit semantics.
+        tree.root = tree.build_balanced_subtree(&mut entries);
         tree
+    }
+
+    pub(crate) fn query_aabb_proxy_indices(&self, query_aabb: ShapeAabb) -> Vec<usize> {
+        let mut indices = Vec::new();
+        self.query_indices(
+            |node_aabb| aabb_overlaps_inclusive(query_aabb, node_aabb),
+            &mut indices,
+        );
+        indices
+    }
+
+    pub(crate) fn query_point_proxy_indices(&self, point: crate::math::point::Point) -> Vec<usize> {
+        let mut indices = Vec::new();
+        self.query_indices(
+            |node_aabb| aabb_contains_point(node_aabb, point),
+            &mut indices,
+        );
+        indices
+    }
+
+    pub(crate) fn query_ray_proxy_indices(
+        &self,
+        origin: crate::math::point::Point,
+        direction: crate::math::vector::Vector,
+        max_toi: FloatNum,
+    ) -> Vec<usize> {
+        let mut indices = Vec::new();
+        self.query_indices(
+            |node_aabb| ray_intersects_aabb(origin, direction, max_toi, node_aabb),
+            &mut indices,
+        );
+        indices
     }
 
     pub(crate) fn candidate_pairs(&self) -> Vec<(usize, usize)> {
@@ -447,6 +480,33 @@ impl DynamicAabbTree {
             }
         }
     }
+
+    fn query_indices(&self, mut overlaps: impl FnMut(ShapeAabb) -> bool, out: &mut Vec<usize>) {
+        let Some(root) = self.root else {
+            return;
+        };
+        let mut stack = vec![root];
+
+        while let Some(index) = stack.pop() {
+            let node = &self.nodes[index];
+            if !overlaps(node.aabb) {
+                continue;
+            }
+            if let Some(proxy_index) = node.proxy_index {
+                out.push(proxy_index);
+                continue;
+            }
+            if let Some(right) = node.right {
+                stack.push(right);
+            }
+            if let Some(left) = node.left {
+                stack.push(left);
+            }
+        }
+
+        // Query callers keep the stable public ordering contract: snapshot order.
+        out.sort_unstable();
+    }
 }
 
 impl TreeNode {
@@ -536,6 +596,55 @@ fn aabb_overlaps(a: ShapeAabb, b: ShapeAabb) -> bool {
     let overlap_x = a.max.x().min(b.max.x()) - a.min.x().max(b.min.x());
     let overlap_y = a.max.y().min(b.max.y()) - a.min.y().max(b.min.y());
     overlap_x > 0.0 && overlap_y > 0.0
+}
+
+fn aabb_overlaps_inclusive(a: ShapeAabb, b: ShapeAabb) -> bool {
+    !(a.max.x() < b.min.x()
+        || b.max.x() < a.min.x()
+        || a.max.y() < b.min.y()
+        || b.max.y() < a.min.y())
+}
+
+fn aabb_contains_point(aabb: ShapeAabb, point: crate::math::point::Point) -> bool {
+    point.x() >= aabb.min.x()
+        && point.x() <= aabb.max.x()
+        && point.y() >= aabb.min.y()
+        && point.y() <= aabb.max.y()
+}
+
+fn ray_intersects_aabb(
+    origin: crate::math::point::Point,
+    direction: crate::math::vector::Vector,
+    max_toi: FloatNum,
+    aabb: ShapeAabb,
+) -> bool {
+    let mut enter: FloatNum = 0.0;
+    let mut exit = max_toi.max(0.0);
+
+    for (origin_axis, direction_axis, min_axis, max_axis) in [
+        (origin.x(), direction.x(), aabb.min.x(), aabb.max.x()),
+        (origin.y(), direction.y(), aabb.min.y(), aabb.max.y()),
+    ] {
+        if direction_axis.abs() <= FloatNum::EPSILON {
+            if origin_axis < min_axis || origin_axis > max_axis {
+                return false;
+            }
+            continue;
+        }
+        let inverse = 1.0 / direction_axis;
+        let mut t0 = (min_axis - origin_axis) * inverse;
+        let mut t1 = (max_axis - origin_axis) * inverse;
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        enter = enter.max(t0);
+        exit = exit.min(t1);
+        if enter > exit {
+            return false;
+        }
+    }
+
+    exit >= 0.0 && enter <= max_toi
 }
 
 #[cfg(test)]
@@ -731,6 +840,91 @@ mod tests {
         ];
 
         assert_eq!(candidate_pairs(&proxies), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn query_traversal_returns_proxy_indices_in_snapshot_order() {
+        let tree = DynamicAabbTree::from_proxies(&[
+            proxy(30, aabb(6.0, 0.0, 8.0, 2.0)),
+            proxy(10, aabb(0.0, 0.0, 2.0, 2.0)),
+            proxy(20, aabb(1.0, 1.0, 3.0, 3.0)),
+            proxy(40, aabb(10.0, 0.0, 12.0, 2.0)),
+        ]);
+
+        assert_eq!(
+            tree.query_aabb_proxy_indices(aabb(-1.0, -1.0, 4.0, 4.0)),
+            vec![1, 2]
+        );
+        assert_eq!(
+            tree.query_aabb_proxy_indices(aabb(-1.0, -1.0, 9.0, 4.0)),
+            vec![0, 1, 2]
+        );
+    }
+
+    #[test]
+    fn query_tree_builds_balanced_from_ordered_snapshot_proxies() {
+        let proxies = (0..64)
+            .map(|index| {
+                let x = index as f32 * 2.0;
+                proxy(index, aabb(x, 0.0, x + 1.0, 1.0))
+            })
+            .collect::<Vec<_>>();
+
+        let tree = DynamicAabbTree::from_proxies(&proxies);
+
+        assert!(
+            tree.depth() <= balanced_depth_budget(proxies.len()),
+            "query tree should not inherit insertion-order depth; got {}",
+            tree.depth()
+        );
+    }
+
+    #[test]
+    fn query_traversal_tracks_stale_removal_rebuilds_and_recycled_handles() {
+        let mut broadphase = Broadphase::default();
+        let old_handle = handle_with_generation(0, 0);
+        let recycled_handle = handle_with_generation(0, 1);
+        let stable_handle = handle(1);
+
+        broadphase.update(&[
+            proxy_with_handle(old_handle, aabb(0.0, 0.0, 2.0, 2.0)),
+            proxy_with_handle(stable_handle, aabb(5.0, 0.0, 7.0, 2.0)),
+        ]);
+        assert_eq!(
+            broadphase
+                .tree
+                .query_aabb_proxy_indices(aabb(-1.0, -1.0, 3.0, 3.0)),
+            vec![0]
+        );
+
+        broadphase.update(&[proxy_with_handle(stable_handle, aabb(5.0, 0.0, 7.0, 2.0))]);
+        assert!(broadphase
+            .tree
+            .query_aabb_proxy_indices(aabb(-1.0, -1.0, 3.0, 3.0))
+            .is_empty());
+
+        let many_proxies = (100..132)
+            .map(|index| {
+                let x = index as f32 * 2.0;
+                proxy(index, aabb(x, 2.0, x + 1.0, 3.0))
+            })
+            .collect::<Vec<_>>();
+        broadphase.update(&many_proxies);
+        assert!(broadphase
+            .tree
+            .query_aabb_proxy_indices(aabb(-1.0, -1.0, 8.0, 8.0))
+            .is_empty());
+
+        broadphase.update(&[
+            proxy_with_handle(recycled_handle, aabb(0.0, 8.0, 1.0, 9.0)),
+            proxy_with_handle(stable_handle, aabb(0.5, 8.0, 1.5, 9.5)),
+        ]);
+        assert_eq!(
+            broadphase
+                .tree
+                .query_aabb_proxy_indices(aabb(-1.0, 7.0, 2.0, 10.0)),
+            vec![0, 1]
+        );
     }
 
     #[test]

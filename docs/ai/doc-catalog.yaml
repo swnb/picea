@@ -212,7 +212,7 @@
   status: active
   owner: supervisor
   applies_to: [milestone, scope, acceptance, productionization, physics-upgrade]
-  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks, m10-5, m11, m12, m13, m14, performance-substrate, active-island-solver, ccd-generalization, ergonomic-api-v2]
+  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks, m10-5, m11, m12, m13, m14, m15, post-m14, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, ccd-generalization, ergonomic-api-v2]
   last_reviewed: 2026-04-27
 - path: todo.md
   title: Picea Physics Engine Backlog Archive
@@ -220,8 +220,8 @@
   authority: medium
   status: active
   owner: supervisor
-  applies_to: [backlog, archive, post-m10, future-work]
-  keywords: [m10-5, m11, m12, m13, m14, completed-baseline, performance-substrate, active-island-solver, ccd-generalization, ergonomic-api-v2]
+  applies_to: [backlog, archive, post-m10, post-m14, future-work]
+  keywords: [m10-5, m11, m12, m13, m14, m15, completed-baseline, post-m14, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, ccd-generalization, ergonomic-api-v2]
   last_reviewed: 2026-04-27
 - path: crates/picea/src/lib.rs
   title: Picea core entrypoint

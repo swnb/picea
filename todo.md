@@ -3,7 +3,8 @@
 > 当前文件是升级 backlog/archive。实际执行顺序、范围和验收门以
 > `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md` 为准。
 > M1-M10 的第一生产能力线已经落地；后续重点从“补齐基础算法”转向
-> 性能承载层、active island solver、CCD 泛化和更易用的 API。
+> Post-M14 的系统质量深化：性能承载层、dense island-local execution、
+> 更广的 CCD 覆盖，以及 scene schema / authoring 稳定化。
 
 ## 已完成生产基线
 
@@ -106,40 +107,69 @@
 
 ### M11 Performance Substrate
 
-- [ ] 为 broadphase 增加 collider-handle -> leaf 的直接索引。
-- [ ] 改进 dynamic AABB tree 插入、平衡和 rebuild 策略。
-- [ ] 复用 broadphase-style tree 做 ray cast、AABB query、region query。
-- [ ] 缓存 world-space vertices / support data，并用 transform revision 失效。
-- [ ] 减少 contact gathering、sleep island、solver setup 的 per-step allocation。
-- [ ] 保持 Criterion baseline，以 counter 和 variance 解释性能变化。
+- [x] 为 broadphase 增加 collider-handle -> leaf 的直接索引。
+
+注：M11 当前 milestone scope 以 direct leaf lookup substrate 验收完成；
+更深的 query reuse、shape/support cache、allocation reduction 和 perf
+threshold 工作转入 Post-M14。
 
 ### M12 Active Island Solver
 
-- [ ] 建立 active island compact arrays。
-- [ ] 将 contact rows 和 joint rows 按 island 统一求解。
-- [ ] 让 sleeping islands 退出 hot solver arrays。
-- [ ] 保持 contact id、manifold id、warm-start facts、wake reason 与 debug facts 稳定。
-- [ ] 增加 stack、ramp friction、jointed island、unrelated island 回归测试。
+- [x] 建立 active-island batching 第一阶段。
+- [x] 将 contact rows 和 joint rows 按 island 分批求解。
+- [x] 让 sleeping islands 退出 hot solver arrays。
+- [x] 保持 contact id、manifold id、warm-start facts、wake reason 与 debug facts 稳定。
+- [x] 增加 stack、friction、jointed island、unrelated island 回归测试。
+
+注：M12 当前 milestone scope 已完成；更 dense 的 per-island arrays、
+更强的一体化 island solver 架构，以及 ramp-specific friction 测试转入
+Post-M14。
 
 ### M13 CCD Generalization
 
-- [ ] 引入 dynamic-vs-static convex shape cast 或 GJK-backed conservative advancement。
-- [ ] 支持非 circle dynamic convex 穿越 thin static geometry 的 TOI。
-- [ ] 增加 multi-impact ordering 和 budget 语义。
-- [ ] 扩展 `ccd_trace`，记录 selected / ignored TOI hits。
-- [ ] 仅在 benchmark 和行为锁支持后再考虑 dynamic-vs-dynamic CCD。
+- [x] 引入 dynamic-vs-static convex shape cast 的当前 milestone 切片。
+- [x] 支持非 circle dynamic convex 穿越 thin static geometry 的 TOI。
+- [x] 增加 multi-impact ordering 和 budget 语义。
+- [x] 扩展 `ccd_trace` 相关统计，记录 selected / ignored TOI hits。
+
+注：M13 当前 milestone scope 已完成；rotational、dynamic-vs-dynamic 和
+all-shape CCD 覆盖转入 Post-M14。
 
 ### M14 Ergonomic API V2
 
-- [ ] 增加更高层的 scene / asset recipe helpers。
-- [ ] 为 recipe / command validation error 增加 nested path context。
-- [ ] 评估 serializable recipe fixtures，用于 examples、benchmarks 和 lab scenarios。
-- [ ] 保持低层 `World::create_*` API 稳定。
-- [ ] 增加 `v1_api_smoke` 和 lab/example fixture 验收。
+- [x] 增加更高层的 scene / asset recipe helpers。
+- [x] 为 recipe / command validation error 增加 nested path context。
+- [x] 评估并落地 serializable recipe fixtures，用于 examples、benchmarks 和 lab scenarios。
+- [x] 保持低层 `World::create_*` API 稳定。
+- [x] 增加 `v1_api_smoke` 和 lab/example fixture 验收。
 
-## 保留风险
+注：M14 当前 milestone scope 已完成；live lab editing 与公共 scene schema
+稳定化转入 Post-M14。
+
+## Post-M14 / 保留风险 / 下一阶段
+
+### M15 Performance Data Path
+
+- [ ] 复用 broadphase-style spatial index 做 ray cast、AABB query、region query
+  的候选遍历，但不向 public API 泄漏 proxy / leaf id。
+- [ ] 缓存 world-space vertices / AABB / support data，并用 transform revision
+  做失效与 stale-cache 行为锁。
+- [ ] 减少 contact gathering、sleep island、solver setup 的 per-step allocation，
+  只推进能被测试、counter 或 benchmark baseline 解释的改动。
+- [ ] 为 query ordering、filter semantics、recycled handle、tree rebuild、body
+  transform patch 补行为锁。
+- [ ] 保持 Criterion baseline，以 counter 和 variance 解释性能变化；暂不设置
+  absolute perf threshold。
+
+### Later Post-M15
+
+- [ ] 改进 dynamic AABB tree 插入、平衡和 rebuild 策略。
+- [ ] 将当前 map/set-heavy batching 收敛为真正 dense per-island arrays。
+- [ ] 增加 ramp-specific friction 回归测试。
+- [ ] 仅在 benchmark 和行为锁支持后再考虑 dynamic-vs-dynamic CCD。
+- [ ] 扩展 rotational CCD 和更广的 all-shape CCD 覆盖。
+- [ ] 稳定公共 scene schema，并明确后续 live lab editing 语义。
 
 - [ ] Concave polygon decomposition 仍未作为 core solver 能力落地。
 - [ ] Public distance query 仍未作为稳定 API 暴露。
-- [ ] Dynamic-vs-dynamic CCD 仍需独立 benchmark 和行为锁证明。
 - [ ] Absolute performance thresholds 需要多轮 baseline 后再设置。

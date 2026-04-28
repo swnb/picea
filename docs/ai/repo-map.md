@@ -3,8 +3,15 @@
 当前路由优先级：先看实时仓库事实（`git status`、Cargo manifests、`crates/picea/src/lib.rs`、最新验证输出），再用本文定位模块。
 
 `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`
-是当前生产化 milestone 路线；`docs/design/physics-engine-upgrade-technical-plan.md`
-解释 M11-M14 的系统升级方向。`docs/plans/2026-04-18-picea-physics-engine-milestones.md`
+是当前生产化 milestone 路线；M11-M14 在当前路线已按 2026-04-27
+验收完成。`docs/design/physics-engine-upgrade-technical-plan.md`
+解释 Post-M14 / M15 的系统升级方向。M15 已落地为 Performance Data Path：
+`QueryPipeline` 通过内部 broadphase-style spatial index 复用做候选遍历，
+collider 派生几何使用 transform/revision-backed cache，contact/CCD/GJK 路径
+减少重复几何重建并做保守 pre-sizing；query allocation/perf counters 与更深
+solver allocation work 仍是 Post-M15，后续性能深化仍以 benchmark/counter
+evidence 为准。
+`docs/plans/2026-04-18-picea-physics-engine-milestones.md`
 只用于历史归档；其中旧 `Scene` / `Context` / `picea-web` / wasm 叙述不代表当前默认路由。
 
 仓库是一个 Rust workspace，当前三类 crate / 工具入口：
@@ -33,16 +40,16 @@
 | `handles` | `BodyHandle`、`ColliderHandle`、`JointHandle`、`ContactId`、`ManifoldId`、`WorldRevision`。 | 不拥有 handle lifecycle 或 store mutation。 | `handles.rs` | `rtk proxy cargo test -p picea --lib --tests` |
 | `joint` | `DistanceJoint*`、`WorldAnchorJoint*`、`JointDesc`、`JointPatch`、`JointView`。 | 不拥有 solver iteration internals。 | `joint.rs` | `rtk proxy cargo test -p picea --test core_model_world`, `rtk proxy cargo test -p picea --lib --tests` |
 | `math` | `Point`、`Vector`、`Matrix`、`Segment`、`Edge`、`FloatNum` 等基础数值类型与运算。 | 不承载 runtime orchestration，不做 milestone 决策。 | `math/mod.rs`, `math/vector.rs`, `math/point.rs`, `math/segment.rs` | `rtk proxy cargo test -p picea --test math_api_compile_fail`, `rtk proxy cargo test -p picea --lib --tests` |
-| `pipeline` | `SimulationPipeline`、`StepConfig`、`StepReport`、`StepContext` transient step facts、broadphase/narrowphase contact gathering、内部 GJK/EPA generic convex fallback、M8 narrow CCD pose-clamping phase。 | 不拥有 world 持久状态；不暴露 public distance-query API；不承载 contact solver row math。 | `pipeline.rs`, `pipeline/step.rs`, `pipeline/integrate.rs`, `pipeline/contacts.rs`, `pipeline/broadphase.rs`, `pipeline/narrowphase.rs`, `pipeline/gjk.rs`, `pipeline/ccd.rs`, `pipeline/joints.rs`, `pipeline/sleep.rs` | `rtk proxy cargo test -p picea --lib pipeline::ccd`, `rtk proxy cargo test -p picea --lib pipeline::gjk`, `rtk proxy cargo test -p picea --lib pipeline::narrowphase`, `rtk proxy cargo test -p picea --test physics_realism_acceptance ccd`, `rtk proxy cargo test -p picea --lib --tests` |
-| `query` | `QueryPipeline`、`QueryFilter`、`AabbHit`、`PointHit`、`RayHit`。 | 不直接修改 authoritative world state。 | `query.rs` | `rtk proxy cargo test -p picea --test world_step_review_regressions`, `rtk proxy cargo test -p picea --lib --tests` |
-| `recipe` | `BodyBundle`、`ColliderBundle`、`JointBundle`、`WorldRecipe::with_joint`、transactional `WorldCommands`、material/collision-layer presets、M9 Criterion API setup helpers。 | 不改低层 `World::create_body` / `World::create_collider` / `World::create_joint` 语义，不承载 solver 或 pipeline behavior。 | `recipe.rs`, `benches/physics_scenarios.rs` | `rtk proxy cargo test -p picea --test v1_api_smoke`, `rtk proxy cargo test -p picea --test core_model_world`, `rtk proxy cargo bench -p picea --no-run` |
+| `pipeline` | `SimulationPipeline`、`StepConfig`、`StepReport`、`StepContext` transient step facts、broadphase/narrowphase contact gathering、M11 broadphase leaf lookup substrate、M15 query/cache/pre-sizing performance data path、内部 GJK/EPA generic convex fallback、M13 staged dynamic-vs-static convex CCD pose-clamping phase。 | 不拥有 world 持久状态；不暴露 public distance-query API；不承载最终 contact/joint solver row math。 | `pipeline.rs`, `pipeline/step.rs`, `pipeline/integrate.rs`, `pipeline/contacts.rs`, `pipeline/broadphase.rs`, `pipeline/narrowphase.rs`, `pipeline/gjk.rs`, `pipeline/ccd.rs`, `pipeline/joints.rs`, `pipeline/sleep.rs` | `rtk proxy cargo test -p picea --lib pipeline::broadphase`, `rtk proxy cargo test -p picea --lib pipeline::ccd`, `rtk proxy cargo test -p picea --lib pipeline::gjk`, `rtk proxy cargo test -p picea --lib pipeline::narrowphase`, `rtk proxy cargo test -p picea --test physics_realism_acceptance ccd`, `rtk proxy cargo test -p picea --lib --tests` |
+| `query` | `QueryPipeline`、`QueryFilter`、`AabbHit`、`PointHit`、`RayHit`；M15 已通过内部 broadphase-style index 做 AABB/point/ray 候选复用，同时保持 public hit ordering/filter semantics。 | 不直接修改 authoritative world state，不暴露 broadphase proxy/leaf id。 | `query.rs` | `rtk proxy cargo test -p picea --test query_debug_contract`, `rtk proxy cargo test -p picea --test world_step_review_regressions`, `rtk proxy cargo test -p picea --lib --tests` |
+| `recipe` | `BodyBundle`、`ColliderBundle`、`JointBundle`、`WorldRecipe::with_joint`、transactional `WorldCommands`、material/collision-layer presets、M14 scene/asset recipe helpers、serializable fixture setup。 | 不改低层 `World::create_body` / `World::create_collider` / `World::create_joint` 语义，不承载 solver 或 pipeline behavior。 | `recipe.rs`, `benches/physics_scenarios.rs` | `rtk proxy cargo test -p picea --test v1_api_smoke`, `rtk proxy cargo test -p picea --test core_model_world`, `rtk proxy cargo bench -p picea --no-run` |
 | `world` | `World` 状态、lifecycle API、runtime retained facts、error/store/contact state。 | 不承载低层数学兼容或消费者壳。 | `world.rs`, `world/api.rs`, `world/store.rs`, `world/runtime.rs`, `world/error.rs`, `world/contact_state.rs` | `rtk proxy cargo test -p picea --test core_model_world`, `rtk proxy cargo test -p picea --test world_step_review_regressions` |
 
 ### `crates/picea/src/solver/*` (internal)
 - owns：当前 `World` + `SimulationPipeline` 路径内部求解辅助实现。
 - does_not_own：不作为 public crate-root surface 暴露，不承担路由入口职责。
 - entrypoints：`solver/mod.rs`、`solver/body_state.rs`、`solver/contact.rs`。
-- notes：M10 后 contact solver rows、effective mass、warm-start impulse application、velocity writeback、residual contact correction 都在 `solver/contact.rs`；`pipeline/contacts.rs` 保留 gather / warm-start / emit。
+- notes：M10 后 contact solver rows、effective mass、warm-start impulse application、velocity writeback、residual contact correction 都在 `solver/contact.rs`；M12 的 active-island batching 已在 contact/joint solve 路径验收完成，但 `pipeline/contacts.rs` 仍保留 gather / warm-start / emit。更 dense 的 island-local execution 属于 Post-M14 follow-up。
 - tests：跟随 `rtk proxy cargo test -p picea --lib --tests`。
 
 ## `crates/picea-lab`
@@ -57,11 +64,11 @@
 
 | Module | Owns | Does Not Own | Entry Points | Tests |
 | --- | --- | --- | --- | --- |
-| `scenario` | 内置 deterministic 场景、reset-time overrides、`RunConfig`；M8 `ccd_fast_circle_wall` 用 no-gravity/no-sleep fast circle vs thin wall 生成 CCD evidence。 | 不读写 artifacts，不持有 live session 状态，不自行运行物理逻辑。 | `crates/picea-lab/src/scenario.rs` | `rtk proxy cargo test -p picea-lab` |
+| `scenario` | 内置 deterministic 场景、reset-time overrides、`RunConfig`；包含 M13 `ccd_fast_circle_wall` / `ccd_fast_convex_walls` CCD evidence，以及 M14 serializable fixture recipe 场景入口。 | 不读写 artifacts，不持有 live session 状态，不自行运行物理逻辑。 | `crates/picea-lab/src/scenario.rs` | `rtk proxy cargo test -p picea-lab` |
 | `artifact` | headless runner、`manifest.json` / `frames.jsonl` / `debug_render.json` / `final_snapshot.json` / `perf.json` 写入；`frames.jsonl` 与 `final_snapshot.json` 保留 core `StepStats` / `DebugStats` CCD counters 和 contact `ccd_trace`。 | 不直接服务 HTTP，不把 target 路径暴露给 UI，不从 lab 侧重新计算 CCD。 | `crates/picea-lab/src/artifact.rs` | `rtk proxy cargo test -p picea-lab --test artifact_run` |
 | `server` | 本地 HTTP + SSE protocol、session 状态、artifact 下载；session 明确暴露 `manifest.json` / `final_snapshot.json` replay provenance，empty SSE 使用 idle event 而不是 failed。 | 不热改正在积分的 world；reset 通过 runner 重建；不把空事件队列当成模拟失败。 | `crates/picea-lab/src/server.rs` | `rtk proxy cargo test -p picea-lab --test server_routes` |
 | `cli` | `picea-lab list`、`run`、`serve` 命令。 | 不拥有 artifact schema 或 scenario 构建细节。 | `crates/picea-lab/src/cli.rs`, `main.rs` | `rtk proxy cargo test -p picea-lab` |
-| `web` | React + Canvas 2D replay workbench, hierarchy, inspector, timeline, overlays；joint rows are selectable, server/demo labels distinguish Rust replay from demo replay, and M8 contact inspector shows CCD trace facts. | 不运行 physics，不替代 Rust artifact schema，不承诺真正 live simulator 语义。 | `crates/picea-lab/web/src/*` | `npm run build` from `crates/picea-lab/web`; `npm run test:ui-contract`; `npm run test:i18n` |
+| `web` | React + Canvas 2D replay workbench, hierarchy, inspector, timeline, overlays；joint rows are selectable, server/demo labels distinguish Rust replay from demo replay, and the contact inspector shows staged M13 CCD trace facts plus M14 fixture-backed replay provenance. | 不运行 physics，不替代 Rust artifact schema，不承诺真正 live simulator 语义。 | `crates/picea-lab/web/src/*` | `npm run build` from `crates/picea-lab/web`; `npm run test:ui-contract`; `npm run test:i18n` |
 
 ## `crates/macro-tools`
 
@@ -76,6 +83,6 @@
 
 - `docs/ai/index.md`：问题类型路由
 - `docs/ai/doc-catalog.yaml`：文档和关键代码索引
-- `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`：当前生产化 milestone 边界、M11-M14 路线和验收门
-- `docs/design/physics-engine-upgrade-technical-plan.md`：post-M10 系统升级设计方向
+- `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`：当前生产化 milestone 边界、M11-M15 完成状态和 Post-M15/Post-M14 follow-up
+- `docs/design/physics-engine-upgrade-technical-plan.md`：Post-M14 / M15 系统升级设计方向
 - `docs/plans/2026-04-18-picea-physics-engine-milestones.md`：历史归档；不要把旧 `Scene` / `Context` / `picea-web` / wasm 条目当作当前默认路由

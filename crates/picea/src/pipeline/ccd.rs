@@ -39,6 +39,8 @@ struct CcdColliderSnapshot {
     start_pose: Pose,
     end_pose: Pose,
     aabb: ShapeAabb,
+    start_convex_vertices: Option<Vec<Point>>,
+    end_convex_vertices: Option<Vec<Point>>,
     filter: CollisionFilter,
     is_sensor: bool,
 }
@@ -95,20 +97,27 @@ pub(crate) fn run_pose_clamp_phase(
     previous_body_poses: &BTreeMap<BodyHandle, Pose>,
 ) -> CcdPoseClampOutcome {
     let snapshots = collect_snapshots(world, previous_body_poses);
-    let moving_circles = snapshots
-        .iter()
-        .filter_map(moving_circle)
-        .collect::<Vec<_>>();
-    let moving_convexes = snapshots
-        .iter()
-        .filter_map(moving_convex)
-        .collect::<Vec<_>>();
-    let static_convexes = snapshots
-        .iter()
-        .filter_map(static_convex)
-        .collect::<Vec<_>>();
+    let mut moving_circles = Vec::with_capacity(snapshots.len());
+    let mut moving_convexes = Vec::with_capacity(snapshots.len());
+    let mut static_convexes = Vec::with_capacity(snapshots.len());
+    for snapshot in &snapshots {
+        if let Some(moving) = moving_circle(snapshot) {
+            moving_circles.push(moving);
+        }
+        if let Some(moving) = moving_convex(snapshot) {
+            moving_convexes.push(moving);
+        }
+        if let Some(target) = static_convex(snapshot) {
+            static_convexes.push(target);
+        }
+    }
     let mut stats = CcdPoseClampStats::default();
-    let mut hits = Vec::new();
+    let mut hits = Vec::with_capacity(
+        moving_circles
+            .len()
+            .saturating_mul(static_convexes.len())
+            .saturating_add(moving_convexes.len().saturating_mul(static_convexes.len())),
+    );
 
     for moving in &moving_circles {
         if moving.is_sensor {
@@ -210,6 +219,12 @@ fn collect_snapshots(
                 .unwrap_or(body.pose);
             let start_pose = start_body_pose.compose(collider.local_pose);
             let end_pose = body.pose.compose(collider.local_pose);
+            let end_geometry = collider.derived_geometry(body.pose);
+            let start_convex_vertices = if start_body_pose == body.pose {
+                end_geometry.convex_vertices.clone()
+            } else {
+                collider.convex_world_vertices(start_body_pose)
+            };
             Some(CcdColliderSnapshot {
                 handle,
                 body: collider.body,
@@ -217,7 +232,9 @@ fn collect_snapshots(
                 shape: collider.shape.clone(),
                 start_pose,
                 end_pose,
-                aabb: collider.shape.aabb(end_pose),
+                aabb: end_geometry.aabb,
+                start_convex_vertices,
+                end_convex_vertices: end_geometry.convex_vertices,
                 filter: collider.filter,
                 is_sensor: collider.is_sensor,
             })
@@ -265,8 +282,16 @@ fn moving_convex(snapshot: &CcdColliderSnapshot) -> Option<MovingConvex> {
     if (snapshot.start_pose.angle() - snapshot.end_pose.angle()).abs() > CCD_TOI_EPSILON {
         return None;
     }
-    let start_vertices = convex_shape_vertices(&snapshot.shape, snapshot.start_pose)?;
-    let end_vertices = convex_shape_vertices(&snapshot.shape, snapshot.end_pose)?;
+    let start_vertices = convex_shape_vertices(
+        &snapshot.shape,
+        snapshot.start_pose,
+        snapshot.start_convex_vertices.as_deref(),
+    )?;
+    let end_vertices = convex_shape_vertices(
+        &snapshot.shape,
+        snapshot.end_pose,
+        snapshot.end_convex_vertices.as_deref(),
+    )?;
     if start_vertices
         .iter()
         .chain(end_vertices.iter())
@@ -301,7 +326,11 @@ fn static_convex(snapshot: &CcdColliderSnapshot) -> Option<StaticConvex> {
     if snapshot.body_type != BodyType::Static {
         return None;
     }
-    let vertices = convex_shape_vertices(&snapshot.shape, snapshot.end_pose)?;
+    let vertices = convex_shape_vertices(
+        &snapshot.shape,
+        snapshot.end_pose,
+        snapshot.end_convex_vertices.as_deref(),
+    )?;
     if vertices.len() < 3
         || vertices
             .iter()
@@ -320,11 +349,19 @@ fn static_convex(snapshot: &CcdColliderSnapshot) -> Option<StaticConvex> {
     })
 }
 
-fn convex_shape_vertices(shape: &SharedShape, pose: Pose) -> Option<Vec<Point>> {
+fn convex_shape_vertices(
+    shape: &SharedShape,
+    pose: Pose,
+    cached_vertices: Option<&[Point]>,
+) -> Option<Vec<Point>> {
     match shape {
         SharedShape::Rect { .. }
         | SharedShape::RegularPolygon { .. }
-        | SharedShape::ConvexPolygon { .. } => Some(shape.world_vertices(pose)),
+        | SharedShape::ConvexPolygon { .. } => Some(
+            cached_vertices
+                .map(|vertices| vertices.to_vec())
+                .unwrap_or_else(|| shape.world_vertices(pose)),
+        ),
         _ => None,
     }
 }

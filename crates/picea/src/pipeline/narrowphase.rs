@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use std::cmp::Ordering;
 
 use crate::{
@@ -28,6 +30,7 @@ pub(crate) struct ContactManifoldGeometry {
     pub(crate) generic_convex_trace: Option<GenericConvexTrace>,
 }
 
+#[allow(dead_code)]
 pub(crate) fn contact_from_shapes(
     shape_a: &SharedShape,
     pose_a: Pose,
@@ -35,6 +38,21 @@ pub(crate) fn contact_from_shapes(
     shape_b: &SharedShape,
     pose_b: Pose,
     aabb_b: ShapeAabb,
+) -> Option<ContactManifoldGeometry> {
+    contact_from_shapes_with_cached_vertices(
+        shape_a, pose_a, aabb_a, None, shape_b, pose_b, aabb_b, None,
+    )
+}
+
+pub(crate) fn contact_from_shapes_with_cached_vertices(
+    shape_a: &SharedShape,
+    pose_a: Pose,
+    aabb_a: ShapeAabb,
+    cached_vertices_a: Option<&[Point]>,
+    shape_b: &SharedShape,
+    pose_b: Pose,
+    aabb_b: ShapeAabb,
+    cached_vertices_b: Option<&[Point]>,
 ) -> Option<ContactManifoldGeometry> {
     match (shape_a, shape_b) {
         (SharedShape::Circle { radius: radius_a }, SharedShape::Circle { radius: radius_b }) => {
@@ -58,37 +76,56 @@ pub(crate) fn contact_from_shapes(
                 true,
             )
         }
-        (SharedShape::Circle { radius }, _) if convex_vertices(shape_b, pose_b).is_some() => {
+        (SharedShape::Circle { radius }, _)
+            if convex_vertices(shape_b, pose_b, cached_vertices_b).is_some() =>
+        {
             contact_from_circle_polygon(
                 pose_a.point(),
                 *radius,
-                &convex_vertices(shape_b, pose_b)?,
+                convex_vertices(shape_b, pose_b, cached_vertices_b)?.as_ref(),
                 false,
             )
         }
-        (_, SharedShape::Circle { radius }) if convex_vertices(shape_a, pose_a).is_some() => {
+        (_, SharedShape::Circle { radius })
+            if convex_vertices(shape_a, pose_a, cached_vertices_a).is_some() =>
+        {
             contact_from_circle_polygon(
                 pose_b.point(),
                 *radius,
-                &convex_vertices(shape_a, pose_a)?,
+                convex_vertices(shape_a, pose_a, cached_vertices_a)?.as_ref(),
                 true,
             )
         }
-        _ if should_try_generic_convex(shape_a, pose_a, shape_b, pose_b) => {
-            generic_convex_contact(shape_a, pose_a, shape_b, pose_b)
+        _ if should_try_generic_convex(
+            shape_a,
+            pose_a,
+            cached_vertices_a,
+            shape_b,
+            pose_b,
+            cached_vertices_b,
+        ) =>
+        {
+            generic_convex_contact(
+                shape_a,
+                pose_a,
+                cached_vertices_a,
+                shape_b,
+                pose_b,
+                cached_vertices_b,
+            )
         }
         _ => {
-            let Some(poly_a) = convex_vertices(shape_a, pose_a) else {
+            let Some(poly_a) = convex_vertices(shape_a, pose_a, cached_vertices_a) else {
                 // M2 only owns convex SAT. Concave polygons need decomposition
                 // before they can enter the generic convex fallback, so keep the
                 // legacy fallback explicit instead of pretending they have convex
                 // feature ids.
                 return overlap_from_aabbs(aabb_a, aabb_b, ContactReductionReason::NonM2Fallback);
             };
-            let Some(poly_b) = convex_vertices(shape_b, pose_b) else {
+            let Some(poly_b) = convex_vertices(shape_b, pose_b, cached_vertices_b) else {
                 return overlap_from_aabbs(aabb_a, aabb_b, ContactReductionReason::NonM2Fallback);
             };
-            contact_from_convex_polygons(&poly_a, &poly_b)
+            contact_from_convex_polygons(poly_a.as_ref(), poly_b.as_ref())
         }
     }
 }
@@ -347,31 +384,42 @@ fn single_point_manifold(
 fn should_try_generic_convex(
     shape_a: &SharedShape,
     pose_a: Pose,
+    cached_vertices_a: Option<&[Point]>,
     shape_b: &SharedShape,
     pose_b: Pose,
+    cached_vertices_b: Option<&[Point]>,
 ) -> bool {
     // SAT/clipping remains primary for polygonal area shapes because it
     // produces stable 1-2 point manifolds with feature ids. GJK/EPA is only the
     // fallback for convex support-mapped pairs that do not have a better local
     // narrowphase path, such as segment-vs-polygon.
-    let sat_ready =
-        convex_vertices(shape_a, pose_a).is_some() && convex_vertices(shape_b, pose_b).is_some();
+    let sat_ready = convex_vertices(shape_a, pose_a, cached_vertices_a).is_some()
+        && convex_vertices(shape_b, pose_b, cached_vertices_b).is_some();
     !sat_ready
         && shape_a
-            .support_point(pose_a, Vector::new(1.0, 0.0))
+            .support_point_with_cached_vertices(pose_a, Vector::new(1.0, 0.0), cached_vertices_a)
             .is_some()
         && shape_b
-            .support_point(pose_b, Vector::new(1.0, 0.0))
+            .support_point_with_cached_vertices(pose_b, Vector::new(1.0, 0.0), cached_vertices_b)
             .is_some()
 }
 
 fn generic_convex_contact(
     shape_a: &SharedShape,
     pose_a: Pose,
+    cached_vertices_a: Option<&[Point]>,
     shape_b: &SharedShape,
     pose_b: Pose,
+    cached_vertices_b: Option<&[Point]>,
 ) -> Option<ContactManifoldGeometry> {
-    let contact = gjk::generic_convex_contact(shape_a, pose_a, shape_b, pose_b)?;
+    let contact = gjk::generic_convex_contact_with_cached_vertices(
+        shape_a,
+        pose_a,
+        cached_vertices_a,
+        shape_b,
+        pose_b,
+        cached_vertices_b,
+    )?;
     Some(ContactManifoldGeometry {
         normal: contact.normal,
         depth: contact.depth,
@@ -650,11 +698,18 @@ fn reduce_contact_points(
     (reduced, reason)
 }
 
-fn convex_vertices(shape: &SharedShape, pose: Pose) -> Option<Vec<Point>> {
+fn convex_vertices<'a>(
+    shape: &SharedShape,
+    pose: Pose,
+    cached_vertices: Option<&'a [Point]>,
+) -> Option<Cow<'a, [Point]>> {
     match shape {
         SharedShape::Rect { .. }
         | SharedShape::RegularPolygon { .. }
-        | SharedShape::ConvexPolygon { .. } => Some(shape.world_vertices(pose)),
+        | SharedShape::ConvexPolygon { .. } => Some(match cached_vertices {
+            Some(vertices) => Cow::Borrowed(vertices),
+            None => Cow::Owned(shape.world_vertices(pose)),
+        }),
         _ => None,
     }
 }
@@ -823,8 +878,8 @@ fn stabilize_normal(normal: Vector) -> Vector {
 #[cfg(test)]
 mod tests {
     use super::{
-        contact_from_shapes, feature_id, overlap_from_aabbs, reduce_contact_points,
-        ContactPointGeometry,
+        contact_from_shapes, contact_from_shapes_with_cached_vertices, feature_id,
+        overlap_from_aabbs, reduce_contact_points, ContactPointGeometry,
     };
     use crate::{
         body::Pose,
@@ -1103,6 +1158,31 @@ mod tests {
         assert!(trace.gjk_iterations > 0);
         assert!(trace.simplex_len > 0);
         assert_eq!(contact.points[0].feature_id, feature_id(6, 5, 1, 0));
+    }
+
+    #[test]
+    fn generic_convex_fallback_honors_cached_convex_vertices_for_support_map() {
+        let segment = SharedShape::segment(Point::new(-1.0, 0.0), Point::new(1.0, 0.0));
+        let rect = SharedShape::rect(1.0, 1.0);
+        let cached_rect_vertices = rect.world_vertices(Pose::from_xy_angle(0.25, 0.0, 0.0));
+
+        let contact = contact_from_shapes_with_cached_vertices(
+            &segment,
+            Pose::default(),
+            aabb(-1.0, 0.0, 1.0, 0.0),
+            None,
+            &rect,
+            Pose::from_xy_angle(100.0, 0.0, 0.0),
+            aabb(-0.25, -0.5, 0.75, 0.5),
+            Some(&cached_rect_vertices),
+        )
+        .expect("generic fallback should use cached world vertices for support points");
+
+        assert_eq!(
+            contact.reduction_reason,
+            ContactReductionReason::GenericConvexFallback
+        );
+        assert!(contact.generic_convex_trace.is_some());
     }
 
     #[test]

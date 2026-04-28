@@ -1,5 +1,7 @@
 //! Stable collider descriptors and shape wrappers for the v1 world API.
 
+use std::sync::{RwLock, RwLockWriteGuard};
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -206,7 +208,19 @@ impl SharedShape {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn support_point(&self, pose: Pose, direction: Vector) -> Option<Point> {
+        self.support_point_with_cached_vertices(pose, direction, None)
+    }
+
+    pub(crate) fn support_point_with_cached_vertices(
+        &self,
+        pose: Pose,
+        direction: Vector,
+        cached_vertices: Option<&[Point]>,
+    ) -> Option<Point> {
+        // Cached vertices are already resolved in world space; callers own the
+        // revision/pose check before passing them in.
         if !direction.x().is_finite() || !direction.y().is_finite() {
             return None;
         }
@@ -222,12 +236,15 @@ impl SharedShape {
                 point_is_finite(point).then_some(point)
             }
             Self::Rect { .. } | Self::RegularPolygon { .. } | Self::ConvexPolygon { .. } => {
-                support_from_points(self.world_vertices(pose), direction)
+                match cached_vertices {
+                    Some(vertices) => support_from_points(vertices.iter().copied(), direction),
+                    None => support_from_points(self.world_vertices(pose), direction),
+                }
             }
             // A segment has a valid support map for distance/intersection tests,
             // but it may still be too degenerate for EPA to produce an area face.
             Self::Segment { start, end } => support_from_points(
-                vec![pose.transform_point(*start), pose.transform_point(*end)],
+                [pose.transform_point(*start), pose.transform_point(*end)],
                 direction,
             ),
             // Concave polygons need decomposition first. Treating the full loop
@@ -373,7 +390,10 @@ impl SharedShape {
     }
 }
 
-fn support_from_points(points: Vec<Point>, direction: Vector) -> Option<Point> {
+fn support_from_points(
+    points: impl IntoIterator<Item = Point>,
+    direction: Vector,
+) -> Option<Point> {
     points
         .into_iter()
         .filter(|point| point_is_finite(*point))
@@ -699,6 +719,12 @@ impl ShapeAabb {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct DerivedGeometry {
+    pub(crate) aabb: ShapeAabb,
+    pub(crate) convex_vertices: Option<Vec<Point>>,
+}
+
+#[derive(Debug)]
 pub(crate) struct ColliderRecord {
     pub(crate) body: BodyHandle,
     pub(crate) shape: SharedShape,
@@ -708,6 +734,8 @@ pub(crate) struct ColliderRecord {
     pub(crate) filter: CollisionFilter,
     pub(crate) is_sensor: bool,
     pub(crate) user_data: u64,
+    geometry_revision: u32,
+    geometry_cache: RwLock<DerivedGeometryCache>,
 }
 
 impl ColliderRecord {
@@ -721,10 +749,13 @@ impl ColliderRecord {
             filter: desc.filter,
             is_sensor: desc.is_sensor,
             user_data: desc.user_data,
+            geometry_revision: 0,
+            geometry_cache: RwLock::new(DerivedGeometryCache::default()),
         }
     }
 
     pub(crate) fn apply_patch(&mut self, patch: ColliderPatch) {
+        let geometry_changed = patch.shape.is_some() || patch.local_pose.is_some();
         if let Some(shape) = patch.shape {
             self.shape = shape;
         }
@@ -746,6 +777,10 @@ impl ColliderRecord {
         if let Some(user_data) = patch.user_data {
             self.user_data = user_data;
         }
+        if geometry_changed {
+            self.geometry_revision = self.geometry_revision.wrapping_add(1);
+            *self.geometry_cache_write() = DerivedGeometryCache::default();
+        }
     }
 
     pub(crate) fn world_pose(&self, body_pose: Pose) -> Pose {
@@ -766,6 +801,105 @@ impl ColliderRecord {
             user_data: self.user_data,
         }
     }
+
+    pub(crate) fn convex_world_vertices(&self, body_pose: Pose) -> Option<Vec<Point>> {
+        self.derived_geometry(body_pose).convex_vertices
+    }
+
+    pub(crate) fn derived_geometry(&self, body_pose: Pose) -> DerivedGeometry {
+        let world_pose = self.world_pose(body_pose);
+        {
+            let cache = self
+                .geometry_cache
+                .read()
+                .expect("collider geometry cache lock should not be poisoned");
+            if cache.is_fresh(self.geometry_revision, world_pose) {
+                return cache.derived_geometry(&self.shape, world_pose);
+            }
+        }
+
+        let mut cache = self.geometry_cache_write();
+        if cache.is_fresh(self.geometry_revision, world_pose) {
+            return cache.derived_geometry(&self.shape, world_pose);
+        }
+
+        let world_vertices = match self.shape {
+            SharedShape::Circle { .. } => None,
+            _ => Some(self.shape.world_vertices(world_pose)),
+        };
+        let aabb = match &world_vertices {
+            Some(vertices) => ShapeAabb::from_points(vertices.clone()),
+            None => self.shape.aabb(world_pose),
+        };
+
+        cache.revision = self.geometry_revision;
+        cache.world_pose = Some(world_pose);
+        cache.aabb = Some(aabb);
+        cache.world_vertices = world_vertices;
+        cache.derived_geometry(&self.shape, world_pose)
+    }
+
+    fn geometry_cache_write(&self) -> RwLockWriteGuard<'_, DerivedGeometryCache> {
+        self.geometry_cache
+            .write()
+            .expect("collider geometry cache lock should not be poisoned")
+    }
+}
+
+impl Clone for ColliderRecord {
+    fn clone(&self) -> Self {
+        // Derived geometry is an optimization, not authoritative state. Reset it
+        // across clones so transactional scratch worlds rebuild from their own
+        // body poses and collider edits.
+        Self {
+            body: self.body,
+            shape: self.shape.clone(),
+            local_pose: self.local_pose,
+            density: self.density,
+            material: self.material,
+            filter: self.filter,
+            is_sensor: self.is_sensor,
+            user_data: self.user_data,
+            geometry_revision: self.geometry_revision,
+            geometry_cache: RwLock::new(DerivedGeometryCache::default()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct DerivedGeometryCache {
+    revision: u32,
+    world_pose: Option<Pose>,
+    aabb: Option<ShapeAabb>,
+    world_vertices: Option<Vec<Point>>,
+}
+
+impl DerivedGeometryCache {
+    fn is_fresh(&self, revision: u32, world_pose: Pose) -> bool {
+        self.world_pose == Some(world_pose) && self.revision == revision && self.aabb.is_some()
+    }
+
+    fn derived_geometry(&self, shape: &SharedShape, world_pose: Pose) -> DerivedGeometry {
+        let aabb = self.aabb.unwrap_or_else(|| shape.aabb(world_pose));
+        let convex_vertices = if is_convex_vertex_shape(shape) {
+            self.world_vertices.clone()
+        } else {
+            None
+        };
+        DerivedGeometry {
+            aabb,
+            convex_vertices,
+        }
+    }
+}
+
+fn is_convex_vertex_shape(shape: &SharedShape) -> bool {
+    matches!(
+        shape,
+        SharedShape::Rect { .. }
+            | SharedShape::RegularPolygon { .. }
+            | SharedShape::ConvexPolygon { .. }
+    )
 }
 
 #[allow(dead_code)]

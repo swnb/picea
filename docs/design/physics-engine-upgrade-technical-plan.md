@@ -13,33 +13,39 @@ Picea should not try to win by being a smaller clone of Box2D or Rapier. The use
 
 The bias is ease of use first, with performance designed into the internal layout instead of patched on through hidden global state.
 
-## Post-M10 Baseline And Remaining Gap
+## Post-M14 Baseline And Remaining Gap
 
-The first production line has moved Picea past the "missing core algorithms"
+The current production line has moved Picea past the "missing core algorithms"
 stage. Current `World` + `SimulationPipeline` already has persistent broadphase
 proxies, SAT + clipping manifolds, mass/inertia facts, warm-started sequential
-impulses, island sleep/wake reasons, GJK/EPA fallback, a narrow CCD
-pose-clamping phase, recipe APIs, debug facts, lab artifacts, and Criterion
-baseline benches.
+impulses, island sleep/wake reasons, GJK/EPA fallback, active-island batching
+for contact/joint rows, a dynamic-vs-static convex CCD pose-clamping phase with
+multi-hit ordering/budget traces, scene/asset recipe helpers, nested recipe
+error paths, serializable lab fixture flows, debug facts, lab artifacts, and
+Criterion baseline benches.
 
 The remaining gap to top production 2D engines is now system quality:
 
-- broadphase is production-shaped but still needs a hotter internal data path:
-  handle-to-leaf indexing, tree query reuse, stronger insertion/balancing
-  heuristics, and fewer per-step temporary collections;
+- broadphase now has direct collider-handle to leaf lookup, but still needs tree
+  query reuse, stronger insertion/balancing heuristics, and fewer per-step
+  temporary collections;
 - queries are stable and easy to use, but still rebuild from debug snapshots and
   scan cached colliders rather than reusing an indexed spatial structure;
-- the contact solver has the right sequential impulse model, but not yet an
-  active-island compact-array execution path for contacts and joints;
-- CCD covers the first important dynamic-circle vs static-convex slice, but not
-  dynamic-vs-dynamic motion, generic shape casts, or multi-impact advancement;
-- shape geometry and support data are recomputed in several hot paths instead
-  of being cached behind transform revision;
-- public authoring is much better through recipes, but still lacks a higher
-  level scene/asset layer and richer error paths for complex setup flows.
+- the contact solver now batches active-island contact and joint rows and keeps
+  sleeping islands out of hot solver arrays, but contact and joint phases are
+  still separate and multithreaded solving remains out of scope;
+- CCD now covers the first staged dynamic-vs-static convex slice for
+  rectangles, regular polygons, and convex polygons with multi-hit ordering and
+  budget traces, but not rotational casts, dynamic-vs-dynamic motion, or
+  all-shape coverage;
+- shape geometry and support data are still recomputed in several hot paths
+  instead of being cached behind transform revision;
+- public authoring now has scene/asset recipe helpers, nested path context, and
+  serializable lab fixture flows, but live lab editing and full public schema
+  stabilization remain outside the landed slice.
 
-This means the next upgrades should optimize the system around the algorithms
-that now exist, not immediately chase a broad new algorithm surface.
+This means the next upgrade line should optimize and deepen the system around
+the accepted M11-M14 capabilities, not treat those milestones as still open.
 
 ## Broadphase Decision
 
@@ -58,8 +64,9 @@ Tradeoff:
   broadphase proxy IDs.
 - The persistent tree now uses fat AABBs, incremental moves, stale cleanup,
   deterministic rebuild/compaction, step/debug metrics, and benchmark
-  scenarios. The next step is performance substrate work: direct handle-to-leaf
-  lookup, query reuse, and better balancing/insertion heuristics.
+  scenarios. The first performance-substrate slice added direct
+  handle-to-leaf lookup; the next broadphase work is query reuse and better
+  balancing/insertion heuristics.
 
 Sources:
 
@@ -104,10 +111,14 @@ This is the path to stable stacks. A single position correction point can pass t
 The first solver goal has landed: Picea now uses a warm-started sequential
 impulse contact solver with effective mass, inverse inertia, Coulomb friction,
 restitution thresholding, velocity iterations, and residual position correction.
-The next solver goal is active-island execution:
+The accepted M12 slice has also landed: contacts and joints are batched by
+active island and sleeping islands stay out of hot solver rows. The remaining
+solver deepening work is denser island-local execution:
 
-- build compact per-island body/contact/joint arrays for the active solve;
-- solve contacts and joints through the same island ordering contract;
+- replace the current map/set-heavy batching with compact per-island
+  body/contact/joint arrays for the active solve;
+- move contact and joint solving closer to one island-owned ordering contract
+  while preserving the current separate-phase behavior until it is proven safe;
 - preserve stable public handles while keeping hot solver state dense;
 - keep warm-start and debug facts attached to stable contact ids;
 - keep residual position correction from overwriting solved velocity facts.
@@ -141,14 +152,15 @@ Source:
 
 ## CCD Plan
 
-The first CCD slice exists as a clearly named pose-clamping phase. It handles
-dynamic circles against static thin walls / static convex geometry, emits
-`ccd_trace`, and feeds the normal contact path after clamping. The next CCD work
-should generalize carefully:
+CCD exists as a clearly named pose-clamping phase. It handles dynamic circles
+and the accepted translational dynamic-convex vs static-convex slice, emits
+`ccd_trace`, and feeds the normal contact path after clamping. The next CCD
+work should broaden that staged model carefully:
 
 - opt in per body or per collider first, then add automatic fast-body heuristics;
 - generate swept AABBs in broadphase;
-- use time of impact for circle/segment, circle/polygon, and convex fallback;
+- use time of impact for more shape pairs, rotational casts, and eventual
+  conservative-advancement fallback;
 - advance to the earliest impact, clamp to a small slop before contact, then resolve through the normal solver;
 - keep CCD event semantics explicit because hit/contact events may be delayed or split across substeps.
 
@@ -174,9 +186,10 @@ The public API should be easier than traditional engine APIs where historical la
 
 The advantage over copying Box2D/Rapier surface APIs is that Picea can design
 around modern Rust data ownership and reproducible debugging from the start.
-The next ergonomic layer should be additive: scene/asset recipes, better nested
-error context, and serializable setup flows without weakening the low-level
-`World` contract.
+The accepted M14 ergonomic layer is additive: scene/asset recipes, better
+nested error context, and serializable setup flows are in place for the current
+milestone line. Future work should stabilize the public scene schema and
+broaden authoring coverage without weakening the low-level `World` contract.
 
 ## Performance Direction
 
@@ -190,7 +203,8 @@ flow rather than micro-optimizing isolated helpers:
 - separate hot simulation arrays from user metadata;
 - compact active islands while leaving stable public handles intact;
 - cache shape support data and world-space vertices when transforms change;
-- avoid per-step allocations in contact generation and event refresh;
+- reduce repeated geometry rebuilding and add conservative pre-sizing where the
+  current counters or behavior locks justify it;
 - keep scenario benchmarks for sparse broadphase, dense broadphase, stacked contacts, CCD bullets, and large batch creation;
 - add thresholds only after several local baselines make variance and expected
   counter shapes clear.
@@ -199,14 +213,45 @@ flow rather than micro-optimizing isolated helpers:
 
 1. M10.5 closeout (completed 2026-04-27): make docs, backlog, and verification
    routing agree that the M1-M10 capability line is complete.
-2. M11 performance substrate: broadphase leaf indexing, query reuse, shape
-   geometry caches, allocation reduction, and benchmark counter baselines.
-3. M12 active island solver: compact active arrays, island-level contact/joint
-   solve, warm-start preservation, and debug fact continuity.
-4. M13 CCD generalization: dynamic-vs-static shape casts, conservative
-   advancement, multi-impact budgeting, and trace semantics.
-5. M14 ergonomic API v2: higher-level scene/asset recipes, serializable setup,
-   and richer command error context.
+2. M11 performance substrate (completed 2026-04-27): the accepted scope is
+   direct broadphase leaf lookup as the performance substrate entry point.
+3. M12 active island solver (completed 2026-04-27): the accepted scope is
+   active-island batching for contact/joint rows with sleeping islands removed
+   from hot solve rows.
+4. M13 CCD generalization (completed 2026-04-27): the accepted scope is
+   dynamic-vs-static translational convex CCD with multi-hit ordering and
+   budget traces.
+5. M14 ergonomic API v2 (completed 2026-04-27): the accepted scope is
+   scene/asset recipe helpers, nested error paths, and serializable lab
+   fixture flows with `v1_api_smoke` and lab fixture acceptance.
+6. M15 performance data path (completed 2026-04-27): `QueryPipeline` reuses an
+   internal broadphase-style spatial index, collider-derived AABBs and convex
+   world vertices are cached behind transform/revision keys, and contact/CCD/GJK
+   paths now reduce repeated geometry rebuilding with conservative pre-sizing
+   where behavior locks make it visible.
+
+## Post-M14 Deepening
+
+The next line is no longer "finish M11-M14". M15 Performance Data Path has now
+landed as the first concrete follow-up:
+
+- `QueryPipeline` now reuses an internal spatial index for semantic-match query
+  candidates without exposing broadphase proxy or leaf implementation details;
+- collider-derived geometry now uses transform/revision-backed AABB and convex
+  world-vertex caches that contact, CCD, generic GJK/EPA fallback, and query
+  paths can safely share;
+- query allocation/perf counters and deeper solver allocation work remain
+  Post-M15 and should move only with counter evidence;
+- keep Criterion as baseline evidence until variance is understood.
+
+After M15, the remaining Post-M14 deepening line is:
+
+- move active-island batching toward denser island-local execution;
+- extend CCD toward dynamic-vs-dynamic, rotational, and broader all-shape
+  coverage only when behavior locks and benchmarks justify it;
+- add focused ramp-friction coverage and other realism regressions where the
+  current accepted line is intentionally narrow;
+- stabilize the public scene schema and any future live authoring semantics.
 
 ## Capability Line Landed
 
@@ -221,9 +266,10 @@ The M1-M10 line should be treated as the first production capability baseline:
 - persistent contact identity, warm-start transfer, and a row-based sequential
   impulse contact solver;
 - deterministic island sleep/wake reasons and explicit event/debug facts;
-- narrow CCD for dynamic circle vs static convex geometry with `ccd_trace`;
+- staged CCD for dynamic circles and translational dynamic convex shapes against
+  static convex geometry with `ccd_trace`;
 - `BodyBundle`, `ColliderBundle`, `JointBundle`, `WorldRecipe`, and
-  transactional `WorldCommands`;
+  transactional `WorldCommands`, plus scene/asset recipe fixtures;
 - `picea-lab` artifact/replay evidence and Criterion baseline scenarios.
 
 The next high-risk work is not "finish the old algorithm checklist"; it is

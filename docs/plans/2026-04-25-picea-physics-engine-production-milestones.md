@@ -796,38 +796,35 @@ rtk proxy git diff --check
 
 ## M11 Performance Substrate
 
-> Status: planned.
+> Status: completed 2026-04-27.
+>
+> Completion notes: the accepted M11 scope is the direct broadphase
+> collider-handle to leaf lookup substrate. Broadphase proxy maintenance no
+> longer searches leaves linearly, and the branch keeps existing public query
+> semantics and benchmark posture unchanged.
 
 ### Goal
 
-Turn the post-M10 engine into a performance-ready system without changing public
-behavior. M11 should make hot data flow explicit: broadphase indexing, query
-reuse, shape geometry caches, and lower per-step allocation.
+Turn the post-M10 engine toward a performance-ready system without changing
+public behavior. The accepted M11 scope is the first substrate step: direct
+broadphase indexing from collider handle to tree leaf. Broader query reuse,
+shape geometry caches, and lower per-step allocation are Post-M14 deepening
+items.
 
 ### Design Goals
 
 - Add direct collider-handle to broadphase leaf lookup so proxy updates do not
   search leaves linearly.
-- Expose or reuse broadphase-style tree queries for ray/AABB/region queries
-  where semantics match the stable `QueryPipeline` contract.
-- Cache world-space vertices and support data behind transform/revision
-  invalidation instead of rebuilding `Vec<Point>` in narrowphase, CCD, and GJK
-  paths.
-- Reduce per-step `Vec` / `BTreeMap` churn in broadphase, contact gathering,
-  sleep islands, and solver setup.
-- Preserve deterministic ordering and existing debug counters while adding new
-  allocation/cache counters only when they explain behavior.
-- Keep Criterion as baseline evidence first; add thresholds only after local
-  variance is understood.
+- Preserve deterministic ordering and existing debug counters.
+- Keep public query semantics and Criterion baseline posture unchanged while
+  creating a clear substrate for later query/cache work.
 
 ### In Scope
 
 - Broadphase leaf map / proxy lookup internals.
-- Query cache acceleration that preserves current public query semantics.
-- Shape geometry/support caches for supported shapes.
-- Focused allocation reductions in step hot paths.
-- Benchmark IDs or artifact counters that explain candidate/contact/query/cache
-  work.
+- Stale/recycled handle safety for the lookup cache.
+- Focused behavior locks proving rebuilds, moves, removals, and recycled
+  handles keep the lookup valid.
 
 ### Out Of Scope
 
@@ -838,10 +835,10 @@ reuse, shape geometry caches, and lower per-step allocation.
 
 ### Acceptance Method
 
-- Add behavior locks proving query and contact ordering stay deterministic.
-- Add focused tests for stale broadphase/query/shape-cache invalidation.
-- Compare Criterion baseline IDs and counters before/after the change; treat
-  unexplained counter regressions as blockers even without absolute thresholds.
+- Add behavior locks proving direct leaf lookup tracks moves, rebuilds, stale
+  removals, and recycled handles.
+- Keep existing query/debug behavior stable.
+- Keep the Criterion bench targets buildable without introducing hard thresholds.
 
 Suggested targeted gates:
 
@@ -853,20 +850,26 @@ rtk proxy cargo bench -p picea --no-run
 
 ## M12 Active Island Solver
 
-> Status: planned.
+> Status: completed 2026-04-27.
+>
+> Completion notes: contact rows and joint rows now batch by active island, and
+> sleeping islands no longer stay in the hottest solver rows. This gives the
+> post-M10 solver an accepted island-owned execution slice while preserving
+> current warm-start facts, handles, and debug/event surfaces.
 
 ### Goal
 
-Move from a correct single-world contact solver to an island-owned solver
-execution model. The target is better stability and performance for stacks,
-friction, and jointed scenes while preserving public handles and existing debug
-facts.
+Move from a correct single-world contact solver toward an island-owned solver
+execution model. The accepted M12 scope is active-island batching for contact
+and joint rows, with sleeping islands skipped from hot solver rows while public
+handles and existing debug facts stay stable.
 
 ### Design Goals
 
-- Build compact active-island arrays for dynamic bodies, contact rows, and joint
-  rows during the step.
-- Solve contacts and joints through one deterministic island ordering contract.
+- Build deterministic active-island batches for dynamic bodies, contact rows,
+  and joint rows during the step.
+- Solve contacts and joints by island while preserving the current separate
+  contact/joint phase boundary.
 - Keep sleeping islands out of hot solver arrays unless a wake reason brings
   them back.
 - Preserve contact ids, manifold ids, warm-start facts, and sleep/wake reasons
@@ -876,10 +879,11 @@ facts.
 
 ### In Scope
 
-- Internal island solve data structures.
+- Internal active-island solve batching.
 - Contact and joint row batching by island.
 - Debug facts that prove island membership and solved impulses still line up.
-- Stack, ramp friction, restitution threshold, and jointed-island regressions.
+- Stack, friction, restitution threshold, jointed-island, and unrelated-island
+  regressions.
 
 ### Out Of Scope
 
@@ -906,7 +910,7 @@ rtk proxy cargo test -p picea --test world_step_review_regressions
 
 ## M13 CCD Generalization
 
-> Status: completed first staged slice 2026-04-27.
+> Status: completed 2026-04-27.
 >
 > Completion notes: CCD remains a named pose-clamping phase before contact
 > generation. The phase now keeps the existing dynamic-circle analytic path and
@@ -921,11 +925,6 @@ rtk proxy cargo test -p picea --test world_step_review_regressions
 > hit and the budgeted later hit through the existing stats + selected-contact
 > `ccd_trace` path.
 >
-> Residual risks: this slice intentionally skips rotational convex casts,
-> dynamic-vs-dynamic CCD, and full all-shape CCD. GJK-backed conservative
-> advancement remains the natural follow-up once broader shape coverage or
-> angular CCD needs a shared distance kernel.
-
 ### Goal
 
 Generalize CCD from the narrow dynamic-circle pose clamp into a staged TOI /
@@ -937,7 +936,7 @@ tunneling cases with explicit trace semantics and controlled cost.
 - Keep CCD as a named step phase that proposes or applies TOI advancement before
   contact generation.
 - Extend dynamic-vs-static support beyond circles through convex shape casts or
-  GJK-backed conservative advancement.
+  staged shape-cast helpers.
 - Add multi-impact budgeting so one moving body can handle more than one
   relevant hit without unbounded substeps.
 - Keep `ccd_trace` rich enough to explain swept start/end, candidate, TOI,
@@ -947,7 +946,7 @@ tunneling cases with explicit trace semantics and controlled cost.
 ### In Scope
 
 - Dynamic-vs-static convex CCD beyond circles.
-- Conservative advancement or shape-cast helpers.
+- Shape-cast helpers for the accepted translational convex slice.
 - Multi-hit ordering and budget semantics.
 - CCD trace/artifact updates.
 
@@ -974,7 +973,14 @@ rtk proxy cargo test -p picea-lab
 
 ## M14 Ergonomic API V2
 
-> Status: planned.
+> Status: completed 2026-04-27.
+>
+> Completion notes: core now has higher-level scene/asset recipe helpers,
+> nested path context for recipe/command validation, and a serializable fixture
+> path that `picea-lab` scenarios can consume directly. The low-level
+> `World::create_*` APIs remain the stable fallback surface, and the accepted
+> branch gate is `v1_api_smoke` plus lab fixture acceptance rather than public
+> scene-schema freeze.
 
 ### Goal
 
@@ -1021,6 +1027,109 @@ rtk proxy cargo test -p picea --test core_model_world
 rtk proxy cargo test -p picea-lab
 ```
 
+## M15 Performance Data Path
+
+> Status: completed 2026-04-27.
+>
+> M15 is the first Post-M14 implementation milestone. It makes the accepted
+> M11-M14 capability line faster and more reusable without changing the public
+> authoring or physics semantics.
+>
+> Completion notes: `QueryPipeline` now builds an internal balanced
+> broadphase-style index for AABB, point, and ray candidate traversal while
+> preserving public hit ordering and filter semantics. `ColliderRecord` caches
+> transform-derived AABBs and convex world vertices behind geometry revision and
+> world-pose keys; contact gathering, CCD, and generic GJK/EPA fallback reuse
+> those facts to reduce repeated geometry rebuilding, with conservative
+> allocation pre-sizing where the current code makes it visible. Broadphase
+> proxy/leaf ids remain private. Query allocation/perf counters and deeper
+> solver allocation work remain Post-M15.
+
+### Goal
+
+Turn the landed broadphase, query, shape, contact, sleep, and solver facts into
+a measurable hot data path. The main win should be less repeated work: queries
+should reuse an indexed spatial structure where semantics match, shape/support
+geometry should be cached behind transform revision, and step setup should
+pre-size or reuse temporary collections only where the current behavior locks
+and counters justify it.
+
+### Design Goals
+
+- Reuse broadphase-style spatial indexing for `QueryPipeline` candidate
+  selection while keeping public query ordering and filtering stable.
+- Keep broadphase proxy/leaf details internal; public callers still work with
+  body/collider handles and query hit types, not proxy ids.
+- Cache world-space vertices, AABBs, and convex support data behind explicit
+  transform/revision invalidation.
+- Reduce repeated geometry recomputation in contact gathering, CCD, and generic
+  GJK/EPA fallback; keep deeper allocation work behind tests or counters.
+- Preserve deterministic ordering, `DebugSnapshot`, `StepStats`, and
+  `picea-lab` artifact semantics.
+- Keep Criterion as baseline evidence first; add hard performance thresholds
+  only after variance is understood.
+
+### In Scope
+
+- `QueryPipeline` / broadphase internal reuse for AABB, ray, and region-style
+  candidate traversal.
+- Shape/support/world-vertices cache storage, invalidation, and stale-cache
+  behavior locks.
+- Focused recomputation reductions and conservative collection pre-sizing in
+  contact gathering, CCD, and support-map paths.
+- Benchmark buildability plus counter/variance evidence that explains the data
+  path change; stronger query allocation/perf counters remain follow-up.
+- AI routing/doc updates if the implemented entry points change.
+
+### Out Of Scope
+
+- Dense island-local solver arrays; keep that for a later M16-style milestone.
+- Dynamic-vs-dynamic CCD, rotational CCD, and all-shape CCD expansion.
+- Public scene schema stabilization or live `picea-lab` editing.
+- Public distance-query API stabilization.
+- Absolute perf pass/fail thresholds before multiple local baselines exist.
+
+### Acceptance Method
+
+- Start with behavior locks for current query semantics, deterministic hit
+  ordering, and stale-cache invalidation before changing the data path.
+- Add targeted broadphase/query/cache tests that fail if transforms, removals,
+  recycled handles, or rebuilds leave stale spatial data behind.
+- Keep existing physics realism, debug contract, and recipe smoke tests stable
+  unless the implementation explicitly extends their debug facts.
+- Build Criterion benches without turning benchmark timing into a brittle gate;
+  report counters or baseline variance instead.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --lib pipeline::broadphase
+rtk proxy cargo test -p picea --test query_debug_contract
+rtk proxy cargo test -p picea --test world_step_review_regressions
+rtk proxy cargo bench -p picea --no-run
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
+## Post-M14 Follow-Up / Remaining Risks
+
+These items are real follow-up work, but they are no longer blockers for
+marking M11-M14 completed in the current milestone line.
+
+- Post-M15 performance follow-up: add stronger query allocation/perf counters
+  before broad solver-data rewrites, deepen solver allocation work separately,
+  and keep Criterion evidence grounded in baseline variance.
+- M12 follow-up: move from the current accepted active-island batching to denser
+  island-local execution, keep exploring whether contact and joint solving
+  should share a stronger island-owned ordering contract, and add ramp-specific
+  friction regression coverage.
+- M13 follow-up: extend CCD beyond the accepted dynamic-vs-static translational
+  convex slice into dynamic-vs-dynamic, rotational casts, and broader all-shape
+  coverage only when behavior locks and benchmarks justify the cost.
+- M14 follow-up: stabilize the public scene schema, broaden authoring coverage,
+  and define any future live `picea-lab` editing semantics as additive work
+  above the current recipe/fixture acceptance line.
+
 ## Picea Lab Role Across Milestones
 
 `picea-lab` should help AI and humans inspect real behavior. Its role grows by
@@ -1045,14 +1154,17 @@ milestone:
   baseline summaries.
 - M10: make replay provenance, final snapshots, joints, and backend/demo state
   explicit while preserving the same artifact fact surface.
-- M11: surface performance evidence through candidate/query/cache counters and
-  benchmark scenario IDs without making the lab the timing oracle.
+- M11: surface broadphase candidate/update/rebuild facts and benchmark scenario
+  IDs without making the lab the timing oracle.
 - M12: show active island membership, solved contact/joint rows, wake reasons,
-  and sleep state after solver compaction.
+  and sleep state after active-island batching.
 - M13: visualize generalized CCD sweeps, selected/ignored TOI hits, and
   advancement budgets.
 - M14: host ergonomic scene/recipe examples as evidence that the public setup
   flow stays easy and reproducible.
+- M15: surface available query/cache/recomputation facts and benchmark variance
+  evidence for the performance data path; stronger allocation counters remain
+  Post-M15.
 
 The lab should not run physics independently from `crates/picea`, and it should
 not be the only pass/fail signal for physics correctness.
