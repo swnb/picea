@@ -4,6 +4,8 @@
 //! internals directly. That keeps spatial queries portable across native,
 //! wasm, and future client/server consumers.
 
+use std::sync::Mutex;
+
 use crate::{
     collider::{CollisionFilter, ShapeAabb},
     debug::{
@@ -12,9 +14,10 @@ use crate::{
     },
     handles::{BodyHandle, ColliderHandle, WorldRevision},
     math::{point::Point, vector::Vector, FloatNum},
-    pipeline::broadphase::{ColliderProxy, DynamicAabbTree},
+    pipeline::broadphase::{ColliderProxy, DynamicAabbTree, TreeQueryStats},
     world::World,
 };
+use serde::{Deserialize, Serialize};
 
 /// Source of stable facts for the query cache.
 pub trait QuerySource {
@@ -172,6 +175,57 @@ pub struct AabbHit {
     pub bounds: DebugAabb,
 }
 
+/// Deterministic counters for the most recent query call on a `QueryPipeline`.
+///
+/// The counters describe query work shape, not wall-clock time. They are useful
+/// for benchmark/artifact evidence because they stay stable across machines
+/// when the snapshot, query, and filter are the same.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryStats {
+    /// Number of query tree nodes visited by the broadphase-style traversal.
+    pub traversal_count: usize,
+    /// Number of leaf candidates returned by the tree before public filtering.
+    pub candidate_count: usize,
+    /// Number of tree nodes rejected by coarse query bounds.
+    pub pruned_count: usize,
+    /// Number of candidates rejected by `QueryFilter`.
+    pub filter_drop_count: usize,
+    /// Number of public hits returned by the query.
+    pub hit_count: usize,
+}
+
+#[derive(Debug, Default)]
+struct QueryStatsCell(Mutex<QueryStats>);
+
+impl Clone for QueryStatsCell {
+    fn clone(&self) -> Self {
+        Self::from_stats(self.get())
+    }
+}
+
+impl QueryStatsCell {
+    fn from_stats(stats: QueryStats) -> Self {
+        Self(Mutex::new(stats))
+    }
+
+    fn get(&self) -> QueryStats {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn set(&self, stats: QueryStats) {
+        // A single lock keeps the "most recent query" counters coherent under
+        // shared reads/writes. Query work stays read-only; only the stats swap
+        // serializes.
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = stats;
+    }
+}
+
 #[derive(Clone, Debug)]
 struct QueryColliderRecord {
     handle: ColliderHandle,
@@ -188,6 +242,7 @@ pub struct QueryPipeline {
     cached_revision: Option<WorldRevision>,
     colliders: Vec<QueryColliderRecord>,
     broadphase: DynamicAabbTree,
+    last_stats: QueryStatsCell,
 }
 
 impl QueryPipeline {
@@ -199,6 +254,11 @@ impl QueryPipeline {
     /// Returns the world revision represented by the cache.
     pub fn revision(&self) -> Option<WorldRevision> {
         self.cached_revision
+    }
+
+    /// Returns deterministic counters from the most recent query call.
+    pub fn last_stats(&self) -> QueryStats {
+        self.last_stats.get()
     }
 
     /// Rebuilds the query cache from a stable source.
@@ -222,6 +282,7 @@ impl QueryPipeline {
             })
             .collect::<Vec<_>>();
         self.broadphase = DynamicAabbTree::from_proxies(&proxies);
+        self.last_stats.set(QueryStats::default());
     }
 
     /// Casts a ray against the cached colliders.
@@ -237,14 +298,17 @@ impl QueryPipeline {
         let max_toi = sanitize_scalar(max_toi).max(0.0);
 
         let mut best_hit: Option<RayHit> = None;
-        for index in self
+        let tree_output = self
             .broadphase
-            .query_ray_proxy_indices(origin, direction, max_toi)
-        {
+            .query_ray_proxy_indices_with_stats(origin, direction, max_toi);
+        let mut stats = query_stats_from_tree(tree_output.stats);
+
+        for index in tree_output.proxy_indices {
             let Some(collider) = self.colliders.get(index) else {
                 continue;
             };
             if !filter.matches(collider) {
+                stats.filter_drop_count += 1;
                 continue;
             }
             let Some(hit) =
@@ -265,6 +329,8 @@ impl QueryPipeline {
                 _ => best_hit = Some(hit),
             }
         }
+        stats.hit_count = usize::from(best_hit.is_some());
+        self.last_stats.set(stats);
         best_hit
     }
 
@@ -272,41 +338,74 @@ impl QueryPipeline {
     pub fn intersect_point(&self, point: Point, filter: QueryFilter) -> Vec<PointHit> {
         let point = sanitize_point(point);
 
-        self.broadphase
-            .query_point_proxy_indices(point)
-            .into_iter()
-            .filter_map(|index| self.colliders.get(index))
-            .filter(|collider| filter.matches(collider))
-            .filter(|collider| collider.bounds.contains_point(point))
-            .filter_map(|collider| {
-                point_distance_to_shape(point, &collider.shape).map(|distance_to_surface| {
-                    PointHit {
-                        body: collider.body,
-                        collider: collider.handle,
-                        point,
-                        distance_to_surface,
-                    }
-                })
-            })
-            .collect()
+        let tree_output = self.broadphase.query_point_proxy_indices_with_stats(point);
+        let mut stats = query_stats_from_tree(tree_output.stats);
+        let mut hits = Vec::new();
+        for index in tree_output.proxy_indices {
+            let Some(collider) = self.colliders.get(index) else {
+                continue;
+            };
+            if !filter.matches(collider) {
+                stats.filter_drop_count += 1;
+                continue;
+            }
+            if !collider.bounds.contains_point(point) {
+                continue;
+            }
+            let Some(distance_to_surface) = point_distance_to_shape(point, &collider.shape) else {
+                continue;
+            };
+            hits.push(PointHit {
+                body: collider.body,
+                collider: collider.handle,
+                point,
+                distance_to_surface,
+            });
+        }
+        stats.hit_count = hits.len();
+        self.last_stats.set(stats);
+        hits
     }
 
     /// Finds colliders whose bounds overlap the given region.
     pub fn intersect_aabb(&self, aabb: DebugAabb, filter: QueryFilter) -> Vec<AabbHit> {
         let query_bounds = DebugAabb::new(aabb.min, aabb.max);
 
-        self.broadphase
-            .query_aabb_proxy_indices(query_bounds.into())
-            .into_iter()
-            .filter_map(|index| self.colliders.get(index))
-            .filter(|collider| filter.matches(collider))
-            .filter(|collider| collider.bounds.overlaps(&query_bounds))
-            .map(|collider| AabbHit {
+        let tree_output = self
+            .broadphase
+            .query_aabb_proxy_indices_with_stats(query_bounds.into());
+        let mut stats = query_stats_from_tree(tree_output.stats);
+        let mut hits = Vec::new();
+        for index in tree_output.proxy_indices {
+            let Some(collider) = self.colliders.get(index) else {
+                continue;
+            };
+            if !filter.matches(collider) {
+                stats.filter_drop_count += 1;
+                continue;
+            }
+            if !collider.bounds.overlaps(&query_bounds) {
+                continue;
+            }
+            hits.push(AabbHit {
                 body: collider.body,
                 collider: collider.handle,
                 bounds: collider.bounds,
-            })
-            .collect()
+            });
+        }
+        stats.hit_count = hits.len();
+        self.last_stats.set(stats);
+        hits
+    }
+}
+
+fn query_stats_from_tree(stats: TreeQueryStats) -> QueryStats {
+    QueryStats {
+        traversal_count: stats.traversal_count,
+        candidate_count: stats.candidate_count,
+        pruned_count: stats.pruned_count,
+        filter_drop_count: 0,
+        hit_count: 0,
     }
 }
 

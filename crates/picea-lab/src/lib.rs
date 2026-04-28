@@ -16,5 +16,10 @@ pub use artifact::{
     DebugRenderFrame, FrameRecord, PerfArtifact, RunManifest, RunResult,
 };
 pub use error::{LabError, LabResult};
-pub use scenario::{list_scenarios, RunConfig, ScenarioDescriptor, ScenarioId, ScenarioOverrides};
+pub use scenario::{
+    instantiate_scene_fixture, list_scenarios, RunConfig, ScenarioDescriptor, ScenarioId,
+    ScenarioOverrides, SceneBodyFixture, SceneDistanceJointFixture, SceneFixtureWorld,
+    SceneJointFixture, SceneRecipeFixture, SceneShapeFixture, SceneWorldAnchorJointFixture,
+    SCENE_RECIPE_SCHEMA_VERSION,
+};
 pub use server::SessionStatus;

@@ -20,6 +20,27 @@ pub(crate) struct IslandSolveBatch {
     pub(crate) joint_rows: Vec<JointSolvePlanRow>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SolverStepStats {
+    pub(crate) island_count: usize,
+    pub(crate) active_island_count: usize,
+    pub(crate) sleeping_island_skip_count: usize,
+    pub(crate) body_slot_count: usize,
+    pub(crate) contact_row_count: usize,
+    pub(crate) joint_row_count: usize,
+}
+
+impl SolverStepStats {
+    pub(crate) fn accumulate(&mut self, other: Self) {
+        self.island_count += other.island_count;
+        self.active_island_count += other.active_island_count;
+        self.sleeping_island_skip_count += other.sleeping_island_skip_count;
+        self.body_slot_count += other.body_slot_count;
+        self.contact_row_count += other.contact_row_count;
+        self.joint_row_count += other.joint_row_count;
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ContactSolvePlanRow {
     pub(crate) contact_index: usize,

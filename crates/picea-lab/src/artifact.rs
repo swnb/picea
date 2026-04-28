@@ -113,9 +113,25 @@ pub struct DebugRenderFrame {
     pub broadphase_same_body_drop_count: usize,
     pub broadphase_filter_drop_count: usize,
     pub broadphase_narrowphase_drop_count: usize,
+    #[serde(default)]
+    pub broadphase_traversal_count: usize,
+    #[serde(default)]
+    pub broadphase_pruned_count: usize,
     pub broadphase_rebuild_count: usize,
     pub broadphase_tree_depth: usize,
     pub contact_count: usize,
+    #[serde(default)]
+    pub island_count: usize,
+    #[serde(default)]
+    pub active_island_count: usize,
+    #[serde(default)]
+    pub sleeping_island_skip_count: usize,
+    #[serde(default)]
+    pub solver_body_slot_count: usize,
+    #[serde(default)]
+    pub contact_row_count: usize,
+    #[serde(default)]
+    pub joint_row_count: usize,
     #[serde(default)]
     pub warm_start_hit_count: usize,
     #[serde(default)]
@@ -145,6 +161,25 @@ pub struct PerfArtifact {
     pub frame_count: usize,
     pub elapsed_micros: u128,
     pub final_state_hash: String,
+    #[serde(default)]
+    pub counter_summary: PerfCounterSummary,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PerfCounterSummary {
+    pub total_broadphase_candidate_count: usize,
+    pub total_broadphase_traversal_count: usize,
+    pub total_broadphase_pruned_count: usize,
+    pub max_broadphase_tree_depth: usize,
+    pub total_contact_count: usize,
+    pub total_contact_row_count: usize,
+    pub total_joint_row_count: usize,
+    pub total_solver_body_slot_count: usize,
+    pub total_island_count: usize,
+    pub total_active_island_count: usize,
+    pub total_sleeping_island_skip_count: usize,
+    pub total_ccd_candidate_count: usize,
+    pub total_ccd_hit_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -270,9 +305,17 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                         .snapshot
                         .stats
                         .broadphase_narrowphase_drop_count,
+                    broadphase_traversal_count: frame.snapshot.stats.broadphase_traversal_count,
+                    broadphase_pruned_count: frame.snapshot.stats.broadphase_pruned_count,
                     broadphase_rebuild_count: frame.snapshot.stats.broadphase_rebuild_count,
                     broadphase_tree_depth: frame.snapshot.stats.broadphase_tree_depth,
                     contact_count: frame.snapshot.contacts.len(),
+                    island_count: frame.snapshot.stats.island_count,
+                    active_island_count: frame.snapshot.stats.active_island_count,
+                    sleeping_island_skip_count: frame.snapshot.stats.sleeping_island_skip_count,
+                    solver_body_slot_count: frame.snapshot.stats.solver_body_slot_count,
+                    contact_row_count: frame.snapshot.stats.contact_row_count,
+                    joint_row_count: frame.snapshot.stats.joint_row_count,
                     warm_start_hit_count: frame.snapshot.stats.warm_start_hit_count,
                     warm_start_miss_count: frame.snapshot.stats.warm_start_miss_count,
                     warm_start_drop_count: frame.snapshot.stats.warm_start_drop_count,
@@ -306,6 +349,7 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
             frame_count,
             elapsed_micros: started.elapsed().as_micros(),
             final_state_hash: final_state_hash.clone(),
+            counter_summary: PerfCounterSummary::from_frames(&frames),
         },
     )?;
 
@@ -314,6 +358,31 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
         manifest,
         frames,
     })
+}
+
+impl PerfCounterSummary {
+    fn from_frames(frames: &[FrameRecord]) -> Self {
+        let mut summary = Self::default();
+        for frame in frames {
+            let stats = &frame.stats;
+            summary.total_broadphase_candidate_count += stats.broadphase_candidate_count;
+            summary.total_broadphase_traversal_count += stats.broadphase_traversal_count;
+            summary.total_broadphase_pruned_count += stats.broadphase_pruned_count;
+            summary.max_broadphase_tree_depth = summary
+                .max_broadphase_tree_depth
+                .max(stats.broadphase_tree_depth);
+            summary.total_contact_count += stats.contact_count;
+            summary.total_contact_row_count += stats.contact_row_count;
+            summary.total_joint_row_count += stats.joint_row_count;
+            summary.total_solver_body_slot_count += stats.solver_body_slot_count;
+            summary.total_island_count += stats.island_count;
+            summary.total_active_island_count += stats.active_island_count;
+            summary.total_sleeping_island_skip_count += stats.sleeping_island_skip_count;
+            summary.total_ccd_candidate_count += stats.ccd_candidate_count;
+            summary.total_ccd_hit_count += stats.ccd_hit_count;
+        }
+        summary
+    }
 }
 
 fn artifact_entries() -> Vec<ArtifactEntry> {

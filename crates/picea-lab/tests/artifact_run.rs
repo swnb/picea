@@ -1,5 +1,6 @@
 use std::{fs, path::Path};
 
+use picea::events::CcdTargetKind;
 use picea_lab::{
     run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact, DebugRenderFrame, FrameRecord,
     RunConfig, RunManifest, ScenarioId,
@@ -527,6 +528,70 @@ fn ccd_fast_convex_walls_artifacts_capture_ordered_budget_trace_facts() {
 }
 
 #[test]
+fn ccd_dynamic_convex_pair_artifacts_capture_dynamic_target_trace_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::CcdDynamicConvexPair,
+            frame_count: 2,
+            run_id: Some("m19-ccd-dynamic-convex-pair".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("dynamic CCD run should write artifacts");
+
+    let first = run.frames.first().expect("first frame should exist");
+    assert_eq!(first.stats.ccd_candidate_count, 1);
+    assert_eq!(first.stats.ccd_hit_count, 1);
+    assert_eq!(first.stats.ccd_miss_count, 0);
+    assert_eq!(first.stats.ccd_clamp_count, 2);
+    let contact = first
+        .snapshot
+        .contacts
+        .iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("dynamic CCD artifact should expose the selected contact trace");
+    let trace = contact.ccd_trace.expect("trace should be present");
+    assert_eq!(trace.target_kind, CcdTargetKind::Dynamic);
+    assert!(trace.target_clamp > 0.0);
+    assert_ne!(trace.target_swept_start, trace.target_swept_end);
+    assert!(trace.toi > 0.0 && trace.toi < 1.0);
+    assert!(trace.advancement >= trace.toi && trace.advancement <= 1.0);
+
+    let frame_lines = fs::read_to_string(run.path.join(ArtifactFile::Frames.file_name()))
+        .expect("frames should be readable");
+    assert!(
+        frame_lines.contains("\"target_kind\":\"dynamic\"")
+            && frame_lines.contains("\"target_clamp\""),
+        "frames.jsonl should preserve dynamic-target CCD trace facts"
+    );
+
+    let render: DebugRenderArtifact = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable"),
+    )
+    .expect("debug render should match schema");
+    let render_first = render
+        .frames
+        .first()
+        .expect("debug render should include ccd frame facts");
+    assert_eq!(render_first.ccd_candidate_count, 1);
+    assert_eq!(render_first.ccd_hit_count, 1);
+    assert_eq!(render_first.ccd_miss_count, 0);
+    assert_eq!(render_first.ccd_clamp_count, 2);
+    assert!(
+        render_first
+            .contacts
+            .iter()
+            .any(|contact| contact.ccd_trace == Some(trace)),
+        "debug render should keep dynamic-target CCD trace facts"
+    );
+}
+
+#[test]
 fn artifact_schema_keeps_final_observability_fact_set() {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let store = ArtifactStore::new(temp.path().join("runs"));
@@ -552,9 +617,17 @@ fn artifact_schema_keeps_final_observability_fact_set() {
         .expect("final snapshot should carry a stats object");
     for field in [
         "broadphase_candidate_count",
+        "broadphase_traversal_count",
+        "broadphase_pruned_count",
         "broadphase_tree_depth",
         "contact_count",
         "manifold_count",
+        "island_count",
+        "active_island_count",
+        "sleeping_island_skip_count",
+        "solver_body_slot_count",
+        "contact_row_count",
+        "joint_row_count",
         "warm_start_hit_count",
         "warm_start_miss_count",
         "warm_start_drop_count",
@@ -597,10 +670,18 @@ fn artifact_schema_keeps_final_observability_fact_set() {
         .expect("debug render should include the first frame object");
     for field in [
         "broadphase_candidate_count",
+        "broadphase_traversal_count",
+        "broadphase_pruned_count",
         "broadphase_tree_depth",
         "contact_count",
         "contacts",
         "manifolds",
+        "island_count",
+        "active_island_count",
+        "sleeping_island_skip_count",
+        "solver_body_slot_count",
+        "contact_row_count",
+        "joint_row_count",
         "warm_start_hit_count",
         "warm_start_miss_count",
         "warm_start_drop_count",
@@ -654,6 +735,30 @@ fn artifact_schema_keeps_final_observability_fact_set() {
             .any(|contact| contact.ccd_trace.is_some()),
         "typed debug render contacts should preserve CCD trace facts"
     );
+
+    let perf_bytes = fs::read(run.path.join(ArtifactFile::Perf.file_name()))
+        .expect("perf artifact should be readable");
+    let perf_json: serde_json::Value =
+        serde_json::from_slice(&perf_bytes).expect("perf artifact should match JSON schema");
+    let counters = perf_json
+        .get("counter_summary")
+        .and_then(serde_json::Value::as_object)
+        .expect("perf artifact should carry deterministic counter summary");
+    for field in [
+        "total_broadphase_traversal_count",
+        "total_broadphase_pruned_count",
+        "total_contact_row_count",
+        "total_joint_row_count",
+        "total_solver_body_slot_count",
+        "total_island_count",
+        "total_active_island_count",
+        "total_sleeping_island_skip_count",
+    ] {
+        assert!(
+            counters.contains_key(field),
+            "perf counter summary should preserve `{field}`"
+        );
+    }
 }
 
 #[test]
@@ -668,9 +773,17 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
         broadphase_same_body_drop_count: 0,
         broadphase_filter_drop_count: 0,
         broadphase_narrowphase_drop_count: 0,
+        broadphase_traversal_count: 0,
+        broadphase_pruned_count: 0,
         broadphase_rebuild_count: 0,
         broadphase_tree_depth: 0,
         contact_count: 0,
+        island_count: 0,
+        active_island_count: 0,
+        sleeping_island_skip_count: 0,
+        solver_body_slot_count: 0,
+        contact_row_count: 0,
+        joint_row_count: 0,
         warm_start_hit_count: 1,
         warm_start_miss_count: 2,
         warm_start_drop_count: 3,
@@ -693,6 +806,14 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     object.remove("warm_start_hit_count");
     object.remove("warm_start_miss_count");
     object.remove("warm_start_drop_count");
+    object.remove("broadphase_traversal_count");
+    object.remove("broadphase_pruned_count");
+    object.remove("island_count");
+    object.remove("active_island_count");
+    object.remove("sleeping_island_skip_count");
+    object.remove("solver_body_slot_count");
+    object.remove("contact_row_count");
+    object.remove("joint_row_count");
     object.remove("ccd_candidate_count");
     object.remove("ccd_hit_count");
     object.remove("ccd_miss_count");
@@ -705,6 +826,14 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     assert_eq!(decoded.warm_start_hit_count, 0);
     assert_eq!(decoded.warm_start_miss_count, 0);
     assert_eq!(decoded.warm_start_drop_count, 0);
+    assert_eq!(decoded.broadphase_traversal_count, 0);
+    assert_eq!(decoded.broadphase_pruned_count, 0);
+    assert_eq!(decoded.island_count, 0);
+    assert_eq!(decoded.active_island_count, 0);
+    assert_eq!(decoded.sleeping_island_skip_count, 0);
+    assert_eq!(decoded.solver_body_slot_count, 0);
+    assert_eq!(decoded.contact_row_count, 0);
+    assert_eq!(decoded.joint_row_count, 0);
     assert_eq!(decoded.ccd_candidate_count, 0);
     assert_eq!(decoded.ccd_hit_count, 0);
     assert_eq!(decoded.ccd_miss_count, 0);

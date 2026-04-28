@@ -11,6 +11,7 @@ use crate::{
     math::{point::Point, vector::Vector, FloatNum},
     pipeline::{
         broadphase::{BroadphaseStats, ColliderProxy},
+        island::SolverStepStats,
         narrowphase::contact_from_shapes_with_cached_vertices,
         StepConfig,
     },
@@ -77,12 +78,13 @@ pub(crate) fn run_contact_phases(
     usize,
     BroadphaseStats,
     WarmStartStats,
+    SolverStepStats,
 ) {
     let mut contacts = world.collect_contact_observations(ccd_traces);
     let broadphase_stats = contacts.broadphase_stats;
     let previous_contacts = world.take_active_contacts();
     world.prepare_contact_warm_start(&mut contacts.observations, &previous_contacts);
-    crate::solver::contact::resolve_contacts(
+    let solver_stats = crate::solver::contact::resolve_contacts(
         world,
         &mut contacts.observations,
         config,
@@ -96,6 +98,7 @@ pub(crate) fn run_contact_phases(
         manifold_count,
         broadphase_stats,
         warm_start_stats,
+        solver_stats,
     )
 }
 

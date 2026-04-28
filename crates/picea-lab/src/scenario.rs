@@ -26,10 +26,11 @@ pub enum ScenarioId {
     SatPolygon,
     CcdFastCircleWall,
     CcdFastConvexWalls,
+    CcdDynamicConvexPair,
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::FallingBoxContact,
         Self::Stack4,
         Self::JointAnchor,
@@ -37,6 +38,7 @@ impl ScenarioId {
         Self::SatPolygon,
         Self::CcdFastCircleWall,
         Self::CcdFastConvexWalls,
+        Self::CcdDynamicConvexPair,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -48,6 +50,7 @@ impl ScenarioId {
             Self::SatPolygon => "sat_polygon",
             Self::CcdFastCircleWall => "ccd_fast_circle_wall",
             Self::CcdFastConvexWalls => "ccd_fast_convex_walls",
+            Self::CcdDynamicConvexPair => "ccd_dynamic_convex_pair",
         }
     }
 }
@@ -70,6 +73,7 @@ impl FromStr for ScenarioId {
             "sat_polygon" => Ok(Self::SatPolygon),
             "ccd_fast_circle_wall" => Ok(Self::CcdFastCircleWall),
             "ccd_fast_convex_walls" => Ok(Self::CcdFastConvexWalls),
+            "ccd_dynamic_convex_pair" => Ok(Self::CcdDynamicConvexPair),
             other => Err(LabError::UnknownScenario(other.to_owned())),
         }
     }
@@ -96,6 +100,7 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::SatPolygon => "SAT polygon manifold",
                 ScenarioId::CcdFastCircleWall => "CCD fast circle wall",
                 ScenarioId::CcdFastConvexWalls => "CCD fast convex walls",
+                ScenarioId::CcdDynamicConvexPair => "CCD dynamic convex pair",
             },
             description: match id {
                 ScenarioId::FallingBoxContact => "A dynamic box falling into static floor contact.",
@@ -112,6 +117,9 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 }
                 ScenarioId::CcdFastConvexWalls => {
                     "A fast dynamic rectangle swept against two static thin walls."
+                }
+                ScenarioId::CcdDynamicConvexPair => {
+                    "Two fast dynamic rectangles swept against each other."
                 }
             },
         })
@@ -157,20 +165,28 @@ impl RunConfig {
 
 /// Serializable scene setup fixture used by lab examples and smoke tests.
 ///
-/// This intentionally covers a narrow first slice: world gravity/sleep flags,
-/// body placement, linear velocity, and circle/rectangle body assets. It proves
-/// the recipe path can be driven from JSON without freezing every low-level
-/// core descriptor as a long-term file format.
+/// Schema v1 covers the stable authoring layer for world flags, body placement,
+/// circle/rectangle assets, material/filter presets, and recipe-indexed
+/// distance/world-anchor joints. The fixture stays above low-level `World`
+/// commands: JSON is converted into a `WorldRecipe`, and the core command layer
+/// still owns handle resolution and validation paths.
+pub const SCENE_RECIPE_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SceneRecipeFixture {
+    #[serde(default = "default_scene_recipe_schema_version")]
+    pub schema_version: u32,
     #[serde(default)]
     pub world: SceneFixtureWorld,
     #[serde(default)]
     pub bodies: Vec<SceneBodyFixture>,
+    #[serde(default)]
+    pub joints: Vec<SceneJointFixture>,
 }
 
 impl SceneRecipeFixture {
-    pub fn to_world_recipe(&self) -> WorldRecipe {
+    pub fn to_world_recipe(&self) -> LabResult<WorldRecipe> {
+        self.validate_schema_version()?;
         let mut recipe = WorldRecipe::new(WorldDesc {
             gravity: self.world.gravity.into(),
             enable_sleep: self.world.enable_sleep,
@@ -178,7 +194,21 @@ impl SceneRecipeFixture {
         for body in &self.bodies {
             recipe = recipe.with_scene_body(body.to_body_bundle());
         }
-        recipe
+        for joint in &self.joints {
+            recipe = recipe.with_joint(joint.to_joint_bundle());
+        }
+        Ok(recipe)
+    }
+
+    fn validate_schema_version(&self) -> LabResult<()> {
+        if self.schema_version == SCENE_RECIPE_SCHEMA_VERSION {
+            Ok(())
+        } else {
+            Err(LabError::UnsupportedSceneSchemaVersion {
+                found: self.schema_version,
+                expected: SCENE_RECIPE_SCHEMA_VERSION,
+            })
+        }
     }
 }
 
@@ -245,6 +275,104 @@ impl SceneBodyFixture {
     }
 }
 
+/// Serializable joint setup for the lab scene schema.
+///
+/// The schema stays above low-level `World::create_joint`: fixture joints point
+/// at recipe body indices and borrow the core descriptor defaults unless the
+/// author explicitly overrides a field.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SceneJointFixture {
+    Distance(SceneDistanceJointFixture),
+    WorldAnchor(SceneWorldAnchorJointFixture),
+}
+
+impl SceneJointFixture {
+    fn to_joint_bundle(&self) -> JointBundle {
+        match self {
+            Self::Distance(joint) => joint.to_joint_bundle(),
+            Self::WorldAnchor(joint) => joint.to_joint_bundle(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneDistanceJointFixture {
+    pub body_a: usize,
+    pub body_b: usize,
+    #[serde(default)]
+    pub rest_length: Option<f32>,
+    #[serde(default)]
+    pub stiffness: Option<f32>,
+    #[serde(default)]
+    pub damping: Option<f32>,
+    #[serde(default)]
+    pub local_anchor_a: Option<[f32; 2]>,
+    #[serde(default)]
+    pub local_anchor_b: Option<[f32; 2]>,
+}
+
+impl SceneDistanceJointFixture {
+    fn to_joint_bundle(&self) -> JointBundle {
+        let mut desc = DistanceJointDesc::default();
+        if let Some(rest_length) = self.rest_length {
+            desc.rest_length = rest_length;
+        }
+        if let Some(stiffness) = self.stiffness {
+            desc.stiffness = stiffness;
+        }
+        if let Some(damping) = self.damping {
+            desc.damping = damping;
+        }
+        if let Some(local_anchor_a) = self.local_anchor_a {
+            desc.local_anchor_a = point_from_array(local_anchor_a);
+        }
+        if let Some(local_anchor_b) = self.local_anchor_b {
+            desc.local_anchor_b = point_from_array(local_anchor_b);
+        }
+        JointBundle::Distance {
+            body_a: self.body_a,
+            body_b: self.body_b,
+            desc,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneWorldAnchorJointFixture {
+    pub body: usize,
+    #[serde(default)]
+    pub world_anchor: Option<[f32; 2]>,
+    #[serde(default)]
+    pub local_anchor: Option<[f32; 2]>,
+    #[serde(default)]
+    pub stiffness: Option<f32>,
+    #[serde(default)]
+    pub damping: Option<f32>,
+}
+
+impl SceneWorldAnchorJointFixture {
+    fn to_joint_bundle(&self) -> JointBundle {
+        let mut desc = WorldAnchorJointDesc::default();
+        if let Some(world_anchor) = self.world_anchor {
+            desc.world_anchor = point_from_array(world_anchor);
+        }
+        if let Some(local_anchor) = self.local_anchor {
+            desc.local_anchor = point_from_array(local_anchor);
+        }
+        if let Some(stiffness) = self.stiffness {
+            desc.stiffness = stiffness;
+        }
+        if let Some(damping) = self.damping {
+            desc.damping = damping;
+        }
+        JointBundle::WorldAnchor {
+            body: self.body,
+            desc,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SceneShapeFixture {
@@ -262,11 +390,16 @@ impl SceneShapeFixture {
 }
 
 pub fn instantiate_scene_fixture(fixture: &SceneRecipeFixture) -> LabResult<World> {
-    fixture
-        .to_world_recipe()
-        .instantiate_with_context()
-        .map(|result| result.world)
-        .map_err(|error| LabError::World(format!("{}: {}", error.path, error.error.error)))
+    fixture.to_world_recipe().and_then(|recipe| {
+        recipe
+            .instantiate_with_context()
+            .map(|result| result.world)
+            .map_err(|error| LabError::World(format!("{}: {}", error.path, error.error.error)))
+    })
+}
+
+fn default_scene_recipe_schema_version() -> u32 {
+    SCENE_RECIPE_SCHEMA_VERSION
 }
 
 fn default_fixture_gravity() -> [f32; 2] {
@@ -285,8 +418,13 @@ fn default_fixture_density() -> f32 {
     1.0
 }
 
+fn point_from_array([x, y]: [f32; 2]) -> Point {
+    Point::new(x, y)
+}
+
 fn falling_box_contact_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
     SceneRecipeFixture {
+        schema_version: SCENE_RECIPE_SCHEMA_VERSION,
         world: SceneFixtureWorld {
             gravity,
             enable_sleep: true,
@@ -321,6 +459,7 @@ fn falling_box_contact_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
                 is_sensor: false,
             },
         ],
+        joints: Vec::new(),
     }
 }
 
@@ -447,6 +586,30 @@ pub(crate) fn build_scenario(
                 0.1,
                 0.1,
                 Vector::new(200.0, 0.0),
+            )?;
+        }
+        ScenarioId::CcdDynamicConvexPair => {
+            world = World::new(WorldDesc {
+                gravity: Vector::default(),
+                enable_sleep: false,
+            });
+            add_box_with_velocity(
+                &mut world,
+                BodyType::Dynamic,
+                -1.0,
+                0.0,
+                0.1,
+                0.1,
+                Vector::new(200.0, 0.0),
+            )?;
+            add_box_with_velocity(
+                &mut world,
+                BodyType::Dynamic,
+                1.0,
+                0.0,
+                0.1,
+                0.1,
+                Vector::new(-200.0, 0.0),
             )?;
         }
     }
@@ -708,6 +871,223 @@ mod tests {
                 })
                 .collect::<Vec<_>>(),
             vec![1, 1]
+        );
+    }
+
+    #[test]
+    fn legacy_scene_fixture_json_defaults_schema_version_to_v1() {
+        let json = r#"
+        {
+          "world": { "gravity": [0.0, 9.8], "enable_sleep": true },
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": { "type": "circle", "radius": 0.5 }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+
+        assert_eq!(fixture.schema_version, SCENE_RECIPE_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn unsupported_scene_schema_version_fails_with_clear_error() {
+        let fixture = SceneRecipeFixture {
+            schema_version: SCENE_RECIPE_SCHEMA_VERSION + 1,
+            world: SceneFixtureWorld::default(),
+            bodies: vec![SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.0, 0.0, 0.0],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Circle { radius: 0.5 },
+                material: MaterialPreset::Default,
+                filter: CollisionLayerPreset::Default,
+                density: 1.0,
+                is_sensor: false,
+            }],
+            joints: Vec::new(),
+        };
+
+        let error =
+            instantiate_scene_fixture(&fixture).expect_err("unsupported schema should fail");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "unsupported scene schema version: {} (expected v{})",
+                SCENE_RECIPE_SCHEMA_VERSION + 1,
+                SCENE_RECIPE_SCHEMA_VERSION
+            )
+        );
+    }
+
+    #[test]
+    fn scene_fixture_joints_round_trip_into_recipe_world() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "world": { "gravity": [0.0, 0.0], "enable_sleep": false },
+          "bodies": [
+            {
+              "body_type": "static",
+              "pose": [0.0, -1.0, 0.0],
+              "shape": { "type": "rect", "width": 8.0, "height": 1.0 }
+            },
+            {
+              "body_type": "dynamic",
+              "pose": [0.0, 1.0, 0.0],
+              "shape": { "type": "circle", "radius": 0.5 }
+            }
+          ],
+          "joints": [
+            {
+              "type": "distance",
+              "body_a": 0,
+              "body_b": 1,
+              "rest_length": 2.5,
+              "stiffness": 3.0,
+              "damping": 0.4,
+              "local_anchor_a": [0.25, 0.0],
+              "local_anchor_b": [-0.25, 0.0]
+            },
+            {
+              "type": "world_anchor",
+              "body": 1,
+              "world_anchor": [0.0, 3.0],
+              "local_anchor": [0.0, 0.5],
+              "stiffness": 2.0,
+              "damping": 0.1
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let world = instantiate_scene_fixture(&fixture).expect("fixture should create a world");
+        let joints: Vec<_> = world.joints().collect();
+        assert_eq!(joints.len(), 2);
+
+        match world
+            .joint(joints[0])
+            .expect("distance joint should resolve")
+            .desc()
+        {
+            JointDesc::Distance(desc) => {
+                assert_eq!(desc.rest_length, 2.5);
+                assert_eq!(desc.stiffness, 3.0);
+                assert_eq!(desc.damping, 0.4);
+                assert_eq!(desc.local_anchor_a, Point::new(0.25, 0.0));
+                assert_eq!(desc.local_anchor_b, Point::new(-0.25, 0.0));
+            }
+            other => panic!("expected distance joint, got {other:?}"),
+        }
+
+        match world
+            .joint(joints[1])
+            .expect("world-anchor joint should resolve")
+            .desc()
+        {
+            JointDesc::WorldAnchor(desc) => {
+                assert_eq!(desc.world_anchor, Point::new(0.0, 3.0));
+                assert_eq!(desc.local_anchor, Point::new(0.0, 0.5));
+                assert_eq!(desc.stiffness, 2.0);
+                assert_eq!(desc.damping, 0.1);
+            }
+            other => panic!("expected world-anchor joint, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scene_fixture_joint_optional_fields_preserve_core_defaults() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "static",
+              "pose": [0.0, -1.0, 0.0],
+              "shape": { "type": "rect", "width": 8.0, "height": 1.0 }
+            },
+            {
+              "body_type": "dynamic",
+              "pose": [0.0, 1.0, 0.0],
+              "shape": { "type": "circle", "radius": 0.5 }
+            }
+          ],
+          "joints": [
+            { "type": "distance", "body_a": 0, "body_b": 1 },
+            { "type": "world_anchor", "body": 1 }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let world = instantiate_scene_fixture(&fixture).expect("fixture should create a world");
+        let joints: Vec<_> = world.joints().collect();
+        assert_eq!(joints.len(), 2);
+
+        match world
+            .joint(joints[0])
+            .expect("distance joint should resolve")
+            .desc()
+        {
+            JointDesc::Distance(desc) => {
+                let expected = DistanceJointDesc::default();
+                assert_eq!(desc.rest_length, expected.rest_length);
+                assert_eq!(desc.stiffness, expected.stiffness);
+                assert_eq!(desc.damping, expected.damping);
+                assert_eq!(desc.local_anchor_a, expected.local_anchor_a);
+                assert_eq!(desc.local_anchor_b, expected.local_anchor_b);
+            }
+            other => panic!("expected distance joint, got {other:?}"),
+        }
+
+        match world
+            .joint(joints[1])
+            .expect("world-anchor joint should resolve")
+            .desc()
+        {
+            JointDesc::WorldAnchor(desc) => {
+                let expected = WorldAnchorJointDesc::default();
+                assert_eq!(desc.world_anchor, expected.world_anchor);
+                assert_eq!(desc.local_anchor, expected.local_anchor);
+                assert_eq!(desc.stiffness, expected.stiffness);
+                assert_eq!(desc.damping, expected.damping);
+            }
+            other => panic!("expected world-anchor joint, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scene_fixture_joint_body_reference_errors_keep_nested_recipe_paths() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": { "type": "circle", "radius": 0.5 }
+            }
+          ],
+          "joints": [
+            { "type": "distance", "body_a": 0, "body_b": 3 }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let error =
+            instantiate_scene_fixture(&fixture).expect_err("invalid joint body should fail");
+        assert_eq!(
+            error.to_string(),
+            "world setup failed: recipe.joints[0].desc.body_b: body handle does not belong to this world"
         );
     }
 }

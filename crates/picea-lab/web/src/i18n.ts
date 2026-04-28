@@ -88,9 +88,13 @@ const enMessages = {
   "fact.ccdToi": "CCD TOI",
   "fact.ccdAdvancement": "CCD advancement",
   "fact.ccdClamp": "CCD clamp",
+  "fact.ccdTargetKind": "CCD target kind",
+  "fact.ccdTargetClamp": "CCD target clamp",
   "fact.ccdSlop": "CCD slop",
   "fact.ccdSweptStart": "swept start",
   "fact.ccdSweptEnd": "swept end",
+  "fact.ccdTargetSweptStart": "target swept start",
+  "fact.ccdTargetSweptEnd": "target swept end",
   "fact.ccdToiPoint": "TOI point",
   "fact.kind": "kind",
   "fact.anchors": "anchors",
@@ -219,9 +223,13 @@ const zhMessages: Record<MessageKey, string> = {
   "fact.ccdToi": "CCD TOI",
   "fact.ccdAdvancement": "CCD 推进",
   "fact.ccdClamp": "CCD 钳制",
+  "fact.ccdTargetKind": "CCD 目标类型",
+  "fact.ccdTargetClamp": "CCD 目标钳制",
   "fact.ccdSlop": "CCD slop",
   "fact.ccdSweptStart": "扫掠起点",
   "fact.ccdSweptEnd": "扫掠终点",
+  "fact.ccdTargetSweptStart": "目标扫掠起点",
+  "fact.ccdTargetSweptEnd": "目标扫掠终点",
   "fact.ccdToiPoint": "TOI 点",
   "fact.kind": "类型",
   "fact.anchors": "锚点",
@@ -302,6 +310,10 @@ const scenarioMessages: Record<string, Record<Locale, Pick<ScenarioDescriptor, "
     "zh-CN": { name: "CCD 快凸体双墙", description: "高速动态矩形扫掠两个静态薄墙，用于观察最早命中和预算钳制事实。" },
     "en-US": { name: "CCD fast convex walls", description: "A fast dynamic rectangle swept against two static thin walls." },
   },
+  ccd_dynamic_convex_pair: {
+    "zh-CN": { name: "CCD 动态凸体对撞", description: "两个高速动态矩形彼此扫掠命中，用于观察动态目标 CCD 的 TOI、目标扫掠和目标钳制事实。" },
+    "en-US": { name: "CCD dynamic convex pair", description: "Two fast dynamic rectangles swept against each other." },
+  },
 };
 
 const bodyTypeLabels: Record<Locale, Record<BodyType, string>> = {
@@ -337,6 +349,8 @@ const actionLabels: Record<Locale, Record<"play" | "pause" | "step" | "reset", s
 const dynamicValueLabels: Record<Locale, Record<string, string>> = {
   "zh-CN": {
     circle: "圆形",
+    static: "静态",
+    dynamic: "动态",
     polygon: "多边形",
     segment: "线段",
     distance: "距离关节",
@@ -368,6 +382,8 @@ const dynamicValueLabels: Record<Locale, Record<string, string>> = {
     dropped_invalid_impulse: "无效冲量丢弃",
   },
   "en-US": {
+    static: "static",
+    dynamic: "dynamic",
     generic_convex_fallback: "generic convex fallback",
     none: "none",
     epa_failure_contained: "EPA failure contained",

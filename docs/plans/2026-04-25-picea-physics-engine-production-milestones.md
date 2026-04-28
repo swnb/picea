@@ -1191,13 +1191,31 @@ rtk proxy git diff --check
 
 ## M17 Performance Evidence And Tuning Gate
 
-> Status: planned / next after M16.
+> Status: completed 2026-04-28.
 >
 > M17 is the measurement gate after the accepted performance data-layout work.
 > M15 made query and geometry reuse real, and M16 made island solver rows dense.
 > M17 should turn those structural improvements into explicit evidence before
 > the roadmap spends more complexity budget on CCD expansion, broadphase tuning,
 > or public scene-schema work.
+>
+> Completion notes: core now exposes additive deterministic evidence counters
+> without changing physics semantics. `QueryPipeline` keeps `QueryStats` for the
+> most recent query call, covering traversal, candidate, prune, filter-drop, and
+> hit counts. `StepStats` / `DebugStats` now include broadphase traversal/prune
+> counts plus island/active-island/sleeping-skip, solver body slot, contact row,
+> and joint row counts with serde defaults for older payloads. `picea-lab`
+> propagates those counters through debug render frames and adds a
+> `perf.json.counter_summary` aggregation so artifacts carry deterministic work
+> shape separately from wall-clock timing. Criterion bench IDs now include
+> counter summaries and cover query-heavy, many-small-islands, and one large
+> island scenarios in addition to the existing sparse/dense broadphase, stack,
+> CCD bullet, and recipe-heavy baselines.
+>
+> Residual risk: M17 records local evidence shape but does not tune the
+> broadphase/query tree, expand CCD, or set hard timing thresholds. M18 should
+> choose its first tuning slice from these counters and repeated local bench
+> baselines.
 
 ### Background
 
@@ -1285,24 +1303,322 @@ rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); p
 rtk proxy git diff --check
 ```
 
-## Post-M16 Follow-Up / Remaining Risks
+## M18 Broadphase And Query Tuning
+
+> Status: completed on 2026-04-28.
+>
+> M18 is the first optimization milestone that should be chosen from M17
+> evidence. It should tune broadphase/query cost where counters and Criterion
+> baselines show real pressure, rather than replacing the broadphase design or
+> chasing micro-optimizations without proof.
+
+### Background
+
+M11 made broadphase proxy maintenance cheaper with direct handle-to-leaf lookup,
+and M15 gave `QueryPipeline` an internal broadphase-style index. After M17, the
+engine should have counter evidence for query traversal, candidate pruning,
+dense/sparse broadphase behavior, and scene-level query-heavy workloads. M18
+uses that evidence to improve the existing dynamic AABB tree path.
+
+The design choice remains Box2D-style dynamic AABB tree first. M18 is not a
+switch to Rapier's BVH or a public proxy-id API. It is a tuning pass on the
+chosen substrate: insertion heuristics, balancing/rebuild policy, query
+traversal cost, and debug/bench evidence.
+
+### Goal
+
+Reduce broadphase and query cost while preserving deterministic ordering and
+public query semantics. The desired result is fewer unnecessary tree traversals,
+fewer stale or imbalanced tree states, clearer rebuild/balance counters, and
+benchmark evidence that explains the improvement.
+
+### Design Goals
+
+- Use M17 counters to pick the narrowest broadphase/query bottleneck first.
+- Improve dynamic AABB tree insertion, balancing, rebuild, or traversal
+  heuristics without changing public `QueryPipeline` hit semantics.
+- Keep broadphase proxy/leaf ids private to `World` and internal pipeline code.
+- Preserve deterministic candidate and hit ordering across rebuilds, removals,
+  and recycled handles.
+- Keep debug counters interpretable enough for `picea-lab` and future tuning
+  sessions.
+- Avoid hard timing thresholds until M17 baseline variance says they are safe.
+
+### In Scope
+
+- Dynamic AABB tree insertion/balancing/rebuild heuristics.
+- Query traversal pruning and region/ray/AABB candidate efficiency.
+- Broadphase/query counters and benchmark scenario updates when they explain a
+  tuning choice.
+- Regression tests for stale removal, recycled handles, deterministic ordering,
+  and query filters.
+
+### Out Of Scope
+
+- Replacing the broadphase with a different BVH implementation.
+- Public broadphase proxy ids or public tree mutation APIs.
+- Public distance-query stabilization.
+- Solver data-layout work; that belongs to M16/Post-M16 solver follow-up.
+- CCD expansion or scene schema work.
+
+### Acceptance Method
+
+- Start from M17 evidence and document which counter/benchmark motivated the
+  tuning slice.
+- Add behavior locks before tuning if the target behavior is not already locked.
+- Prove deterministic ordering survives tree balance/rebuild, removals, and
+  recycled handles.
+- Build Criterion benches and report counter/baseline movement without turning
+  timing into a brittle pass/fail gate.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --lib pipeline::broadphase
+rtk proxy cargo test -p picea --test query_debug_contract
+rtk proxy cargo test -p picea --test world_step_review_regressions
+rtk proxy cargo bench -p picea --no-run
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
+### Completion Notes
+
+- M17 evidence showed the small three-collider step still paying the old
+  per-leaf root scan cost in `DynamicAabbTree::candidate_pairs_with_stats()`,
+  with `broadphase_traversal_count=15` and `broadphase_pruned_count=4`
+  candidate-pair traversal work units for a single surviving pair.
+- M18 replaced that path with subtree-pair traversal from internal child pairs,
+  so each overlapping node pair is considered once from its lowest common
+  ancestor instead of rescanning the whole root per leaf.
+- Public behavior stayed fixed: candidate output remains sorted by live collider
+  snapshot index, query AABB/point/ray ordering and semantics stay unchanged,
+  stale removal/recycled handles still rebuild correctly, and broadphase
+  proxy/leaf ids remain private.
+- The accepted small-scene lock now reports
+  `broadphase_traversal_count=4` and `broadphase_pruned_count=2` for the same
+  one-pair overlap case. This is evidence that the old per-leaf scan did more
+  candidate-pair traversal work, while the new subtree-pair traversal reports
+  fewer work units for the same scene; these counts are not literal tree-node
+  visit totals.
+
+## M19 CCD And Realism Expansion
+
+> Status: completed selected CCD slice 2026-04-28.
+>
+> M19 is the first post-M17 physical-behavior expansion milestone. It should use
+> performance evidence and behavior locks to choose the next CCD/realism slice,
+> rather than attempting all-shape continuous collision or broad material
+> realism in one pass.
+>
+> Completion notes: the selected M19 slice is translational dynamic-vs-dynamic
+> convex CCD. The CCD phase now reduces two moving convex colliders to relative
+> translational motion, selects hits through the existing swept convex-convex
+> TOI path, and clamps both dynamic bodies to one traceable advancement before
+> contact generation. The first slice intentionally skips the dynamic-dynamic
+> path when either body rotates during the step, and it still excludes circles,
+> rotational casts, and broad all-shape CCD.
+>
+> `CcdTrace` keeps the older `static_body` / `static_collider` field names for
+> compatibility, but adds serde-defaulted `target_kind`, `target_swept_start`,
+> `target_swept_end`, and `target_clamp` facts so artifacts can distinguish
+> static targets from dynamic targets. `picea-lab` includes a
+> `ccd_dynamic_convex_pair` artifact scenario, and Criterion now has a
+> `ccd_dynamic_pair` bench ID so the new CCD cost is observable.
+>
+> Residual risk: rotational CCD, dynamic circle-vs-dynamic CCD, broader
+> all-shape CCD, ramp-specific friction realism, public scene schema, and broad
+> material-system work remain staged follow-up work.
+
+### Background
+
+M13 landed translational dynamic-vs-static convex CCD with multi-hit ordering
+and budget traces. That removed a major tunneling gap without hiding substeps or
+event semantics. The remaining CCD risks are harder: dynamic-vs-dynamic motion,
+rotational casts, and broader all-shape coverage can all become expensive or
+ambiguous without strong behavior locks and counter evidence.
+
+Picea also still needs focused realism regressions such as ramp-specific
+friction. These are visible to users and cheaper to prove than broad material
+systems, so they should be included as targeted behavior locks rather than
+rolled into an open-ended solver rewrite.
+
+### Goal
+
+Expand simulation realism in the smallest evidence-backed slice. The preferred
+CCD order is dynamic-vs-dynamic translational convex first, then rotational or
+broader all-shape coverage only if tests and M17/M18 counters justify the cost.
+The milestone should also add focused ramp/friction regressions where current
+behavior is intentionally narrow.
+
+### Design Goals
+
+- Keep CCD as an explicit named phase with traceable selected/ignored TOI facts.
+- Add dynamic-vs-dynamic CCD only with narrow behavior locks, counters, and
+  budget semantics.
+- Preserve existing dynamic-vs-static CCD behavior and contact event semantics.
+- Keep rotational/all-shape CCD staged behind tests and performance evidence.
+- Add focused ramp/friction realism tests without broad material-system churn.
+- Keep `picea-lab` artifacts able to explain swept paths, TOI selection, and
+  ignored/budgeted impacts.
+
+### In Scope
+
+- One evidence-backed CCD expansion slice, preferably translational
+  dynamic-vs-dynamic convex CCD.
+- No-false-positive, ordering, budget, and event/debug trace tests for the new
+  CCD slice.
+- Ramp-specific friction regression coverage if it can be locked without
+  changing public API.
+- Lab artifact updates for new CCD trace facts if the trace surface changes.
+
+### Out Of Scope
+
+- Full all-shape CCD in one milestone.
+- Rotational CCD unless the selected M19 slice explicitly proves it is the
+  smallest safe next step.
+- Hidden unbounded substeps.
+- Broad material-system redesign.
+- Public scene schema or authoring UX work.
+
+### Acceptance Method
+
+- Add known-red tests for the selected CCD or realism gap before implementation.
+- Prove selected/ignored TOI ordering and budget semantics remain deterministic.
+- Keep existing M13 dynamic-vs-static CCD tests green.
+- Use lab artifacts or trace snapshots to show the new CCD/realism facts.
+- Build Criterion benches so the new CCD cost is at least observable.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --test physics_realism_acceptance ccd
+rtk proxy cargo test -p picea --test physics_realism_acceptance friction
+rtk proxy cargo test -p picea --lib pipeline::ccd
+rtk proxy cargo test -p picea-lab
+rtk proxy cargo bench -p picea --no-run
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
+## M20 Scene Schema And Authoring UX
+
+> Status: completed 2026-04-28.
+>
+> M20 is the next ease-of-use milestone. It should turn the accepted M14
+> recipe/fixture surface into a clearer scene-authoring contract without
+> weakening the low-level `World::create_*` APIs.
+
+### Background
+
+Picea should not compete only by matching physics algorithms. A major advantage
+should be that users can create repeatable worlds, inspect failures, and share
+examples without hand-threading every body, collider, material, collision layer,
+and validation path. M14 added scene/asset recipe helpers, nested error paths,
+and serializable lab fixture flows; M20 stabilizes the next public authoring
+layer around that work.
+
+This milestone should happen after M17-M19 because schema and UX choices should
+be informed by real benchmark/artifact scenarios and by the CCD/realism facts
+that users need to author and inspect.
+
+### Goal
+
+Stabilize a versioned scene schema and authoring workflow for examples,
+benchmarks, and `picea-lab` scenarios. The target is a friendlier public setup
+path that remains reproducible, validated, and easy to debug, while preserving
+the low-level `World` lifecycle APIs for advanced users.
+
+### Design Goals
+
+- Keep low-level `World::create_body` / `create_collider` / `create_joint`
+  stable as the control surface.
+- Make scene schema additions versioned, additive, and explicit about defaults.
+- Preserve nested validation paths for body/collider/joint/material/layer
+  failures.
+- Let examples, benches, and lab scenarios share the same authoring model where
+  that reduces duplication.
+- Define live `picea-lab` editing semantics separately from static scene
+  loading; do not imply hot mutation behavior the engine does not support.
+- Keep generated artifacts reproducible enough for AI and human debugging.
+
+### In Scope
+
+- Versioned public scene schema for accepted recipe/asset concepts.
+- Serializable examples or fixtures that exercise common body/collider/joint
+  setup without hiding handles from advanced users.
+- Schema validation tests, nested error-path tests, and backward-compatible
+  fixture loading where feasible.
+- `picea-lab` scenario loading improvements that consume the stabilized schema.
+- Documentation examples that show both high-level scene authoring and low-level
+  `World` fallback.
+
+### Out Of Scope
+
+- Replacing low-level `World::create_*` APIs.
+- Full live editing of an actively stepping world unless a separate design locks
+  reset/patch/transaction semantics first.
+- Physics solver, broadphase, CCD, or material-model changes.
+- A large visual editor; `picea-lab` remains an inspection and replay tool unless
+  a later product milestone says otherwise.
+
+### Acceptance Method
+
+- Add schema/fixture tests before implementation where the desired authoring
+  behavior is new.
+- Prove old accepted fixtures still load or fail with clear versioned errors.
+- Add `v1_api_smoke` coverage showing low-level APIs remain stable.
+- Add or update at least one lab/example fixture that uses the stabilized schema.
+- Update AI routing and docs so future sessions know whether a task belongs to
+  schema authoring, lab scenario loading, or low-level `World` lifecycle.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --test v1_api_smoke
+rtk proxy cargo test -p picea --test core_model_world
+rtk proxy cargo test -p picea-lab
+rtk proxy cargo bench -p picea --no-run
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
+### 2026-04-28 Narrow Slice Notes
+
+- `picea-lab` scene fixtures now treat `SCENE_RECIPE_SCHEMA_VERSION = 1` as the
+  stable v1 authoring contract; legacy accepted JSON that omits
+  `schema_version` still deserializes as v1.
+- Unsupported non-v1 scene schema versions fail before world instantiation with
+  a dedicated scene-schema error instead of falling through to lower-level world
+  setup.
+- Scene fixtures can now author recipe-indexed `distance` and `world_anchor`
+  joints with additive optional fields (`rest_length`, anchors, `stiffness`,
+  `damping`) while still delegating handle resolution and nested path reporting
+  to `WorldRecipe::with_joint`.
+- Verification for this slice uses `v1_api_smoke`, `core_model_world`,
+  `picea-lab`, bench build, AI YAML parse, formatting, and diff hygiene gates.
+
+## Post-M20 Follow-Up / Remaining Risks
 
 These items are real follow-up work, but they are no longer blockers for
-marking M11-M16 completed in the current milestone line.
+marking M11-M20 completed in the current milestone line.
 
-- M17 focus: add stronger query/broadphase/solver-island performance counters,
-  artifact summaries, and Criterion baseline variance before choosing the next
-  optimization milestone.
-- Post-M16 solver follow-up: only later explore whether contact and joint
+- M17 completed: query/broadphase/solver-island counters, artifact summaries,
+  and Criterion scenario coverage now exist as the evidence gate before tuning.
+- M18 completed: broadphase candidate-pair traversal now walks subtree pairs
+  once from internal child pairs, reducing avoidable candidate-pair
+  traversal/prune work units while preserving candidate/query ordering and
+  private proxy ids.
+- M19 completed: expanded CCD/realism in the smallest evidence-backed slice
+  rather than attempting full all-shape CCD.
+- M20 completed: stabilized public scene authoring without replacing the
+  low-level `World` lifecycle APIs.
+- Post-M20 solver follow-up: only later explore whether contact and joint
   solving should share a stronger island-owned ordering contract or expose
   denser debug/lab facts beyond the current accepted slice.
-- Realism follow-up: add ramp-specific friction regression coverage.
-- M13 follow-up: extend CCD beyond the accepted dynamic-vs-static translational
-  convex slice into dynamic-vs-dynamic, rotational casts, and broader all-shape
-  coverage only when behavior locks and benchmarks justify the cost.
-- M14 follow-up: stabilize the public scene schema, broaden authoring coverage,
-  and define any future live `picea-lab` editing semantics as additive work
-  above the current recipe/fixture acceptance line.
+- Public distance query remains a separate API-design decision.
+- Concave polygon decomposition remains outside the core solver until a focused
+  design and acceptance plan exists.
 
 ## Picea Lab Role Across Milestones
 
@@ -1345,6 +1661,13 @@ milestone:
 - M17: show performance evidence summaries for query, broadphase, island, solver
   row, CCD-heavy, and recipe-heavy scenarios while keeping wall-clock benchmark
   timing outside lab pass/fail semantics.
+- M18: show broadphase/query tuning counters, tree/rebuild facts, and
+  query-heavy scenario summaries without exposing internal proxy ids.
+- M19: visualize the selected CCD/realism expansion slice, including
+  selected/ignored TOI facts, budget decisions, and ramp/friction evidence where
+  applicable.
+- M20: host stabilized scene-schema fixtures and authoring examples with clear
+  validation errors, replay provenance, and low-level `World` fallback examples.
 
 The lab should not run physics independently from `crates/picea`, and it should
 not be the only pass/fail signal for physics correctness.

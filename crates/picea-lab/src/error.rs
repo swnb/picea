@@ -10,6 +10,7 @@ pub enum LabError {
     Io(std::io::Error),
     Json(serde_json::Error),
     UnknownScenario(String),
+    UnsupportedSceneSchemaVersion { found: u32, expected: u32 },
     InvalidArtifactFile(String),
     SessionNotFound(String),
     InvalidControlAction(String),
@@ -22,6 +23,12 @@ impl Display for LabError {
             Self::Io(error) => write!(f, "I/O error: {error}"),
             Self::Json(error) => write!(f, "JSON error: {error}"),
             Self::UnknownScenario(id) => write!(f, "unknown scenario: {id}"),
+            Self::UnsupportedSceneSchemaVersion { found, expected } => {
+                write!(
+                    f,
+                    "unsupported scene schema version: {found} (expected v{expected})"
+                )
+            }
             Self::InvalidArtifactFile(file) => write!(f, "invalid artifact file: {file}"),
             Self::SessionNotFound(id) => write!(f, "session not found: {id}"),
             Self::InvalidControlAction(action) => write!(f, "invalid control action: {action}"),

@@ -81,6 +81,14 @@ pub struct StepStats {
     pub broadphase_filter_drop_count: usize,
     /// Number of broadphase candidates rejected by narrowphase geometry.
     pub broadphase_narrowphase_drop_count: usize,
+    /// Number of broadphase subtree-pair traversal work units spent while
+    /// finding candidate pairs.
+    #[serde(default)]
+    pub broadphase_traversal_count: usize,
+    /// Number of subtree-pair traversal work units pruned because the two
+    /// candidate broadphase subtrees did not overlap.
+    #[serde(default)]
+    pub broadphase_pruned_count: usize,
     /// Number of broadphase tree rebuilds used to restore a bounded tree depth.
     pub broadphase_rebuild_count: usize,
     /// Current broadphase tree depth after proxy synchronization.
@@ -89,6 +97,24 @@ pub struct StepStats {
     pub contact_count: usize,
     /// Number of active manifolds after refresh.
     pub manifold_count: usize,
+    /// Number of deterministic solver islands considered while building rows.
+    #[serde(default)]
+    pub island_count: usize,
+    /// Number of solver islands that were awake or explicitly waking.
+    #[serde(default)]
+    pub active_island_count: usize,
+    /// Number of sleeping solver islands skipped before hot row construction.
+    #[serde(default)]
+    pub sleeping_island_skip_count: usize,
+    /// Number of dense body slots built for hot contact/joint solver rows.
+    #[serde(default)]
+    pub solver_body_slot_count: usize,
+    /// Number of contact solver rows built for active islands.
+    #[serde(default)]
+    pub contact_row_count: usize,
+    /// Number of joint solver rows built for active islands.
+    #[serde(default)]
+    pub joint_row_count: usize,
     /// Number of contacts that reused trusted warm-start cache facts.
     #[serde(default)]
     pub warm_start_hit_count: usize,

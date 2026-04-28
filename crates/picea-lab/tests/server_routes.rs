@@ -43,6 +43,7 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "sat_polygon",
             "ccd_fast_circle_wall",
             "ccd_fast_convex_walls",
+            "ccd_dynamic_convex_pair",
         ]
     );
 

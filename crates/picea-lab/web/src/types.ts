@@ -116,11 +116,15 @@ export type CcdTrace = {
   static_body: number;
   moving_collider: number;
   static_collider: number;
+  target_kind?: "static" | "dynamic";
   swept_start: Vec2;
   swept_end: Vec2;
+  target_swept_start?: Vec2;
+  target_swept_end?: Vec2;
   toi: number;
   advancement: number;
   clamp: number;
+  target_clamp?: number;
   slop: number;
   toi_point: Vec2;
 };

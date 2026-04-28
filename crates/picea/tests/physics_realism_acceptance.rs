@@ -1,3 +1,4 @@
+use picea::events::CcdTargetKind;
 use picea::prelude::*;
 
 const DT: f32 = 1.0 / 60.0;
@@ -1535,6 +1536,94 @@ fn static_contacts_do_not_bridge_dynamic_sleep_islands() {
 }
 
 #[test]
+fn step_broadphase_counters_report_traversal_and_prune_work() {
+    let mut world = no_gravity_world();
+    let near_left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let near_right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+    let far = create_body(&mut world, BodyType::Static, 20.0, 20.0, Vector::default());
+    for body in [near_left, near_right, far] {
+        attach_shape(
+            &mut world,
+            body,
+            SharedShape::circle(1.0),
+            Material::default(),
+        );
+    }
+
+    let report = step_world(&mut world, 1);
+
+    assert_eq!(report.stats.broadphase_candidate_count, 1);
+    assert_eq!(report.stats.broadphase_traversal_count, 4);
+    assert_eq!(report.stats.broadphase_pruned_count, 2);
+    assert_eq!(report.stats.contact_count, 1);
+
+    let snapshot = DebugSnapshot::from_world_with_step_report(
+        &world,
+        &report,
+        &DebugSnapshotOptions::default(),
+    );
+    assert_eq!(
+        snapshot.stats.broadphase_traversal_count,
+        report.stats.broadphase_traversal_count
+    );
+    assert_eq!(
+        snapshot.stats.broadphase_pruned_count,
+        report.stats.broadphase_pruned_count
+    );
+}
+
+#[test]
+fn jointed_active_island_reports_joint_rows_without_contact_rows() {
+    let mut world = no_gravity_world();
+    let left = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-0.5, 0.0, 0.0),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("left body should be created");
+    let right = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.75, 0.0, 0.0),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("right body should be created");
+    world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: left,
+            body_b: right,
+            rest_length: 1.0,
+            stiffness: 4.0,
+            damping: 0.25,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("distance joint should be created");
+
+    let report = step_world(&mut world, 1);
+
+    assert_eq!(report.stats.island_count, 1);
+    assert_eq!(report.stats.active_island_count, 1);
+    assert_eq!(report.stats.sleeping_island_skip_count, 0);
+    assert_eq!(report.stats.solver_body_slot_count, 2);
+    assert_eq!(report.stats.contact_row_count, 0);
+    assert_eq!(report.stats.joint_row_count, 1);
+
+    let snapshot = DebugSnapshot::from_world_with_step_report(
+        &world,
+        &report,
+        &DebugSnapshotOptions::default(),
+    );
+    assert_eq!(snapshot.stats.joint_row_count, report.stats.joint_row_count);
+    assert_eq!(
+        snapshot.stats.contact_row_count,
+        report.stats.contact_row_count
+    );
+}
+
+#[test]
 fn sleeping_body_wakes_on_contact_solver_impact() {
     let mut world = no_gravity_world();
     let target = world
@@ -1734,6 +1823,12 @@ fn sleeping_unrelated_island_keeps_contact_facts_but_skips_solver_rows() {
         contacts.len(),
         "StepStats contact count should still match emitted active contact facts"
     );
+    assert_eq!(report.stats.island_count, 2);
+    assert_eq!(report.stats.active_island_count, 1);
+    assert_eq!(report.stats.sleeping_island_skip_count, 1);
+    assert_eq!(report.stats.solver_body_slot_count, 2);
+    assert_eq!(report.stats.contact_row_count, 1);
+    assert_eq!(report.stats.joint_row_count, 0);
 
     let snapshot = DebugSnapshot::from_world_with_step_report(
         &world,
@@ -1752,6 +1847,19 @@ fn sleeping_unrelated_island_keeps_contact_facts_but_skips_solver_rows() {
             .iter()
             .any(|island| island.id == sleeper_island && island.sleeping),
         "DebugSnapshot should keep the unrelated sleeping island visible"
+    );
+    assert_eq!(snapshot.stats.island_count, report.stats.island_count);
+    assert_eq!(
+        snapshot.stats.active_island_count,
+        report.stats.active_island_count
+    );
+    assert_eq!(
+        snapshot.stats.sleeping_island_skip_count,
+        report.stats.sleeping_island_skip_count
+    );
+    assert_eq!(
+        snapshot.stats.contact_row_count,
+        report.stats.contact_row_count
     );
     let snapshot_sleep_contact = snapshot
         .contacts
@@ -2179,5 +2287,290 @@ fn ccd_dynamic_convex_multi_hit_budget_selects_earliest_static_hit() {
     assert!(
         body_position(&world, bullet).x() <= -0.09,
         "CCD budget should clamp at the first static hit before reaching the farther wall"
+    );
+}
+
+#[test]
+fn ccd_dynamic_convex_pair_clamps_both_bodies_without_tunneling() {
+    let mut world = no_gravity_world();
+    let left = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.0,
+        0.0,
+        Vector::new(200.0, 0.0),
+    );
+    let right = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        1.0,
+        0.0,
+        Vector::new(-200.0, 0.0),
+    );
+    let left_collider = attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+    let right_collider = attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let left_position = body_position(&world, left);
+    let right_position = body_position(&world, right);
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("dynamic-vs-dynamic CCD should emit the selected swept contact");
+    let trace = contact.ccd_trace.expect("contact should carry CCD trace");
+
+    assert_eq!(report.stats.ccd_candidate_count, 1);
+    assert_eq!(report.stats.ccd_hit_count, 1);
+    assert_eq!(report.stats.ccd_miss_count, 0);
+    assert_eq!(report.stats.ccd_clamp_count, 2);
+    assert_eq!(trace.moving_body, left);
+    assert_eq!(trace.static_body, right);
+    assert_eq!(trace.moving_collider, left_collider);
+    assert_eq!(trace.static_collider, right_collider);
+    assert_eq!(trace.target_kind, CcdTargetKind::Dynamic);
+    assert_eq!(trace.target_swept_start, Point::new(1.0, 0.0));
+    assert!(trace.target_swept_end.x() < -2.0);
+    assert!(trace.toi > 0.0 && trace.toi < 1.0);
+    assert!(trace.clamp > 0.0);
+    assert!(trace.target_clamp > 0.0);
+    assert!(
+        left_position.x() < right_position.x(),
+        "dynamic CCD should stop the bodies before they exchange sides; left_x={}, right_x={}",
+        left_position.x(),
+        right_position.x()
+    );
+}
+
+#[test]
+fn ccd_dynamic_convex_hits_stationary_dynamic_convex_target() {
+    let mut world = no_gravity_world();
+    let bullet = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.0,
+        0.0,
+        Vector::new(200.0, 0.0),
+    );
+    let target = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        0.0,
+        Vector::new(0.0, 0.0),
+    );
+    let bullet_collider = attach_shape(
+        &mut world,
+        bullet,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+    let target_collider = attach_shape(
+        &mut world,
+        target,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let bullet_position = body_position(&world, bullet);
+    let target_position = body_position(&world, target);
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("dynamic CCD should include stationary dynamic convex targets");
+    let trace = contact.ccd_trace.expect("contact should carry CCD trace");
+
+    assert_eq!(report.stats.ccd_candidate_count, 1);
+    assert_eq!(report.stats.ccd_hit_count, 1);
+    assert_eq!(report.stats.ccd_miss_count, 0);
+    assert_eq!(report.stats.ccd_clamp_count, 2);
+    assert_eq!(trace.moving_body, bullet);
+    assert_eq!(trace.static_body, target);
+    assert_eq!(trace.moving_collider, bullet_collider);
+    assert_eq!(trace.static_collider, target_collider);
+    assert_eq!(trace.target_kind, CcdTargetKind::Dynamic);
+    assert_eq!(trace.target_swept_start, Point::new(0.0, 0.0));
+    assert_eq!(trace.target_swept_end, Point::new(0.0, 0.0));
+    assert!(trace.toi > 0.0 && trace.toi < 1.0);
+    assert!(trace.clamp > 0.0);
+    assert_eq!(trace.target_clamp, 0.0);
+    assert!(
+        bullet_position.x() < target_position.x(),
+        "dynamic CCD should stop the bullet before it tunnels through a stationary dynamic target; bullet_x={}, target_x={}",
+        bullet_position.x(),
+        target_position.x()
+    );
+}
+
+#[test]
+fn ccd_dynamic_convex_pair_missed_sweep_does_not_false_positive_or_clamp() {
+    let mut world = no_gravity_world();
+    let diamond = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        0.0,
+        Vector::new(0.1, 0.0),
+    );
+    let bullet = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -0.9,
+        2.0,
+        Vector::new(0.0, -66.0),
+    );
+    attach_shape(
+        &mut world,
+        diamond,
+        SharedShape::convex_polygon(vec![
+            Point::new(0.0, -1.0),
+            Point::new(1.0, 0.0),
+            Point::new(0.0, 1.0),
+            Point::new(-1.0, 0.0),
+        ]),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        bullet,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let bullet_position = body_position(&world, bullet);
+
+    assert_eq!(report.stats.contact_count, 0);
+    assert_eq!(report.stats.ccd_candidate_count, 1);
+    assert_eq!(report.stats.ccd_hit_count, 0);
+    assert_eq!(report.stats.ccd_miss_count, 1);
+    assert_eq!(report.stats.ccd_clamp_count, 0);
+    assert!(
+        (bullet_position.y() - 0.9).abs() < 1.0e-4,
+        "missed dynamic sweep should keep the integrated end pose; y={}",
+        bullet_position.y()
+    );
+}
+
+#[test]
+fn ccd_dynamic_convex_multi_hit_budget_selects_earliest_dynamic_hit() {
+    let mut world = no_gravity_world();
+    let bullet = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.0,
+        0.0,
+        Vector::new(200.0, 0.0),
+    );
+    let near = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        0.0,
+        Vector::new(0.1, 0.0),
+    );
+    let far = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.8,
+        0.0,
+        Vector::new(0.1, 0.0),
+    );
+    let near_collider = attach_shape(
+        &mut world,
+        near,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+    let far_collider = attach_shape(
+        &mut world,
+        far,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        bullet,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("CCD should emit the selected earliest dynamic hit");
+    let trace = contact.ccd_trace.expect("contact should carry CCD trace");
+
+    assert_eq!(report.stats.ccd_candidate_count, 2);
+    assert_eq!(report.stats.ccd_hit_count, 2);
+    assert_eq!(report.stats.ccd_miss_count, 0);
+    assert_eq!(report.stats.ccd_clamp_count, 2);
+    assert_eq!(trace.static_body, near);
+    assert_eq!(trace.static_collider, near_collider);
+    assert_ne!(trace.static_collider, far_collider);
+    assert_eq!(trace.target_kind, CcdTargetKind::Dynamic);
+    assert_eq!(trace.target_swept_start, Point::new(0.0, 0.0));
+    assert!(trace.target_swept_end.x() > trace.target_swept_start.x());
+    assert!(trace.target_clamp > 0.0);
+    assert!(
+        body_position(&world, bullet).x() < body_position(&world, far).x(),
+        "CCD budget should select the nearer dynamic target before the farther hit"
+    );
+}
+
+#[test]
+fn ccd_dynamic_convex_pair_skips_rotating_bodies() {
+    let mut world = no_gravity_world();
+    let rotating = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            linear_velocity: Vector::new(200.0, 0.0),
+            angular_velocity: 1.0,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("rotating body should be created");
+    let target = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        1.0,
+        0.0,
+        Vector::new(-200.0, 0.0),
+    );
+    attach_shape(
+        &mut world,
+        rotating,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        target,
+        SharedShape::rect(0.1, 0.1),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+
+    assert_eq!(report.stats.ccd_candidate_count, 0);
+    assert_eq!(report.stats.ccd_hit_count, 0);
+    assert_eq!(report.stats.ccd_clamp_count, 0);
+    assert!(
+        active_contact_events(&report)
+            .iter()
+            .all(|contact| contact.ccd_trace.is_none()),
+        "rotational CCD is outside the M19 translational slice"
     );
 }

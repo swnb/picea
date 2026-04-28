@@ -30,6 +30,10 @@ const {
   t,
 } = module.exports;
 
+function assertLocalizedScenario(locale, scenario, expected) {
+  assert.equal(JSON.stringify(localizeScenario(locale, scenario)), JSON.stringify(expected));
+}
+
 assert.deepEqual(Array.from(supportedLocales), ["zh-CN", "en-US"]);
 assert.deepEqual(Object.keys(messages["zh-CN"]).sort(), Object.keys(messages["en-US"]).sort());
 for (const locale of supportedLocales) {
@@ -47,15 +51,29 @@ assert.equal(layerLabel("zh-CN", "contacts"), "接触点");
 assert.equal(entityLabel("zh-CN", "body", 2), "物体 2");
 assert.equal(dynamicValueLabel("zh-CN", "generic_convex_fallback"), "通用凸形回退");
 assert.equal(dynamicValueLabel("en-US", "epa_failure_contained"), "EPA failure contained");
-assert.equal(
-  JSON.stringify(localizeScenario("zh-CN", {
+assertLocalizedScenario(
+  "zh-CN",
+  {
     id: "falling_box_contact",
     name: "Falling box contact",
     description: "Demo fallback",
-  })),
-  JSON.stringify({
+  },
+  {
     id: "falling_box_contact",
     name: "落箱接触",
     description: "动态箱体下落到静态地面接触，用于观察 AABB、轨迹和接触事实。",
-  }),
+  },
+);
+assertLocalizedScenario(
+  "zh-CN",
+  {
+    id: "ccd_dynamic_convex_pair",
+    name: "CCD dynamic convex pair",
+    description: "Two fast dynamic rectangles swept against each other.",
+  },
+  {
+    id: "ccd_dynamic_convex_pair",
+    name: "CCD 动态凸体对撞",
+    description: "两个高速动态矩形彼此扫掠命中，用于观察动态目标 CCD 的 TOI、目标扫掠和目标钳制事实。",
+  },
 );

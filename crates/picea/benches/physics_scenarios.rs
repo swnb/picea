@@ -2,14 +2,17 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use picea::prelude::{
-    BodyBundle, BodyDesc, BodyType, ColliderBundle, CollisionLayerPreset, MaterialPreset, Pose,
-    SharedShape, SimulationPipeline, StepConfig, StepReport, World, WorldCommands, WorldDesc,
+    BodyBundle, BodyDesc, BodyType, ColliderBundle, ColliderDesc, CollisionLayerPreset,
+    DistanceJointDesc, JointDesc, MaterialPreset, Point, Pose, QueryFilter, QueryPipeline,
+    QueryStats, SharedShape, SimulationPipeline, StepConfig, StepReport, World, WorldCommands,
+    WorldDesc,
 };
 
 const BROADPHASE_GRID: usize = 12;
 const DENSE_GRID: usize = 9;
 const STACK_HEIGHT: usize = 10;
 const API_BATCH_SIZE: usize = 128;
+const ISLAND_COUNT: usize = 32;
 
 fn step_config() -> StepConfig {
     StepConfig {
@@ -41,11 +44,26 @@ fn bench_step_scenario(
     let id = BenchmarkId::new(
         "steps",
         format!(
-            "n={steps}/bodies={}/colliders={}/candidates={}/contacts={}/ccd_hits={}",
+            concat!(
+                "n={}/bodies={}/colliders={}/candidates={}/",
+                "broadphase_traversals={}/broadphase_pruned={}/",
+                "contacts={}/contact_rows={}/joint_rows={}/",
+                "islands={}/active_islands={}/sleep_skips={}/solver_slots={}/",
+                "ccd_hits={}"
+            ),
+            steps,
             stats.body_count,
             stats.collider_count,
             stats.broadphase_candidate_count,
+            stats.broadphase_traversal_count,
+            stats.broadphase_pruned_count,
             stats.contact_count,
+            stats.contact_row_count,
+            stats.joint_row_count,
+            stats.island_count,
+            stats.active_island_count,
+            stats.sleeping_island_skip_count,
+            stats.solver_body_slot_count,
             stats.ccd_hit_count
         ),
     );
@@ -55,6 +73,147 @@ fn bench_step_scenario(
         bench.iter_batched(
             || make_world(),
             |world| black_box(run_steps(world, steps)),
+            BatchSize::SmallInput,
+        );
+    });
+    group.finish();
+}
+
+fn many_small_islands_world() -> World {
+    let mut world = World::new(WorldDesc {
+        gravity: (0.0, 0.0).into(),
+        enable_sleep: true,
+    });
+    let bodies = (0..ISLAND_COUNT)
+        .map(|index| {
+            BodyBundle::dynamic()
+                .with_pose(Pose::from_xy_angle(index as f32 * 4.0, 0.0, 0.0))
+                .with_collider(
+                    ColliderBundle::new(SharedShape::circle(0.35))
+                        .with_filter(CollisionLayerPreset::DynamicBody)
+                        .with_material(MaterialPreset::Default),
+                )
+        })
+        .collect::<Vec<_>>();
+    world
+        .commands()
+        .create_bodies(bodies)
+        .expect("many-islands setup should create");
+    world
+}
+
+fn one_large_island_world() -> World {
+    let mut world = World::new(WorldDesc {
+        gravity: (0.0, 0.0).into(),
+        enable_sleep: true,
+    });
+    let mut handles = Vec::new();
+    for index in 0..ISLAND_COUNT {
+        let body = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                pose: Pose::from_xy_angle(index as f32 * 0.8, 0.0, 0.0),
+                gravity_scale: 0.0,
+                ..BodyDesc::default()
+            })
+            .expect("large-island body should create");
+        world
+            .create_collider(
+                body,
+                ColliderDesc {
+                    shape: SharedShape::circle(0.35),
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("large-island collider should create");
+        handles.push(body);
+    }
+    for pair in handles.windows(2) {
+        world
+            .create_joint(JointDesc::Distance(DistanceJointDesc {
+                body_a: pair[0],
+                body_b: pair[1],
+                rest_length: 0.8,
+                stiffness: 1.0,
+                damping: 0.0,
+                ..DistanceJointDesc::default()
+            }))
+            .expect("large-island joint should create");
+    }
+    world
+}
+
+fn query_heavy_world() -> World {
+    let mut world = World::new(WorldDesc::default());
+    let bodies = (0..BROADPHASE_GRID)
+        .flat_map(|row| {
+            (0..BROADPHASE_GRID).map(move |col| {
+                BodyBundle::static_body()
+                    .with_pose(Pose::from_xy_angle(col as f32 * 1.5, row as f32 * 1.5, 0.0))
+                    .with_collider(
+                        ColliderBundle::new(SharedShape::rect(0.75, 0.75))
+                            .with_filter(CollisionLayerPreset::StaticGeometry)
+                            .with_material(MaterialPreset::Default),
+                    )
+            })
+        })
+        .collect::<Vec<_>>();
+    world
+        .commands()
+        .create_bodies(bodies)
+        .expect("query-heavy setup should create");
+    world
+}
+
+fn query_points() -> Vec<Point> {
+    (0..BROADPHASE_GRID)
+        .flat_map(|row| {
+            (0..BROADPHASE_GRID).map(move |col| Point::new(col as f32 * 1.5, row as f32 * 1.5))
+        })
+        .collect()
+}
+
+fn add_query_stats(total: &mut QueryStats, stats: QueryStats) {
+    total.traversal_count += stats.traversal_count;
+    total.candidate_count += stats.candidate_count;
+    total.pruned_count += stats.pruned_count;
+    total.filter_drop_count += stats.filter_drop_count;
+    total.hit_count += stats.hit_count;
+}
+
+fn run_query_sweep(world: &World, points: &[Point]) -> (usize, QueryStats) {
+    let mut query = QueryPipeline::new();
+    query.sync(world);
+    let mut hit_count = 0usize;
+    let mut stats = QueryStats::default();
+    for point in points {
+        hit_count += query.intersect_point(*point, QueryFilter::default()).len();
+        add_query_stats(&mut stats, query.last_stats());
+    }
+    (hit_count, stats)
+}
+
+fn bench_query_heavy(c: &mut Criterion) {
+    let world = query_heavy_world();
+    let points = query_points();
+    let (hits, stats) = run_query_sweep(&world, &points);
+    let id = BenchmarkId::new(
+        "intersect_point_sweep",
+        format!(
+            "queries={}/hits={hits}/candidates={}/traversals={}/pruned={}/filter_drops={}",
+            points.len(),
+            stats.candidate_count,
+            stats.traversal_count,
+            stats.pruned_count,
+            stats.filter_drop_count
+        ),
+    );
+
+    let mut group = c.benchmark_group("query_heavy");
+    group.bench_function(id, |bench| {
+        bench.iter_batched(
+            || (query_heavy_world(), query_points()),
+            |(world, points)| black_box(run_query_sweep(&world, &points)),
             BatchSize::SmallInput,
         );
     });
@@ -169,6 +328,44 @@ fn ccd_bullet_world() -> World {
     world
 }
 
+fn ccd_dynamic_pair_world() -> World {
+    let mut world = World::new(WorldDesc {
+        gravity: (0.0, 0.0).into(),
+        enable_sleep: false,
+    });
+    let left = BodyBundle::new(BodyDesc {
+        body_type: BodyType::Dynamic,
+        pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+        linear_velocity: (200.0, 0.0).into(),
+        gravity_scale: 0.0,
+        can_sleep: false,
+        ..BodyDesc::default()
+    })
+    .with_collider(
+        ColliderBundle::new(SharedShape::rect(0.1, 0.1))
+            .with_filter(CollisionLayerPreset::DynamicBody)
+            .with_material(MaterialPreset::Default),
+    );
+    let right = BodyBundle::new(BodyDesc {
+        body_type: BodyType::Dynamic,
+        pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+        linear_velocity: (-200.0, 0.0).into(),
+        gravity_scale: 0.0,
+        can_sleep: false,
+        ..BodyDesc::default()
+    })
+    .with_collider(
+        ColliderBundle::new(SharedShape::rect(0.1, 0.1))
+            .with_filter(CollisionLayerPreset::DynamicBody)
+            .with_material(MaterialPreset::Default),
+    );
+    world
+        .commands()
+        .create_bodies([left, right])
+        .expect("dynamic CCD pair setup should create");
+    world
+}
+
 fn api_batch_bodies(count: usize) -> Vec<BodyBundle> {
     (0..count)
         .map(|index| {
@@ -226,8 +423,12 @@ fn bench_api_batch_creation(c: &mut Criterion) {
 fn physics_scenarios(c: &mut Criterion) {
     bench_step_scenario(c, "sparse_broadphase", sparse_broadphase_world, 1);
     bench_step_scenario(c, "dense_broadphase", dense_broadphase_world, 1);
+    bench_query_heavy(c);
+    bench_step_scenario(c, "many_small_islands", many_small_islands_world, 10);
+    bench_step_scenario(c, "one_large_island", one_large_island_world, 10);
     bench_step_scenario(c, "stack_stability", stack_stability_world, 60);
     bench_step_scenario(c, "ccd_bullet", ccd_bullet_world, 1);
+    bench_step_scenario(c, "ccd_dynamic_pair", ccd_dynamic_pair_world, 1);
     bench_api_batch_creation(c);
 }
 

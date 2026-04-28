@@ -185,6 +185,14 @@ pub struct DebugStats {
     pub broadphase_filter_drop_count: usize,
     /// Number of broadphase candidates rejected by narrowphase geometry.
     pub broadphase_narrowphase_drop_count: usize,
+    /// Number of broadphase subtree-pair traversal work units spent while
+    /// finding candidate pairs.
+    #[serde(default)]
+    pub broadphase_traversal_count: usize,
+    /// Number of subtree-pair traversal work units pruned because the two
+    /// candidate broadphase subtrees did not overlap.
+    #[serde(default)]
+    pub broadphase_pruned_count: usize,
     /// Number of broadphase tree rebuilds in the last step.
     pub broadphase_rebuild_count: usize,
     /// Broadphase tree depth after the last step.
@@ -193,6 +201,24 @@ pub struct DebugStats {
     pub contact_count: usize,
     /// Number of active manifolds in the last step.
     pub manifold_count: usize,
+    /// Number of deterministic solver islands considered while building rows.
+    #[serde(default)]
+    pub island_count: usize,
+    /// Number of solver islands that were awake or explicitly waking.
+    #[serde(default)]
+    pub active_island_count: usize,
+    /// Number of sleeping solver islands skipped before hot row construction.
+    #[serde(default)]
+    pub sleeping_island_skip_count: usize,
+    /// Number of dense body slots built for hot contact/joint solver rows.
+    #[serde(default)]
+    pub solver_body_slot_count: usize,
+    /// Number of contact solver rows built for active islands.
+    #[serde(default)]
+    pub contact_row_count: usize,
+    /// Number of joint solver rows built for active islands.
+    #[serde(default)]
+    pub joint_row_count: usize,
     /// Number of contacts that reused trusted warm-start cache facts.
     #[serde(default)]
     pub warm_start_hit_count: usize,
@@ -459,11 +485,15 @@ fn sanitize_ccd_trace(trace: CcdTrace) -> CcdTrace {
         static_body: trace.static_body,
         moving_collider: trace.moving_collider,
         static_collider: trace.static_collider,
+        target_kind: trace.target_kind,
         swept_start: sanitize_point(trace.swept_start),
         swept_end: sanitize_point(trace.swept_end),
+        target_swept_start: sanitize_point(trace.target_swept_start),
+        target_swept_end: sanitize_point(trace.target_swept_end),
         toi: sanitize_scalar(trace.toi),
         advancement: sanitize_scalar(trace.advancement),
         clamp: sanitize_scalar(trace.clamp).max(0.0),
+        target_clamp: sanitize_scalar(trace.target_clamp).max(0.0),
         slop: sanitize_scalar(trace.slop).max(0.0),
         toi_point: sanitize_point(trace.toi_point),
     }
@@ -861,10 +891,18 @@ impl DebugSnapshot {
                 broadphase_same_body_drop_count: stats.broadphase_same_body_drop_count,
                 broadphase_filter_drop_count: stats.broadphase_filter_drop_count,
                 broadphase_narrowphase_drop_count: stats.broadphase_narrowphase_drop_count,
+                broadphase_traversal_count: stats.broadphase_traversal_count,
+                broadphase_pruned_count: stats.broadphase_pruned_count,
                 broadphase_rebuild_count: stats.broadphase_rebuild_count,
                 broadphase_tree_depth: stats.broadphase_tree_depth,
                 contact_count: stats.contact_count.max(contacts.len()),
                 manifold_count: stats.manifold_count.max(manifolds.len()),
+                island_count: stats.island_count,
+                active_island_count: stats.active_island_count,
+                sleeping_island_skip_count: stats.sleeping_island_skip_count,
+                solver_body_slot_count: stats.solver_body_slot_count,
+                contact_row_count: stats.contact_row_count,
+                joint_row_count: stats.joint_row_count,
                 warm_start_hit_count: stats.warm_start_hit_count,
                 warm_start_miss_count: stats.warm_start_miss_count,
                 warm_start_drop_count: stats.warm_start_drop_count,
@@ -1284,8 +1322,14 @@ fn sanitize_f64(value: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_scalar, DebugAabb, DebugPrimitive, DebugShape, DebugSnapshot};
-    use crate::math::{point::Point, vector::Vector};
+    use super::{
+        sanitize_ccd_trace, sanitize_scalar, DebugAabb, DebugPrimitive, DebugShape, DebugSnapshot,
+    };
+    use crate::{
+        events::{CcdTargetKind, CcdTrace},
+        handles::{BodyHandle, ColliderHandle},
+        math::{point::Point, vector::Vector},
+    };
 
     #[test]
     fn debug_aabb_normalizes_non_finite_ranges() {
@@ -1334,5 +1378,38 @@ mod tests {
         assert_eq!(sanitize_scalar(f32::NAN), 0.0);
         assert_eq!(sanitize_scalar(f32::INFINITY), 0.0);
         assert_eq!(sanitize_scalar(-1.5), -1.5);
+    }
+
+    #[test]
+    fn sanitize_ccd_trace_keeps_dynamic_target_kind_and_cleans_new_fields() {
+        let trace = sanitize_ccd_trace(CcdTrace {
+            moving_body: BodyHandle::from_raw_parts(1, 0),
+            static_body: BodyHandle::from_raw_parts(2, 0),
+            moving_collider: ColliderHandle::from_raw_parts(3, 0),
+            static_collider: ColliderHandle::from_raw_parts(4, 0),
+            target_kind: CcdTargetKind::Dynamic,
+            swept_start: Point::new(f32::NAN, -1.0),
+            swept_end: Point::new(2.0, f32::INFINITY),
+            target_swept_start: Point::new(f32::NEG_INFINITY, 1.0),
+            target_swept_end: Point::new(3.0, f32::NAN),
+            toi: f32::INFINITY,
+            advancement: f32::NAN,
+            clamp: -1.0,
+            target_clamp: f32::NAN,
+            slop: -0.5,
+            toi_point: Point::new(f32::NAN, f32::INFINITY),
+        });
+
+        assert_eq!(trace.target_kind, CcdTargetKind::Dynamic);
+        assert_eq!(trace.swept_start, Point::new(0.0, -1.0));
+        assert_eq!(trace.swept_end, Point::new(2.0, 0.0));
+        assert_eq!(trace.target_swept_start, Point::new(0.0, 1.0));
+        assert_eq!(trace.target_swept_end, Point::new(3.0, 0.0));
+        assert_eq!(trace.toi, 0.0);
+        assert_eq!(trace.advancement, 0.0);
+        assert_eq!(trace.clamp, 0.0);
+        assert_eq!(trace.target_clamp, 0.0);
+        assert_eq!(trace.slop, 0.0);
+        assert_eq!(trace.toi_point, Point::default());
     }
 }

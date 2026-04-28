@@ -42,7 +42,7 @@
   owner: ai-context
   applies_to: [all, triage, routing, current-facts]
   keywords: [route, questions, module, current-facts, dependency-graph, verification, docs]
-  last_reviewed: 2026-04-23
+  last_reviewed: 2026-04-28
 - path: docs/ai/repo-map.md
   title: Repo Map
   kind: doc
@@ -51,7 +51,7 @@
   owner: ai-context
   applies_to: [architecture, debugging, implementation, workspace, public-modules]
   keywords: [algo, body, collider, debug, events, handles, joint, world, pipeline, query, solver, math, dependency-graph]
-  last_reviewed: 2026-04-23
+  last_reviewed: 2026-04-28
 - path: docs/architecture/README.md
   title: Architecture Docs Index
   kind: architecture
@@ -212,7 +212,7 @@
   status: active
   owner: supervisor
   applies_to: [milestone, scope, acceptance, productionization, physics-upgrade]
-  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks, m10-5, m11, m12, m13, m14, m15, m16, post-m14, post-m15, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, ccd-generalization, ergonomic-api-v2]
+  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks, m10-5, m11, m12, m13, m14, m15, m16, m17, m18, m19, post-m14, post-m15, performance-substrate, performance-data-path, performance-evidence, query-stats, counter-summary, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, subtree-pair-traversal, ccd-generalization, dynamic-vs-dynamic-ccd, ergonomic-api-v2]
   last_reviewed: 2026-04-28
 - path: todo.md
   title: Picea Physics Engine Backlog Archive
@@ -248,8 +248,26 @@
   status: active
   owner: picea-core
   applies_to: [core, pipeline, step-context, stats, events]
-  keywords: [stepcontext, transient-facts, stepstats, wake-reasons, numeric-warnings, ccd-pose-clamp]
-  last_reviewed: 2026-04-27
+  keywords: [stepcontext, transient-facts, stepstats, wake-reasons, numeric-warnings, ccd-pose-clamp, performance-evidence, solver-counters, broadphase-counters]
+  last_reviewed: 2026-04-28
+- path: crates/picea/src/pipeline/ccd.rs
+  title: Picea CCD Pose Clamp
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [core, pipeline, ccd, pose-clamp, dynamic-targets]
+  keywords: [ccd, pose-clamp, swept-convex-convex, swept-circle-convex, dynamic-vs-static, dynamic-vs-dynamic, target-kind, m13, m19]
+  last_reviewed: 2026-04-28
+- path: crates/picea/src/query.rs
+  title: Picea Query Pipeline
+  kind: code
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [core, query, performance-evidence, public-api]
+  keywords: [querypipeline, queryfilter, querystats, traversal-count, candidate-count, prune-count, filter-drop-count, hit-count, m17]
+  last_reviewed: 2026-04-28
 - path: crates/picea/src/pipeline/island.rs
   title: Internal Island Solve Plan
   kind: code
@@ -257,7 +275,7 @@
   status: active
   owner: picea-core
   applies_to: [core, pipeline, solver, dense-island-execution, active-island-solver]
-  keywords: [island-solve-plan, body-slots, contact-row-indices, joint-rows, solver-data-layout, m16]
+  keywords: [island-solve-plan, body-slots, contact-row-indices, joint-rows, solver-data-layout, solver-step-stats, m16, m17]
   last_reviewed: 2026-04-28
 - path: crates/picea/src/solver/contact.rs
   title: Internal Contact Solver
@@ -275,8 +293,8 @@
   status: active
   owner: picea-core
   applies_to: [benchmarks, broadphase, stack, ccd, api, baseline]
-  keywords: [criterion, benchmark, sparse-broadphase, dense-broadphase, stack-stability, ccd-bullet, api-batch, counters]
-  last_reviewed: 2026-04-27
+  keywords: [criterion, benchmark, sparse-broadphase, dense-broadphase, query-heavy, many-small-islands, one-large-island, stack-stability, ccd-bullet, ccd-dynamic-pair, api-batch, counters, query-stats, island-counters, m19]
+  last_reviewed: 2026-04-28
 - path: crates/picea/src/pipeline/gjk.rs
   title: Internal GJK/EPA generic convex fallback
   kind: code
@@ -292,9 +310,27 @@
   authority: medium
   status: active
   owner: picea-lab
-  applies_to: [lab, simulator, artifacts, server, cli, scenarios]
-  keywords: [picea-lab, artifact, scenario, server, sse, cli, viewer]
-  last_reviewed: 2026-04-24
+  applies_to: [lab, simulator, artifacts, server, cli, scenarios, authoring]
+  keywords: [picea-lab, artifact, scenario, scene-schema, schema-version, scene-recipe-fixture, server, sse, cli, viewer]
+  last_reviewed: 2026-04-28
+- path: crates/picea-lab/src/scenario.rs
+  title: Picea Lab Scenarios And Scene Fixtures
+  kind: code
+  authority: high
+  status: active
+  owner: picea-lab
+  applies_to: [lab, scenarios, fixtures, scene-schema, authoring, recipes]
+  keywords: [scene-recipe-fixture, schema-version, distance-joint, world-anchor-joint, backward-compatibility, recipe-indexed-joints, scenario-overrides, m14, m19, m20]
+  last_reviewed: 2026-04-28
+- path: crates/picea-lab/src/artifact.rs
+  title: Picea Lab Artifact Runner
+  kind: code
+  authority: medium
+  status: active
+  owner: picea-lab
+  applies_to: [lab, artifacts, performance-evidence, debug-render, perf-summary]
+  keywords: [artifact, frames-jsonl, debug-render, perf-json, counter-summary, perf-counter-summary, broadphase-counters, island-counters, ccd-trace, target-kind, m17, m19]
+  last_reviewed: 2026-04-28
 - path: crates/picea-lab/web/src/App.tsx
   title: Picea Lab web workbench
   kind: code

@@ -6,7 +6,7 @@ use std::{
 use crate::{
     body::{BodyType, Pose},
     collider::{CollisionFilter, ShapeAabb, SharedShape},
-    events::CcdTrace,
+    events::{CcdTargetKind, CcdTrace},
     handles::{BodyHandle, ColliderHandle},
     math::{point::Point, vector::Vector, FloatNum},
     world::World,
@@ -70,9 +70,22 @@ struct MovingConvex {
 }
 
 #[derive(Clone, Debug)]
+struct DynamicConvexTarget {
+    body: BodyHandle,
+    collider: ColliderHandle,
+    start: Point,
+    end: Point,
+    start_vertices: Vec<Point>,
+    swept_aabb: ShapeAabb,
+    filter: CollisionFilter,
+    is_sensor: bool,
+}
+
+#[derive(Clone, Debug)]
 struct StaticConvex {
     body: BodyHandle,
     collider: ColliderHandle,
+    point: Point,
     vertices: Vec<Point>,
     aabb: ShapeAabb,
     filter: CollisionFilter,
@@ -85,10 +98,14 @@ struct CcdHit {
     static_body: BodyHandle,
     moving_collider: ColliderHandle,
     static_collider: ColliderHandle,
+    target_kind: CcdTargetKind,
     swept_start: Point,
     swept_end: Point,
+    target_swept_start: Point,
+    target_swept_end: Point,
     toi: FloatNum,
     exit: FloatNum,
+    slop_sweep_length: FloatNum,
     toi_point: Point,
 }
 
@@ -99,10 +116,14 @@ pub(crate) fn run_pose_clamp_phase(
     let snapshots = collect_snapshots(world, previous_body_poses);
     let mut moving_circles = Vec::with_capacity(snapshots.len());
     let mut moving_convexes = Vec::with_capacity(snapshots.len());
+    let mut dynamic_convex_targets = Vec::with_capacity(snapshots.len());
     let mut static_convexes = Vec::with_capacity(snapshots.len());
     for snapshot in &snapshots {
         if let Some(moving) = moving_circle(snapshot) {
             moving_circles.push(moving);
+        }
+        if let Some(target) = dynamic_convex_target(snapshot) {
+            dynamic_convex_targets.push(target);
         }
         if let Some(moving) = moving_convex(snapshot) {
             moving_convexes.push(moving);
@@ -116,7 +137,13 @@ pub(crate) fn run_pose_clamp_phase(
         moving_circles
             .len()
             .saturating_mul(static_convexes.len())
-            .saturating_add(moving_convexes.len().saturating_mul(static_convexes.len())),
+            .saturating_add(moving_convexes.len().saturating_mul(static_convexes.len()))
+            .saturating_add(
+                moving_convexes
+                    .len()
+                    .saturating_mul(moving_convexes.len().saturating_sub(1))
+                    / 2,
+            ),
     );
 
     for moving in &moving_circles {
@@ -134,6 +161,7 @@ pub(crate) fn run_pose_clamp_phase(
                 continue;
             }
             stats.candidate_count += 1;
+            let sweep = moving.end - moving.start;
             if let Some(hit) =
                 swept_circle_convex_toi(moving.start, moving.end, moving.radius, &target.vertices)
             {
@@ -142,10 +170,14 @@ pub(crate) fn run_pose_clamp_phase(
                     static_body: target.body,
                     moving_collider: moving.collider,
                     static_collider: target.collider,
+                    target_kind: CcdTargetKind::Static,
                     swept_start: moving.start,
                     swept_end: moving.end,
+                    target_swept_start: target.point,
+                    target_swept_end: target.point,
                     toi: hit.toi,
                     exit: hit.exit,
+                    slop_sweep_length: sweep.length(),
                     toi_point: moving.start + (moving.end - moving.start) * hit.toi
                         - hit.normal * moving.radius,
                 });
@@ -176,11 +208,58 @@ pub(crate) fn run_pose_clamp_phase(
                     static_body: target.body,
                     moving_collider: moving.collider,
                     static_collider: target.collider,
+                    target_kind: CcdTargetKind::Static,
                     swept_start: moving.start,
                     swept_end: moving.end,
+                    target_swept_start: target.point,
+                    target_swept_end: target.point,
                     toi: hit.toi,
                     exit: hit.exit,
+                    slop_sweep_length: sweep.length(),
                     toi_point: hit.toi_point,
+                });
+            }
+        }
+    }
+    for moving in &moving_convexes {
+        for target in &dynamic_convex_targets {
+            if moving.body == target.body || moving.is_sensor || target.is_sensor {
+                continue;
+            }
+            if dynamic_convex_is_moving(target)
+                && (moving.body, moving.collider) > (target.body, target.collider)
+            {
+                continue;
+            }
+            if !moving.filter.allows(&target.filter) {
+                continue;
+            }
+            if !aabb_overlaps(moving.swept_aabb, target.swept_aabb) {
+                continue;
+            }
+            stats.candidate_count += 1;
+            let moving_sweep = moving.end - moving.start;
+            let target_sweep = target.end - target.start;
+            let relative_sweep = moving_sweep - target_sweep;
+            if let Some(hit) = swept_convex_convex_toi(
+                &moving.start_vertices,
+                relative_sweep,
+                &target.start_vertices,
+            ) {
+                hits.push(CcdHit {
+                    moving_body: moving.body,
+                    static_body: target.body,
+                    moving_collider: moving.collider,
+                    static_collider: target.collider,
+                    target_kind: CcdTargetKind::Dynamic,
+                    swept_start: moving.start,
+                    swept_end: moving.end,
+                    target_swept_start: target.start,
+                    target_swept_end: target.end,
+                    toi: hit.toi,
+                    exit: hit.exit,
+                    slop_sweep_length: relative_sweep.length(),
+                    toi_point: hit.toi_point + target_sweep * hit.toi,
                 });
             }
         }
@@ -193,11 +272,18 @@ pub(crate) fn run_pose_clamp_phase(
     let mut clamped_bodies = BTreeSet::new();
     let mut traces = Vec::new();
     for hit in hits {
-        if !clamped_bodies.insert(hit.moving_body) {
+        let clamps_dynamic_target = hit.target_kind == CcdTargetKind::Dynamic;
+        if clamped_bodies.contains(&hit.moving_body)
+            || (clamps_dynamic_target && clamped_bodies.contains(&hit.static_body))
+        {
             continue;
         }
-        if let Some(trace) = clamp_body_to_toi(world, hit) {
-            stats.clamp_count += 1;
+        if let Some((trace, clamp_count)) = clamp_hit_to_toi(world, hit) {
+            clamped_bodies.insert(trace.moving_body);
+            if trace.target_kind == CcdTargetKind::Dynamic {
+                clamped_bodies.insert(trace.static_body);
+            }
+            stats.clamp_count += clamp_count;
             traces.push(trace);
         }
     }
@@ -271,6 +357,24 @@ fn moving_circle(snapshot: &CcdColliderSnapshot) -> Option<MovingCircle> {
 }
 
 fn moving_convex(snapshot: &CcdColliderSnapshot) -> Option<MovingConvex> {
+    let target = dynamic_convex_target(snapshot)?;
+    let sweep = target.end - target.start;
+    if sweep.length() <= CCD_TOI_EPSILON {
+        return None;
+    }
+    Some(MovingConvex {
+        body: target.body,
+        collider: target.collider,
+        start: target.start,
+        end: target.end,
+        start_vertices: target.start_vertices,
+        swept_aabb: target.swept_aabb,
+        filter: target.filter,
+        is_sensor: target.is_sensor,
+    })
+}
+
+fn dynamic_convex_target(snapshot: &CcdColliderSnapshot) -> Option<DynamicConvexTarget> {
     if !snapshot.body_type.is_dynamic() {
         return None;
     }
@@ -305,12 +409,8 @@ fn moving_convex(snapshot: &CcdColliderSnapshot) -> Option<MovingConvex> {
     if !point_is_finite(start) || !point_is_finite(end) {
         return None;
     }
-    let sweep = end - start;
-    if sweep.length() <= CCD_TOI_EPSILON {
-        return None;
-    }
     let swept_aabb = swept_points_aabb(start_vertices.iter().chain(end_vertices.iter()).copied());
-    Some(MovingConvex {
+    Some(DynamicConvexTarget {
         body: snapshot.body,
         collider: snapshot.handle,
         start,
@@ -320,6 +420,10 @@ fn moving_convex(snapshot: &CcdColliderSnapshot) -> Option<MovingConvex> {
         filter: snapshot.filter,
         is_sensor: snapshot.is_sensor,
     })
+}
+
+fn dynamic_convex_is_moving(target: &DynamicConvexTarget) -> bool {
+    (target.end - target.start).length() > CCD_TOI_EPSILON
 }
 
 fn static_convex(snapshot: &CcdColliderSnapshot) -> Option<StaticConvex> {
@@ -342,6 +446,7 @@ fn static_convex(snapshot: &CcdColliderSnapshot) -> Option<StaticConvex> {
     Some(StaticConvex {
         body: snapshot.body,
         collider: snapshot.handle,
+        point: snapshot.end_pose.point(),
         vertices,
         aabb: snapshot.aabb,
         filter: snapshot.filter,
@@ -805,13 +910,32 @@ fn polygon_area(vertices: &[Point]) -> FloatNum {
     area * 0.5
 }
 
-fn clamp_body_to_toi(world: &mut World, hit: CcdHit) -> Option<CcdTrace> {
+fn clamp_hit_to_toi(world: &mut World, hit: CcdHit) -> Option<(CcdTrace, usize)> {
     let sweep = hit.swept_end - hit.swept_start;
-    let sweep_length = sweep.length();
-    if sweep_length <= CCD_TOI_EPSILON {
+    let target_sweep = hit.target_swept_end - hit.target_swept_start;
+    if sweep.length() <= CCD_TOI_EPSILON || hit.slop_sweep_length <= CCD_TOI_EPSILON {
         return None;
     }
-    let slop_fraction = CCD_CLAMP_SLOP / sweep_length;
+    let target_is_dynamic = hit.target_kind == CcdTargetKind::Dynamic;
+    if !world
+        .body_record(hit.moving_body)
+        .ok()?
+        .body_type
+        .is_dynamic()
+    {
+        return None;
+    }
+    if target_is_dynamic
+        && !world
+            .body_record(hit.static_body)
+            .ok()?
+            .body_type
+            .is_dynamic()
+    {
+        return None;
+    }
+
+    let slop_fraction = CCD_CLAMP_SLOP / hit.slop_sweep_length;
     let safe_exit = if hit.exit > hit.toi {
         hit.toi + (hit.exit - hit.toi) * 0.5
     } else {
@@ -820,35 +944,57 @@ fn clamp_body_to_toi(world: &mut World, hit: CcdHit) -> Option<CcdTrace> {
     let advancement = (hit.toi + slop_fraction).min(safe_exit).clamp(hit.toi, 1.0);
     let clamped_center = hit.swept_start + sweep * advancement;
     let rollback = hit.swept_end - clamped_center;
-    let record = world.body_record_mut(hit.moving_body).ok()?;
-    if !record.body_type.is_dynamic() {
-        return None;
-    }
-    crate::solver::body_state::translate_pose(&mut record.pose, -rollback, 0.0);
-    record.sleeping = false;
-    record.sleep_idle_time = 0.0;
+    let target_rollback = if target_is_dynamic {
+        hit.target_swept_end - (hit.target_swept_start + target_sweep * advancement)
+    } else {
+        Vector::default()
+    };
 
-    Some(CcdTrace {
-        moving_body: hit.moving_body,
-        static_body: hit.static_body,
-        moving_collider: hit.moving_collider,
-        static_collider: hit.static_collider,
-        swept_start: hit.swept_start,
-        swept_end: hit.swept_end,
-        toi: hit.toi,
-        advancement,
-        clamp: rollback.length(),
-        slop: CCD_CLAMP_SLOP,
-        toi_point: hit.toi_point,
-    })
+    {
+        let record = world.body_record_mut(hit.moving_body).ok()?;
+        crate::solver::body_state::translate_pose(&mut record.pose, -rollback, 0.0);
+        record.sleeping = false;
+        record.sleep_idle_time = 0.0;
+    }
+    let mut clamp_count = 1;
+    if target_is_dynamic {
+        let record = world.body_record_mut(hit.static_body).ok()?;
+        crate::solver::body_state::translate_pose(&mut record.pose, -target_rollback, 0.0);
+        record.sleeping = false;
+        record.sleep_idle_time = 0.0;
+        clamp_count += 1;
+    }
+
+    Some((
+        CcdTrace {
+            moving_body: hit.moving_body,
+            static_body: hit.static_body,
+            moving_collider: hit.moving_collider,
+            static_collider: hit.static_collider,
+            target_kind: hit.target_kind,
+            swept_start: hit.swept_start,
+            swept_end: hit.swept_end,
+            target_swept_start: hit.target_swept_start,
+            target_swept_end: hit.target_swept_end,
+            toi: hit.toi,
+            advancement,
+            clamp: rollback.length(),
+            target_clamp: target_rollback.length(),
+            slop: CCD_CLAMP_SLOP,
+            toi_point: hit.toi_point,
+        },
+        clamp_count,
+    ))
 }
 
 fn compare_hits(a: &CcdHit, b: &CcdHit) -> Ordering {
     a.toi
         .partial_cmp(&b.toi)
         .unwrap_or(Ordering::Equal)
+        .then(a.target_kind.cmp(&b.target_kind))
         .then(a.moving_body.cmp(&b.moving_body))
         .then(a.moving_collider.cmp(&b.moving_collider))
+        .then(a.static_body.cmp(&b.static_body))
         .then(a.static_collider.cmp(&b.static_collider))
 }
 

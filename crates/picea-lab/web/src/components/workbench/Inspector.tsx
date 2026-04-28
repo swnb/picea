@@ -426,6 +426,20 @@ function EntityInspector({
                   value={selected.entity.ccd_trace.clamp.toFixed(5)}
                 />
                 <Fact
+                  label={t(locale, "fact.ccdTargetKind")}
+                  value={dynamicValueLabel(
+                    locale,
+                    selected.entity.ccd_trace.target_kind ?? "static",
+                  )}
+                  mono={false}
+                />
+                <Fact
+                  label={t(locale, "fact.ccdTargetClamp")}
+                  value={(selected.entity.ccd_trace.target_clamp ?? 0).toFixed(
+                    5,
+                  )}
+                />
+                <Fact
                   label={t(locale, "fact.ccdSlop")}
                   value={selected.entity.ccd_trace.slop.toFixed(5)}
                 />
@@ -436,6 +450,20 @@ function EntityInspector({
                 <VectorFact
                   label={t(locale, "fact.ccdSweptEnd")}
                   value={selected.entity.ccd_trace.swept_end}
+                />
+                <VectorFact
+                  label={t(locale, "fact.ccdTargetSweptStart")}
+                  value={
+                    selected.entity.ccd_trace.target_swept_start ??
+                    selected.entity.ccd_trace.swept_start
+                  }
+                />
+                <VectorFact
+                  label={t(locale, "fact.ccdTargetSweptEnd")}
+                  value={
+                    selected.entity.ccd_trace.target_swept_end ??
+                    selected.entity.ccd_trace.swept_end
+                  }
                 />
                 <VectorFact
                   label={t(locale, "fact.ccdToiPoint")}

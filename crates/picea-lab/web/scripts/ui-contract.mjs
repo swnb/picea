@@ -74,6 +74,26 @@ assert.match(
 );
 assert.match(
   appSource,
+  /ccd_trace\.target_kind/,
+  "Contact inspector should expose CCD target kind for dynamic target traces.",
+);
+assert.match(
+  appSource,
+  /ccd_trace\.target_swept_start/,
+  "Contact inspector should expose CCD target swept start.",
+);
+assert.match(
+  appSource,
+  /ccd_trace\.target_swept_end/,
+  "Contact inspector should expose CCD target swept end.",
+);
+assert.match(
+  appSource,
+  /ccd_trace\.target_clamp/,
+  "Contact inspector should expose CCD target clamp distance.",
+);
+assert.match(
+  appSource,
   /tree\.joints/,
   "Scene hierarchy should expose joints as selectable replay artifacts.",
 );

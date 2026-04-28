@@ -5,9 +5,13 @@ use picea::prelude::{
     CollisionFilter, ContactEvent, ContactFeatureId, ContactId, ContactReductionReason, DebugBody,
     DebugContact, DebugIsland, DebugManifold, DebugManifoldPoint, DebugSnapshot,
     DebugSnapshotOptions, EpaTerminationReason, GenericConvexFallbackReason, GenericConvexTrace,
-    GjkTerminationReason, ManifoldId, Material, Pose, QueryFilter, QueryPipeline, SharedShape,
-    SimulationPipeline, SleepEvent, SleepTransitionReason, StepConfig, StepReport, StepStats,
-    WarmStartCacheReason, World, WorldDesc, WorldEvent,
+    GjkTerminationReason, ManifoldId, Material, Pose, QueryFilter, QueryPipeline, QueryStats,
+    SharedShape, SimulationPipeline, SleepEvent, SleepTransitionReason, StepConfig, StepReport,
+    StepStats, WarmStartCacheReason, World, WorldDesc, WorldEvent,
+};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
 };
 
 fn step_once(world: &mut World) -> StepReport {
@@ -34,6 +38,155 @@ fn query_pipeline_returns_no_hits_before_sync() {
     assert!(query
         .intersect_point(Point::new(0.0, 0.0), QueryFilter::default())
         .is_empty());
+    assert_eq!(query.last_stats(), QueryStats::default());
+}
+
+#[test]
+fn query_pipeline_records_candidate_filter_and_hit_counters() {
+    let mut world = World::new(WorldDesc::default());
+    let visible_body = world
+        .create_body(BodyDesc {
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("visible body");
+    world
+        .create_collider(
+            visible_body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("visible collider");
+    let sensor_body = world
+        .create_body(BodyDesc {
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("sensor body");
+    world
+        .create_collider(
+            sensor_body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                is_sensor: true,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("sensor collider");
+
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+    let hits = query.intersect_point(Point::new(0.0, 0.0), QueryFilter::default());
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(
+        query.last_stats(),
+        QueryStats {
+            traversal_count: 3,
+            candidate_count: 2,
+            pruned_count: 0,
+            filter_drop_count: 1,
+            hit_count: 1,
+        }
+    );
+
+    let misses = query.intersect_point(Point::new(20.0, 20.0), QueryFilter::default());
+
+    assert!(misses.is_empty());
+    assert_eq!(
+        query.last_stats(),
+        QueryStats {
+            traversal_count: 1,
+            candidate_count: 0,
+            pruned_count: 1,
+            filter_drop_count: 0,
+            hit_count: 0,
+        }
+    );
+}
+
+#[test]
+fn query_pipeline_last_stats_stays_coherent_under_shared_queries() {
+    let mut world = World::new(WorldDesc::default());
+    let visible_body = world
+        .create_body(BodyDesc {
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("visible body");
+    world
+        .create_collider(
+            visible_body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("visible collider");
+    let sensor_body = world
+        .create_body(BodyDesc {
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("sensor body");
+    world
+        .create_collider(
+            sensor_body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                is_sensor: true,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("sensor collider");
+
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+    let query = Arc::new(query);
+    let stop = Arc::new(AtomicBool::new(false));
+    let hit_stats = QueryStats {
+        traversal_count: 3,
+        candidate_count: 2,
+        pruned_count: 0,
+        filter_drop_count: 1,
+        hit_count: 1,
+    };
+    let miss_stats = QueryStats {
+        traversal_count: 1,
+        candidate_count: 0,
+        pruned_count: 1,
+        filter_drop_count: 0,
+        hit_count: 0,
+    };
+
+    std::thread::scope(|scope| {
+        for point in [Point::new(0.0, 0.0), Point::new(20.0, 20.0)] {
+            let query = Arc::clone(&query);
+            let stop = Arc::clone(&stop);
+            scope.spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let _ = query.intersect_point(point, QueryFilter::default());
+                    std::thread::yield_now();
+                }
+            });
+        }
+
+        let query = Arc::clone(&query);
+        let stop = Arc::clone(&stop);
+        scope.spawn(move || {
+            for _ in 0..200_000 {
+                let stats = query.last_stats();
+                if stats == QueryStats::default() || stats == hit_stats || stats == miss_stats {
+                    continue;
+                }
+                stop.store(true, Ordering::Relaxed);
+                panic!("last_stats observed a torn snapshot: {stats:?}");
+            }
+            stop.store(true, Ordering::Relaxed);
+        });
+    });
 }
 
 #[test]
@@ -116,10 +269,18 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
             broadphase_same_body_drop_count: 1,
             broadphase_filter_drop_count: 1,
             broadphase_narrowphase_drop_count: 1,
+            broadphase_traversal_count: 8,
+            broadphase_pruned_count: 5,
             broadphase_rebuild_count: 1,
             broadphase_tree_depth: 3,
             contact_count: 1,
             manifold_count: 1,
+            island_count: 2,
+            active_island_count: 1,
+            sleeping_island_skip_count: 1,
+            solver_body_slot_count: 3,
+            contact_row_count: 2,
+            joint_row_count: 1,
             warm_start_hit_count: 1,
             warm_start_miss_count: 2,
             warm_start_drop_count: 3,
@@ -177,8 +338,16 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
     assert_eq!(snapshot.stats.broadphase_same_body_drop_count, 1);
     assert_eq!(snapshot.stats.broadphase_filter_drop_count, 1);
     assert_eq!(snapshot.stats.broadphase_narrowphase_drop_count, 1);
+    assert_eq!(snapshot.stats.broadphase_traversal_count, 8);
+    assert_eq!(snapshot.stats.broadphase_pruned_count, 5);
     assert_eq!(snapshot.stats.broadphase_rebuild_count, 1);
     assert_eq!(snapshot.stats.broadphase_tree_depth, 3);
+    assert_eq!(snapshot.stats.island_count, 2);
+    assert_eq!(snapshot.stats.active_island_count, 1);
+    assert_eq!(snapshot.stats.sleeping_island_skip_count, 1);
+    assert_eq!(snapshot.stats.solver_body_slot_count, 3);
+    assert_eq!(snapshot.stats.contact_row_count, 2);
+    assert_eq!(snapshot.stats.joint_row_count, 1);
     assert_eq!(snapshot.stats.warm_start_hit_count, 1);
     assert_eq!(snapshot.stats.warm_start_miss_count, 2);
     assert_eq!(snapshot.stats.warm_start_drop_count, 3);
@@ -362,6 +531,14 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "warm_start_hit_count",
             "warm_start_miss_count",
             "warm_start_drop_count",
+            "broadphase_traversal_count",
+            "broadphase_pruned_count",
+            "island_count",
+            "active_island_count",
+            "sleeping_island_skip_count",
+            "solver_body_slot_count",
+            "contact_row_count",
+            "joint_row_count",
             "ccd_candidate_count",
             "ccd_hit_count",
             "ccd_miss_count",
@@ -373,6 +550,14 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(stats.warm_start_hit_count, 0);
     assert_eq!(stats.warm_start_miss_count, 0);
     assert_eq!(stats.warm_start_drop_count, 0);
+    assert_eq!(stats.broadphase_traversal_count, 0);
+    assert_eq!(stats.broadphase_pruned_count, 0);
+    assert_eq!(stats.island_count, 0);
+    assert_eq!(stats.active_island_count, 0);
+    assert_eq!(stats.sleeping_island_skip_count, 0);
+    assert_eq!(stats.solver_body_slot_count, 0);
+    assert_eq!(stats.contact_row_count, 0);
+    assert_eq!(stats.joint_row_count, 0);
     assert_eq!(stats.ccd_candidate_count, 0);
     assert_eq!(stats.ccd_hit_count, 0);
     assert_eq!(stats.ccd_miss_count, 0);
@@ -386,6 +571,14 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "warm_start_hit_count",
             "warm_start_miss_count",
             "warm_start_drop_count",
+            "broadphase_traversal_count",
+            "broadphase_pruned_count",
+            "island_count",
+            "active_island_count",
+            "sleeping_island_skip_count",
+            "solver_body_slot_count",
+            "contact_row_count",
+            "joint_row_count",
             "ccd_candidate_count",
             "ccd_hit_count",
             "ccd_miss_count",
@@ -397,6 +590,14 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(debug_stats.warm_start_hit_count, 0);
     assert_eq!(debug_stats.warm_start_miss_count, 0);
     assert_eq!(debug_stats.warm_start_drop_count, 0);
+    assert_eq!(debug_stats.broadphase_traversal_count, 0);
+    assert_eq!(debug_stats.broadphase_pruned_count, 0);
+    assert_eq!(debug_stats.island_count, 0);
+    assert_eq!(debug_stats.active_island_count, 0);
+    assert_eq!(debug_stats.sleeping_island_skip_count, 0);
+    assert_eq!(debug_stats.solver_body_slot_count, 0);
+    assert_eq!(debug_stats.contact_row_count, 0);
+    assert_eq!(debug_stats.joint_row_count, 0);
     assert_eq!(debug_stats.ccd_candidate_count, 0);
     assert_eq!(debug_stats.ccd_hit_count, 0);
     assert_eq!(debug_stats.ccd_miss_count, 0);

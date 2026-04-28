@@ -7,6 +7,22 @@ use crate::{
     math::{point::Point, vector::Vector, FloatNum},
 };
 
+/// Kind of CCD target hit by a swept moving collider.
+///
+/// Older CCD payloads only swept dynamic shapes against static geometry, so
+/// [`CcdTrace::static_body`] and [`CcdTrace::static_collider`] keep their
+/// historic names. This enum is the additive disambiguation for newer traces
+/// where those legacy fields may identify a dynamic target.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CcdTargetKind {
+    /// The target did not move during the CCD sweep.
+    #[default]
+    Static,
+    /// The target was another translational dynamic collider.
+    Dynamic,
+}
+
 /// Compact trace facts for a continuous collision detection clamp.
 ///
 /// CCD (continuous collision detection) sweeps a fast collider from the
@@ -25,15 +41,28 @@ pub struct CcdTrace {
     /// Dynamic collider that was swept.
     #[serde(default)]
     pub moving_collider: ColliderHandle,
-    /// Static convex collider hit by the sweep.
+    /// Target collider hit by the sweep. Kept under the legacy static-oriented
+    /// name for backward compatibility.
     #[serde(default)]
     pub static_collider: ColliderHandle,
+    /// Whether the legacy static target fields describe static geometry or a
+    /// dynamic collider selected by the dynamic-vs-dynamic CCD slice.
+    #[serde(default)]
+    pub target_kind: CcdTargetKind,
     /// Swept collider reference point at the beginning of the step.
     #[serde(default)]
     pub swept_start: Point,
     /// Swept collider reference point before contact generation.
     #[serde(default)]
     pub swept_end: Point,
+    /// Target reference point at the beginning of the step. Meaningful for
+    /// dynamic targets; older/static payloads default to zero.
+    #[serde(default)]
+    pub target_swept_start: Point,
+    /// Target reference point before contact generation. Meaningful for dynamic
+    /// targets; older/static payloads default to zero.
+    #[serde(default)]
+    pub target_swept_end: Point,
     /// First time of impact as a fraction of the sweep.
     #[serde(default)]
     pub toi: FloatNum,
@@ -43,10 +72,14 @@ pub struct CcdTrace {
     /// World-space rollback distance from the integrated end pose to the clamp.
     #[serde(default)]
     pub clamp: FloatNum,
+    /// World-space rollback distance applied to the dynamic target, or zero for
+    /// static targets and older payloads.
+    #[serde(default)]
+    pub target_clamp: FloatNum,
     /// Small world-space overlap allowed at the clamp.
     #[serde(default)]
     pub slop: FloatNum,
-    /// World-space point where the swept collider first touched the static convex.
+    /// World-space point where the swept collider first touched the target.
     #[serde(default)]
     pub toi_point: Point,
 }
@@ -340,8 +373,8 @@ pub enum WorldEvent {
 mod tests {
     use crate::{
         events::{
-            ContactEvent, ContactReductionReason, NumericsWarningEvent, SleepEvent,
-            SleepTransitionReason, WarmStartCacheReason, WorldEvent,
+            CcdTargetKind, CcdTrace, ContactEvent, ContactReductionReason, NumericsWarningEvent,
+            SleepEvent, SleepTransitionReason, WarmStartCacheReason, WorldEvent,
         },
         handles::{
             BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
@@ -423,5 +456,42 @@ mod tests {
         assert!(
             matches!(&events[8], WorldEvent::JointRemoved { joint } if *joint == JointHandle::from_raw_parts(13, 0))
         );
+    }
+
+    #[test]
+    fn ccd_trace_defaults_dynamic_target_fields_for_legacy_payloads() {
+        let trace = CcdTrace {
+            moving_body: BodyHandle::from_raw_parts(1, 0),
+            static_body: BodyHandle::from_raw_parts(2, 0),
+            moving_collider: ColliderHandle::from_raw_parts(3, 0),
+            static_collider: ColliderHandle::from_raw_parts(4, 0),
+            target_kind: CcdTargetKind::Dynamic,
+            swept_start: Point::new(-1.0, 0.0),
+            swept_end: Point::new(1.0, 0.0),
+            target_swept_start: Point::new(2.0, 0.0),
+            target_swept_end: Point::new(0.0, 0.0),
+            toi: 0.25,
+            advancement: 0.251,
+            clamp: 1.0,
+            target_clamp: 0.75,
+            slop: 0.001,
+            toi_point: Point::new(0.0, 0.0),
+        };
+        let mut value = serde_json::to_value(trace).expect("ccd trace should serialize");
+        let object = value
+            .as_object_mut()
+            .expect("ccd trace should serialize as an object");
+        object.remove("target_kind");
+        object.remove("target_swept_start");
+        object.remove("target_swept_end");
+        object.remove("target_clamp");
+
+        let decoded: CcdTrace =
+            serde_json::from_value(value).expect("legacy CCD trace should deserialize");
+
+        assert_eq!(decoded.target_kind, CcdTargetKind::Static);
+        assert_eq!(decoded.target_swept_start, Point::default());
+        assert_eq!(decoded.target_swept_end, Point::default());
+        assert_eq!(decoded.target_clamp, 0.0);
     }
 }

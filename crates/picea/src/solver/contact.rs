@@ -54,7 +54,7 @@ pub(crate) fn resolve_contacts(
     contacts: &mut [ContactObservation],
     config: &StepConfig,
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
-) {
+) -> island::SolverStepStats {
     let islands = sleep::build_active_solver_islands(
         world,
         contacts
@@ -81,7 +81,7 @@ pub(crate) fn resolve_contacts(
         contact.restitution_applied = false;
     }
 
-    let mut batches = contact_solver_row_batches(world, contacts, plan, config);
+    let (mut batches, stats) = contact_solver_row_batches(world, contacts, &islands, plan, config);
 
     for batch in &mut batches {
         let mut solver_bodies = solver_body_cache(world, &batch.body_slots);
@@ -117,15 +117,18 @@ pub(crate) fn resolve_contacts(
         config.position_iterations,
         wake_reasons,
     );
+    stats
 }
 
 fn contact_solver_row_batches(
     world: &World,
     contacts: &[ContactObservation],
+    islands: &[sleep::SolverIsland],
     plan: island::IslandSolvePlan,
     config: &StepConfig,
-) -> Vec<ContactSolveBatch> {
-    plan.islands
+) -> (Vec<ContactSolveBatch>, island::SolverStepStats) {
+    let batches = plan
+        .islands
         .into_iter()
         .filter_map(|island| {
             let bodies = solver_body_cache(world, &island.body_slots);
@@ -148,7 +151,16 @@ fn contact_solver_row_batches(
                 rows,
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let stats = island::SolverStepStats {
+        island_count: islands.len(),
+        active_island_count: islands.iter().filter(|island| island.active).count(),
+        sleeping_island_skip_count: islands.iter().filter(|island| !island.active).count(),
+        body_slot_count: batches.iter().map(|batch| batch.body_slots.len()).sum(),
+        contact_row_count: batches.iter().map(|batch| batch.rows.len()).sum(),
+        joint_row_count: 0,
+    };
+    (batches, stats)
 }
 
 fn solver_body_cache(world: &World, body_slots: &[BodyHandle]) -> Vec<SolverBody> {

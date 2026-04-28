@@ -36,7 +36,7 @@ pub mod prelude {
     };
     pub use super::math::{edge::Edge, point::Point, segment::Segment, vector::Vector, FloatNum};
     pub use super::pipeline::{SimulationPipeline, StepConfig, StepReport, StepStats};
-    pub use super::query::{AabbHit, PointHit, QueryFilter, QueryPipeline, RayHit};
+    pub use super::query::{AabbHit, PointHit, QueryFilter, QueryPipeline, QueryStats, RayHit};
     pub use super::recipe::{
         BodyAsset, BodyBundle, ColliderBundle, CollisionLayerPreset, CollisionLayers, JointBundle,
         MaterialPreset, WorldCommand, WorldCommandContextError, WorldCommandError,

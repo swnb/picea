@@ -5,6 +5,7 @@ use crate::{
     handles::BodyHandle,
     joint::{DistanceJointDesc, WorldAnchorJointDesc},
     math::{vector::Vector, FloatNum},
+    pipeline::island::SolverStepStats,
     world::World,
 };
 
@@ -32,14 +33,15 @@ pub(crate) fn solve_joint_phase(
     dt: FloatNum,
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     numeric_warnings: &mut Vec<NumericsWarningEvent>,
-) {
+) -> SolverStepStats {
     let islands = crate::pipeline::sleep::build_active_solver_islands(
         world,
         std::iter::empty::<(BodyHandle, BodyHandle)>(),
         wake_reasons,
     );
-    let batches = joint_solve_batches(world, &islands);
+    let (batches, stats) = joint_solve_batches(world, &islands);
     world.apply_joint_constraints(dt, batches, wake_reasons, numeric_warnings);
+    stats
 }
 
 impl World {
@@ -114,14 +116,29 @@ impl World {
 fn joint_solve_batches(
     world: &World,
     islands: &[crate::pipeline::sleep::SolverIsland],
-) -> Vec<JointSolveBatch> {
+) -> (Vec<JointSolveBatch>, SolverStepStats) {
     let plan = crate::pipeline::island::build_island_solve_plan(
         islands,
         std::iter::empty(),
         world.joint_records().map(|(_, record)| record.desc.clone()),
     );
+    let stats = SolverStepStats {
+        body_slot_count: plan
+            .islands
+            .iter()
+            .filter(|island| !island.joint_rows.is_empty())
+            .map(|island| island.body_slots.len())
+            .sum(),
+        joint_row_count: plan
+            .islands
+            .iter()
+            .map(|island| island.joint_rows.len())
+            .sum(),
+        ..SolverStepStats::default()
+    };
 
-    plan.islands
+    let batches = plan
+        .islands
         .into_iter()
         .filter_map(|island| {
             let rows = island
@@ -147,7 +164,9 @@ fn joint_solve_batches(
                 rows,
             })
         })
-        .collect()
+        .collect();
+
+    (batches, stats)
 }
 
 fn normalized_or_x_axis(vector: Vector) -> Vector {

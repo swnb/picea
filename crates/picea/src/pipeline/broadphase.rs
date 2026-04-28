@@ -20,6 +20,8 @@ pub(crate) struct BroadphaseStats {
     pub(crate) same_body_drop_count: usize,
     pub(crate) filter_drop_count: usize,
     pub(crate) narrowphase_drop_count: usize,
+    pub(crate) traversal_count: usize,
+    pub(crate) pruned_count: usize,
     pub(crate) rebuild_count: usize,
     pub(crate) tree_depth: usize,
 }
@@ -28,6 +30,19 @@ pub(crate) struct BroadphaseStats {
 pub(crate) struct BroadphaseOutput {
     pub(crate) candidate_pairs: Vec<(usize, usize)>,
     pub(crate) stats: BroadphaseStats,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TreeQueryStats {
+    pub(crate) traversal_count: usize,
+    pub(crate) pruned_count: usize,
+    pub(crate) candidate_count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TreeQueryOutput {
+    pub(crate) proxy_indices: Vec<usize>,
+    pub(crate) stats: TreeQueryStats,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -63,21 +78,29 @@ impl Broadphase {
             rebuild_count = 1;
         }
 
-        let candidate_pairs = self.tree.candidate_pairs();
+        let candidate_output = self.tree.candidate_pairs_with_stats();
         BroadphaseOutput {
             stats: BroadphaseStats {
-                candidate_count: candidate_pairs.len(),
+                candidate_count: candidate_output.pairs.len(),
                 update_count,
                 stale_proxy_drop_count,
                 same_body_drop_count: 0,
                 filter_drop_count: 0,
                 narrowphase_drop_count: 0,
+                traversal_count: candidate_output.stats.traversal_count,
+                pruned_count: candidate_output.stats.pruned_count,
                 rebuild_count,
                 tree_depth: self.tree.depth(),
             },
-            candidate_pairs,
+            candidate_pairs: candidate_output.pairs,
         }
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct CandidatePairOutput {
+    pairs: Vec<(usize, usize)>,
+    stats: TreeQueryStats,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -109,63 +132,167 @@ impl DynamicAabbTree {
         tree
     }
 
+    #[cfg(test)]
     pub(crate) fn query_aabb_proxy_indices(&self, query_aabb: ShapeAabb) -> Vec<usize> {
+        self.query_aabb_proxy_indices_with_stats(query_aabb)
+            .proxy_indices
+    }
+
+    pub(crate) fn query_aabb_proxy_indices_with_stats(
+        &self,
+        query_aabb: ShapeAabb,
+    ) -> TreeQueryOutput {
         let mut indices = Vec::new();
-        self.query_indices(
+        let stats = self.query_indices(
             |node_aabb| aabb_overlaps_inclusive(query_aabb, node_aabb),
             &mut indices,
         );
-        indices
+        TreeQueryOutput {
+            proxy_indices: indices,
+            stats,
+        }
     }
 
-    pub(crate) fn query_point_proxy_indices(&self, point: crate::math::point::Point) -> Vec<usize> {
+    pub(crate) fn query_point_proxy_indices_with_stats(
+        &self,
+        point: crate::math::point::Point,
+    ) -> TreeQueryOutput {
         let mut indices = Vec::new();
-        self.query_indices(
+        let stats = self.query_indices(
             |node_aabb| aabb_contains_point(node_aabb, point),
             &mut indices,
         );
-        indices
+        TreeQueryOutput {
+            proxy_indices: indices,
+            stats,
+        }
     }
 
-    pub(crate) fn query_ray_proxy_indices(
+    pub(crate) fn query_ray_proxy_indices_with_stats(
         &self,
         origin: crate::math::point::Point,
         direction: crate::math::vector::Vector,
         max_toi: FloatNum,
-    ) -> Vec<usize> {
+    ) -> TreeQueryOutput {
         let mut indices = Vec::new();
-        self.query_indices(
+        let stats = self.query_indices(
             |node_aabb| ray_intersects_aabb(origin, direction, max_toi, node_aabb),
             &mut indices,
         );
-        indices
+        TreeQueryOutput {
+            proxy_indices: indices,
+            stats,
+        }
     }
 
+    #[cfg(test)]
     pub(crate) fn candidate_pairs(&self) -> Vec<(usize, usize)> {
-        let mut pairs = Vec::new();
+        self.candidate_pairs_with_stats().pairs
+    }
 
-        for &leaf_index in &self.leaves {
-            let leaf = &self.nodes[leaf_index];
-            let Some(proxy_index) = leaf.proxy_index else {
-                continue;
-            };
-            self.query_overlaps(leaf_index, leaf.aabb, |other_leaf_index| {
-                let other = &self.nodes[other_leaf_index];
-                let Some(other_proxy_index) = other.proxy_index else {
-                    return;
-                };
-                if proxy_index >= other_proxy_index {
-                    return;
-                }
-                pairs.push((proxy_index, other_proxy_index));
-            });
+    fn candidate_pairs_with_stats(&self) -> CandidatePairOutput {
+        let mut pairs = Vec::new();
+        let mut stats = TreeQueryStats::default();
+
+        if let Some(root) = self.root {
+            self.collect_subtree_candidate_pairs(root, &mut pairs, &mut stats);
         }
 
         // Preserve the old contact pass ordering: live collider snapshot order,
         // not handle ordering. Recycled handles may compare differently because
         // generation bits participate in `Ord`.
         pairs.sort_unstable();
-        pairs
+        stats.candidate_count = pairs.len();
+        CandidatePairOutput { pairs, stats }
+    }
+
+    fn collect_subtree_candidate_pairs(
+        &self,
+        node_index: usize,
+        pairs: &mut Vec<(usize, usize)>,
+        stats: &mut TreeQueryStats,
+    ) {
+        let node = &self.nodes[node_index];
+        let (Some(left), Some(right)) = (node.left, node.right) else {
+            return;
+        };
+
+        self.collect_subtree_candidate_pairs(left, pairs, stats);
+        self.collect_subtree_candidate_pairs(right, pairs, stats);
+        self.collect_candidate_pairs_between(left, right, pairs, stats);
+    }
+
+    fn collect_candidate_pairs_between(
+        &self,
+        left_index: usize,
+        right_index: usize,
+        pairs: &mut Vec<(usize, usize)>,
+        stats: &mut TreeQueryStats,
+    ) {
+        stats.traversal_count += 1;
+
+        let left = &self.nodes[left_index];
+        let right = &self.nodes[right_index];
+        if !aabb_overlaps(left.aabb, right.aabb) {
+            stats.pruned_count += 1;
+            return;
+        }
+
+        match (left.proxy_index, right.proxy_index) {
+            (Some(left_proxy_index), Some(right_proxy_index)) => {
+                let (first, second) = if left_proxy_index <= right_proxy_index {
+                    (left_proxy_index, right_proxy_index)
+                } else {
+                    (right_proxy_index, left_proxy_index)
+                };
+                if first != second {
+                    stats.candidate_count += 1;
+                    pairs.push((first, second));
+                }
+            }
+            (Some(_), None) => {
+                let right_left = right
+                    .left
+                    .expect("internal broadphase node must have a left child");
+                let right_right = right
+                    .right
+                    .expect("internal broadphase node must have a right child");
+                self.collect_candidate_pairs_between(left_index, right_left, pairs, stats);
+                self.collect_candidate_pairs_between(left_index, right_right, pairs, stats);
+            }
+            (None, Some(_)) => {
+                let left_left = left
+                    .left
+                    .expect("internal broadphase node must have a left child");
+                let left_right = left
+                    .right
+                    .expect("internal broadphase node must have a right child");
+                self.collect_candidate_pairs_between(left_left, right_index, pairs, stats);
+                self.collect_candidate_pairs_between(left_right, right_index, pairs, stats);
+            }
+            (None, None) => {
+                let left_left = left
+                    .left
+                    .expect("internal broadphase node must have a left child");
+                let left_right = left
+                    .right
+                    .expect("internal broadphase node must have a right child");
+                let right_left = right
+                    .left
+                    .expect("internal broadphase node must have a left child");
+                let right_right = right
+                    .right
+                    .expect("internal broadphase node must have a right child");
+
+                // Walk each overlapping subtree pair once from its lowest common
+                // ancestor so traversal/prune counters measure subtree-pair work
+                // units rather than literal node visits.
+                self.collect_candidate_pairs_between(left_left, right_left, pairs, stats);
+                self.collect_candidate_pairs_between(left_left, right_right, pairs, stats);
+                self.collect_candidate_pairs_between(left_right, right_left, pairs, stats);
+                self.collect_candidate_pairs_between(left_right, right_right, pairs, stats);
+            }
+        }
     }
 
     fn handles(&self) -> Vec<ColliderHandle> {
@@ -453,46 +580,26 @@ impl DynamicAabbTree {
         }
     }
 
-    fn query_overlaps(
+    fn query_indices(
         &self,
-        query_leaf: usize,
-        query_aabb: ShapeAabb,
-        mut visit_leaf: impl FnMut(usize),
-    ) {
+        mut overlaps: impl FnMut(ShapeAabb) -> bool,
+        out: &mut Vec<usize>,
+    ) -> TreeQueryStats {
         let Some(root) = self.root else {
-            return;
+            return TreeQueryStats::default();
         };
         let mut stack = vec![root];
+        let mut stats = TreeQueryStats::default();
 
         while let Some(index) = stack.pop() {
-            if index == query_leaf || !aabb_overlaps(query_aabb, self.nodes[index].aabb) {
-                continue;
-            }
-            if self.nodes[index].is_leaf() {
-                visit_leaf(index);
-                continue;
-            }
-            if let Some(left) = self.nodes[index].left {
-                stack.push(left);
-            }
-            if let Some(right) = self.nodes[index].right {
-                stack.push(right);
-            }
-        }
-    }
-
-    fn query_indices(&self, mut overlaps: impl FnMut(ShapeAabb) -> bool, out: &mut Vec<usize>) {
-        let Some(root) = self.root else {
-            return;
-        };
-        let mut stack = vec![root];
-
-        while let Some(index) = stack.pop() {
+            stats.traversal_count += 1;
             let node = &self.nodes[index];
             if !overlaps(node.aabb) {
+                stats.pruned_count += 1;
                 continue;
             }
             if let Some(proxy_index) = node.proxy_index {
+                stats.candidate_count += 1;
                 out.push(proxy_index);
                 continue;
             }
@@ -506,6 +613,7 @@ impl DynamicAabbTree {
 
         // Query callers keep the stable public ordering contract: snapshot order.
         out.sort_unstable();
+        stats
     }
 }
 
@@ -840,6 +948,22 @@ mod tests {
         ];
 
         assert_eq!(candidate_pairs(&proxies), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn candidate_pair_traversal_visits_each_overlapping_subtree_once() {
+        let tree = DynamicAabbTree::from_proxies(&[
+            proxy(10, aabb(0.0, 0.0, 2.0, 2.0)),
+            proxy(20, aabb(1.5, 0.0, 3.5, 2.0)),
+            proxy(30, aabb(20.0, 20.0, 22.0, 22.0)),
+        ]);
+
+        let output = tree.candidate_pairs_with_stats();
+
+        assert_eq!(output.pairs, vec![(0, 1)]);
+        assert_eq!(output.stats.candidate_count, 1);
+        assert_eq!(output.stats.traversal_count, 4);
+        assert_eq!(output.stats.pruned_count, 2);
     }
 
     #[test]

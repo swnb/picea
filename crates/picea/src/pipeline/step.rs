@@ -5,7 +5,8 @@ use crate::{
     events::{NumericsWarningEvent, SleepTransitionReason, WorldEvent},
     handles::BodyHandle,
     pipeline::{
-        broadphase::BroadphaseStats, ccd::CcdPoseClampOutcome, StepConfig, StepOutcome, StepStats,
+        broadphase::BroadphaseStats, ccd::CcdPoseClampOutcome, island::SolverStepStats, StepConfig,
+        StepOutcome, StepStats,
     },
     world::contact_state::WarmStartStats,
     world::World,
@@ -15,26 +16,34 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
     let mut step = StepContext::new(world);
 
     crate::pipeline::integrate::run_integration_phase(world, config, &mut step.numeric_warnings);
-    crate::pipeline::joints::solve_joint_phase(
+    let joint_solver_stats = crate::pipeline::joints::solve_joint_phase(
         world,
         config.dt,
         &mut step.wake_reasons,
         &mut step.numeric_warnings,
     );
+    step.record_solver_stats(joint_solver_stats);
     step.pose_clamp = crate::pipeline::ccd::run_pose_clamp_phase(world, &step.previous_body_poses);
-    let (contact_events, contact_count, manifold_count, broadphase_stats, warm_start_stats) =
-        crate::pipeline::contacts::run_contact_phases(
-            world,
-            config,
-            &mut step.wake_reasons,
-            &step.pose_clamp.traces,
-        );
+    let (
+        contact_events,
+        contact_count,
+        manifold_count,
+        broadphase_stats,
+        warm_start_stats,
+        contact_solver_stats,
+    ) = crate::pipeline::contacts::run_contact_phases(
+        world,
+        config,
+        &mut step.wake_reasons,
+        &step.pose_clamp.traces,
+    );
     step.record_contacts(
         contact_events,
         contact_count,
         manifold_count,
         broadphase_stats,
         warm_start_stats,
+        contact_solver_stats,
     );
     let (sleep_events, sleep_transition_count, active_body_count) =
         crate::pipeline::sleep::refresh_sleep_phase(
@@ -60,6 +69,7 @@ struct StepContext {
     pose_clamp: CcdPoseClampOutcome,
     broadphase_stats: BroadphaseStats,
     warm_start_stats: WarmStartStats,
+    solver_stats: SolverStepStats,
     contact_count: usize,
     manifold_count: usize,
     sleep_transition_count: usize,
@@ -94,6 +104,7 @@ impl StepContext {
             pose_clamp: CcdPoseClampOutcome::default(),
             broadphase_stats: BroadphaseStats::default(),
             warm_start_stats: WarmStartStats::default(),
+            solver_stats: SolverStepStats::default(),
             contact_count: 0,
             manifold_count: 0,
             sleep_transition_count: 0,
@@ -108,12 +119,18 @@ impl StepContext {
         manifold_count: usize,
         broadphase_stats: BroadphaseStats,
         warm_start_stats: WarmStartStats,
+        solver_stats: SolverStepStats,
     ) {
         self.events.extend(events);
         self.contact_count = contact_count;
         self.manifold_count = manifold_count;
         self.broadphase_stats = broadphase_stats;
         self.warm_start_stats = warm_start_stats;
+        self.record_solver_stats(solver_stats);
+    }
+
+    fn record_solver_stats(&mut self, stats: SolverStepStats) {
+        self.solver_stats.accumulate(stats);
     }
 
     fn record_sleep(
@@ -149,10 +166,18 @@ impl StepContext {
             broadphase_same_body_drop_count: self.broadphase_stats.same_body_drop_count,
             broadphase_filter_drop_count: self.broadphase_stats.filter_drop_count,
             broadphase_narrowphase_drop_count: self.broadphase_stats.narrowphase_drop_count,
+            broadphase_traversal_count: self.broadphase_stats.traversal_count,
+            broadphase_pruned_count: self.broadphase_stats.pruned_count,
             broadphase_rebuild_count: self.broadphase_stats.rebuild_count,
             broadphase_tree_depth: self.broadphase_stats.tree_depth,
             contact_count: self.contact_count,
             manifold_count: self.manifold_count,
+            island_count: self.solver_stats.island_count,
+            active_island_count: self.solver_stats.active_island_count,
+            sleeping_island_skip_count: self.solver_stats.sleeping_island_skip_count,
+            solver_body_slot_count: self.solver_stats.body_slot_count,
+            contact_row_count: self.solver_stats.contact_row_count,
+            joint_row_count: self.solver_stats.joint_row_count,
             warm_start_hit_count: self.warm_start_stats.hit_count,
             warm_start_miss_count: self.warm_start_stats.miss_count,
             warm_start_drop_count: self.warm_start_stats.drop_count,
