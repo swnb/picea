@@ -10,14 +10,7 @@ import type {
   SelectedEntity,
   Vec2,
 } from "../../types";
-
-type LayerState = {
-  shapes: boolean;
-  aabbs: boolean;
-  contacts: boolean;
-  velocities: boolean;
-  trace: boolean;
-};
+import type { LayerState } from "./types";
 
 type WorldCanvasProps = {
   frames: FrameRecord[];

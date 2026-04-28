@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const contractSources = [
+  "../src/App.tsx",
+  "../src/components/workbench/Toolbar.tsx",
+  "../src/components/workbench/SceneHierarchy.tsx",
+  "../src/components/workbench/Inspector.tsx",
+].map((path) => fs.readFileSync(new URL(path, import.meta.url), "utf8"));
+const appSource = contractSources.join("\n");
 
 assert.doesNotMatch(
   appSource,
