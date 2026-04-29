@@ -191,8 +191,8 @@ impl SceneRecipeFixture {
             gravity: self.world.gravity.into(),
             enable_sleep: self.world.enable_sleep,
         });
-        for body in &self.bodies {
-            recipe = recipe.with_scene_body(body.to_body_bundle());
+        for (body_index, body) in self.bodies.iter().enumerate() {
+            recipe = recipe.with_scene_body(body.to_body_bundle(body_index)?);
         }
         for joint in &self.joints {
             recipe = recipe.with_joint(joint.to_joint_bundle());
@@ -251,27 +251,31 @@ pub struct SceneBodyFixture {
 }
 
 impl SceneBodyFixture {
-    fn to_body_bundle(&self) -> BodyBundle {
-        let collider = self
+    fn to_body_bundle(&self, body_index: usize) -> LabResult<BodyBundle> {
+        let colliders = self
             .shape
-            .to_collider_bundle()
-            .with_material(self.material)
-            .with_filter(self.filter)
-            .with_density(self.density)
-            .with_sensor(self.is_sensor);
+            .to_collider_bundles(body_index)?
+            .into_iter()
+            .map(|collider| {
+                collider
+                    .with_material(self.material)
+                    .with_filter(self.filter)
+                    .with_density(self.density)
+                    .with_sensor(self.is_sensor)
+            });
         let base = match self.body_type {
             BodyType::Static => BodyBundle::static_body(),
             BodyType::Dynamic => BodyBundle::dynamic(),
             BodyType::Kinematic => BodyBundle::kinematic(),
         }
-        .with_collider(collider);
+        .with_colliders(colliders);
         let asset = BodyAsset::from_bundle(base);
         let [x, y, angle] = self.pose;
         let mut bundle = asset.at(Pose::from_xy_angle(x, y, angle));
         let [vx, vy] = self.linear_velocity;
         bundle.desc.linear_velocity = Vector::new(vx, vy);
         bundle.desc.can_sleep = self.can_sleep;
-        bundle
+        Ok(bundle)
     }
 }
 
@@ -376,15 +380,118 @@ impl SceneWorldAnchorJointFixture {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SceneShapeFixture {
-    Circle { radius: f32 },
-    Rect { width: f32, height: f32 },
+    Circle {
+        radius: f32,
+    },
+    Rect {
+        width: f32,
+        height: f32,
+    },
+    ConvexPolygon {
+        vertices: Vec<[f32; 2]>,
+    },
+    Compound {
+        pieces: Vec<SceneCompoundPieceFixture>,
+    },
+    ConcavePolygon {
+        vertices: Vec<[f32; 2]>,
+    },
 }
 
-impl SceneShapeFixture {
+/// One authored convex piece inside a compound body fixture.
+///
+/// "Compound" means one rigid body with several collider pieces attached in a
+/// deterministic order. This keeps the runtime model unchanged while making
+/// the authoring boundary explicit.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneCompoundPieceFixture {
+    pub shape: SceneCompoundPieceShapeFixture,
+    #[serde(default)]
+    pub local_pose: Option<[f32; 3]>,
+}
+
+/// Authorable convex piece shapes for the M22 fixture boundary.
+///
+/// Convex pieces are safe to forward into the existing recipe/runtime path.
+/// Direct concave loops are rejected above the world layer so M22 does not
+/// pretend the narrowphase or solver supports arbitrary concave contacts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SceneCompoundPieceShapeFixture {
+    Circle { radius: f32 },
+    Rect { width: f32, height: f32 },
+    ConvexPolygon { vertices: Vec<[f32; 2]> },
+}
+
+impl SceneCompoundPieceFixture {
+    fn validate(&self, body_index: usize, piece_index: usize) -> LabResult<()> {
+        self.shape.validate(body_index, piece_index)?;
+        if let Some(local_pose) = self.local_pose {
+            let path = format!("scene.bodies[{body_index}].shape.pieces[{piece_index}].local_pose");
+            validate_local_pose(&path, local_pose)?;
+        }
+        Ok(())
+    }
+
+    fn to_collider_bundle(&self) -> ColliderBundle {
+        let mut collider = self.shape.to_collider_bundle();
+        if let Some(local_pose) = self.local_pose {
+            collider = collider.with_local_pose(pose_from_array(local_pose));
+        }
+        collider
+    }
+}
+
+impl SceneCompoundPieceShapeFixture {
+    fn validate(&self, body_index: usize, piece_index: usize) -> LabResult<()> {
+        let piece_shape_path =
+            format!("scene.bodies[{body_index}].shape.pieces[{piece_index}].shape");
+        match self {
+            Self::Circle { radius } => {
+                validate_circle_radius(&format!("{piece_shape_path}.radius"), *radius)
+            }
+            Self::Rect { width, height } => validate_rect_size(&piece_shape_path, *width, *height),
+            Self::ConvexPolygon { vertices } => {
+                validate_convex_vertices(&format!("{piece_shape_path}.vertices"), vertices)
+            }
+        }
+    }
+
     fn to_collider_bundle(&self) -> ColliderBundle {
         match self {
             Self::Circle { radius } => ColliderBundle::circle(*radius),
             Self::Rect { width, height } => ColliderBundle::rect(*width, *height),
+            Self::ConvexPolygon { vertices } => {
+                ColliderBundle::new(SharedShape::convex_polygon(points_from_arrays(vertices)))
+            }
+        }
+    }
+}
+
+impl SceneShapeFixture {
+    fn to_collider_bundles(&self, body_index: usize) -> LabResult<Vec<ColliderBundle>> {
+        match self {
+            Self::Circle { radius } => Ok(vec![ColliderBundle::circle(*radius)]),
+            Self::Rect { width, height } => Ok(vec![ColliderBundle::rect(*width, *height)]),
+            Self::ConvexPolygon { vertices } => {
+                validate_convex_vertices(
+                    &format!("scene.bodies[{body_index}].shape.vertices"),
+                    vertices,
+                )?;
+                Ok(vec![ColliderBundle::new(SharedShape::convex_polygon(
+                    points_from_arrays(vertices),
+                ))])
+            }
+            Self::Compound { pieces } => {
+                validate_compound_pieces(body_index, pieces)?;
+                Ok(pieces
+                    .iter()
+                    .map(SceneCompoundPieceFixture::to_collider_bundle)
+                    .collect())
+            }
+            Self::ConcavePolygon { .. } => Err(LabError::World(format!(
+                "scene.bodies[{body_index}].shape: concave_polygon is not supported directly; use compound with convex pieces"
+            ))),
         }
     }
 }
@@ -420,6 +527,172 @@ fn default_fixture_density() -> f32 {
 
 fn point_from_array([x, y]: [f32; 2]) -> Point {
     Point::new(x, y)
+}
+
+fn validate_compound_pieces(
+    body_index: usize,
+    pieces: &[SceneCompoundPieceFixture],
+) -> LabResult<()> {
+    if pieces.is_empty() {
+        return Err(LabError::World(format!(
+            "scene.bodies[{body_index}].shape.pieces: compound must contain at least one piece"
+        )));
+    }
+
+    for (piece_index, piece) in pieces.iter().enumerate() {
+        piece.validate(body_index, piece_index)?;
+    }
+
+    Ok(())
+}
+
+/// The scene fixture owns stable authoring errors for the validated fixture
+/// shape fields below, so these failures do not bounce back from recipe paths.
+fn validate_convex_vertices(path: &str, vertices: &[[f32; 2]]) -> LabResult<()> {
+    let has_enough_vertices = vertices.len() >= 3 && distinct_vertex_count(vertices) >= 3;
+    let vertices_are_finite = polygon_vertices_are_finite(vertices);
+    let has_no_zero_length_edges = polygon_has_no_zero_length_edges(vertices);
+    let has_area = polygon_twice_area(vertices).abs() > f32::EPSILON;
+
+    if !has_enough_vertices || !vertices_are_finite || !has_no_zero_length_edges || !has_area {
+        Err(LabError::World(format!(
+            "{path}: convex_polygon requires at least 3 non-degenerate vertices"
+        )))
+    } else if polygon_is_convex(vertices) {
+        Ok(())
+    } else {
+        Err(LabError::World(format!(
+            "{path}: convex_polygon requires convex vertices"
+        )))
+    }
+}
+
+fn validate_circle_radius(path: &str, radius: f32) -> LabResult<()> {
+    if radius.is_finite() && radius > 0.0 {
+        Ok(())
+    } else {
+        Err(LabError::World(format!(
+            "{path}: circle radius must be finite and > 0"
+        )))
+    }
+}
+
+fn validate_rect_size(path: &str, width: f32, height: f32) -> LabResult<()> {
+    validate_positive_finite_scalar(&format!("{path}.width"), width, "rect width")?;
+    validate_positive_finite_scalar(&format!("{path}.height"), height, "rect height")
+}
+
+fn validate_local_pose(path: &str, [x, y, angle]: [f32; 3]) -> LabResult<()> {
+    validate_finite_scalar(&format!("{path}.x"), x, "local_pose.x")?;
+    validate_finite_scalar(&format!("{path}.y"), y, "local_pose.y")?;
+    validate_finite_scalar(&format!("{path}.angle"), angle, "local_pose.angle")
+}
+
+fn validate_positive_finite_scalar(path: &str, value: f32, label: &str) -> LabResult<()> {
+    if value.is_finite() && value > 0.0 {
+        Ok(())
+    } else {
+        Err(LabError::World(format!(
+            "{path}: {label} must be finite and > 0"
+        )))
+    }
+}
+
+fn validate_finite_scalar(path: &str, value: f32, label: &str) -> LabResult<()> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(LabError::World(format!("{path}: {label} must be finite")))
+    }
+}
+
+fn distinct_vertex_count(vertices: &[[f32; 2]]) -> usize {
+    let mut distinct = Vec::with_capacity(vertices.len());
+    for vertex in vertices {
+        if !distinct.iter().any(|existing| existing == vertex) {
+            distinct.push(*vertex);
+        }
+    }
+    distinct.len()
+}
+
+fn polygon_vertices_are_finite(vertices: &[[f32; 2]]) -> bool {
+    vertices.iter().all(|[x, y]| x.is_finite() && y.is_finite())
+}
+
+fn polygon_has_no_zero_length_edges(vertices: &[[f32; 2]]) -> bool {
+    if vertices.len() < 2 {
+        return true;
+    }
+
+    for index in 0..vertices.len() {
+        let current = vertices[index];
+        let next = vertices[(index + 1) % vertices.len()];
+        let edge_x = next[0] - current[0];
+        let edge_y = next[1] - current[1];
+        if edge_x.abs() <= f32::EPSILON && edge_y.abs() <= f32::EPSILON {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn polygon_twice_area(vertices: &[[f32; 2]]) -> f32 {
+    if vertices.len() < 3 {
+        return 0.0;
+    }
+
+    let mut twice_area = 0.0;
+    for index in 0..vertices.len() {
+        let [x1, y1] = vertices[index];
+        let [x2, y2] = vertices[(index + 1) % vertices.len()];
+        twice_area += x1 * y2 - x2 * y1;
+    }
+    twice_area
+}
+
+/// "Convex" here means the authored loop turns consistently around the shape.
+/// Collinear edges are tolerated so authors can keep explicit seam vertices.
+fn polygon_is_convex(vertices: &[[f32; 2]]) -> bool {
+    let mut winding_sign = 0.0_f32;
+
+    for index in 0..vertices.len() {
+        let previous = vertices[(index + vertices.len() - 1) % vertices.len()];
+        let current = vertices[index];
+        let next = vertices[(index + 1) % vertices.len()];
+        let turn = polygon_turn_cross(previous, current, next);
+        if turn.abs() <= f32::EPSILON {
+            continue;
+        }
+
+        if winding_sign == 0.0 {
+            winding_sign = turn.signum();
+            continue;
+        }
+
+        if turn.signum() != winding_sign {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn polygon_turn_cross(previous: [f32; 2], current: [f32; 2], next: [f32; 2]) -> f32 {
+    let incoming_x = current[0] - previous[0];
+    let incoming_y = current[1] - previous[1];
+    let outgoing_x = next[0] - current[0];
+    let outgoing_y = next[1] - current[1];
+    incoming_x * outgoing_y - incoming_y * outgoing_x
+}
+
+fn points_from_arrays(vertices: &[[f32; 2]]) -> Vec<Point> {
+    vertices.iter().copied().map(point_from_array).collect()
+}
+
+fn pose_from_array([x, y, angle]: [f32; 3]) -> Pose {
+    Pose::from_xy_angle(x, y, angle)
 }
 
 fn falling_box_contact_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
@@ -875,7 +1148,492 @@ mod tests {
     }
 
     #[test]
-    fn legacy_scene_fixture_json_defaults_schema_version_to_v1() {
+    fn compound_scene_fixture_builds_ordered_colliders_with_inherited_body_semantics() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "world": { "gravity": [0.0, 0.0], "enable_sleep": false },
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "pose": [3.0, -2.0, 0.75],
+              "linear_velocity": [1.0, -0.5],
+              "can_sleep": false,
+              "shape": {
+                "type": "compound",
+                "pieces": [
+                  {
+                    "shape": { "type": "rect", "width": 2.0, "height": 1.0 },
+                    "local_pose": [-1.0, 0.0, 0.0]
+                  },
+                  {
+                    "shape": {
+                      "type": "convex_polygon",
+                      "vertices": [[-0.5, -0.25], [0.75, -0.1], [0.25, 0.8]]
+                    },
+                    "local_pose": [1.5, 0.25, 0.3]
+                  },
+                  {
+                    "shape": { "type": "circle", "radius": 0.5 }
+                  }
+                ]
+              },
+              "material": "bouncy",
+              "filter": "sensor",
+              "density": 2.5,
+              "is_sensor": true
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let world = instantiate_scene_fixture(&fixture).expect("fixture should create a world");
+
+        let body = world
+            .bodies()
+            .next()
+            .expect("fixture should create one compound body");
+        let colliders: Vec<_> = world
+            .colliders_for_body(body)
+            .expect("compound body should resolve")
+            .collect();
+        assert_eq!(colliders.len(), 3);
+
+        let expected = [
+            (
+                SharedShape::rect(2.0, 1.0),
+                Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            ),
+            (
+                SharedShape::convex_polygon(vec![
+                    (-0.5, -0.25).into(),
+                    (0.75, -0.1).into(),
+                    (0.25, 0.8).into(),
+                ]),
+                Pose::from_xy_angle(1.5, 0.25, 0.3),
+            ),
+            (SharedShape::circle(0.5), Pose::default()),
+        ];
+        for (handle, (shape, local_pose)) in colliders.into_iter().zip(expected) {
+            let collider = world
+                .collider(handle)
+                .expect("compound collider should resolve");
+            assert_eq!(collider.shape(), &shape);
+            assert_eq!(collider.local_pose(), local_pose);
+            assert_eq!(collider.density(), 2.5);
+            assert_eq!(
+                collider.material(),
+                Material::preset(MaterialPreset::Bouncy)
+            );
+            assert_eq!(
+                collider.filter(),
+                CollisionFilter::preset(CollisionLayerPreset::Sensor)
+            );
+            assert!(collider.is_sensor());
+        }
+    }
+
+    #[test]
+    fn empty_compound_scene_fixture_fails_before_world_instantiation_with_stable_piece_path() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": {
+                "type": "compound",
+                "pieces": []
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("empty compound authoring should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.pieces: compound must contain at least one piece"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture)
+            .expect_err("empty compound fixture should also fail through the lab entrypoint");
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn invalid_compound_piece_convex_polygon_fails_with_stable_piece_index_path() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": {
+                "type": "compound",
+                "pieces": [
+                  {
+                    "shape": {
+                      "type": "convex_polygon",
+                      "vertices": [[0.0, 0.0], [1.0, 0.0]]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("invalid compound piece should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.pieces[0].shape.vertices: convex_polygon requires at least 3 non-degenerate vertices"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture)
+            .expect_err("invalid compound piece should also fail through the lab entrypoint");
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn concave_compound_piece_convex_polygon_fails_with_stable_piece_index_path() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": {
+                "type": "compound",
+                "pieces": [
+                  {
+                    "shape": {
+                      "type": "convex_polygon",
+                      "vertices": [[-1.0, -1.0], [1.0, -1.0], [0.0, 0.0], [1.0, 1.0], [-1.0, 1.0]]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("concave compound piece should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.pieces[0].shape.vertices: convex_polygon requires convex vertices"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture)
+            .expect_err("concave compound fixture should also fail through the lab entrypoint");
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn top_level_convex_polygon_scene_fixture_rejects_concave_vertices_with_stable_fixture_path() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": {
+                "type": "convex_polygon",
+                "vertices": [[-1.0, -1.0], [1.0, -1.0], [0.0, 0.0], [1.0, 1.0], [-1.0, 1.0]]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("top-level concave convex_polygon should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.vertices: convex_polygon requires convex vertices"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture).expect_err(
+            "top-level convex_polygon fixture should also fail through the lab entrypoint",
+        );
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn top_level_convex_polygon_scene_fixture_rejects_closing_zero_length_edge_with_stable_fixture_path(
+    ) {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": {
+                "type": "convex_polygon",
+                "vertices": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture.to_world_recipe().expect_err(
+            "top-level convex_polygon with closing zero-length edge should fail before instantiation",
+        );
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.vertices: convex_polygon requires at least 3 non-degenerate vertices"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture).expect_err(
+            "top-level convex_polygon fixture should also fail through the lab entrypoint",
+        );
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn compound_piece_convex_polygon_rejects_adjacent_duplicate_vertices_with_stable_piece_index_path(
+    ) {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": {
+                "type": "compound",
+                "pieces": [
+                  {
+                    "shape": {
+                      "type": "convex_polygon",
+                      "vertices": [[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture.to_world_recipe().expect_err(
+            "compound piece with adjacent duplicate vertices should fail before instantiation",
+        );
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.pieces[0].shape.vertices: convex_polygon requires at least 3 non-degenerate vertices"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture)
+            .expect_err("invalid compound piece should also fail through the lab entrypoint");
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn compound_piece_circle_radius_scene_fixture_fails_with_stable_piece_shape_path() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": {
+                "type": "compound",
+                "pieces": [
+                  {
+                    "shape": { "type": "circle", "radius": -0.5 }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("invalid circle piece should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.pieces[0].shape.radius: circle radius must be finite and > 0"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture)
+            .expect_err("invalid circle piece should also fail through the lab entrypoint");
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn compound_piece_nonfinite_circle_radius_scene_fixture_fails_with_stable_piece_shape_path() {
+        let fixture = SceneRecipeFixture {
+            schema_version: SCENE_RECIPE_SCHEMA_VERSION,
+            world: SceneFixtureWorld::default(),
+            bodies: vec![SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.0, 0.0, 0.0],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Compound {
+                    pieces: vec![SceneCompoundPieceFixture {
+                        shape: SceneCompoundPieceShapeFixture::Circle {
+                            radius: f32::INFINITY,
+                        },
+                        local_pose: None,
+                    }],
+                },
+                material: MaterialPreset::Default,
+                filter: CollisionLayerPreset::Default,
+                density: 1.0,
+                is_sensor: false,
+            }],
+            joints: Vec::new(),
+        };
+
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("non-finite circle piece should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.pieces[0].shape.radius: circle radius must be finite and > 0"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture)
+            .expect_err("non-finite circle piece should also fail through the lab entrypoint");
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn compound_piece_rect_size_scene_fixture_fails_with_stable_piece_shape_path() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": {
+                "type": "compound",
+                "pieces": [
+                  {
+                    "shape": { "type": "rect", "width": 1.0, "height": 0.0 }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("invalid rect piece should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.pieces[0].shape.height: rect height must be finite and > 0"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture)
+            .expect_err("invalid rect piece should also fail through the lab entrypoint");
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn compound_piece_local_pose_scene_fixture_fails_with_stable_piece_local_pose_path() {
+        let fixture = SceneRecipeFixture {
+            schema_version: SCENE_RECIPE_SCHEMA_VERSION,
+            world: SceneFixtureWorld::default(),
+            bodies: vec![SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.0, 0.0, 0.0],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Compound {
+                    pieces: vec![SceneCompoundPieceFixture {
+                        shape: SceneCompoundPieceShapeFixture::Circle { radius: 0.5 },
+                        local_pose: Some([0.0, 0.0, f32::INFINITY]),
+                    }],
+                },
+                material: MaterialPreset::Default,
+                filter: CollisionLayerPreset::Default,
+                density: 1.0,
+                is_sensor: false,
+            }],
+            joints: Vec::new(),
+        };
+
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("non-finite local pose should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.pieces[0].local_pose.angle: local_pose.angle must be finite"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture)
+            .expect_err("non-finite local pose should also fail through the lab entrypoint");
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn direct_concave_scene_fixture_fails_before_world_instantiation() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "dynamic",
+              "shape": {
+                "type": "concave_polygon",
+                "vertices": [[-1.0, -1.0], [1.0, -1.0], [1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [-1.0, 1.0]]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("direct concave authoring should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape: concave_polygon is not supported directly; use compound with convex pieces"
+        );
+
+        let instantiate_error = instantiate_scene_fixture(&fixture)
+            .expect_err("concave fixture should also fail through the lab entrypoint");
+        assert_eq!(instantiate_error.to_string(), build_error.to_string());
+    }
+
+    #[test]
+    fn legacy_scene_fixture_json_defaults_schema_version_to_v1_and_builds_unchanged() {
         let json = r#"
         {
           "world": { "gravity": [0.0, 9.8], "enable_sleep": true },
@@ -892,6 +1650,24 @@ mod tests {
             serde_json::from_str(json).expect("fixture json should deserialize");
 
         assert_eq!(fixture.schema_version, SCENE_RECIPE_SCHEMA_VERSION);
+
+        let world = instantiate_scene_fixture(&fixture).expect("legacy fixture should build");
+        let body = world
+            .bodies()
+            .next()
+            .expect("legacy fixture should create one body");
+        let collider = world
+            .colliders_for_body(body)
+            .expect("legacy fixture body should resolve")
+            .next()
+            .expect("legacy fixture body should have one collider");
+        assert_eq!(
+            world
+                .collider(collider)
+                .expect("legacy fixture collider should resolve")
+                .shape(),
+            &SharedShape::circle(0.5)
+        );
     }
 
     #[test]

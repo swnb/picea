@@ -1427,8 +1427,9 @@ rtk proxy git diff --check
 > `ccd_dynamic_pair` bench ID so the new CCD cost is observable.
 >
 > Residual risk: rotational CCD, dynamic circle-vs-dynamic CCD, broader
-> all-shape CCD, ramp-specific friction realism, public scene schema, and broad
-> material-system work remain staged follow-up work.
+> all-shape CCD, public scene schema, and broad material-system work remain
+> staged follow-up work. Ramp-specific friction now has a Post-M22 regression
+> lock.
 
 ### Background
 
@@ -1598,10 +1599,231 @@ rtk proxy git diff --check
 - Verification for this slice uses `v1_api_smoke`, `core_model_world`,
   `picea-lab`, bench build, AI YAML parse, formatting, and diff hygiene gates.
 
-## Post-M20 Follow-Up / Remaining Risks
+## M21 Public Distance And Shape Query API
 
-These items are real follow-up work, but they are no longer blockers for
-marking M11-M20 completed in the current milestone line.
+> Status: completed 2026-04-28; Plan Gate accepted.
+>
+> Completion notes: M21 adds the public `QueryShape`, `ShapeHit`, and
+> `QueryShapeError` surface plus `QueryPipeline::intersect_shape` /
+> `QueryPipeline::closest_shape`. The API returns semantic handles, distances,
+> witness points, optional normals, and existing `QueryStats` counters without
+> exposing broadphase proxy/leaf ids. The accepted slice covers circle,
+> convex-polygon/rect, and segment query shapes, rejects direct concave query
+> input, preserves AABB/point/ray semantics, and keeps query behavior locked for
+> ordering, filters, stale sync, recycled handles, degenerate input, no-hit
+> cases, and capsule snapshot radius facts.
+
+### Background
+
+After M20, users can author repeatable scenes, but inspection and gameplay-style
+logic still need a stable way to ask geometric questions beyond AABB, point, and
+ray hits. Internally, Picea already has ordered `QueryPipeline` traversal,
+filtering, query stats, cached collider geometry, and GJK distance/fallback
+kernels. The remaining gap is an ergonomic public contract for distance and
+shape queries that does not leak broadphase proxy ids or mutate the `World`.
+
+This milestone is also part of Picea's ease-of-use advantage: users should be
+able to write "how far is this shape from the world?" code without rebuilding
+engine internals in application space.
+
+### Goal
+
+Expose a deterministic, filterable public distance/shape-query API that returns
+closest collider facts in a stable form, reuses the existing indexed query/cache
+path, and gives enough debug/stat evidence to prove ordering, filtering, stale
+sync, and handle-reuse behavior.
+
+### Design Goals
+
+- Build on `QueryPipeline`, existing collider geometry caches, and the internal
+  GJK distance kernel instead of creating a second query engine.
+- Return semantic handles and geometric facts only: collider/body handles,
+  distance, closest points, normal/direction where well-defined, and query
+  statistics. Do not expose broadphase proxy/leaf ids.
+- Keep hit ordering deterministic across equivalent worlds and recycled handles.
+- Make filters explicit and consistent with existing AABB/point/ray queries.
+- Treat unsupported shapes or degenerate inputs as clear validation results, not
+  panics or silent "no hit" outcomes.
+- Keep concave decomposition and compound authoring for M22; M21 handles the
+  supported convex/circle/segment/rectangle/polygon query surface.
+
+### In Scope
+
+- Public API types for distance/shape query results, filters, and options.
+- Distance or closest-hit queries against supported existing collider shapes.
+- Tests for ordering, filtering, stale pipeline sync, recycled handles,
+  degenerate input, and no-hit cases.
+- `QueryStats` or debug fact updates only where they explain the new query path.
+- Documentation examples that show high-level query usage without bypassing
+  `World`/`QueryPipeline` ownership.
+
+### Out Of Scope
+
+- World mutation, live editing, or automatic collider creation from query input.
+- Concave polygon decomposition, compound scene authoring, or direct concave
+  solver support.
+- CCD, solver, material model, or broadphase balancing changes.
+- Public exposure of internal proxy ids, leaf ids, cache revisions, or tree
+  implementation details.
+- Absolute performance thresholds; use Criterion and counters as evidence first.
+
+### Acceptance Method
+
+- Add behavior locks before implementation for the public distance/shape-query
+  contract.
+- Prove query results are deterministic, filter-aware, and stable after body
+  transform patches and handle recycling.
+- Prove the query path reuses the existing query/cache infrastructure instead of
+  scanning all colliders in the accepted scenarios.
+- Keep existing AABB/point/ray query behavior unchanged.
+- Update AI routing so future tasks know public distance query belongs to M21,
+  while concave/compound authoring belongs to M22.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --test query_debug_contract
+rtk proxy cargo test -p picea --test world_step_review_regressions
+rtk proxy cargo test -p picea --lib pipeline::gjk
+rtk proxy cargo test -p picea --test v1_api_smoke
+rtk proxy cargo bench -p picea --no-run
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
+### Subagent Execution Plan
+
+- `explorer` (leaf agent, no subagents): inspect `query.rs`, `pipeline/gjk.rs`,
+  collider shape support, and existing query tests; report the smallest public
+  API surface and behavior-lock locations.
+- `worker` (leaf agent, no subagents; prefer `gpt-5.4` unless API risk calls for
+  higher quality): implement the accepted API slice and tests in the query/API
+  ownership files only.
+- `reviewer` (leaf agent, no subagents): review public API compatibility,
+  determinism, stale sync, filtering, and proxy-id leakage risk.
+- `verifier` (leaf agent, no subagents): run the targeted gates and report any
+  generated or modified files.
+
+## M22 Compound And Concave Authoring Boundary
+
+> Status: completed 2026-04-28; Plan Gate accepted.
+>
+> Completion notes: M22 lands the additive lab scene-fixture authoring boundary:
+> `compound` means one body with ordered validated convex collider pieces
+> (`circle`, `rect`, `convex_polygon`) and optional piece `local_pose`.
+> Generated pieces inherit body-level material, filter, density, and sensor
+> semantics, while existing low-level `World`/`Collider` lifecycle APIs stay
+> unchanged. Direct `concave_polygon`, top-level/piece concave
+> `convex_polygon`, zero-length polygon edges, empty compounds, invalid piece
+> radii/sizes, and invalid piece local poses now fail before world
+> instantiation with stable `scene.bodies[..].shape...` paths. M20 v1 fixture
+> compatibility remains intact. Artifact/UI provenance, automatic polygon
+> decomposition, per-piece material overrides, and broader dynamic concave
+> support remain Post-M22 follow-up work; additive compound-piece mass/inertia
+> now has a Post-M22 behavior lock.
+
+### Background
+
+Picea's narrowphase direction remains convex-first: SAT + clipping for supported
+convex manifolds, analytic simple-shape paths, and GJK/EPA fallback for generic
+convex cases. That is the right core-solver boundary. The product gap after M20
+is different: users still need to express common concave-looking objects,
+terrain pieces, sensor areas, or compound obstacles without hand-authoring a
+fragile pile of low-level colliders.
+
+M22 should define the safe authoring contract: concave input is either rejected
+with a clear error or represented as validated compound convex pieces with
+traceable provenance.
+
+### Goal
+
+Provide a clear compound/concave authoring boundary for scene recipes and lab
+fixtures: supported compound convex shapes should be easy to author and inspect,
+while unsupported direct concave solver usage should fail early with stable
+errors before world mutation.
+
+### Design Goals
+
+- Preserve the core solver's convex-contact contract; do not add direct concave
+  contact solving in this milestone.
+- Represent concave-looking objects as compound convex pieces or validated
+  pre-decomposed fixtures with explicit provenance.
+- Keep body/collider handles, material, sensor, and collision-filter semantics
+  understandable at the authored object and generated-piece levels.
+- Prefer static or explicitly constrained compound authoring first; dynamic
+  concave mass/inertia behavior requires a separate behavior lock before support.
+- Use `picea-lab` fixture evidence to explain generated child pieces and
+  validation failures in this slice; richer artifact/schema/UI provenance is a
+  Post-M22 follow-up.
+- Keep the schema additive and versioned so M20 fixtures remain compatible.
+
+### In Scope
+
+- Scene/recipe authoring support for compound convex collider groups or
+  validated pre-decomposed concave fixtures.
+- Validation and nested error paths for unsupported direct concave shapes,
+  invalid pieces, and empty decomposition.
+- Tests proving generated pieces preserve filters, materials, sensors, and
+  deterministic ordering.
+- At least one lab/example fixture behavior lock that demonstrates compound or
+  concave-looking authoring boundaries.
+- Documentation that states the solver boundary in user terms: convex pieces are
+  supported; arbitrary concave contact solving is not.
+
+### Out Of Scope
+
+- Direct arbitrary concave-vs-concave or concave-vs-convex contact solving in the
+  core narrowphase.
+- A broad polygon-decomposition algorithm unless the selected implementation
+  slice first locks its input limits, determinism, and failure modes.
+- Dynamic concave mass/inertia aggregation without explicit tests and acceptance.
+- Visual editor work, live scene patching, or hidden world mutation semantics.
+- CCD expansion for compound shapes beyond whatever existing per-piece collider
+  behavior already guarantees.
+
+### Acceptance Method
+
+- Add behavior locks for accepted compound/concave authoring examples before
+  implementation.
+- Prove unsupported direct concave authoring fails before world instantiation or
+  mutation, with nested path errors.
+- Prove generated compound pieces preserve material/filter/sensor semantics and
+  deterministic ordering.
+- Prove existing M20 v1 scene fixtures remain compatible.
+- Add lab artifact or fixture evidence showing generated piece provenance.
+- Update AI routing so future tasks do not confuse M22 authoring support with
+  direct core-solver concave support.
+
+Suggested targeted gates:
+
+```bash
+rtk proxy cargo test -p picea --test core_model_world
+rtk proxy cargo test -p picea --test v1_api_smoke
+rtk proxy cargo test -p picea --test query_debug_contract
+rtk proxy cargo test -p picea-lab
+rtk proxy cargo bench -p picea --no-run
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+```
+
+### Subagent Execution Plan
+
+- `explorer` (leaf agent, no subagents): inspect `recipe.rs`,
+  `picea-lab/src/scenario.rs`, collider shape representation, and current
+  schema tests; report the smallest additive authoring surface.
+- `worker` (leaf agent, no subagents; prefer `gpt-5.4` unless schema/API risk
+  calls for higher quality): implement the accepted M22 slice in recipe/scene
+  files and focused tests only.
+- `reviewer` (leaf agent, no subagents): review schema compatibility, solver
+  boundary wording, error paths, deterministic ordering, and accidental direct
+  concave-solver leakage.
+- `verifier` (leaf agent, no subagents): run the targeted gates and report any
+  generated or modified files.
+
+## Post-M22 Follow-Up / Remaining Risks
+
+These items are real follow-up work. M11-M22 are completed in the current
+milestone line; the items below are not completed claims.
 
 - M17 completed: query/broadphase/solver-island counters, artifact summaries,
   and Criterion scenario coverage now exist as the evidence gate before tuning.
@@ -1613,12 +1835,27 @@ marking M11-M20 completed in the current milestone line.
   rather than attempting full all-shape CCD.
 - M20 completed: stabilized public scene authoring without replacing the
   low-level `World` lifecycle APIs.
-- Post-M20 solver follow-up: only later explore whether contact and joint
+- M21 completed: public distance/shape query now sits on top of the accepted
+  query/cache/GJK substrate without exposing proxy/cache internals.
+- M22 completed: compound/concave authoring is explicit for lab scene fixtures,
+  while direct concave contact solving stays outside the core solver.
+- Post-M22 completed slice: ramp-specific friction now has a signed downhill
+  regression, and authored dynamic compound pieces have an additive
+  mass/inertia behavior lock that distinguishes overlapping pieces from boolean
+  concave union semantics.
+- Post-M22 lab follow-up: expose richer compound-piece provenance in artifact
+  schemas/UI when that evidence becomes part of the user-facing replay
+  workflow.
+- Post-M22 authoring follow-up: consider automatic polygon decomposition,
+  per-piece material/filter overrides, stricter convex diagnostics, and broader
+  dynamic compound/concave support only behind fresh behavior locks.
+- Post-M22 solver follow-up: only later explore whether contact and joint
   solving should share a stronger island-owned ordering contract or expose
   denser debug/lab facts beyond the current accepted slice.
-- Public distance query remains a separate API-design decision.
-- Concave polygon decomposition remains outside the core solver until a focused
-  design and acceptance plan exists.
+- Rotational CCD, all-shape CCD, and dynamic compound CCD remain staged behind
+  focused behavior locks and benchmark evidence.
+- Absolute performance thresholds need multiple baseline runs before becoming
+  pass/fail gates.
 
 ## Picea Lab Role Across Milestones
 
@@ -1668,6 +1905,12 @@ milestone:
   applicable.
 - M20: host stabilized scene-schema fixtures and authoring examples with clear
   validation errors, replay provenance, and low-level `World` fallback examples.
+- M21: show public distance/shape-query results, filters, closest-point facts,
+  and query stats without exposing internal broadphase proxy ids.
+- M22: show supported compound/concave authoring examples, generated convex
+  piece ordering and validation facts, and stable validation errors for
+  unsupported direct concave solver usage; richer artifact/schema/UI
+  provenance remains a Post-M22 follow-up.
 
 The lab should not run physics independently from `crates/picea`, and it should
 not be the only pass/fail signal for physics correctness.

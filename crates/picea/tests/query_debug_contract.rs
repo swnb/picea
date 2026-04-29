@@ -1,13 +1,14 @@
-use picea::debug::DebugStats;
+use picea::debug::{DebugShape, DebugStats, DebugTransform};
 use picea::math::{point::Point, vector::Vector};
 use picea::prelude::{
     BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderDesc, ColliderHandle, ColliderPatch,
     CollisionFilter, ContactEvent, ContactFeatureId, ContactId, ContactReductionReason, DebugBody,
-    DebugContact, DebugIsland, DebugManifold, DebugManifoldPoint, DebugSnapshot,
+    DebugCollider, DebugContact, DebugIsland, DebugManifold, DebugManifoldPoint, DebugSnapshot,
     DebugSnapshotOptions, EpaTerminationReason, GenericConvexFallbackReason, GenericConvexTrace,
-    GjkTerminationReason, ManifoldId, Material, Pose, QueryFilter, QueryPipeline, QueryStats,
-    SharedShape, SimulationPipeline, SleepEvent, SleepTransitionReason, StepConfig, StepReport,
-    StepStats, WarmStartCacheReason, World, WorldDesc, WorldEvent,
+    GjkTerminationReason, ManifoldId, Material, Pose, QueryFilter, QueryPipeline, QueryShape,
+    QueryShapeError, QueryStats, SharedShape, SimulationPipeline, SleepEvent,
+    SleepTransitionReason, StepConfig, StepReport, StepStats, WarmStartCacheReason, World,
+    WorldDesc, WorldEvent,
 };
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -1168,4 +1169,504 @@ fn query_pipeline_sync_does_not_leak_recycled_collider_candidates() {
         recycled
     );
     assert_ne!(original, recycled);
+}
+
+#[test]
+fn query_pipeline_shape_query_returns_deterministic_closest_hits_and_stats() {
+    let mut world = World::new(WorldDesc::default());
+    let temp_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("temporary body should be created");
+    let recycled_slot = world
+        .create_collider(
+            temp_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("temporary collider should be created");
+    world
+        .destroy_collider(recycled_slot)
+        .expect("collider slot should be reusable");
+
+    let left_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(-2.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("left body should be created");
+    let left = world
+        .create_collider(
+            left_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("left collider should reuse the old slot generation");
+    let right_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(2.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("right body should be created");
+    let right = world
+        .create_collider(
+            right_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("right collider should be created after the recycled slot");
+    let sensor_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(0.0, 2.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("sensor body should be created");
+    world
+        .create_collider(
+            sensor_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                is_sensor: true,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("sensor collider should be created");
+    let filtered_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(0.0, -2.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("filtered body should be created");
+    world
+        .create_collider(
+            filtered_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                filter: CollisionFilter {
+                    memberships: 0b0010,
+                    collides_with: 0b0010,
+                },
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("filtered collider should be created");
+    let far_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(10.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("far body should be created");
+    world
+        .create_collider(
+            far_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("far collider should be created");
+
+    assert!(
+        right < left,
+        "generation bits should make handle ordering diverge from snapshot order"
+    );
+
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+
+    let shape = QueryShape::circle(Point::new(0.0, 0.0), 0.5).expect("query shape should build");
+    let hits = query.intersect_shape(
+        &shape,
+        1.0,
+        QueryFilter::default().colliding_with(CollisionFilter {
+            memberships: 0b0001,
+            collides_with: 0b0001,
+        }),
+    );
+    let closest = query.closest_shape(
+        &shape,
+        1.0,
+        QueryFilter::default().colliding_with(CollisionFilter {
+            memberships: 0b0001,
+            collides_with: 0b0001,
+        }),
+    );
+    let hits = hits.expect("shape query should succeed");
+    let closest = closest
+        .expect("closest shape query should succeed")
+        .expect("closest hit should exist");
+
+    assert_eq!(
+        hits.iter().map(|hit| hit.collider).collect::<Vec<_>>(),
+        vec![left, right]
+    );
+    assert!(hits.iter().all(|hit| (hit.distance - 1.0).abs() <= 1.0e-5));
+    assert_eq!(closest.collider, left);
+    assert_eq!(closest.body, left_body);
+    assert_eq!(closest.query_point, Point::new(-0.5, 0.0));
+    assert_eq!(closest.collider_point, Point::new(-1.5, 0.0));
+    assert_eq!(closest.normal, Some((1.0, 0.0).into()));
+    assert_eq!(query.last_stats().candidate_count, 4);
+    assert_eq!(query.last_stats().filter_drop_count, 2);
+    assert_eq!(query.last_stats().hit_count, 1);
+    assert!(query.last_stats().traversal_count >= query.last_stats().candidate_count);
+}
+
+#[test]
+fn query_pipeline_shape_query_respects_filters_sync_and_recycled_handles() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let collider = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created");
+    let sensor = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                is_sensor: true,
+                local_pose: Pose::from_xy_angle(0.0, 2.0, 0.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("sensor collider should be created");
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+
+    let origin_shape =
+        QueryShape::circle(Point::new(2.0, 0.0), 0.5).expect("query shape should build");
+    assert_eq!(
+        query
+            .closest_shape(&origin_shape, 1.0, QueryFilter::default())
+            .expect("shape query should succeed")
+            .expect("query should hit")
+            .collider,
+        collider
+    );
+    assert_eq!(
+        query
+            .closest_shape(
+                &QueryShape::circle(Point::new(0.0, 2.0), 0.5).expect("query shape should build"),
+                0.0,
+                QueryFilter::default().including_sensors(),
+            )
+            .expect("sensor query should succeed")
+            .expect("sensor hit should exist")
+            .collider,
+        sensor
+    );
+    assert!(query
+        .closest_shape(
+            &QueryShape::circle(Point::new(0.0, 2.0), 0.5).expect("query shape should build"),
+            0.0,
+            QueryFilter::default(),
+        )
+        .expect("sensor-excluding query should succeed")
+        .is_none());
+
+    world
+        .apply_body_patch(
+            body,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(10.0, 0.0, 0.0)),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body patch should succeed");
+    query.sync(&world);
+    assert!(query
+        .closest_shape(&origin_shape, 1.0, QueryFilter::default())
+        .expect("shape query should succeed")
+        .is_none());
+
+    let moved_body_shape =
+        QueryShape::circle(Point::new(12.0, 0.0), 0.5).expect("query shape should build");
+    assert_eq!(
+        query
+            .closest_shape(&moved_body_shape, 1.0, QueryFilter::default())
+            .expect("shape query should succeed")
+            .expect("query should hit after body patch")
+            .collider,
+        collider
+    );
+
+    world
+        .apply_collider_patch(
+            collider,
+            ColliderPatch {
+                local_pose: Some(Pose::from_xy_angle(5.0, 0.0, 0.0)),
+                ..ColliderPatch::default()
+            },
+        )
+        .expect("collider patch should succeed");
+    query.sync(&world);
+    assert!(query
+        .closest_shape(&moved_body_shape, 1.0, QueryFilter::default())
+        .expect("shape query should succeed")
+        .is_none());
+
+    let moved_collider_shape =
+        QueryShape::circle(Point::new(17.0, 0.0), 0.5).expect("query shape should build");
+    assert_eq!(
+        query
+            .closest_shape(&moved_collider_shape, 1.0, QueryFilter::default())
+            .expect("shape query should succeed")
+            .expect("query should hit after collider patch")
+            .collider,
+        collider
+    );
+    world
+        .destroy_collider(collider)
+        .expect("collider should be destroyed");
+    let recycled = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                local_pose: Pose::from_xy_angle(14.0, 0.0, 0.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should reuse the old slot with a new generation");
+    query.sync(&world);
+
+    assert!(query
+        .closest_shape(&moved_collider_shape, 1.0, QueryFilter::default())
+        .expect("shape query should succeed after recycle")
+        .is_none());
+    assert_eq!(
+        query
+            .closest_shape(
+                &QueryShape::circle(Point::new(24.0, 0.0), 0.5).expect("query shape should build"),
+                0.0,
+                QueryFilter::default(),
+            )
+            .expect("recycled collider query should succeed")
+            .expect("recycled collider should be hit")
+            .collider,
+        recycled
+    );
+    assert_ne!(collider, recycled);
+}
+
+#[test]
+fn query_shape_rejects_degenerate_and_unsupported_inputs() {
+    assert!(matches!(
+        QueryShape::from_shared_shape(
+            &SharedShape::concave_polygon(vec![
+                Point::new(-1.0, -1.0),
+                Point::new(1.0, -1.0),
+                Point::new(0.0, 0.0),
+                Point::new(1.0, 1.0),
+                Point::new(-1.0, 1.0),
+            ]),
+            Pose::default(),
+        ),
+        Err(QueryShapeError::UnsupportedShape { .. })
+    ));
+    assert!(matches!(
+        QueryShape::circle(Point::new(0.0, 0.0), 0.0),
+        Err(QueryShapeError::InvalidShape { .. })
+    ));
+    assert!(matches!(
+        QueryShape::segment(Point::new(1.0, 1.0), Point::new(1.0, 1.0)),
+        Err(QueryShapeError::InvalidShape { .. })
+    ));
+    assert!(matches!(
+        QueryShape::polygon(vec![
+            Point::new(f32::NAN, 0.0),
+            Point::new(1.0, 0.0),
+            Point::new(0.0, 1.0),
+        ]),
+        Err(QueryShapeError::InvalidShape { .. })
+    ));
+}
+
+#[test]
+fn query_shape_rejects_direct_concave_polygon_input() {
+    assert_eq!(
+        QueryShape::polygon(vec![
+            Point::new(-2.0, -2.0),
+            Point::new(2.0, -2.0),
+            Point::new(0.0, 0.0),
+            Point::new(2.0, 2.0),
+            Point::new(-2.0, 2.0),
+        ]),
+        Err(QueryShapeError::UnsupportedShape {
+            kind: "concave_polygon",
+        })
+    );
+}
+
+#[test]
+fn query_shape_public_polygon_and_segment_constructors_build_supported_queries() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let collider = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created");
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+
+    let polygon = QueryShape::polygon(vec![
+        Point::new(1.0, -0.5),
+        Point::new(2.0, -0.5),
+        Point::new(2.0, 0.5),
+        Point::new(1.0, 0.5),
+    ])
+    .expect("convex polygon query should build");
+    let segment = QueryShape::segment(Point::new(1.0, 0.0), Point::new(2.0, 0.0))
+        .expect("segment query should build");
+
+    assert_eq!(
+        query
+            .closest_shape(&polygon, 1.0, QueryFilter::default())
+            .expect("polygon query should succeed")
+            .expect("polygon query should hit")
+            .collider,
+        collider
+    );
+    assert_eq!(
+        query
+            .closest_shape(&segment, 1.0, QueryFilter::default())
+            .expect("segment query should succeed")
+            .expect("segment query should hit")
+            .collider,
+        collider
+    );
+}
+
+#[test]
+fn query_pipeline_shape_query_rejects_negative_max_distance() {
+    let query = QueryPipeline::new();
+    let shape = QueryShape::circle(Point::new(0.0, 0.0), 0.5).expect("query shape should build");
+
+    assert_eq!(
+        query.closest_shape(&shape, -0.1, QueryFilter::default()),
+        Err(QueryShapeError::InvalidShape {
+            kind: "max_distance",
+            reason: "negative_or_non_finite",
+        })
+    );
+}
+
+#[test]
+fn query_pipeline_shape_query_keeps_capsule_snapshot_distance_and_witness_points_consistent() {
+    let mut snapshot = DebugSnapshot::default();
+    snapshot.colliders.push(DebugCollider {
+        handle: ColliderHandle::default(),
+        body: BodyHandle::default(),
+        local_transform: DebugTransform::default(),
+        world_transform: DebugTransform::default(),
+        aabb: None,
+        shape: DebugShape::Segment {
+            start: Point::new(0.0, -1.0),
+            end: Point::new(0.0, 1.0),
+            radius: 0.25,
+        },
+        density: 1.0,
+        material: Material::default(),
+        filter: CollisionFilter::default(),
+        is_sensor: false,
+        user_data: 0,
+    });
+
+    let mut query = QueryPipeline::new();
+    query.sync(&snapshot);
+
+    let polygon = QueryShape::polygon(vec![
+        Point::new(1.0, -0.5),
+        Point::new(2.0, -0.5),
+        Point::new(2.0, 0.5),
+        Point::new(1.0, 0.5),
+    ])
+    .expect("convex polygon query should build");
+    let hit = query
+        .closest_shape(&polygon, 1.0, QueryFilter::default())
+        .expect("shape query should succeed")
+        .expect("capsule snapshot should be hit");
+
+    assert!((hit.distance - 0.75).abs() <= 1.0e-5);
+    assert_eq!(hit.query_point.x(), 1.0);
+    assert_eq!(hit.collider_point.x(), 0.25);
+    assert!((hit.query_point.y() - hit.collider_point.y()).abs() <= 1.0e-5);
+    assert!((hit.query_point.y().abs() - 0.5).abs() <= 1.0e-5);
+    assert_eq!(hit.normal, Some((1.0, 0.0).into()));
+}
+
+#[test]
+fn query_pipeline_shape_query_treats_capsule_radius_overlap_as_zero_distance() {
+    let mut snapshot = DebugSnapshot::default();
+    snapshot.colliders.push(DebugCollider {
+        handle: ColliderHandle::default(),
+        body: BodyHandle::default(),
+        local_transform: DebugTransform::default(),
+        world_transform: DebugTransform::default(),
+        aabb: None,
+        shape: DebugShape::Segment {
+            start: Point::new(0.0, -1.0),
+            end: Point::new(0.0, 1.0),
+            radius: 0.25,
+        },
+        density: 1.0,
+        material: Material::default(),
+        filter: CollisionFilter::default(),
+        is_sensor: false,
+        user_data: 0,
+    });
+
+    let mut query = QueryPipeline::new();
+    query.sync(&snapshot);
+
+    let polygon = QueryShape::polygon(vec![
+        Point::new(0.2, -0.5),
+        Point::new(1.2, -0.5),
+        Point::new(1.2, 0.5),
+        Point::new(0.2, 0.5),
+    ])
+    .expect("convex polygon query should build");
+    let hit = query
+        .closest_shape(&polygon, 0.0, QueryFilter::default())
+        .expect("shape query should succeed")
+        .expect("capsule snapshot should overlap polygon");
+
+    assert_eq!(hit.distance, 0.0);
+    assert_eq!(hit.query_point, Point::new(0.2, -0.5));
+    assert_eq!(hit.collider_point, Point::new(0.2, -0.5));
+    assert_eq!(hit.normal, None);
 }

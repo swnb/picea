@@ -113,7 +113,7 @@
   status: active
   owner: architecture
   applies_to: [engine, physics-upgrade, broadphase, narrowphase, solver, sleep, ccd, api, performance]
-  keywords: [post-m10, post-m14, post-m15, dynamic-aabb-tree, sat, gjk, vclip, manifold, sequential-impulse, active-island-solver, dense-island-execution, ccd-generalization, performance-substrate, performance-data-path, shape-cache, query-reuse, ergonomics]
+  keywords: [post-m10, post-m14, post-m15, post-m20, post-m22, dynamic-aabb-tree, sat, gjk, vclip, manifold, sequential-impulse, active-island-solver, dense-island-execution, ccd-generalization, performance-substrate, performance-data-path, shape-cache, query-reuse, ergonomics, scene-schema, public-distance-query, shape-query, compound-authoring, concave-authoring, m21, m22]
   last_reviewed: 2026-04-28
 - path: docs/design/debug-observability-design.md
   title: Debug Observability Design
@@ -212,7 +212,7 @@
   status: active
   owner: supervisor
   applies_to: [milestone, scope, acceptance, productionization, physics-upgrade]
-  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks, m10-5, m11, m12, m13, m14, m15, m16, m17, m18, m19, post-m14, post-m15, performance-substrate, performance-data-path, performance-evidence, query-stats, counter-summary, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, subtree-pair-traversal, ccd-generalization, dynamic-vs-dynamic-ccd, ergonomic-api-v2]
+  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, observability, benchmarks, m10-5, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, post-m14, post-m15, post-m22, performance-substrate, performance-data-path, performance-evidence, query-stats, counter-summary, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, subtree-pair-traversal, ccd-generalization, dynamic-vs-dynamic-ccd, ergonomic-api-v2, scene-schema, public-distance-query, shape-query, compound-authoring, concave-authoring]
   last_reviewed: 2026-04-28
 - path: todo.md
   title: Picea Physics Engine Backlog Archive
@@ -220,8 +220,8 @@
   authority: medium
   status: active
   owner: supervisor
-  applies_to: [backlog, archive, post-m10, post-m14, post-m15, future-work]
-  keywords: [m10-5, m11, m12, m13, m14, m15, m16, completed-baseline, post-m14, post-m15, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, ccd-generalization, ergonomic-api-v2]
+  applies_to: [backlog, archive, post-m10, post-m14, post-m15, post-m22, future-work]
+  keywords: [m10-5, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, completed-baseline, post-m14, post-m15, post-m22, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, ccd-generalization, ergonomic-api-v2, scene-schema, public-distance-query, shape-query, compound-authoring, concave-authoring]
   last_reviewed: 2026-04-28
 - path: crates/picea/src/lib.rs
   title: Picea core entrypoint

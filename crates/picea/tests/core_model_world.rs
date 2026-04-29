@@ -87,6 +87,93 @@ fn world_supports_multiple_colliders_per_body() {
 }
 
 #[test]
+fn world_recipe_keeps_compound_collider_order_and_piece_semantics() {
+    let material = Material {
+        friction: 0.7,
+        restitution: 0.35,
+    };
+    let filter = CollisionFilter {
+        memberships: 0b1010,
+        collides_with: 0b1100,
+    };
+    let colliders = vec![
+        ColliderBundle::circle(0.5)
+            .with_local_pose(Pose::from_xy_angle(-1.0, 0.0, 0.0))
+            .with_density(2.5)
+            .with_material(material)
+            .with_filter(filter)
+            .with_sensor(true),
+        ColliderBundle::rect(2.0, 1.0)
+            .with_local_pose(Pose::from_xy_angle(1.25, 0.5, 0.2))
+            .with_density(2.5)
+            .with_material(material)
+            .with_filter(filter)
+            .with_sensor(true),
+        ColliderBundle::new(SharedShape::convex_polygon(vec![
+            (-0.5, -0.25).into(),
+            (0.75, -0.1).into(),
+            (0.25, 0.8).into(),
+        ]))
+        .with_local_pose(Pose::from_xy_angle(0.0, -1.0, -0.4))
+        .with_density(2.5)
+        .with_material(material)
+        .with_filter(filter)
+        .with_sensor(true),
+    ];
+    let recipe = WorldRecipe::new(WorldDesc::default()).with_body(
+        BodyBundle::dynamic()
+            .with_pose(Pose::from_xy_angle(3.0, -2.0, 0.6))
+            .with_colliders(colliders),
+    );
+
+    let created = recipe
+        .instantiate()
+        .expect("compound recipe should create a world");
+
+    assert_eq!(created.created.body_handles.len(), 1);
+    assert_eq!(created.created.collider_handles.len(), 3);
+
+    let body = created.created.body_handles[0];
+    let attached: Vec<_> = created
+        .world
+        .colliders_for_body(body)
+        .expect("compound body should resolve")
+        .collect();
+    assert_eq!(attached, created.created.collider_handles);
+
+    let expected = [
+        (
+            SharedShape::circle(0.5),
+            Pose::from_xy_angle(-1.0, 0.0, 0.0),
+        ),
+        (
+            SharedShape::rect(2.0, 1.0),
+            Pose::from_xy_angle(1.25, 0.5, 0.2),
+        ),
+        (
+            SharedShape::convex_polygon(vec![
+                (-0.5, -0.25).into(),
+                (0.75, -0.1).into(),
+                (0.25, 0.8).into(),
+            ]),
+            Pose::from_xy_angle(0.0, -1.0, -0.4),
+        ),
+    ];
+    for (handle, (shape, local_pose)) in attached.into_iter().zip(expected) {
+        let collider = created
+            .world
+            .collider(handle)
+            .expect("compound collider should resolve");
+        assert_eq!(collider.shape(), &shape);
+        assert_eq!(collider.local_pose(), local_pose);
+        assert_eq!(collider.density(), 2.5);
+        assert_eq!(collider.material(), material);
+        assert_eq!(collider.filter(), filter);
+        assert!(collider.is_sensor());
+    }
+}
+
+#[test]
 fn world_applies_body_patches_without_exposing_mutable_internals() {
     let mut world = World::new(WorldDesc::default());
     let body = world
@@ -329,6 +416,40 @@ fn mass_properties_recompute_after_collider_and_body_mutations() {
         .mass_properties();
     assert_eq!(after_removal.mass, 0.0);
     assert_eq!(after_removal.inertia, 0.0);
+}
+
+#[test]
+fn compound_convex_pieces_add_mass_properties_without_concave_decomposition() {
+    let recipe =
+        WorldRecipe::new(WorldDesc::default()).with_body(BodyBundle::dynamic().with_colliders(
+            [(-1.0, 0.0), (0.0, -1.0), (-0.5, -0.5)].map(|(x, y)| {
+                ColliderBundle::rect(1.0, 1.0)
+                    .with_local_pose(Pose::from_xy_angle(x, y, 0.0))
+                    .with_density(1.0)
+            }),
+        ));
+    let created = recipe
+        .instantiate()
+        .expect("compound recipe should create a world");
+    let body = created.created.body_handles[0];
+
+    // The third piece intentionally overlaps the other two so authored recipe pieces keep
+    // additive mass properties instead of being boolean-unioned into one concave silhouette.
+    let mass = created
+        .world
+        .body(body)
+        .expect("compound body should resolve")
+        .mass_properties();
+
+    // Each 1x1 rectangle contributes unit mass and 1/6 local inertia. Because the overlap is kept
+    // as authored mass, the aggregate center stays at (-0.5, -0.5) and the parallel-axis sum is
+    // 3 * (1/6) + 2 * (0.5) = 3/2 rather than a de-duplicated concave union's inertia.
+    assert_near(mass.mass, 3.0);
+    assert_near(mass.local_center_of_mass.x(), -0.5);
+    assert_near(mass.local_center_of_mass.y(), -0.5);
+    assert_near(mass.inertia, 1.5);
+    assert_near(mass.inverse_mass, 1.0 / 3.0);
+    assert_near(mass.inverse_inertia, 2.0 / 3.0);
 }
 
 #[test]

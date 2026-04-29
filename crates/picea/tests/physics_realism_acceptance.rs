@@ -936,6 +936,82 @@ fn friction_changes_tangential_sliding_speed() {
 }
 
 #[test]
+fn ramp_friction_suppresses_downhill_sliding_more_than_low_friction() {
+    // In this setup the actual downhill motion projects onto the ramp's negative tangent, so we
+    // lock assertions to that signed downhill vector instead of erasing direction with `abs()`.
+    fn downhill_progress_after_contact(friction: f32) -> (f32, f32) {
+        let mut world = World::new(WorldDesc {
+            gravity: Vector::new(0.0, 9.81),
+            enable_sleep: false,
+        });
+        let ramp_angle: f32 = 0.4;
+        let ramp_tangent = Vector::new(ramp_angle.cos(), ramp_angle.sin());
+        let downhill_tangent = -ramp_tangent;
+        let surface_normal = Vector::new(ramp_angle.sin(), -ramp_angle.cos());
+        let ramp_origin = Vector::new(0.0, 1.0);
+        let slider_origin = ramp_origin + ramp_tangent * -1.5 + surface_normal * 0.73;
+        let material = Material {
+            friction,
+            restitution: 0.0,
+        };
+
+        let ramp = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Static,
+                pose: Pose::from_xy_angle(ramp_origin.x(), ramp_origin.y(), ramp_angle),
+                can_sleep: false,
+                ..BodyDesc::default()
+            })
+            .expect("ramp should be created");
+        let slider = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                pose: Pose::from_xy_angle(slider_origin.x(), slider_origin.y(), 0.0),
+                can_sleep: false,
+                ..BodyDesc::default()
+            })
+            .expect("slider should be created");
+        attach_shape(&mut world, ramp, SharedShape::rect(8.0, 0.5), material);
+        attach_shape(&mut world, slider, SharedShape::circle(0.5), material);
+
+        step_world(&mut world, 90);
+
+        let downhill_progress =
+            (body_position(&world, slider) - slider_origin).dot(downhill_tangent);
+        let downhill_speed = body_velocity(&world, slider).dot(downhill_tangent);
+        (downhill_progress, downhill_speed)
+    }
+
+    let (low_downhill_progress, low_downhill_speed) = downhill_progress_after_contact(0.05);
+    let (high_downhill_progress, high_downhill_speed) = downhill_progress_after_contact(1.2);
+
+    assert!(
+        low_downhill_progress > 0.0,
+        "low-friction slider should still move downhill; progress={low_downhill_progress}"
+    );
+    assert!(
+        high_downhill_progress > 0.0,
+        "high-friction slider should still move downhill, just less; progress={high_downhill_progress}"
+    );
+    assert!(
+        low_downhill_speed > 0.0,
+        "low-friction slider should still have downhill speed; speed={low_downhill_speed}"
+    );
+    assert!(
+        high_downhill_speed > 0.0,
+        "high-friction slider should still have downhill speed, just less; speed={high_downhill_speed}"
+    );
+    assert!(
+        low_downhill_progress > high_downhill_progress + 0.2,
+        "low-friction ramp should allow more downhill travel; low={low_downhill_progress}, high={high_downhill_progress}"
+    );
+    assert!(
+        low_downhill_speed > high_downhill_speed + 0.2,
+        "low-friction ramp should retain more downhill speed; low={low_downhill_speed}, high={high_downhill_speed}"
+    );
+}
+
+#[test]
 fn sequential_impulse_solves_all_manifold_rows_for_stacked_contact() {
     let mut world = World::new(WorldDesc {
         gravity: Vector::default(),

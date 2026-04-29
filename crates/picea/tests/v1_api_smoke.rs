@@ -1,8 +1,8 @@
 use picea::prelude::{
     BodyAsset, BodyBundle, BodyDesc, BodyType, ColliderBundle, ColliderDesc, CollisionFilter,
     CollisionLayerPreset, DebugSnapshotOptions, DistanceJointDesc, JointBundle, JointDesc,
-    Material, MaterialPreset, Pose, QueryFilter, QueryPipeline, SharedShape, SimulationPipeline,
-    StepConfig, World, WorldAnchorJointDesc, WorldDesc, WorldRecipe,
+    Material, MaterialPreset, Pose, QueryFilter, QueryPipeline, QueryShape, SharedShape,
+    SimulationPipeline, StepConfig, World, WorldAnchorJointDesc, WorldDesc, WorldRecipe,
 };
 
 #[test]
@@ -86,6 +86,46 @@ fn world_api_supports_create_step_query_and_debug_snapshot() {
     assert_eq!(snapshot.colliders.len(), 2);
     assert_eq!(snapshot.joints.len(), 2);
     assert_eq!(snapshot.stats.step_index, report.step_index);
+}
+
+#[test]
+fn world_api_supports_shape_query_via_prelude() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let collider = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::rect(2.0, 2.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created");
+
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+
+    let shape = QueryShape::from_shared_shape(
+        &SharedShape::circle(0.5),
+        Pose::from_xy_angle(3.0, 0.0, 0.0),
+    )
+    .expect("query shape should build");
+    let hit = query
+        .closest_shape(&shape, 2.0, QueryFilter::default())
+        .expect("shape query should succeed")
+        .expect("closest collider should be found");
+
+    assert_eq!(hit.collider, collider);
+    assert_eq!(hit.body, body);
+    assert!((hit.distance - 1.5).abs() <= 1.0e-5);
+    assert_eq!(hit.query_point, (2.5, 0.0).into());
+    assert_eq!(hit.collider_point, (1.0, 0.0).into());
+    assert_eq!(hit.normal, Some((1.0, 0.0).into()));
 }
 
 #[test]

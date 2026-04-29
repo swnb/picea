@@ -4,10 +4,12 @@
 //! internals directly. That keeps spatial queries portable across native,
 //! wasm, and future client/server consumers.
 
+use std::cmp::Ordering;
 use std::sync::Mutex;
 
 use crate::{
-    collider::{CollisionFilter, ShapeAabb},
+    body::Pose,
+    collider::{CollisionFilter, ShapeAabb, SharedShape},
     debug::{
         sanitize_point, sanitize_scalar, sanitize_vector, DebugAabb, DebugCollider, DebugShape,
         DebugSnapshot, DebugSnapshotOptions,
@@ -175,6 +177,119 @@ pub struct AabbHit {
     pub bounds: DebugAabb,
 }
 
+/// Sanitized world-space input shape for public read-only queries.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueryShape {
+    shape: DebugShape,
+    bounds: DebugAabb,
+}
+
+impl QueryShape {
+    /// Creates a circle query in world space.
+    pub fn circle(center: Point, radius: FloatNum) -> Result<Self, QueryShapeError> {
+        let center = validate_point(center, "circle.center")?;
+        let radius = validate_positive_scalar(radius, "circle.radius")?;
+        Ok(Self {
+            shape: DebugShape::Circle { center, radius },
+            bounds: DebugAabb::from_circle(center, radius),
+        })
+    }
+
+    /// Creates a convex polygon query in world space.
+    pub fn polygon(vertices: impl Into<Vec<Point>>) -> Result<Self, QueryShapeError> {
+        let vertices = validate_polygon(vertices.into(), "polygon.vertices")?;
+        let bounds = DebugAabb::from_points(&vertices).ok_or(QueryShapeError::InvalidShape {
+            kind: "polygon",
+            reason: "empty",
+        })?;
+        Ok(Self {
+            shape: DebugShape::Polygon { vertices },
+            bounds,
+        })
+    }
+
+    /// Creates a segment query in world space.
+    pub fn segment(start: Point, end: Point) -> Result<Self, QueryShapeError> {
+        let start = validate_point(start, "segment.start")?;
+        let end = validate_point(end, "segment.end")?;
+        if (end - start).length() <= FloatNum::EPSILON {
+            return Err(QueryShapeError::InvalidShape {
+                kind: "segment",
+                reason: "degenerate",
+            });
+        }
+        let bounds =
+            DebugAabb::from_points(&[start, end]).ok_or(QueryShapeError::InvalidShape {
+                kind: "segment",
+                reason: "empty",
+            })?;
+        Ok(Self {
+            shape: DebugShape::Segment {
+                start,
+                end,
+                radius: 0.0,
+            },
+            bounds,
+        })
+    }
+
+    /// Converts a stable owned collider shape into the public query surface.
+    ///
+    /// Concave polygons stay rejected in M21 so the query API does not imply
+    /// authoring/decomposition support that belongs to M22.
+    pub fn from_shared_shape(shape: &SharedShape, pose: Pose) -> Result<Self, QueryShapeError> {
+        match shape {
+            SharedShape::Circle { radius } => Self::circle(pose.point(), *radius),
+            SharedShape::Rect { .. }
+            | SharedShape::RegularPolygon { .. }
+            | SharedShape::ConvexPolygon { .. } => Self::polygon(shape.world_vertices(pose)),
+            SharedShape::Segment { start, end } => {
+                Self::segment(pose.transform_point(*start), pose.transform_point(*end))
+            }
+            SharedShape::ConcavePolygon { .. } => Err(QueryShapeError::UnsupportedShape {
+                kind: "concave_polygon",
+            }),
+        }
+    }
+
+    fn shape(&self) -> &DebugShape {
+        &self.shape
+    }
+
+    fn bounds(&self) -> DebugAabb {
+        self.bounds
+    }
+}
+
+/// Stable public error for invalid or unsupported query-shape input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueryShapeError {
+    /// The input shape contained non-finite or degenerate geometry.
+    InvalidShape {
+        kind: &'static str,
+        reason: &'static str,
+    },
+    /// The shape kind is not supported by the M21 public surface.
+    UnsupportedShape { kind: &'static str },
+}
+
+/// Exact distance hit for public shape queries.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShapeHit {
+    /// Hit body.
+    pub body: BodyHandle,
+    /// Hit collider.
+    pub collider: ColliderHandle,
+    /// Non-negative distance between the query and collider shapes.
+    pub distance: FloatNum,
+    /// Closest point on the query shape.
+    pub query_point: Point,
+    /// Closest point on the collider shape.
+    pub collider_point: Point,
+    /// Direction from collider toward the query shape when stable.
+    pub normal: Option<Vector>,
+}
+
 /// Deterministic counters for the most recent query call on a `QueryPipeline`.
 ///
 /// The counters describe query work shape, not wall-clock time. They are useful
@@ -228,12 +343,19 @@ impl QueryStatsCell {
 
 #[derive(Clone, Debug)]
 struct QueryColliderRecord {
+    snapshot_index: usize,
     handle: ColliderHandle,
     body: BodyHandle,
     is_sensor: bool,
     filter: CollisionFilter,
     bounds: DebugAabb,
     shape: DebugShape,
+}
+
+#[derive(Clone, Debug)]
+struct OrderedShapeHit {
+    snapshot_index: usize,
+    hit: ShapeHit,
 }
 
 /// Cached query pipeline built from stable snapshot facts.
@@ -271,7 +393,10 @@ impl QueryPipeline {
         self.colliders = snapshot
             .colliders
             .into_iter()
-            .filter_map(QueryColliderRecord::from_debug_collider)
+            .enumerate()
+            .filter_map(|(snapshot_index, collider)| {
+                QueryColliderRecord::from_debug_collider(snapshot_index, collider)
+            })
             .collect();
         let proxies = self
             .colliders
@@ -397,6 +522,89 @@ impl QueryPipeline {
         self.last_stats.set(stats);
         hits
     }
+
+    /// Finds colliders whose exact distance to the query shape is within the
+    /// given limit.
+    pub fn intersect_shape(
+        &self,
+        shape: &QueryShape,
+        max_distance: FloatNum,
+        filter: QueryFilter,
+    ) -> Result<Vec<ShapeHit>, QueryShapeError> {
+        self.shape_hits_internal(shape, max_distance, filter, false)
+    }
+
+    /// Finds the closest collider to the query shape within the given limit.
+    pub fn closest_shape(
+        &self,
+        shape: &QueryShape,
+        max_distance: FloatNum,
+        filter: QueryFilter,
+    ) -> Result<Option<ShapeHit>, QueryShapeError> {
+        Ok(self
+            .shape_hits_internal(shape, max_distance, filter, true)?
+            .into_iter()
+            .next())
+    }
+
+    fn shape_hits_internal(
+        &self,
+        shape: &QueryShape,
+        max_distance: FloatNum,
+        filter: QueryFilter,
+        first_only: bool,
+    ) -> Result<Vec<ShapeHit>, QueryShapeError> {
+        let max_distance = validate_non_negative_scalar(max_distance, "max_distance")?;
+        let query_bounds = expand_aabb(shape.bounds(), max_distance);
+        let tree_output = self
+            .broadphase
+            .query_aabb_proxy_indices_with_stats(query_bounds.into());
+        let mut stats = query_stats_from_tree(tree_output.stats);
+        let mut hits = Vec::new();
+
+        for index in tree_output.proxy_indices {
+            let Some(collider) = self.colliders.get(index) else {
+                continue;
+            };
+            if !filter.matches(collider) {
+                stats.filter_drop_count += 1;
+                continue;
+            }
+            let Some((distance, query_point, collider_point, normal)) =
+                distance_between_shapes(shape.shape(), &collider.shape)
+            else {
+                continue;
+            };
+            if distance > max_distance {
+                continue;
+            }
+            hits.push(OrderedShapeHit {
+                snapshot_index: collider.snapshot_index,
+                hit: ShapeHit {
+                    body: collider.body,
+                    collider: collider.handle,
+                    distance,
+                    query_point,
+                    collider_point,
+                    normal,
+                },
+            });
+        }
+
+        hits.sort_by(|lhs, rhs| {
+            lhs.hit
+                .distance
+                .total_cmp(&rhs.hit.distance)
+                .then_with(|| lhs.snapshot_index.cmp(&rhs.snapshot_index))
+        });
+        if first_only {
+            hits.truncate(1);
+        }
+        let hits = hits.into_iter().map(|entry| entry.hit).collect::<Vec<_>>();
+        stats.hit_count = hits.len();
+        self.last_stats.set(stats);
+        Ok(hits)
+    }
 }
 
 fn query_stats_from_tree(stats: TreeQueryStats) -> QueryStats {
@@ -409,10 +617,566 @@ fn query_stats_from_tree(stats: TreeQueryStats) -> QueryStats {
     }
 }
 
+fn validate_point(point: Point, kind: &'static str) -> Result<Point, QueryShapeError> {
+    if !point.x().is_finite() || !point.y().is_finite() {
+        return Err(QueryShapeError::InvalidShape {
+            kind,
+            reason: "non_finite",
+        });
+    }
+    Ok(sanitize_point(point))
+}
+
+fn validate_positive_scalar(
+    value: FloatNum,
+    kind: &'static str,
+) -> Result<FloatNum, QueryShapeError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(QueryShapeError::InvalidShape {
+            kind,
+            reason: "non_positive",
+        });
+    }
+    Ok(sanitize_scalar(value))
+}
+
+fn validate_non_negative_scalar(
+    value: FloatNum,
+    kind: &'static str,
+) -> Result<FloatNum, QueryShapeError> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(QueryShapeError::InvalidShape {
+            kind,
+            reason: "negative_or_non_finite",
+        });
+    }
+    Ok(sanitize_scalar(value))
+}
+
+fn validate_polygon(
+    vertices: Vec<Point>,
+    kind: &'static str,
+) -> Result<Vec<Point>, QueryShapeError> {
+    if vertices.len() < 3 {
+        return Err(QueryShapeError::InvalidShape {
+            kind,
+            reason: "too_few_vertices",
+        });
+    }
+    let vertices = vertices
+        .into_iter()
+        .map(|point| validate_point(point, kind))
+        .collect::<Result<Vec<_>, _>>()?;
+    if signed_polygon_area(&vertices).abs() <= FloatNum::EPSILON {
+        return Err(QueryShapeError::InvalidShape {
+            kind,
+            reason: "degenerate",
+        });
+    }
+    if !is_convex_polygon(&vertices) {
+        return Err(QueryShapeError::UnsupportedShape {
+            kind: "concave_polygon",
+        });
+    }
+    Ok(vertices)
+}
+
+fn signed_polygon_area(vertices: &[Point]) -> FloatNum {
+    polygon_edges(vertices)
+        .map(|(start, end)| start.x() * end.y() - end.x() * start.y())
+        .sum::<FloatNum>()
+        * 0.5
+}
+
+fn is_convex_polygon(vertices: &[Point]) -> bool {
+    let mut sign: FloatNum = 0.0;
+    for ((a, b), c) in polygon_edges(vertices).zip(vertices.iter().copied().cycle().skip(2)) {
+        let cross = (b - a).cross(c - b);
+        if cross.abs() <= FloatNum::EPSILON {
+            continue;
+        }
+        if sign.abs() <= FloatNum::EPSILON {
+            sign = cross;
+            continue;
+        }
+        if cross.signum() != sign.signum() {
+            return false;
+        }
+    }
+    true
+}
+
+fn expand_aabb(bounds: DebugAabb, margin: FloatNum) -> DebugAabb {
+    let margin = sanitize_scalar(margin).max(0.0);
+    DebugAabb::new(
+        Point::new(bounds.min.x() - margin, bounds.min.y() - margin),
+        Point::new(bounds.max.x() + margin, bounds.max.y() + margin),
+    )
+}
+
+fn distance_between_shapes(
+    query: &DebugShape,
+    collider: &DebugShape,
+) -> Option<(FloatNum, Point, Point, Option<Vector>)> {
+    // M21 keeps the public query surface on simple deterministic world-space
+    // closest-point geometry over stable debug snapshots. That is enough for
+    // convex polygons, circles, and segments/capsules without implying richer
+    // penetration or concave decomposition semantics, which stay in later work.
+    match (query, collider) {
+        (
+            DebugShape::Circle {
+                center: query_center,
+                radius: query_radius,
+            },
+            DebugShape::Circle {
+                center: collider_center,
+                radius: collider_radius,
+            },
+        ) => circle_circle_distance(
+            *query_center,
+            *query_radius,
+            *collider_center,
+            *collider_radius,
+        ),
+        (
+            DebugShape::Circle {
+                center: query_center,
+                radius: query_radius,
+            },
+            DebugShape::Polygon { vertices },
+        ) => circle_polygon_distance(*query_center, *query_radius, vertices),
+        (
+            DebugShape::Circle {
+                center: query_center,
+                radius: query_radius,
+            },
+            DebugShape::Segment { start, end, radius },
+        ) => circle_segment_distance(*query_center, *query_radius, *start, *end, *radius),
+        (
+            DebugShape::Polygon { vertices },
+            DebugShape::Circle {
+                center: collider_center,
+                radius: collider_radius,
+            },
+        ) => swap_shape_distance(circle_polygon_distance(
+            *collider_center,
+            *collider_radius,
+            vertices,
+        )),
+        (
+            DebugShape::Polygon {
+                vertices: query_vertices,
+            },
+            DebugShape::Polygon {
+                vertices: collider_vertices,
+            },
+        ) => polygon_polygon_distance(query_vertices, collider_vertices),
+        (DebugShape::Polygon { vertices }, DebugShape::Segment { start, end, radius }) => {
+            polygon_segment_distance(vertices, *start, *end, *radius)
+        }
+        (
+            DebugShape::Segment { start, end, radius },
+            DebugShape::Circle {
+                center: collider_center,
+                radius: collider_radius,
+            },
+        ) => swap_shape_distance(circle_segment_distance(
+            *collider_center,
+            *collider_radius,
+            *start,
+            *end,
+            *radius,
+        )),
+        (DebugShape::Segment { start, end, radius }, DebugShape::Polygon { vertices }) => {
+            swap_shape_distance(polygon_segment_distance(vertices, *start, *end, *radius))
+        }
+        (
+            DebugShape::Segment {
+                start: query_start,
+                end: query_end,
+                radius: query_radius,
+            },
+            DebugShape::Segment {
+                start: collider_start,
+                end: collider_end,
+                radius: collider_radius,
+            },
+        ) => segment_segment_distance(
+            *query_start,
+            *query_end,
+            *query_radius,
+            *collider_start,
+            *collider_end,
+            *collider_radius,
+        ),
+    }
+}
+
+fn swap_shape_distance(
+    value: Option<(FloatNum, Point, Point, Option<Vector>)>,
+) -> Option<(FloatNum, Point, Point, Option<Vector>)> {
+    value.map(|(distance, query_point, collider_point, normal)| {
+        (
+            distance,
+            collider_point,
+            query_point,
+            normal.map(|normal| -normal),
+        )
+    })
+}
+
+fn circle_circle_distance(
+    query_center: Point,
+    query_radius: FloatNum,
+    collider_center: Point,
+    collider_radius: FloatNum,
+) -> Option<(FloatNum, Point, Point, Option<Vector>)> {
+    let query_radius = sanitize_scalar(query_radius).max(0.0);
+    let collider_radius = sanitize_scalar(collider_radius).max(0.0);
+    let delta = query_center - collider_center;
+    let center_distance = delta.length();
+    let normal = normalized_or_none(delta);
+    let distance = (center_distance - query_radius - collider_radius).max(0.0);
+    let (query_point, collider_point) = match normal {
+        Some(normal) => (
+            query_center - normal * query_radius,
+            collider_center + normal * collider_radius,
+        ),
+        None => (query_center, collider_center),
+    };
+    Some((distance, query_point, collider_point, normal))
+}
+
+fn circle_polygon_distance(
+    center: Point,
+    radius: FloatNum,
+    vertices: &[Point],
+) -> Option<(FloatNum, Point, Point, Option<Vector>)> {
+    let radius = sanitize_scalar(radius).max(0.0);
+    let collider_point = closest_point_on_polygon(center, vertices)?;
+    let offset = center - collider_point;
+    let raw_distance = offset.length();
+    let normal = normalized_or_none(offset);
+    if contains_point_polygon(vertices, center) || raw_distance <= radius + FloatNum::EPSILON {
+        let point = if raw_distance <= FloatNum::EPSILON {
+            center
+        } else {
+            collider_point
+        };
+        return Some((0.0, point, collider_point, normal));
+    }
+
+    Some((
+        (raw_distance - radius).max(0.0),
+        center - normal.unwrap_or_default() * radius,
+        collider_point,
+        normal,
+    ))
+}
+
+fn circle_segment_distance(
+    center: Point,
+    radius: FloatNum,
+    start: Point,
+    end: Point,
+    segment_radius: FloatNum,
+) -> Option<(FloatNum, Point, Point, Option<Vector>)> {
+    let radius = sanitize_scalar(radius).max(0.0);
+    let segment_radius = sanitize_scalar(segment_radius).max(0.0);
+    let segment_point = closest_point_on_segment(center, start, end);
+    let offset = center - segment_point;
+    let raw_distance = offset.length();
+    let normal = normalized_or_none(offset);
+    let distance = (raw_distance - radius - segment_radius).max(0.0);
+    let query_point = center - normal.unwrap_or_default() * radius;
+    let collider_point = segment_point + normal.unwrap_or_default() * segment_radius;
+    if distance <= FloatNum::EPSILON {
+        return Some((0.0, collider_point, collider_point, normal));
+    }
+    Some((distance, query_point, collider_point, normal))
+}
+
+fn polygon_polygon_distance(
+    query_vertices: &[Point],
+    collider_vertices: &[Point],
+) -> Option<(FloatNum, Point, Point, Option<Vector>)> {
+    if let Some(point) = polygon_overlap_point(query_vertices, collider_vertices) {
+        return Some((0.0, point, point, None));
+    }
+
+    let mut best: Option<(FloatNum, Point, Point)> = None;
+    for &vertex in query_vertices {
+        let collider_point = closest_point_on_polygon(vertex, collider_vertices)?;
+        best = best_of_shape_distance(best, vertex, collider_point);
+    }
+    for &vertex in collider_vertices {
+        let query_point = closest_point_on_polygon(vertex, query_vertices)?;
+        best = best_of_shape_distance(best, query_point, vertex);
+    }
+    finalize_shape_distance(best)
+}
+
+fn polygon_segment_distance(
+    vertices: &[Point],
+    start: Point,
+    end: Point,
+    segment_radius: FloatNum,
+) -> Option<(FloatNum, Point, Point, Option<Vector>)> {
+    let segment_radius = sanitize_scalar(segment_radius).max(0.0);
+    if contains_point_polygon(vertices, start)
+        || contains_point_polygon(vertices, end)
+        || polygon_edges(vertices).any(|(edge_start, edge_end)| {
+            segment_segment_intersection(start, end, edge_start, edge_end).is_some()
+        })
+    {
+        let point = if contains_point_polygon(vertices, start) {
+            start
+        } else {
+            closest_point_on_polygon(start, vertices).unwrap_or(start)
+        };
+        return Some((0.0, point, point, None));
+    }
+
+    let mut best_centerline_overlap: Option<(FloatNum, Point)> = None;
+    for (edge_start, edge_end) in polygon_edges(vertices) {
+        let (segment_point, polygon_point) =
+            closest_points_between_segments(start, end, edge_start, edge_end);
+        let distance = (polygon_point - segment_point).length();
+        match best_centerline_overlap {
+            Some((current_distance, current_point))
+                if current_distance < distance
+                    || (current_distance == distance
+                        && point_order(current_point) <= point_order(polygon_point)) => {}
+            _ => best_centerline_overlap = Some((distance, polygon_point)),
+        }
+    }
+    if let Some((distance, polygon_point)) = best_centerline_overlap {
+        // A debug `Segment { radius > 0 }` represents a capsule. Even when the
+        // centerline stays outside the polygon, the public M21 query contract
+        // still treats radius-backed overlap as a zero-distance hit.
+        if distance <= segment_radius + FloatNum::EPSILON {
+            return Some((0.0, polygon_point, polygon_point, None));
+        }
+    }
+
+    let mut best: Option<(FloatNum, Point, Point)> = None;
+    for &vertex in vertices {
+        let collider_point = closest_point_on_segment(vertex, start, end);
+        let collider_point =
+            move_point_along_normal(collider_point, vertex - collider_point, segment_radius);
+        best = best_of_shape_distance(best, vertex, collider_point);
+    }
+    for &endpoint in &[start, end] {
+        let query_point = closest_point_on_polygon(endpoint, vertices)?;
+        let collider_point =
+            move_point_along_normal(endpoint, query_point - endpoint, segment_radius);
+        best = best_of_shape_distance(best, query_point, collider_point);
+    }
+    finalize_shape_distance(best)
+}
+
+fn segment_segment_distance(
+    query_start: Point,
+    query_end: Point,
+    query_radius: FloatNum,
+    collider_start: Point,
+    collider_end: Point,
+    collider_radius: FloatNum,
+) -> Option<(FloatNum, Point, Point, Option<Vector>)> {
+    let query_radius = sanitize_scalar(query_radius).max(0.0);
+    let collider_radius = sanitize_scalar(collider_radius).max(0.0);
+    if let Some(point) =
+        segment_segment_intersection(query_start, query_end, collider_start, collider_end)
+    {
+        return Some((0.0, point, point, None));
+    }
+    let (query_centerline_point, collider_centerline_point) =
+        closest_points_between_segments(query_start, query_end, collider_start, collider_end);
+    let delta = query_centerline_point - collider_centerline_point;
+    let normal = normalized_or_none(delta);
+    let distance = (delta.length() - query_radius - collider_radius).max(0.0);
+    let query_point = query_centerline_point - normal.unwrap_or_default() * query_radius;
+    let collider_point = collider_centerline_point + normal.unwrap_or_default() * collider_radius;
+    if distance <= FloatNum::EPSILON {
+        return Some((0.0, collider_point, collider_point, normal));
+    }
+    Some((distance, query_point, collider_point, normal))
+}
+
+fn best_of_shape_distance(
+    current: Option<(FloatNum, Point, Point)>,
+    query_point: Point,
+    collider_point: Point,
+) -> Option<(FloatNum, Point, Point)> {
+    let distance = (query_point - collider_point).length();
+    match current {
+        Some((current_distance, current_query_point, current_collider_point))
+            if current_distance < distance =>
+        {
+            Some((
+                current_distance,
+                current_query_point,
+                current_collider_point,
+            ))
+        }
+        Some((current_distance, current_query_point, current_collider_point))
+            if current_distance == distance
+                && compare_point_pair(
+                    (query_point, collider_point),
+                    (current_query_point, current_collider_point),
+                ) == Ordering::Greater =>
+        {
+            Some((
+                current_distance,
+                current_query_point,
+                current_collider_point,
+            ))
+        }
+        _ => Some((distance, query_point, collider_point)),
+    }
+}
+
+fn compare_point_pair(lhs: (Point, Point), rhs: (Point, Point)) -> Ordering {
+    point_order(lhs.0)
+        .cmp(&point_order(rhs.0))
+        .then_with(|| point_order(lhs.1).cmp(&point_order(rhs.1)))
+}
+
+fn point_order(point: Point) -> (u32, u32) {
+    (point.x().to_bits(), point.y().to_bits())
+}
+
+fn finalize_shape_distance(
+    best: Option<(FloatNum, Point, Point)>,
+) -> Option<(FloatNum, Point, Point, Option<Vector>)> {
+    best.map(|(distance, query_point, collider_point)| {
+        let normal = if distance <= FloatNum::EPSILON {
+            None
+        } else {
+            normalized_or_none(query_point - collider_point)
+        };
+        (distance, query_point, collider_point, normal)
+    })
+}
+
+fn polygon_overlap_point(query_vertices: &[Point], collider_vertices: &[Point]) -> Option<Point> {
+    for (query_start, query_end) in polygon_edges(query_vertices) {
+        for (collider_start, collider_end) in polygon_edges(collider_vertices) {
+            if let Some(point) =
+                segment_segment_intersection(query_start, query_end, collider_start, collider_end)
+            {
+                return Some(point);
+            }
+        }
+    }
+    query_vertices
+        .iter()
+        .copied()
+        .find(|point| contains_point_polygon(collider_vertices, *point))
+        .or_else(|| {
+            collider_vertices
+                .iter()
+                .copied()
+                .find(|point| contains_point_polygon(query_vertices, *point))
+        })
+}
+
+fn closest_point_on_polygon(point: Point, vertices: &[Point]) -> Option<Point> {
+    polygon_edges(vertices)
+        .map(|(start, end)| {
+            let candidate = closest_point_on_segment(point, start, end);
+            ((point - candidate).length(), candidate)
+        })
+        .min_by(|lhs, rhs| {
+            lhs.0
+                .total_cmp(&rhs.0)
+                .then_with(|| point_order(lhs.1).cmp(&point_order(rhs.1)))
+        })
+        .map(|(_, candidate)| candidate)
+}
+
+fn closest_point_on_segment(point: Point, start: Point, end: Point) -> Point {
+    let edge = end - start;
+    let edge_length_squared = edge.dot(edge);
+    if edge_length_squared <= FloatNum::EPSILON {
+        return start;
+    }
+    let projection = ((point - start).dot(edge) / edge_length_squared).clamp(0.0, 1.0);
+    start + edge * projection
+}
+
+fn move_point_along_normal(point: Point, normal_hint: Vector, radius: FloatNum) -> Point {
+    point + normalized_or_none(normal_hint).unwrap_or_default() * sanitize_scalar(radius).max(0.0)
+}
+
+fn normalized_or_none(vector: Vector) -> Option<Vector> {
+    let normalized = vector.normalized_or_zero();
+    (normalized.length() > FloatNum::EPSILON).then_some(normalized)
+}
+
+fn segment_segment_intersection(a0: Point, a1: Point, b0: Point, b1: Point) -> Option<Point> {
+    let direction_a = a1 - a0;
+    let direction_b = b1 - b0;
+    let denominator = direction_a.cross(direction_b);
+    let offset = b0 - a0;
+    if denominator.abs() <= FloatNum::EPSILON {
+        return None;
+    }
+
+    let t = offset.cross(direction_b) / denominator;
+    let u = offset.cross(direction_a) / denominator;
+    if !(0.0..=1.0).contains(&t) || !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    Some(a0 + direction_a * t)
+}
+
+fn closest_points_between_segments(a0: Point, a1: Point, b0: Point, b1: Point) -> (Point, Point) {
+    let d1 = a1 - a0;
+    let d2 = b1 - b0;
+    let r = a0 - b0;
+    let a = d1.dot(d1);
+    let e = d2.dot(d2);
+    let f = d2.dot(r);
+
+    if a <= FloatNum::EPSILON && e <= FloatNum::EPSILON {
+        return (a0, b0);
+    }
+    if a <= FloatNum::EPSILON {
+        let t = (f / e).clamp(0.0, 1.0);
+        return (a0, b0 + d2 * t);
+    }
+    if e <= FloatNum::EPSILON {
+        let s = (-d1.dot(r) / a).clamp(0.0, 1.0);
+        return (a0 + d1 * s, b0);
+    }
+
+    let c = d1.dot(r);
+    let b = d1.dot(d2);
+    let denominator = a * e - b * b;
+    let mut s = if denominator.abs() <= FloatNum::EPSILON {
+        0.0
+    } else {
+        ((b * f - c * e) / denominator).clamp(0.0, 1.0)
+    };
+    let mut t = (b * s + f) / e;
+
+    if t < 0.0 {
+        t = 0.0;
+        s = (-c / a).clamp(0.0, 1.0);
+    } else if t > 1.0 {
+        t = 1.0;
+        s = ((b - c) / a).clamp(0.0, 1.0);
+    }
+
+    (a0 + d1 * s, b0 + d2 * t)
+}
+
 impl QueryColliderRecord {
-    fn from_debug_collider(collider: DebugCollider) -> Option<Self> {
+    fn from_debug_collider(snapshot_index: usize, collider: DebugCollider) -> Option<Self> {
         let bounds = collider.aabb.or_else(|| collider.shape.aabb())?;
         Some(Self {
+            snapshot_index,
             handle: collider.handle,
             body: collider.body,
             is_sensor: collider.is_sensor,

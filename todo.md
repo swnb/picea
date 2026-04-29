@@ -175,15 +175,42 @@ solver allocation work 转入 Post-M15。
 - [x] 证明 sleeping islands 不构建 hot rows，unrelated islands 不相互影响。
 - [x] 保持 warm-start、wake reason、contact/debug facts 和 lab artifact 语义稳定。
 
-### Later Post-M16
+### M21 Public Distance And Shape Query API
+
+- [x] 设计稳定的 public distance / shape query API，返回 handles、distance、
+  closest points、normal / direction 和 query stats，不暴露 broadphase proxy id。
+- [x] 复用 `QueryPipeline`、内部 query index、collider geometry cache 和 GJK
+  distance kernel，不新增第二套 query engine。
+- [x] 为 ordering、filter semantics、stale sync、recycled handle、degenerate input
+  和 no-hit 行为补行为锁。
+- [x] 保持 AABB / point / ray query 现有语义不变。
+- [x] 更新 AI routing 和使用示例，明确 concave / compound authoring 属于 M22。
+
+### M22 Compound And Concave Authoring Boundary
+
+- [x] 在 recipe / scene authoring 层支持 compound convex collider groups 或
+  validated pre-decomposed concave fixtures。
+- [x] 对 unsupported direct concave solver usage、invalid pieces、empty
+  decomposition 提供稳定 nested error path。
+- [x] 保持 material、sensor、collision filter 和 generated-piece ordering 可解释。
+- [x] 增加至少一个 lab/example fixture 行为锁，展示 compound /
+  concave-looking authoring 边界。
+- [x] 明确文档边界：core solver 支持 convex pieces，不直接求解 arbitrary concave
+  contacts。
+
+### Later Post-M22
 
 - [ ] 改进 dynamic AABB tree 插入、平衡和 rebuild 策略。
 - [ ] 增加 query allocation/perf counters，并用 Criterion baseline variance 解释。
-- [ ] 增加 ramp-specific friction 回归测试。
-- [ ] 仅在 benchmark 和行为锁支持后再考虑 dynamic-vs-dynamic CCD。
+- [x] 增加 ramp-specific friction 回归测试。
+- [ ] 在 M19 selected slice 之后，再扩展更多 dynamic-vs-dynamic / all-shape CCD。
 - [ ] 扩展 rotational CCD 和更广的 all-shape CCD 覆盖。
-- [ ] 稳定公共 scene schema，并明确后续 live lab editing 语义。
-
-- [ ] Concave polygon decomposition 仍未作为 core solver 能力落地。
-- [ ] Public distance query 仍未作为稳定 API 暴露。
+- [ ] 在 M20 public scene schema 之后，再明确 live lab editing / scene patch
+  语义。
+- [ ] 为 compound pieces 增加 artifact/schema/UI provenance，而不让 lab 重新
+  计算物理事实。
+- [x] 为 dynamic concave-looking / compound authored pieces 补 additive
+  mass/inertia 行为锁；是否支持更广 dynamic concave authoring 仍需后续设计。
+- [ ] M22 之后再评估是否引入更广的自动 polygon decomposition；默认不把
+  arbitrary concave contact 放进 core solver。
 - [ ] Absolute performance thresholds 需要多轮 baseline 后再设置。
