@@ -7,7 +7,15 @@ export type SourceKind = "server" | "demo";
 export type StatusKind = "idle" | "loading" | "playing" | "paused" | "failed" | "created" | "running" | "completed";
 export type EntityKind = "body" | "collider" | "contact" | "joint";
 export type BodyType = "static" | "dynamic" | "kinematic";
-export type LayerKey = "shapes" | "aabbs" | "contacts" | "velocities" | "trace";
+export type LayerKey =
+  | "shapes"
+  | "aabbs"
+  | "contacts"
+  | "velocities"
+  | "trace"
+  | "broadphaseTree"
+  | "islands"
+  | "provenance";
 
 const storageKey = "picea-lab.locale";
 
@@ -29,6 +37,7 @@ const enMessages = {
   "panel.sceneHierarchy": "Scene hierarchy",
   "panel.inspector": "Inspector",
   "panel.firstSliceFacts": "first slice facts",
+  "panel.processFacts": "Process facts",
   "tree.bodies": "Bodies",
   "tree.colliders": "Colliders",
   "tree.contacts": "Contacts",
@@ -50,6 +59,25 @@ const enMessages = {
   "inspector.broadphaseCandidates": "broadphase candidates",
   "inspector.warmStart": "warm-start",
   "inspector.ccd": "CCD cand/hit/miss/clamp",
+  "inspector.broadphaseTree": "broadphase tree",
+  "inspector.treeShape": "tree shape",
+  "inspector.treeCounters": "tree counters",
+  "inspector.islandLifecycle": "island lifecycle",
+  "inspector.compoundProvenance": "compound provenance",
+  "inspector.authoredBody": "authored body",
+  "inspector.generatedPieces": "generated pieces",
+  "inspector.inheritance": "inheritance",
+  "inspector.validationPath": "validation path",
+  "inspector.pieceOrder": "piece order",
+  "inspector.colliderHandle": "collider handle",
+  "inspector.localPose": "local pose",
+  "inspector.material": "material",
+  "inspector.filter": "filter",
+  "inspector.density": "density",
+  "inspector.sensor": "sensor",
+  "inspector.treeEmpty": "no exported tree nodes",
+  "inspector.provenanceEmpty": "no authored compound provenance in this frame",
+  "inspector.islandEmpty": "no island facts exported in this frame",
   "inspector.emptyTitle": "Nothing selected",
   "inspector.emptySelection": "Select a body, collider, contact, or joint in the hierarchy or canvas.",
   "inspector.emptyHintEsc": "clears the current selection",
@@ -164,6 +192,7 @@ const zhMessages: Record<MessageKey, string> = {
   "panel.sceneHierarchy": "场景层级",
   "panel.inspector": "检查器",
   "panel.firstSliceFacts": "首个切片事实",
+  "panel.processFacts": "过程事实",
   "tree.bodies": "物体",
   "tree.colliders": "碰撞体",
   "tree.contacts": "接触点",
@@ -185,6 +214,25 @@ const zhMessages: Record<MessageKey, string> = {
   "inspector.broadphaseCandidates": "宽阶段候选",
   "inspector.warmStart": "暖启动",
   "inspector.ccd": "CCD 候选/命中/错过/钳制",
+  "inspector.broadphaseTree": "宽阶段树",
+  "inspector.treeShape": "树形态",
+  "inspector.treeCounters": "树计数器",
+  "inspector.islandLifecycle": "岛生命周期",
+  "inspector.compoundProvenance": "复合体来源",
+  "inspector.authoredBody": "作者体",
+  "inspector.generatedPieces": "生成片段",
+  "inspector.inheritance": "继承",
+  "inspector.validationPath": "校验路径",
+  "inspector.pieceOrder": "片段顺序",
+  "inspector.colliderHandle": "碰撞体句柄",
+  "inspector.localPose": "局部位姿",
+  "inspector.material": "材质",
+  "inspector.filter": "过滤层",
+  "inspector.density": "密度",
+  "inspector.sensor": "传感器",
+  "inspector.treeEmpty": "当前帧没有导出的树节点",
+  "inspector.provenanceEmpty": "当前帧没有作者提供的复合体来源",
+  "inspector.islandEmpty": "当前帧没有导出的岛事实",
   "inspector.emptyTitle": "未选中实体",
   "inspector.emptySelection": "在层级树或画布中选择物体、碰撞体、接触点或关节。",
   "inspector.emptyHintEsc": "清除当前选中",
@@ -314,6 +362,10 @@ const scenarioMessages: Record<string, Record<Locale, Pick<ScenarioDescriptor, "
     "zh-CN": { name: "CCD 动态凸体对撞", description: "两个高速动态矩形彼此扫掠命中，用于观察动态目标 CCD 的 TOI、目标扫掠和目标钳制事实。" },
     "en-US": { name: "CCD dynamic convex pair", description: "Two fast dynamic rectangles swept against each other." },
   },
+  compound_provenance: {
+    "zh-CN": { name: "复合体来源", description: "作者提供的复合体 fixture，展示 piece 顺序、继承语义、宽阶段树和岛事实。" },
+    "en-US": { name: "Compound provenance fixture", description: "An authored compound fixture exposing piece order, inherited collider semantics, broadphase tree, and island facts." },
+  },
 };
 
 const bodyTypeLabels: Record<Locale, Record<BodyType, string>> = {
@@ -327,8 +379,8 @@ const entityKindLabels: Record<Locale, Record<EntityKind, string>> = {
 };
 
 const layerLabels: Record<Locale, Record<LayerKey, string>> = {
-  "zh-CN": { shapes: "形状", aabbs: "AABB", contacts: "接触点", velocities: "速度", trace: "轨迹" },
-  "en-US": { shapes: "Shapes", aabbs: "AABBs", contacts: "Contacts", velocities: "Velocities", trace: "Trace" },
+  "zh-CN": { shapes: "形状", aabbs: "AABB", contacts: "接触点", velocities: "速度", trace: "轨迹", broadphaseTree: "宽阶段树", islands: "岛", provenance: "来源" },
+  "en-US": { shapes: "Shapes", aabbs: "AABBs", contacts: "Contacts", velocities: "Velocities", trace: "Trace", broadphaseTree: "Broadphase tree", islands: "Islands", provenance: "Provenance" },
 };
 
 const sourceLabels: Record<Locale, Record<SourceKind, string>> = {
@@ -353,6 +405,15 @@ const dynamicValueLabels: Record<Locale, Record<string, string>> = {
     dynamic: "动态",
     polygon: "多边形",
     segment: "线段",
+    default: "默认",
+    ice: "低摩擦",
+    rough: "粗糙",
+    bouncy: "弹性",
+    sticky: "高摩擦",
+    static_geometry: "静态几何",
+    dynamic_body: "动态物体",
+    sensor: "传感器",
+    query_only: "仅查询",
     distance: "距离关节",
     world_anchor: "世界锚点",
     single_point: "单点",
@@ -372,6 +433,14 @@ const dynamicValueLabels: Record<Locale, Record<string, string>> = {
     converged: "已收敛",
     gjk_did_not_intersect: "GJK 未相交",
     degenerate_edge: "退化边",
+    stability_window: "稳定窗口",
+    impact: "碰撞唤醒",
+    contact_impulse: "接触冲量",
+    joint_correction: "关节修正",
+    transform_edit: "位姿编辑",
+    velocity_edit: "速度编辑",
+    user_patch: "用户补丁",
+    sleep_disabled: "禁用休眠",
     hit: "命中",
     miss_no_previous: "无历史",
     miss_feature_id: "特征不匹配",
@@ -384,6 +453,17 @@ const dynamicValueLabels: Record<Locale, Record<string, string>> = {
   "en-US": {
     static: "static",
     dynamic: "dynamic",
+    polygon: "polygon",
+    segment: "segment",
+    default: "default",
+    ice: "ice",
+    rough: "rough",
+    bouncy: "bouncy",
+    sticky: "sticky",
+    static_geometry: "static geometry",
+    dynamic_body: "dynamic body",
+    sensor: "sensor",
+    query_only: "query only",
     generic_convex_fallback: "generic convex fallback",
     none: "none",
     epa_failure_contained: "EPA failure contained",
@@ -397,6 +477,14 @@ const dynamicValueLabels: Record<Locale, Record<string, string>> = {
     converged: "converged",
     gjk_did_not_intersect: "GJK did not intersect",
     degenerate_edge: "degenerate edge",
+    stability_window: "stability window",
+    impact: "impact",
+    contact_impulse: "contact impulse",
+    joint_correction: "joint correction",
+    transform_edit: "transform edit",
+    velocity_edit: "velocity edit",
+    user_patch: "user patch",
+    sleep_disabled: "sleep disabled",
   },
 };
 

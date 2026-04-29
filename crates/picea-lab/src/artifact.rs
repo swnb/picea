@@ -16,7 +16,7 @@ use picea::{debug::DebugAabb, prelude::*};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    scenario::{build_scenario, RunConfig, ScenarioId},
+    scenario::{build_scenario, CompoundProvenance, RunConfig, ScenarioId},
     LabError, LabResult,
 };
 
@@ -91,6 +91,10 @@ pub struct FrameRecord {
     pub stats: StepStats,
     pub events: Vec<WorldEvent>,
     pub snapshot: DebugSnapshot,
+    /// Lab-owned authoring provenance repeated per frame so replay consumers do
+    /// not need a side channel or web-side fixture reconstruction.
+    #[serde(default)]
+    pub compound_provenance: Vec<CompoundProvenance>,
 }
 
 /// Viewer-oriented, compact render summary derived from debug snapshots.
@@ -152,7 +156,11 @@ pub struct DebugRenderFrame {
     pub contacts: Vec<DebugContact>,
     pub manifolds: Vec<DebugManifold>,
     #[serde(default)]
+    pub broadphase_tree: picea::debug::DebugBroadphaseTree,
+    #[serde(default)]
     pub islands: Vec<picea::debug::DebugIsland>,
+    #[serde(default)]
+    pub compound_provenance: Vec<CompoundProvenance>,
     pub unmeasured: Vec<String>,
 }
 
@@ -260,6 +268,7 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
             events: report.events.clone(),
             report,
             snapshot,
+            compound_provenance: scenario.compound_provenance.clone(),
         });
     }
 
@@ -328,7 +337,9 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     colliders: frame.snapshot.colliders.clone(),
                     contacts: frame.snapshot.contacts.clone(),
                     manifolds: frame.snapshot.manifolds.clone(),
+                    broadphase_tree: frame.snapshot.broadphase_tree.clone(),
                     islands: frame.snapshot.islands.clone(),
+                    compound_provenance: frame.compound_provenance.clone(),
                     // M5 exposes contact solver impulses; force/torque accumulation is still
                     // outside the lab artifact contract.
                     unmeasured: ["forces", "torques"]

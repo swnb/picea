@@ -6,6 +6,7 @@ const contractSources = [
   "../src/components/workbench/Toolbar.tsx",
   "../src/components/workbench/SceneHierarchy.tsx",
   "../src/components/workbench/Inspector.tsx",
+  "../src/components/workbench/WorldCanvas.tsx",
 ].map((path) => fs.readFileSync(new URL(path, import.meta.url), "utf8"));
 const appSource = contractSources.join("\n");
 
@@ -111,4 +112,39 @@ assert.match(
   appSource,
   /final_snapshot_artifact/,
   "Workbench should surface final_snapshot artifact provenance from the server session.",
+);
+assert.match(
+  appSource,
+  /panel\.processFacts/,
+  "Inspector should expose a process facts panel for broadphase tree, island lifecycle, and compound provenance.",
+);
+assert.match(
+  appSource,
+  /inspector\.broadphaseTree/,
+  "Process facts should label the exported broadphase tree read model.",
+);
+assert.match(
+  appSource,
+  /inspector\.islandLifecycle/,
+  "Process facts should label island lifecycle facts.",
+);
+assert.match(
+  appSource,
+  /inspector\.compoundProvenance/,
+  "Process facts should label compound provenance facts.",
+);
+assert.match(
+  appSource,
+  /broadphaseTree/,
+  "Layer controls should expose a broadphase tree overlay toggle.",
+);
+assert.match(
+  appSource,
+  /layers\.islands/,
+  "World canvas should expose an island overlay toggle and draw path.",
+);
+assert.match(
+  appSource,
+  /layers\.provenance/,
+  "World canvas should expose a provenance overlay toggle and draw path.",
 );

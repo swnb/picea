@@ -28,6 +28,11 @@ M21 已把 public distance / shape query API 落到 `QueryShape`、
 `closest_shape`。M22 已把 lab scene fixture 的 compound / concave
 authoring boundary 固定为 validated convex pieces 或稳定 authoring error；
 direct concave contact solving 仍不属于 core solver。
+M23-M30 是下一组计划 gate：先硬化 broadphase/query performance evidence，
+再把 `picea-lab-web` 提升为 broadphase tree / island lifecycle / compound
+provenance 的过程可视化基础，然后处理 live scene patch semantics、单片 CCD
+扩展、automatic polygon decomposition、solver ordering contract、performance
+threshold policy，最后收束到 public beta hardening。
 `docs/plans/2026-04-18-picea-physics-engine-milestones.md`
 只用于历史归档；其中旧 `Scene` / `Context` / `picea-web` / wasm 叙述不代表当前默认路由。
 
@@ -82,7 +87,7 @@ direct concave contact solving 仍不属于 core solver。
 | Module | Owns | Does Not Own | Entry Points | Tests |
 | --- | --- | --- | --- | --- |
 | `scenario` | 内置 deterministic 场景、reset-time overrides、`RunConfig`；包含 M13 `ccd_fast_circle_wall` / `ccd_fast_convex_walls` CCD evidence、M19 `ccd_dynamic_convex_pair` 动态目标 CCD evidence、M20 versioned `SceneRecipeFixture` / joint authoring / backward-compatible fixture loading；M22 已接入 compound convex piece authoring、direct concave rejection、top-level/piece convex validation 和 stable scene-path errors。 | 不读写 artifacts，不持有 live session 状态，不自行运行物理逻辑；不把 M22 authoring support 解读成 lab 自己运行 concave solver。 | `crates/picea-lab/src/scenario.rs` | `rtk proxy cargo test -p picea-lab` |
-| `artifact` | headless runner、`manifest.json` / `frames.jsonl` / `debug_render.json` / `final_snapshot.json` / `perf.json` 写入；`frames.jsonl` 与 `final_snapshot.json` 保留 core `StepStats` / `DebugStats` CCD counters 和 contact `ccd_trace`，包括 M19 dynamic-target `target_kind` / target sweep facts；M17 `perf.json.counter_summary` 汇总 deterministic work counters，debug render frames 携带 broadphase traversal/prune 与 island/solver row counters；M22 未扩展 artifact schema，compound provenance UI/schema 属于 Post-M22。 | 不直接服务 HTTP，不把 target 路径暴露给 UI，不从 lab 侧重新计算 CCD，不把 wall-clock timing 当正确性 oracle。 | `crates/picea-lab/src/artifact.rs` | `rtk proxy cargo test -p picea-lab --test artifact_run` |
+| `artifact` | headless runner、`manifest.json` / `frames.jsonl` / `debug_render.json` / `final_snapshot.json` / `perf.json` 写入；`frames.jsonl` 与 `final_snapshot.json` 保留 core `StepStats` / `DebugStats` CCD counters 和 contact `ccd_trace`，包括 M19 dynamic-target `target_kind` / target sweep facts；M17 `perf.json.counter_summary` 汇总 deterministic work counters，debug render frames 携带 broadphase traversal/prune 与 island/solver row counters；M24 计划把 broadphase tree、island lifecycle、compound provenance 做成 lab-web 过程可视化。 | 不直接服务 HTTP，不把 target 路径暴露给 UI，不从 lab 侧重新计算 CCD，不把 wall-clock timing 当正确性 oracle。 | `crates/picea-lab/src/artifact.rs` | `rtk proxy cargo test -p picea-lab --test artifact_run` |
 | `server` | 本地 HTTP + SSE protocol、session 状态、artifact 下载；session 明确暴露 `manifest.json` / `final_snapshot.json` replay provenance，empty SSE 使用 idle event 而不是 failed。 | 不热改正在积分的 world；reset 通过 runner 重建；不把空事件队列当成模拟失败。 | `crates/picea-lab/src/server.rs` | `rtk proxy cargo test -p picea-lab --test server_routes` |
 | `cli` | `picea-lab list`、`run`、`serve` 命令。 | 不拥有 artifact schema 或 scenario 构建细节。 | `crates/picea-lab/src/cli.rs`, `main.rs` | `rtk proxy cargo test -p picea-lab` |
 | `web` | React + Canvas 2D replay workbench, hierarchy, inspector, timeline, overlays；joint rows are selectable, server/demo labels distinguish Rust replay from demo replay, and the contact inspector shows staged M13 CCD trace facts plus M14 fixture-backed replay provenance. | 不运行 physics，不替代 Rust artifact schema，不承诺真正 live simulator 语义。 | `crates/picea-lab/web/src/*` | `npm run build` from `crates/picea-lab/web`; `npm run test:ui-contract`; `npm run test:i18n` |
@@ -100,6 +105,6 @@ direct concave contact solving 仍不属于 core solver。
 
 - `docs/ai/index.md`：问题类型路由
 - `docs/ai/doc-catalog.yaml`：文档和关键代码索引
-- `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`：当前生产化 milestone 边界、M11-M22 完成状态和 Post-M22 follow-up
+- `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`：当前生产化 milestone 边界、M11-M22 完成状态、M23-M30 计划 gate 和 Post-M30 follow-up
 - `docs/design/physics-engine-upgrade-technical-plan.md`：Post-M20 baseline、M21 public query 和 M22 authoring boundary 之后的系统升级设计方向
 - `docs/plans/2026-04-18-picea-physics-engine-milestones.md`：历史归档；不要把旧 `Scene` / `Context` / `picea-web` / wasm 条目当作当前默认路由

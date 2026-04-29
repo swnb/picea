@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
+    debug::DebugBroadphaseTree,
     events::{SleepTransitionReason, WorldEvent},
     handles::BodyHandle,
     math::FloatNum,
@@ -40,6 +41,10 @@ impl World {
 
     pub(crate) fn update_broadphase(&mut self, proxies: &[ColliderProxy]) -> BroadphaseOutput {
         self.broadphase.update(proxies)
+    }
+
+    pub(crate) fn debug_broadphase_tree(&self) -> DebugBroadphaseTree {
+        self.broadphase.debug_tree()
     }
 
     pub(crate) fn commit_step(

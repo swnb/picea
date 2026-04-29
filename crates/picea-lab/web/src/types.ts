@@ -8,6 +8,22 @@ export type DebugAabb = {
   max: Vec2;
 };
 
+export type DebugBroadphaseTreeNode = {
+  id: number;
+  parent?: number | null;
+  left?: number | null;
+  right?: number | null;
+  collider?: number | null;
+  depth: number;
+  aabb: DebugAabb;
+};
+
+export type DebugBroadphaseTree = {
+  root?: number | null;
+  depth: number;
+  nodes: DebugBroadphaseTreeNode[];
+};
+
 export type DebugShape =
   | { kind: "circle"; center: Vec2; radius: number }
   | { kind: "polygon"; vertices: Vec2[] }
@@ -198,6 +214,34 @@ export type DebugIsland = {
   reason?: SleepTransitionReason;
 };
 
+export type CompoundProvenancePiece = {
+  generated_piece_index: number;
+  collider_handle?: number | null;
+  validation_path: string;
+  local_pose: [number, number, number];
+};
+
+export type CompoundProvenance = {
+  authored_body_index: number;
+  body_handle?: number | null;
+  validation_path: string;
+  inherited_material:
+    | "default"
+    | "ice"
+    | "rough"
+    | "bouncy"
+    | "sticky";
+  inherited_filter:
+    | "default"
+    | "static_geometry"
+    | "dynamic_body"
+    | "sensor"
+    | "query_only";
+  inherited_density: number;
+  inherited_is_sensor: boolean;
+  pieces: CompoundProvenancePiece[];
+};
+
 export type DebugSnapshot = {
   meta: {
     revision: number | null;
@@ -211,6 +255,7 @@ export type DebugSnapshot = {
   contacts: DebugContact[];
   manifolds: DebugManifold[];
   islands?: DebugIsland[];
+  broadphase_tree?: DebugBroadphaseTree;
   primitives: DebugPrimitive[];
   stats: {
     step_index: number;
@@ -218,8 +263,19 @@ export type DebugSnapshot = {
     active_collider_count: number;
     active_joint_count: number;
     broadphase_candidate_count: number;
+    broadphase_update_count?: number;
+    broadphase_traversal_count?: number;
+    broadphase_pruned_count?: number;
+    broadphase_rebuild_count?: number;
+    broadphase_tree_depth?: number;
     contact_count: number;
     manifold_count: number;
+    island_count?: number;
+    active_island_count?: number;
+    sleeping_island_skip_count?: number;
+    solver_body_slot_count?: number;
+    contact_row_count?: number;
+    joint_row_count?: number;
     warm_start_hit_count?: number;
     warm_start_miss_count?: number;
     warm_start_drop_count?: number;
@@ -235,6 +291,7 @@ export type FrameRecord = {
   simulated_time: number;
   state_hash: string;
   snapshot: DebugSnapshot;
+  compound_provenance?: CompoundProvenance[];
 };
 
 export type ScenarioDescriptor = {

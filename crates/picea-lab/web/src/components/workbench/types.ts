@@ -6,6 +6,9 @@ export type LayerState = {
   contacts: boolean
   velocities: boolean
   trace: boolean
+  broadphaseTree: boolean
+  islands: boolean
+  provenance: boolean
 }
 
 export const defaultLayers: LayerState = {
@@ -14,6 +17,9 @@ export const defaultLayers: LayerState = {
   contacts: true,
   velocities: true,
   trace: true,
+  broadphaseTree: false,
+  islands: false,
+  provenance: false,
 }
 
 export type SourceKind = "server" | "demo"

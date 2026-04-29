@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type {
   DebugAabb,
   DebugBody,
+  DebugBroadphaseTree,
   DebugCollider,
   DebugContact,
+  DebugIsland,
   DebugPrimitive,
   DebugShape,
   FrameRecord,
@@ -132,6 +134,24 @@ function drawWorld(
     }
   }
 
+  if (layers.broadphaseTree) {
+    drawBroadphaseTree(
+      ctx,
+      frame.snapshot.broadphase_tree,
+      frame.snapshot.colliders,
+      camera,
+      selected,
+    );
+  }
+
+  if (layers.islands) {
+    drawIslands(ctx, frame.snapshot.islands ?? [], frame.snapshot.colliders, camera);
+  }
+
+  if (layers.provenance) {
+    drawProvenance(ctx, frame, camera);
+  }
+
   if (selected?.kind === "body") {
     const body = frame.snapshot.bodies.find((entry) => entry.handle === selected.id);
     if (body) {
@@ -222,6 +242,101 @@ function drawAxes(ctx: CanvasRenderingContext2D, camera: Camera) {
   ctx.fillText("y", origin.x + 8, 16);
 }
 
+function drawBroadphaseTree(
+  ctx: CanvasRenderingContext2D,
+  tree: DebugBroadphaseTree | undefined,
+  colliders: DebugCollider[],
+  camera: Camera,
+  selected: SelectedEntity | null,
+) {
+  const nodes = tree?.nodes ?? [];
+  if (nodes.length === 0) {
+    return;
+  }
+  const sortedNodes = [...nodes].sort((left, right) => left.depth - right.depth);
+  for (const node of sortedNodes) {
+    const isLeaf = node.collider != null;
+    const isSelected =
+      isLeaf &&
+      ((selected?.kind === "collider" && selected.id === node.collider) ||
+        (selected?.kind === "body" &&
+          colliders.some(
+            (collider) => collider.handle === node.collider && collider.body === selected.id,
+          )));
+    ctx.save();
+    ctx.strokeStyle = isSelected
+      ? "#f0c36b"
+      : isLeaf
+        ? "rgba(127, 176, 105, 0.75)"
+        : "rgba(240, 195, 107, 0.55)";
+    ctx.lineWidth = isSelected ? 2.2 : isLeaf ? 1.2 : 1;
+    ctx.setLineDash(isLeaf ? [] : [6, 5]);
+    drawAabbOutline(ctx, node.aabb, camera);
+    ctx.restore();
+
+    const label = isLeaf ? `L${node.depth}` : `N${node.depth}`;
+    const labelPoint = worldToScreen(node.aabb.min, camera);
+    ctx.fillStyle = isLeaf ? "#7fb069" : "#f0c36b";
+    ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+    ctx.fillText(label, labelPoint.x + 4, labelPoint.y - 4);
+  }
+}
+
+function drawIslands(
+  ctx: CanvasRenderingContext2D,
+  islands: DebugIsland[],
+  colliders: DebugCollider[],
+  camera: Camera,
+) {
+  for (const island of islands) {
+    const bounds = mergeBounds(
+      colliders
+        .filter((collider) => island.bodies.includes(collider.body))
+        .map((collider) => collider.aabb)
+        .filter((aabb): aabb is DebugAabb => Boolean(aabb)),
+    );
+    if (!bounds) {
+      continue;
+    }
+
+    ctx.save();
+    ctx.strokeStyle = island.sleeping
+      ? "rgba(143, 154, 170, 0.8)"
+      : "rgba(86, 182, 194, 0.85)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 6]);
+    drawAabbOutline(ctx, inflateAabb(bounds, 0.08), camera);
+    ctx.restore();
+
+    const labelPoint = worldToScreen(bounds.max, camera);
+    ctx.fillStyle = island.sleeping ? "#8f9aaa" : "#56b6c2";
+    ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+    ctx.fillText(`I${island.id}`, labelPoint.x + 4, labelPoint.y - 4);
+  }
+}
+
+function drawProvenance(ctx: CanvasRenderingContext2D, frame: FrameRecord, camera: Camera) {
+  for (const entry of frame.compound_provenance ?? []) {
+    for (const piece of entry.pieces) {
+      const collider = frame.snapshot.colliders.find(
+        (candidate) => candidate.handle === piece.collider_handle,
+      );
+      if (!collider) {
+        continue;
+      }
+      const screen = worldToScreen(collider.world_transform.translation, camera);
+      ctx.fillStyle = "rgba(17, 20, 24, 0.82)";
+      ctx.fillRect(screen.x - 12, screen.y - 20, 24, 14);
+      ctx.strokeStyle = "#f0c36b";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(screen.x - 12, screen.y - 20, 24, 14);
+      ctx.fillStyle = "#f0c36b";
+      ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+      ctx.fillText(`P${piece.generated_piece_index}`, screen.x - 9, screen.y - 10);
+    }
+  }
+}
+
 function drawShape(ctx: CanvasRenderingContext2D, collider: DebugCollider, camera: Camera, isSelected: boolean) {
   const isStatic = collider.density === 0;
   const fill = isStatic ? "rgba(143, 154, 170, 0.18)" : "rgba(86, 182, 194, 0.20)";
@@ -261,13 +376,17 @@ function shapePath(ctx: CanvasRenderingContext2D, shape: DebugShape, camera: Cam
 }
 
 function drawAabb(ctx: CanvasRenderingContext2D, aabb: DebugAabb, camera: Camera, isSelected: boolean) {
-  const min = worldToScreen(aabb.min, camera);
-  const max = worldToScreen(aabb.max, camera);
   ctx.strokeStyle = isSelected ? "#f0c36b" : "rgba(216, 173, 91, 0.65)";
   ctx.lineWidth = isSelected ? 2 : 1;
   ctx.setLineDash([5, 4]);
-  ctx.strokeRect(min.x, max.y, max.x - min.x, min.y - max.y);
+  drawAabbOutline(ctx, aabb, camera);
   ctx.setLineDash([]);
+}
+
+function drawAabbOutline(ctx: CanvasRenderingContext2D, aabb: DebugAabb, camera: Camera) {
+  const min = worldToScreen(aabb.min, camera);
+  const max = worldToScreen(aabb.max, camera);
+  ctx.strokeRect(min.x, max.y, max.x - min.x, min.y - max.y);
 }
 
 function drawBodySelection(ctx: CanvasRenderingContext2D, body: DebugBody, colliders: DebugCollider[], camera: Camera) {
@@ -576,6 +695,13 @@ function mergeBounds(aabbs: DebugAabb[]): DebugAabb | null {
     min: { x: Math.min(acc.min.x, aabb.min.x), y: Math.min(acc.min.y, aabb.min.y) },
     max: { x: Math.max(acc.max.x, aabb.max.x), y: Math.max(acc.max.y, aabb.max.y) },
   }));
+}
+
+function inflateAabb(aabb: DebugAabb, amount: number): DebugAabb {
+  return {
+    min: { x: aabb.min.x - amount, y: aabb.min.y - amount },
+    max: { x: aabb.max.x + amount, y: aabb.max.y + amount },
+  };
 }
 
 function primitiveBounds(primitive: DebugPrimitive): DebugAabb | null {

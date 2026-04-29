@@ -17,6 +17,11 @@ export const demoScenarios: ScenarioDescriptor[] = [
     description: "Offline joint anchor preview with a constraint line.",
   },
   {
+    id: "compound_provenance",
+    name: "Compound provenance fixture",
+    description: "Offline fixture preview with broadphase tree, island facts, and authored compound provenance.",
+  },
+  {
     id: "ccd_fast_circle_wall",
     name: "CCD fast circle wall",
     description: "Offline CCD preview with swept path, TOI point, and clamped contact.",
@@ -39,6 +44,9 @@ export function makeDemoFrames(scenarioId = "falling_box_contact", frameCount = 
   }
   if (scenarioId === "stack_4") {
     return makeStackFrames(frameCount);
+  }
+  if (scenarioId === "compound_provenance") {
+    return makeCompoundProvenanceFrames(frameCount);
   }
   if (scenarioId === "ccd_fast_circle_wall") {
     return makeCcdFrames(frameCount);
@@ -181,6 +189,102 @@ function makeJointFrames(frameCount: number): FrameRecord[] {
       },
     ];
     return frame(frameIndex, snapshot);
+  });
+}
+
+function makeCompoundProvenanceFrames(frameCount: number): FrameRecord[] {
+  return Array.from({ length: frameCount }, (_, frameIndex) => {
+    const t = frameIndex / Math.max(1, frameCount - 1);
+    const compoundCenter = { x: 0.58, y: 0.46 };
+    const snapshot = baseSnapshot(frameIndex, frameIndex / 60, [
+      body(1, "static", { x: 0, y: 2.2 }, { x: 0, y: 0 }),
+      body(2, "dynamic", compoundCenter, { x: 0, y: 0 }),
+    ]);
+
+    snapshot.meta.gravity = { x: 0, y: 0 };
+    snapshot.colliders = [
+      collider(1, 1, { min: { x: -4, y: 2.0 }, max: { x: 4, y: 2.4 } }),
+      {
+        ...collider(2, 2, boxAabb({ x: 0.58, y: 0.46 }, 1.4, 0.4)),
+        density: 1.75,
+      },
+      {
+        ...circleCollider(3, 2, { x: 1.42, y: 0.25 }, 0.25),
+        density: 1.75,
+      },
+      {
+        ...collider(4, 2, { min: { x: -0.69, y: 0.26 }, max: { x: 0.13, y: 0.98 } }),
+        density: 1.75,
+      },
+    ];
+    snapshot.islands = [
+      {
+        id: 1,
+        bodies: [2],
+        sleeping: t > 0.5,
+        reason: t > 0.5 ? "stability_window" : "impact",
+      },
+    ];
+    snapshot.broadphase_tree = {
+      root: 1,
+      depth: 3,
+      nodes: [
+        { id: 1, depth: 1, parent: null, left: 2, right: 5, collider: null, aabb: { min: { x: -4, y: 0.0 }, max: { x: 4, y: 2.4 } } },
+        { id: 2, depth: 2, parent: 1, left: 3, right: 4, collider: null, aabb: { min: { x: -0.69, y: 0.0 }, max: { x: 1.67, y: 0.98 } } },
+        { id: 3, depth: 3, parent: 2, left: null, right: null, collider: 2, aabb: { min: { x: -0.12, y: 0.26 }, max: { x: 1.28, y: 0.66 } } },
+        { id: 4, depth: 3, parent: 2, left: null, right: null, collider: 4, aabb: { min: { x: -0.69, y: 0.26 }, max: { x: 0.13, y: 0.98 } } },
+        { id: 5, depth: 2, parent: 1, left: 6, right: 7, collider: null, aabb: { min: { x: -4, y: 0.0 }, max: { x: 4, y: 2.4 } } },
+        { id: 6, depth: 3, parent: 5, left: null, right: null, collider: 1, aabb: { min: { x: -4, y: 2.0 }, max: { x: 4, y: 2.4 } } },
+        { id: 7, depth: 3, parent: 5, left: null, right: null, collider: 3, aabb: { min: { x: 1.17, y: 0.0 }, max: { x: 1.67, y: 0.5 } } },
+      ],
+    };
+    snapshot.stats.broadphase_candidate_count = 1;
+    snapshot.stats.broadphase_update_count = frameIndex === 0 ? 4 : 0;
+    snapshot.stats.broadphase_traversal_count = 3;
+    snapshot.stats.broadphase_pruned_count = 2;
+    snapshot.stats.broadphase_rebuild_count = frameIndex === 0 ? 1 : 0;
+    snapshot.stats.broadphase_tree_depth = 3;
+    snapshot.stats.island_count = 1;
+    snapshot.stats.active_island_count = t > 0.5 ? 0 : 1;
+    snapshot.stats.sleeping_island_skip_count = t > 0.5 ? 1 : 0;
+    snapshot.stats.solver_body_slot_count = 1;
+    snapshot.stats.contact_row_count = 0;
+    snapshot.stats.joint_row_count = 0;
+
+    return {
+      ...frame(frameIndex, snapshot),
+      compound_provenance: [
+        {
+          authored_body_index: 1,
+          body_handle: 2,
+          validation_path: "scene.bodies[1].shape.pieces",
+          inherited_material: "sticky",
+          inherited_filter: "dynamic_body",
+          inherited_density: 1.75,
+          inherited_is_sensor: false,
+          pieces: [
+            {
+              generated_piece_index: 0,
+              collider_handle: 2,
+              validation_path: "scene.bodies[1].shape.pieces[0]",
+              local_pose: [0, 0, 0],
+            },
+            {
+              generated_piece_index: 1,
+              collider_handle: 3,
+              validation_path: "scene.bodies[1].shape.pieces[1]",
+              local_pose: [0.9, -0.2, 0],
+            },
+            {
+              generated_piece_index: 2,
+              collider_handle: 4,
+              validation_path: "scene.bodies[1].shape.pieces[2]",
+              local_pose: [-0.85, 0.3, -0.35],
+            },
+          ],
+        },
+      ],
+    };
   });
 }
 
@@ -422,6 +526,7 @@ function baseSnapshot(frameIndex: number, simulatedTime: number, bodies: DebugSn
     contacts: [],
     manifolds: [],
     islands: [],
+    broadphase_tree: { root: null, depth: 0, nodes: [] },
     primitives: [],
     stats: {
       step_index: frameIndex,

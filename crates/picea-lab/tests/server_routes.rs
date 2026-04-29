@@ -41,6 +41,7 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "joint_anchor",
             "broadphase_sparse",
             "sat_polygon",
+            "compound_provenance",
             "ccd_fast_circle_wall",
             "ccd_fast_convex_walls",
             "ccd_dynamic_convex_pair",

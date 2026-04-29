@@ -24,18 +24,20 @@ pub enum ScenarioId {
     JointAnchor,
     BroadphaseSparse,
     SatPolygon,
+    CompoundProvenance,
     CcdFastCircleWall,
     CcdFastConvexWalls,
     CcdDynamicConvexPair,
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::FallingBoxContact,
         Self::Stack4,
         Self::JointAnchor,
         Self::BroadphaseSparse,
         Self::SatPolygon,
+        Self::CompoundProvenance,
         Self::CcdFastCircleWall,
         Self::CcdFastConvexWalls,
         Self::CcdDynamicConvexPair,
@@ -48,6 +50,7 @@ impl ScenarioId {
             Self::JointAnchor => "joint_anchor",
             Self::BroadphaseSparse => "broadphase_sparse",
             Self::SatPolygon => "sat_polygon",
+            Self::CompoundProvenance => "compound_provenance",
             Self::CcdFastCircleWall => "ccd_fast_circle_wall",
             Self::CcdFastConvexWalls => "ccd_fast_convex_walls",
             Self::CcdDynamicConvexPair => "ccd_dynamic_convex_pair",
@@ -71,6 +74,7 @@ impl FromStr for ScenarioId {
             "joint_anchor" => Ok(Self::JointAnchor),
             "broadphase_sparse" => Ok(Self::BroadphaseSparse),
             "sat_polygon" => Ok(Self::SatPolygon),
+            "compound_provenance" => Ok(Self::CompoundProvenance),
             "ccd_fast_circle_wall" => Ok(Self::CcdFastCircleWall),
             "ccd_fast_convex_walls" => Ok(Self::CcdFastConvexWalls),
             "ccd_dynamic_convex_pair" => Ok(Self::CcdDynamicConvexPair),
@@ -98,6 +102,7 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::JointAnchor => "World anchor joint",
                 ScenarioId::BroadphaseSparse => "Sparse broadphase",
                 ScenarioId::SatPolygon => "SAT polygon manifold",
+                ScenarioId::CompoundProvenance => "Compound provenance fixture",
                 ScenarioId::CcdFastCircleWall => "CCD fast circle wall",
                 ScenarioId::CcdFastConvexWalls => "CCD fast convex walls",
                 ScenarioId::CcdDynamicConvexPair => "CCD dynamic convex pair",
@@ -111,6 +116,9 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 }
                 ScenarioId::SatPolygon => {
                     "A rectangle and convex polygon exposing clipped manifold points."
+                }
+                ScenarioId::CompoundProvenance => {
+                    "An authored compound body fixture exposing stable piece order and inherited collider semantics."
                 }
                 ScenarioId::CcdFastCircleWall => {
                     "A fast dynamic circle swept against a static thin rectangle wall."
@@ -248,6 +256,43 @@ pub struct SceneBodyFixture {
     pub density: f32,
     #[serde(default)]
     pub is_sensor: bool,
+}
+
+/// Lab-owned read model for authored compound fixtures.
+///
+/// This carrier is intentionally produced during fixture instantiation rather
+/// than reconstructed in the web app. The tradeoff is some repeated artifact
+/// data, but it keeps authoring provenance separate from runtime physics facts.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CompoundProvenance {
+    #[serde(default)]
+    pub authored_body_index: usize,
+    #[serde(default)]
+    pub body_handle: Option<BodyHandle>,
+    #[serde(default)]
+    pub validation_path: String,
+    #[serde(default)]
+    pub inherited_material: MaterialPreset,
+    #[serde(default)]
+    pub inherited_filter: CollisionLayerPreset,
+    #[serde(default = "default_fixture_density")]
+    pub inherited_density: f32,
+    #[serde(default)]
+    pub inherited_is_sensor: bool,
+    #[serde(default)]
+    pub pieces: Vec<CompoundProvenancePiece>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CompoundProvenancePiece {
+    #[serde(default)]
+    pub generated_piece_index: usize,
+    #[serde(default)]
+    pub collider_handle: Option<ColliderHandle>,
+    #[serde(default)]
+    pub validation_path: String,
+    #[serde(default)]
+    pub local_pose: [f32; 3],
 }
 
 impl SceneBodyFixture {
@@ -494,14 +539,37 @@ impl SceneShapeFixture {
             ))),
         }
     }
+
+    fn collider_count(&self) -> usize {
+        match self {
+            Self::Compound { pieces } => pieces.len(),
+            _ => 1,
+        }
+    }
 }
 
 pub fn instantiate_scene_fixture(fixture: &SceneRecipeFixture) -> LabResult<World> {
-    fixture.to_world_recipe().and_then(|recipe| {
+    instantiate_scene_fixture_with_provenance(fixture).map(|result| result.world)
+}
+
+pub(crate) struct InstantiatedSceneFixture {
+    pub(crate) world: World,
+    pub(crate) compound_provenance: Vec<CompoundProvenance>,
+}
+
+pub(crate) fn instantiate_scene_fixture_with_provenance(
+    fixture: &SceneRecipeFixture,
+) -> LabResult<InstantiatedSceneFixture> {
+    let result = fixture.to_world_recipe().and_then(|recipe| {
         recipe
             .instantiate_with_context()
-            .map(|result| result.world)
             .map_err(|error| LabError::World(format!("{}: {}", error.path, error.error.error)))
+    })?;
+
+    let compound_provenance = build_compound_provenance(fixture, &result.created);
+    Ok(InstantiatedSceneFixture {
+        world: result.world,
+        compound_provenance,
     })
 }
 
@@ -695,6 +763,10 @@ fn pose_from_array([x, y, angle]: [f32; 3]) -> Pose {
     Pose::from_xy_angle(x, y, angle)
 }
 
+fn pose_to_array(pose: Option<[f32; 3]>) -> [f32; 3] {
+    pose.unwrap_or([0.0, 0.0, 0.0])
+}
+
 fn falling_box_contact_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
     SceneRecipeFixture {
         schema_version: SCENE_RECIPE_SCHEMA_VERSION,
@@ -736,8 +808,108 @@ fn falling_box_contact_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
     }
 }
 
+fn compound_provenance_fixture() -> SceneRecipeFixture {
+    SceneRecipeFixture {
+        schema_version: SCENE_RECIPE_SCHEMA_VERSION,
+        world: SceneFixtureWorld {
+            gravity: [0.0, 0.0],
+            enable_sleep: true,
+        },
+        bodies: vec![
+            SceneBodyFixture {
+                body_type: BodyType::Static,
+                pose: [0.0, 2.2, 0.0],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: false,
+                shape: SceneShapeFixture::Rect {
+                    width: 8.0,
+                    height: 0.4,
+                },
+                material: MaterialPreset::Rough,
+                filter: CollisionLayerPreset::StaticGeometry,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.6, 0.45, 0.2],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Compound {
+                    pieces: vec![
+                        SceneCompoundPieceFixture {
+                            shape: SceneCompoundPieceShapeFixture::Rect {
+                                width: 1.4,
+                                height: 0.4,
+                            },
+                            local_pose: Some([0.0, 0.0, 0.0]),
+                        },
+                        SceneCompoundPieceFixture {
+                            shape: SceneCompoundPieceShapeFixture::Circle { radius: 0.25 },
+                            local_pose: Some([0.9, -0.2, 0.0]),
+                        },
+                        SceneCompoundPieceFixture {
+                            shape: SceneCompoundPieceShapeFixture::ConvexPolygon {
+                                vertices: vec![[-0.4, 0.0], [0.0, -0.45], [0.45, 0.1], [0.0, 0.5]],
+                            },
+                            local_pose: Some([-0.85, 0.3, -0.35]),
+                        },
+                    ],
+                },
+                material: MaterialPreset::Sticky,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: 1.75,
+                is_sensor: false,
+            },
+        ],
+        joints: Vec::new(),
+    }
+}
+
+fn build_compound_provenance(
+    fixture: &SceneRecipeFixture,
+    created: &WorldCommandReport,
+) -> Vec<CompoundProvenance> {
+    let mut collider_cursor = 0usize;
+    let mut provenance = Vec::new();
+
+    for (body_index, body) in fixture.bodies.iter().enumerate() {
+        let body_handle = created.body_handles.get(body_index).copied();
+        if let SceneShapeFixture::Compound { pieces } = &body.shape {
+            provenance.push(CompoundProvenance {
+                authored_body_index: body_index,
+                body_handle,
+                validation_path: format!("scene.bodies[{body_index}].shape.pieces"),
+                inherited_material: body.material,
+                inherited_filter: body.filter,
+                inherited_density: body.density,
+                inherited_is_sensor: body.is_sensor,
+                pieces: pieces
+                    .iter()
+                    .enumerate()
+                    .map(|(piece_index, piece)| CompoundProvenancePiece {
+                        generated_piece_index: piece_index,
+                        collider_handle: created
+                            .collider_handles
+                            .get(collider_cursor + piece_index)
+                            .copied(),
+                        validation_path: format!(
+                            "scene.bodies[{body_index}].shape.pieces[{piece_index}]"
+                        ),
+                        local_pose: pose_to_array(piece.local_pose),
+                    })
+                    .collect(),
+            });
+        }
+        collider_cursor += body.shape.collider_count();
+    }
+
+    provenance
+}
+
 pub(crate) struct BuiltScenario {
     pub(crate) world: World,
+    pub(crate) compound_provenance: Vec<CompoundProvenance>,
 }
 
 pub(crate) fn build_scenario(
@@ -829,6 +1001,14 @@ pub(crate) fn build_scenario(
                 )
                 .map_err(|error| LabError::World(error.to_string()))?;
         }
+        ScenarioId::CompoundProvenance => {
+            let instantiated =
+                instantiate_scene_fixture_with_provenance(&compound_provenance_fixture())?;
+            return Ok(BuiltScenario {
+                world: instantiated.world,
+                compound_provenance: instantiated.compound_provenance,
+            });
+        }
         ScenarioId::CcdFastCircleWall => {
             world = World::new(WorldDesc {
                 gravity: Vector::default(),
@@ -887,7 +1067,10 @@ pub(crate) fn build_scenario(
         }
     }
 
-    Ok(BuiltScenario { world })
+    Ok(BuiltScenario {
+        world,
+        compound_provenance: Vec::new(),
+    })
 }
 
 fn add_box(

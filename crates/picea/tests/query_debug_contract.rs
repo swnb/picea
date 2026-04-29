@@ -10,6 +10,7 @@ use picea::prelude::{
     SleepTransitionReason, StepConfig, StepReport, StepStats, WarmStartCacheReason, World,
     WorldDesc, WorldEvent,
 };
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -17,6 +18,107 @@ use std::sync::{
 
 fn step_once(world: &mut World) -> StepReport {
     SimulationPipeline::new(StepConfig::default()).step(world)
+}
+
+fn assert_serialized_broadphase_tree_contract(
+    nodes: &[serde_json::Value],
+    root_id: u64,
+    expected_leaf_colliders: &[ColliderHandle],
+    expected_depth: u64,
+) {
+    let node_ids = nodes
+        .iter()
+        .map(|node| {
+            node.get("id")
+                .and_then(serde_json::Value::as_u64)
+                .expect("broadphase tree nodes should carry ids")
+        })
+        .collect::<Vec<_>>();
+    let unique_ids = node_ids.iter().copied().collect::<BTreeSet<_>>();
+    let node_by_id = nodes
+        .iter()
+        .map(|node| {
+            (
+                node.get("id")
+                    .and_then(serde_json::Value::as_u64)
+                    .expect("broadphase tree nodes should carry ids"),
+                node,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    assert_eq!(unique_ids.len(), nodes.len());
+    let root = node_by_id
+        .get(&root_id)
+        .expect("root id should reference a reachable node");
+    assert!(root.get("parent").is_none_or(serde_json::Value::is_null));
+
+    let mut leaf_colliders = Vec::new();
+    let mut visited = BTreeSet::new();
+    let mut stack = vec![root_id];
+    while let Some(node_id) = stack.pop() {
+        assert!(
+            visited.insert(node_id),
+            "tree edges should not revisit the same node twice"
+        );
+        let node = node_by_id[&node_id];
+        let parent_id = node.get("parent").and_then(serde_json::Value::as_u64);
+        let left_id = node.get("left").and_then(serde_json::Value::as_u64);
+        let right_id = node.get("right").and_then(serde_json::Value::as_u64);
+        let collider = node.get("collider").filter(|value| !value.is_null());
+
+        if let Some(parent_id) = parent_id {
+            let parent = node_by_id
+                .get(&parent_id)
+                .expect("every parent id should reference another reachable node");
+            let parent_left = parent.get("left").and_then(serde_json::Value::as_u64);
+            let parent_right = parent.get("right").and_then(serde_json::Value::as_u64);
+            assert!(
+                parent_left == Some(node_id) || parent_right == Some(node_id),
+                "parent should point back to each child"
+            );
+        }
+
+        match (collider, left_id, right_id) {
+            (Some(collider), None, None) => leaf_colliders.push(collider.clone()),
+            (None, Some(left_id), Some(right_id)) => {
+                assert_ne!(left_id, right_id);
+                for child_id in [left_id, right_id] {
+                    let child = node_by_id
+                        .get(&child_id)
+                        .expect("child ids should reference reachable nodes");
+                    assert_eq!(
+                        child.get("parent").and_then(serde_json::Value::as_u64),
+                        Some(node_id),
+                        "child should point back to its parent"
+                    );
+                    stack.push(child_id);
+                }
+            }
+            _ => panic!("debug tree nodes should be leaves or binary internal nodes"),
+        }
+    }
+
+    let mut expected_colliders = expected_leaf_colliders
+        .iter()
+        .copied()
+        .map(|handle| serde_json::to_value(handle).expect("collider handle should serialize"))
+        .collect::<Vec<_>>();
+    leaf_colliders.sort_by_key(|value| value.to_string());
+    expected_colliders.sort_by_key(|value| value.to_string());
+    assert_eq!(leaf_colliders, expected_colliders);
+    assert_eq!(visited.len(), nodes.len());
+
+    let max_depth = nodes
+        .iter()
+        .map(|node| {
+            node.get("depth")
+                .and_then(serde_json::Value::as_u64)
+                .expect("broadphase tree nodes should expose depth")
+        })
+        .max()
+        .expect("reachable tree should contain nodes");
+    assert_eq!(max_depth, expected_depth);
 }
 
 #[test]
@@ -29,7 +131,80 @@ fn debug_snapshot_defaults_to_empty_stable_fact_layers() {
     assert!(snapshot.contacts.is_empty());
     assert!(snapshot.manifolds.is_empty());
     assert!(snapshot.islands.is_empty());
+    assert!(snapshot.broadphase_tree.root.is_none());
+    assert!(snapshot.broadphase_tree.nodes.is_empty());
     assert!(snapshot.primitives.is_empty());
+}
+
+#[test]
+fn debug_snapshot_serializes_broadphase_tree_without_proxy_or_leaf_ids() {
+    let mut world = World::new(WorldDesc::default());
+    let mut colliders = Vec::new();
+
+    for x in [0.0, 4.0, 8.0] {
+        let body = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Static,
+                pose: Pose::from_xy_angle(x, 0.0, 0.0),
+                ..BodyDesc::default()
+            })
+            .expect("body should be created");
+        let collider = world
+            .create_collider(
+                body,
+                ColliderDesc {
+                    shape: SharedShape::circle(0.5),
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("collider should be created");
+        colliders.push(collider);
+    }
+
+    let report = step_once(&mut world);
+    let snapshot = DebugSnapshot::from_world_with_step_report(
+        &world,
+        &report,
+        &DebugSnapshotOptions::default(),
+    );
+    let snapshot_value = serde_json::to_value(&snapshot).expect("debug snapshot should serialize");
+    let tree = snapshot_value
+        .get("broadphase_tree")
+        .and_then(serde_json::Value::as_object)
+        .expect("snapshot should carry a broadphase tree read model");
+    let root = tree
+        .get("root")
+        .and_then(serde_json::Value::as_u64)
+        .expect("reachable tree should expose a transient root node id");
+    let depth = tree
+        .get("depth")
+        .and_then(serde_json::Value::as_u64)
+        .expect("reachable tree should expose its depth");
+    let nodes = tree
+        .get("nodes")
+        .and_then(serde_json::Value::as_array)
+        .expect("reachable tree should expose nodes for visualization");
+
+    assert_eq!(depth, report.stats.broadphase_tree_depth as u64);
+    assert_eq!(nodes.len(), colliders.len() * 2 - 1);
+    assert_serialized_broadphase_tree_contract(
+        nodes,
+        root,
+        &colliders,
+        report.stats.broadphase_tree_depth as u64,
+    );
+
+    for node in nodes.iter() {
+        let object = node
+            .as_object()
+            .expect("broadphase tree nodes should serialize as objects");
+        for internal_name in ["proxy_id", "proxy_index", "leaf_id", "leaf_index"] {
+            assert!(
+                !object.contains_key(internal_name),
+                "debug tree must not expose private broadphase {internal_name}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -756,10 +931,11 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
 
     let mut snapshot_value =
         serde_json::to_value(DebugSnapshot::default()).expect("debug snapshot should serialize");
-    remove_json_fields(&mut snapshot_value, &["islands"]);
+    remove_json_fields(&mut snapshot_value, &["islands", "broadphase_tree"]);
     let decoded_snapshot: DebugSnapshot =
         serde_json::from_value(snapshot_value).expect("older debug snapshot should deserialize");
     assert!(decoded_snapshot.islands.is_empty());
+    assert!(decoded_snapshot.broadphase_tree.nodes.is_empty());
 }
 
 fn remove_json_fields(value: &mut serde_json::Value, fields: &[&str]) {
@@ -900,6 +1076,7 @@ fn query_pipeline_can_filter_by_collision_groups_from_debug_facts() {
         }),
     );
 
+    assert!(snapshot.broadphase_tree.nodes.is_empty());
     assert_eq!(allowed.len(), 1);
     assert!(blocked.is_empty());
 }
@@ -1016,6 +1193,352 @@ fn query_pipeline_preserves_ordering_and_filters_when_candidates_are_pruned() {
         )
         .expect("ray should hit the first collider in snapshot order");
     assert_eq!(ray_hit.collider, collider_a);
+}
+
+#[test]
+fn query_pipeline_sync_resets_last_stats_after_ray_and_aabb_queries() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(1.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created");
+
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+
+    assert!(query
+        .cast_ray(
+            Point::new(-3.0, 0.0),
+            Vector::new(1.0, 0.0),
+            10.0,
+            QueryFilter::default(),
+        )
+        .is_some());
+    assert_ne!(query.last_stats(), QueryStats::default());
+
+    query.sync(&world);
+    assert_eq!(query.last_stats(), QueryStats::default());
+
+    assert_eq!(
+        query
+            .intersect_aabb(
+                picea::debug::DebugAabb::new(Point::new(-1.0, -1.0), Point::new(1.0, 1.0)),
+                QueryFilter::default(),
+            )
+            .len(),
+        1
+    );
+    assert_ne!(query.last_stats(), QueryStats::default());
+
+    query.sync(&world);
+    assert_eq!(query.last_stats(), QueryStats::default());
+}
+
+#[test]
+fn query_pipeline_ray_and_aabb_queries_respect_sensor_and_collision_filters() {
+    let mut world = World::new(WorldDesc::default());
+    let visible_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("visible body should be created");
+    let visible = world
+        .create_collider(
+            visible_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                filter: CollisionFilter {
+                    memberships: 0b0001,
+                    collides_with: 0b0001,
+                },
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("visible collider should be created");
+    let sensor_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(-2.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("sensor body should be created");
+    let sensor = world
+        .create_collider(
+            sensor_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                is_sensor: true,
+                filter: CollisionFilter {
+                    memberships: 0b0001,
+                    collides_with: 0b0001,
+                },
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("sensor collider should be created");
+    let blocked_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(2.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("blocked body should be created");
+    let blocked = world
+        .create_collider(
+            blocked_body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                filter: CollisionFilter {
+                    memberships: 0b0010,
+                    collides_with: 0b0010,
+                },
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("blocked collider should be created");
+
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+
+    let all_bounds = picea::debug::DebugAabb::new(Point::new(-3.0, -1.0), Point::new(3.0, 1.0));
+    assert_eq!(
+        query
+            .intersect_aabb(all_bounds, QueryFilter::default())
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![visible, blocked]
+    );
+    assert_eq!(
+        query
+            .intersect_aabb(all_bounds, QueryFilter::default().including_sensors())
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![visible, sensor, blocked]
+    );
+    assert_eq!(
+        query
+            .intersect_aabb(
+                all_bounds,
+                QueryFilter::default().colliding_with(CollisionFilter {
+                    memberships: 0b0010,
+                    collides_with: 0b0010,
+                }),
+            )
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![blocked]
+    );
+
+    assert_eq!(
+        query
+            .cast_ray(
+                Point::new(-4.0, 0.0),
+                Vector::new(1.0, 0.0),
+                10.0,
+                QueryFilter::default(),
+            )
+            .expect("default ray should skip sensors and hit the visible collider")
+            .collider,
+        visible
+    );
+    assert_eq!(
+        query
+            .cast_ray(
+                Point::new(-4.0, 0.0),
+                Vector::new(1.0, 0.0),
+                10.0,
+                QueryFilter::default().including_sensors(),
+            )
+            .expect("sensor-inclusive ray should hit the nearest sensor")
+            .collider,
+        sensor
+    );
+    assert_eq!(
+        query
+            .cast_ray(
+                Point::new(-4.0, 0.0),
+                Vector::new(1.0, 0.0),
+                10.0,
+                QueryFilter::default().colliding_with(CollisionFilter {
+                    memberships: 0b0010,
+                    collides_with: 0b0010,
+                }),
+            )
+            .expect("collision-filtered ray should hit only the matching collider")
+            .collider,
+        blocked
+    );
+}
+
+#[test]
+fn query_pipeline_ray_and_aabb_queries_require_sync_to_drop_stale_and_recycled_handles() {
+    let mut world = World::new(WorldDesc::default());
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("body should be created");
+    let original = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("original collider should be created");
+
+    let mut query = QueryPipeline::new();
+    query.sync(&world);
+
+    let origin_bounds = picea::debug::DebugAabb::new(Point::new(-1.0, -1.0), Point::new(1.0, 1.0));
+    assert_eq!(
+        query
+            .cast_ray(
+                Point::new(-3.0, 0.0),
+                Vector::new(1.0, 0.0),
+                10.0,
+                QueryFilter::default(),
+            )
+            .expect("original collider should be on the initial ray path")
+            .collider,
+        original
+    );
+    assert_eq!(
+        query
+            .intersect_aabb(origin_bounds, QueryFilter::default())
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![original]
+    );
+
+    world
+        .apply_body_patch(
+            body,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(10.0, 0.0, 0.0)),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body patch should succeed");
+
+    assert_eq!(
+        query
+            .cast_ray(
+                Point::new(-3.0, 0.0),
+                Vector::new(1.0, 0.0),
+                10.0,
+                QueryFilter::default(),
+            )
+            .expect("stale cache should still reflect the old ray path before sync")
+            .collider,
+        original
+    );
+    assert_eq!(
+        query
+            .intersect_aabb(origin_bounds, QueryFilter::default())
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![original]
+    );
+
+    query.sync(&world);
+    assert!(
+        query
+            .cast_ray(
+                Point::new(-3.0, 0.0),
+                Vector::new(1.0, 0.0),
+                10.0,
+                QueryFilter::default(),
+            )
+            .is_none(),
+        "resync should drop the old ray hit once the collider moved away"
+    );
+    assert!(query
+        .intersect_aabb(origin_bounds, QueryFilter::default())
+        .is_empty());
+
+    world
+        .destroy_collider(original)
+        .expect("collider should be destroyed");
+    let recycled = world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::circle(0.5),
+                local_pose: Pose::from_xy_angle(10.0, 0.0, 0.0),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should reuse the old slot with a new generation");
+    let recycled_bounds =
+        picea::debug::DebugAabb::new(Point::new(19.0, -1.0), Point::new(21.0, 1.0));
+
+    assert_eq!(
+        query
+            .cast_ray(
+                Point::new(7.0, 0.0),
+                Vector::new(1.0, 0.0),
+                10.0,
+                QueryFilter::default(),
+            )
+            .expect("stale cache should still point at the old generation before sync")
+            .collider,
+        original
+    );
+    assert_eq!(
+        query
+            .intersect_aabb(
+                picea::debug::DebugAabb::new(Point::new(9.0, -1.0), Point::new(11.0, 1.0)),
+                QueryFilter::default(),
+            )
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![original]
+    );
+
+    query.sync(&world);
+    assert_eq!(
+        query
+            .cast_ray(
+                Point::new(17.0, 0.0),
+                Vector::new(1.0, 0.0),
+                10.0,
+                QueryFilter::default(),
+            )
+            .expect("resync should expose the recycled collider on its new ray path")
+            .collider,
+        recycled
+    );
+    assert_eq!(
+        query
+            .intersect_aabb(recycled_bounds, QueryFilter::default())
+            .iter()
+            .map(|hit| hit.collider)
+            .collect::<Vec<_>>(),
+        vec![recycled]
+    );
+    assert_ne!(original, recycled);
 }
 
 #[test]

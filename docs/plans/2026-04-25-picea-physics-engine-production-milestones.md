@@ -1820,10 +1820,619 @@ rtk proxy git diff --check
 - `verifier` (leaf agent, no subagents): run the targeted gates and report any
   generated or modified files.
 
-## Post-M22 Follow-Up / Remaining Risks
+## M23：Performance Hardening / Broadphase + Query Cost Gate
+
+状态：已完成；Plan Gate 已确认 2026-04-29；Supervisor Acceptance 通过 2026-04-29。
+
+目标：
+让 M21 之后的 public query surface 既好用又可解释。M23 完成后，
+`closest_shape`、`intersect_shape`、ray / AABB / point query 和 broadphase
+candidate-pair traversal 的成本应该能通过 counters、debug facts 和 Criterion
+baseline 解释；dynamic AABB tree 的插入、平衡、rebuild 策略应该有第一轮
+行为锁和调优证据。
+
+为什么现在做：
+M21/M22 已经把易用 API 和 compound authoring 打开了。先做 M23 可以避免后续
+CCD、live editing、automatic decomposition 把更多复杂场景压到尚未硬化的
+query / broadphase 路径上。
+
+执行拆分：
+- M23-A 行为锁和事实盘点：先锁定 `closest_shape` / `intersect_shape` / ray /
+  AABB / point query 的 ordering、filter、stale sync、recycled handle 和
+  `last_stats()` reset/coherence；同时列出 M24 需要但当前 artifact/debug facts
+  尚未承载的 tree/traversal 信息。
+- M23-B Broadphase tree cost evidence：只在 M23-A 明确缺口后改 dynamic AABB
+  tree 的插入、move、rebuild 或 debug carrier；每个调优都必须用 deterministic
+  counter 或行为锁解释，不能用单次 wall-clock 作为结论。
+- M23-C Benchmark / routing closeout：刷新或补齐 Criterion scenario labels 和
+  counter summaries，更新计划/AI 路由中 M23 的完成证据；仍不设置 pass/fail
+  性能阈值。
+
+范围：
+- 改进 dynamic AABB tree 插入、平衡、move / rebuild 策略，保持 public
+  ordering 和 proxy id 私有性。
+- 增加 query allocation / perf counters，覆盖 `closest_shape`、
+  `intersect_shape`、ray、AABB、point query。
+- 补充 M24 可视化需要消费的 broadphase tree / traversal facts，例如 tree depth、
+  node AABB、leaf collider link、candidate traversal / prune reason；这些事实
+  仍然不成为 public broadphase mutation API。
+- 用 Criterion 多轮 baseline 解释 query-heavy、broadphase-heavy、compound
+  authoring 后的成本形状。
+- 补行为锁：candidate ordering、filter semantics、stale sync、recycled
+  handles、tree rebuild、counter reset behavior。
+
+不做：
+- 不公开 broadphase proxy / leaf id。
+- 不设置硬性能阈值；M29 才讨论 threshold gate。
+- 不做 CCD expansion、concave solver、live scene editing。
+- 不改 `World::create_*` 或 M21 public query 的语义。
+
+所有权：
+- 可能触及：`crates/picea/src/pipeline/broadphase.rs`、
+  `crates/picea/src/query.rs`、`crates/picea/src/debug.rs`、
+  `crates/picea/src/pipeline/step.rs`、`crates/picea/tests/query_debug_contract.rs`、
+  `crates/picea/tests/world_step_review_regressions.rs`、
+  `crates/picea/benches/physics_scenarios.rs`。
+- 不应触及：`crates/picea/src/pipeline/ccd.rs` 的 TOI 语义、
+  `crates/picea-lab/web` UI、public scene patch/live editing API。
+
+验收标准：
+- Query / broadphase counters 能解释新增和既有 query path 的主要工作量。
+- Dynamic AABB tree 调整不改变 public hit ordering、filter semantics 或
+  recycled-handle 行为。
+- Criterion baseline 能展示成本形状，不把 wall-clock timing 当正确性 oracle。
+- Existing M21 query tests 和 M18 broadphase tests 保持绿色。
+
+验证方式：
+- `rtk proxy cargo test -p picea --lib pipeline::broadphase`
+- `rtk proxy cargo test -p picea --test query_debug_contract`
+- `rtk proxy cargo test -p picea --test world_step_review_regressions`
+- `rtk proxy cargo bench -p picea --no-run`
+- `rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'`
+- `rtk proxy git diff --check`
+
+Subagent 执行计划：
+- explorer：叶子 agent；回答 broadphase/query counter 缺口、tree heuristics
+  风险、M24 可消费 facts 缺口和最小行为锁位置。
+- worker：叶子 agent；优先 `gpt-5.4`，只拥有 broadphase/query/debug/bench
+  相关文件，按 M23-A -> M23-B -> M23-C 顺序推进，先补测试再做最小调优。
+- reviewer：叶子 agent；重点审查 ordering、filter、stale sync、proxy id 泄漏、
+  counter 语义和 benchmark 结论是否过度。
+- verifier：叶子 agent；运行 M23 验证方式并报告验证过程中产生或修改的文件。
+
+提交策略：
+- auto-commit：否。
+- message hint：`Add M23 performance hardening gate`。
+
+风险 / 后续：
+- Tree heuristic 容易过拟合当前 fixture；必须用 counters 和多场景 baseline
+  解释，不用单一场景定结论。
+- 如果 M23-A 发现需要公开新的 query 或 debug contract，必须先暂停确认 API
+  边界；默认只加内部/serde-default debug facts。
+
+进度记录：
+- 2026-04-29：用户确认使用 `subagent-current-workspace` 依次执行 M23 -> M24；
+  当前主 Codex 作为 supervisor，M23 先进入 M23-A 探索/行为锁执行。M24 完成后
+  必须使用 `browser-use:browser` 对 `picea-lab-web` 进行最终可视验收。
+- 2026-04-29：M23 完成。补齐 ray / AABB query 的 sensor/filter、stale sync、
+  recycled handle、`last_stats()` reset 行为锁；`DebugSnapshot` 增加 additive /
+  serde-default 的 `broadphase_tree` 读模型，导出 tree depth、node AABB、leaf
+  collider link，并保持 broadphase proxy / leaf id 私有。`for_query()` 路径跳过
+  M24 可视化 tree carrier，避免 query cache rebuild 先建后丢。
+- 2026-04-29：M23 reviewer 发现的 prelude surface 和 transient node id 测试
+  过拟合已修正；最终 verification 通过：
+  `rtk proxy cargo test -p picea --lib pipeline::broadphase`、`rtk proxy cargo test -p picea --test query_debug_contract`、
+  `rtk proxy cargo test -p picea --test world_step_review_regressions`、
+  `rtk proxy cargo bench -p picea --no-run`、`rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'`、
+  `rtk proxy git diff --check`。
+
+## M24：Lab-Web Visualization Foundation / Tree + Island + Provenance
+
+状态：已完成；Plan Gate 已确认 2026-04-29；Supervisor Acceptance 通过 2026-04-29。
+
+目标：
+把 `picea-lab-web` 从“能看 replay / inspector”推进到“能解释物理过程”的
+可视化工作台。M24 完成后，用户应该能在同一个案例中看到 broadphase tree
+结构与遍历过程、island 形成与 sleep/wake 过程、以及 M22 compound provenance；
+这些可视化必须来自 core / artifact facts，`picea-lab-web` 不重新计算物理。
+
+为什么现在做：
+M23 会补 query / broadphase 成本和 tree traversal 事实，M16/M17 已经有 island
+和 solver row 事实，M22 已经定义 compound authoring boundary。下一步应该把这些
+事实组织成过程型可视化，而不是继续只堆表格字段。这样后续 M26 CCD、M27
+decomposition、M28 solver ordering 都能复用同一套 viewer 架构。
+
+前置条件：
+- M23 至少要完成 M23-A，并明确哪些 broadphase/query facts 已经稳定到 artifact
+  或 debug carrier；否则 M24 只能先做 artifact/schema 盘点，不能先写 UI。
+- 如果 M24 需要 core 侧新增 facts，必须保持 additive / serde default，并证明旧
+  artifact、旧 scene fixture 和现有 web demo 数据仍能加载。
+
+执行拆分：
+- M24-A Artifact/schema foundation：先补 deterministic scenarios、debug render /
+  final snapshot / perf artifact 中的 tree、island、compound provenance carriers，
+  并用 serde-default tests 锁住旧 artifact 兼容。
+- M24-B Web process panels：在现有 `WorkbenchLayout`、`SceneHierarchy`、
+  `Inspector`、`WorldCanvas`、`Facts` 等边界内加过程视图和 overlay，不重写
+  workbench 结构，不引入 live editor 语义。
+- M24-C Contract / docs closeout：补 UI contract、i18n contract、web build 和
+  路由文档证据，确保 broadphase tree / island lifecycle / compound provenance
+  的入口可从 scenario gallery 到达。
+
+范围：
+- 建立第一版 lab-web 可视化面板结构：scenario gallery、timeline、overlay
+  toggles、entity inspector、process facts panel。
+- Broadphase tree 可视化：tree node AABB、leaf collider、tree depth、fat AABB、
+  rebuild / move facts、candidate traversal 和 prune reason。
+- Island 可视化：body/contact/joint graph、island id、awake/sleep state、
+  wake reason、active solver rows、body slots、contact rows、joint rows。
+- Compound provenance 可视化：authored object、generated convex pieces、piece
+  ordering、material/filter/sensor 继承关系和 validation failure path。
+- 增加第一批确定性案例：sparse/dense broadphase tree、query closest-shape、
+  sleeping island split/wake、stack island solve、compound fixture。
+- 扩展 artifact/debug-render/final snapshot 中缺失的可视化 facts；仅记录 core
+  或 scene loader 已经确定的事实。
+- 保持 M20 v1 scene fixture 兼容；新增字段必须 additive / serde default。
+
+不做：
+- 不让 lab-web 重新执行 broadphase traversal、island grouping、decomposition、
+  mass/inertia 或 collision 计算。
+- 不改变 core solver、narrowphase 或 contact manifold。
+- 不做 visual editor 或 live patch。
+- 不做完整 CCD visualization pack；M26 只为选中的 CCD slice 增加对应 overlay。
+- 不做自动 polygon decomposition；M27 单独处理。
+- 不做 per-piece material/filter override，除非后续 milestone 单独批准。
+
+所有权：
+- 可能触及：`crates/picea-lab/src/scenario.rs`、
+  `crates/picea-lab/src/artifact.rs`、`crates/picea-lab/tests/artifact_run.rs`、
+  `crates/picea-lab/web/src/*`、artifact schema docs；若 facts 缺失，可小范围
+  触及 `crates/picea/src/debug.rs`、`crates/picea/src/pipeline/broadphase.rs`、
+  `crates/picea/src/pipeline/island.rs` 的 debug carrier。
+- 不应触及：solver row math、CCD algorithms、low-level `World::create_*` API。
+
+验收标准：
+- Lab-web 至少提供 broadphase tree、island graph / lifecycle、compound
+  provenance 三类过程型视图。
+- 每个可视化点都能追溯到 artifact/core facts；web 不制造新的物理判断。
+- Scenario gallery 能从内置案例进入对应可视化，不暴露 `target/...` 作为主要
+  用户心智模型。
+- UI/schema 展示继承关系、piece ordering、tree traversal 和 island state，不
+  混淆 debug facts 与 solver 结果。
+- 旧 artifact / fixture 仍能加载或用清晰 serde default 兼容。
+- M22 direct concave rejection 的错误路径仍然稳定。
+
+验证方式：
+- `rtk proxy cargo test -p picea-lab`
+- `rtk proxy cargo test -p picea-lab --test artifact_run`
+- `rtk proxy cargo test -p picea --test core_model_world`
+- `rtk proxy cargo test -p picea --test world_step_review_regressions`
+- `cd crates/picea-lab/web && npm run build`
+- `cd crates/picea-lab/web && npm run test:ui-contract`
+- `cd crates/picea-lab/web && npm run test:i18n`
+- `rtk proxy git diff --check`
+
+Subagent 执行计划：
+- explorer：叶子 agent；梳理 artifact schema、web panel ownership、broadphase
+  tree facts、island facts、M22 fixture provenance 缺口和旧 artifact 兼容风险。
+- worker：叶子 agent；优先 `gpt-5.4`，负责 lab artifact/schema/UI 的 additive
+  visualization foundation，按 M24-A -> M24-B -> M24-C 顺序推进，避免改 physics
+  algorithms。
+- reviewer：叶子 agent；重点审查 schema backward compatibility、web 是否重新
+  计算物理事实、tree/island 标签是否误导用户、案例是否足够确定性。
+- verifier：叶子 agent；运行 Rust lab tests、web build、UI contract 和 i18n
+  contract。
+
+提交策略：
+- auto-commit：否。
+- message hint：`Add M24 lab web visualization foundation`。
+
+风险 / 后续：
+- Artifact schema 一旦公开就会被依赖；字段命名和 default 行为要保守。
+- Process visualization 很容易膨胀成编辑器；M24 只做解释和 replay，不做 live
+  mutation。
+- 如果 M24-A 发现 core facts 不足，不允许在 web 侧补算 broadphase/island/
+  decomposition 结论；应退回 core/debug carrier 的最小 additive 变更。
+
+最终验收补充：
+- Rust / web / contract gates 全部通过后，必须启动本地 `picea-lab-web`，再用
+  `browser-use:browser` 打开本地页面，实际检查 scenario gallery、process facts
+  panel / overlays、broadphase tree、island lifecycle 和 compound provenance 入口
+  是否可见且不需要用户理解 `target/...` 路径。
+
+进度记录：
+- 2026-04-29：M24 完成。新增 lab-owned `compound_provenance` artifact carrier
+  和 `compound_provenance` 内置场景；`frames.jsonl` / `debug_render.json`
+  保留 provenance，`debug_render` 携带 M23 `broadphase_tree`，新增字段均为
+  additive / serde-default。Web 在既有 Inspector / layer menu / canvas 边界内展示
+  process facts panel、broadphase tree overlay、island overlay、provenance overlay；
+  可视化只消费 core / artifact facts，不重新计算 broadphase、island、decomposition、
+  mass/inertia 或 collision。
+- 2026-04-29：M24 verification 通过：
+  `rtk proxy cargo test -p picea-lab --test artifact_run`、`rtk proxy cargo test -p picea-lab`、
+  `rtk proxy cargo test -p picea --test core_model_world`、
+  `rtk proxy cargo test -p picea --test world_step_review_regressions`、
+  `cd crates/picea-lab/web && npm run build`、`cd crates/picea-lab/web && npm run test:ui-contract`、
+  `cd crates/picea-lab/web && npm run test:i18n`、`rtk proxy git diff --check`。
+- 2026-04-29：按最终验收补充启动 `picea-lab serve --bind 127.0.0.1:18080`
+  和 `picea-lab-web` Vite dev server，并用 `browser-use:browser` 打开
+  `http://127.0.0.1:5174/`。真实 Rust 回放中可从 scenario gallery 选择
+  `compound_provenance`，process facts panel 显示 `7 nodes / 4 leaves / depth 4`、
+  island lifecycle 和 3 个 generated pieces；layer menu 中 `宽阶段树` / `岛` /
+  `来源` overlay 可打开，浏览器 console 无 warning/error。
+
+## M25：Live Scene Patch Semantics
+
+状态：计划中。
+
+目标：
+在实现 live editing 前先固定语义。M25 完成后，文档和行为锁应该明确 reset、
+patch、transaction、handle invalidation、query pipeline sync、artifact
+provenance 的边界；必要时只落最小静态 patch contract，不做完整 editor。
+
+为什么现在做：
+M20/M22 都是静态 scene loading。直接在 running `World` 上热改会影响 handle
+生命周期、contact cache、sleep island、query sync 和 artifact reproducibility。
+
+范围：
+- 设计 live scene patch 的 reset / rebuild / transactional apply 选项。
+- 明确哪些 patch 会保留 handles，哪些必须 invalidate / rebuild。
+- 为 query pipeline sync、contact cache 清理、sleep wake reason 增加行为锁。
+- 只实现最小可验证 patch path，或在探索后仅提交设计文档和红线测试。
+
+不做：
+- 不做完整视觉编辑器。
+- 不承诺任意运行中 world mutation 都保持 handle 稳定。
+- 不把 `WorldCommands` 变成高频 runtime mutation API。
+- 不做 networking / collaborative editing。
+
+所有权：
+- 可能触及：`docs/design/*`、`crates/picea/src/recipe.rs`、
+  `crates/picea/src/world/api.rs`、`crates/picea-lab/src/scenario.rs`、
+  `crates/picea-lab/src/server.rs`、相关 tests。
+- 不应触及：solver row math、CCD algorithms、broadphase heuristics。
+
+验收标准：
+- 文档能回答 reset vs patch vs transaction 的语义差异。
+- 行为锁覆盖 handle invalidation、query sync、contact/sleep cleanup 的关键边界。
+- 旧 static scene fixture path 不变。
+- 如果实现最小 patch，失败模式必须是显式错误，不允许静默半更新。
+
+验证方式：
+- `rtk proxy cargo test -p picea --test v1_api_smoke`
+- `rtk proxy cargo test -p picea --test core_model_world`
+- `rtk proxy cargo test -p picea --test world_step_review_regressions`
+- `rtk proxy cargo test -p picea-lab`
+- `rtk proxy git diff --check`
+
+Subagent 执行计划：
+- explorer：叶子 agent；先给出 handle/contact/query/sleep 语义风险清单和最小
+  design surface。
+- worker：叶子 agent；若计划批准实现，仅落最小设计/测试/patch contract。
+- reviewer：叶子 agent；重点审查 public API、兼容性、artifact reproducibility
+  和隐式 world mutation。
+- verifier：叶子 agent；运行 M25 验证方式。
+
+提交策略：
+- auto-commit：否。
+- message hint：`Define M25 live scene patch semantics`。
+
+风险 / 后续：
+- 如果 patch 语义影响 public API 或 handle lifecycle，必须暂停让用户确认。
+
+## M26：CCD Expansion Slice
+
+状态：计划中。
+
+目标：
+选择 dynamic compound CCD 或 rotational CCD 中最小、最可验收的一片。M26
+完成后，选中的 CCD slice 应该有 TOI ordering、budget、false-positive /
+false-negative 行为锁和 trace facts；未选方向继续留在后续。
+
+为什么现在做：
+M19 已完成 translational dynamic-vs-dynamic convex CCD。M22 引入 compound
+authoring 后，CCD 的下一步必须更谨慎：compound 和 rotation 都会显著增加
+TOI 候选、排序和预算复杂度。
+
+范围：
+- 先探索 dynamic compound CCD vs rotational CCD 的最小可验收切片。
+- 只选择一个方向实现；另一个方向记录为 residual risk。
+- 为 selected/ignored TOI、budget clamp、no false positive、missed impact
+  增加行为锁。
+- 扩展 `CcdTrace` / debug facts 仅限解释选中 slice。
+
+不做：
+- 不做全 shape CCD。
+- 不做 arbitrary concave CCD。
+- 不做 hidden unbounded substeps。
+- 不改 public scene authoring 或 query API。
+
+所有权：
+- 可能触及：`crates/picea/src/pipeline/ccd.rs`、
+  `crates/picea/src/pipeline/gjk.rs`、`crates/picea/src/debug.rs`、
+  `crates/picea/tests/physics_realism_acceptance.rs`、
+  `crates/picea-lab/src/scenario.rs`、CCD bench scenarios。
+- 不应触及：broadphase balancing、scene patch semantics、automatic polygon
+  decomposition。
+
+验收标准：
+- 明确记录为什么选择 dynamic compound 或 rotational 作为 M26 slice。
+- TOI ordering、budget 和 trace facts 对选中场景可观察。
+- 已有 M13/M19 CCD 行为保持绿色。
+- 未覆盖方向在文档中保留为后续，不伪装成已完成。
+
+验证方式：
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance ccd`
+- `rtk proxy cargo test -p picea --lib pipeline::ccd`
+- `rtk proxy cargo test -p picea --lib pipeline::gjk`
+- `rtk proxy cargo test -p picea-lab --test artifact_run`
+- `rtk proxy cargo bench -p picea --no-run`
+- `rtk proxy git diff --check`
+
+Subagent 执行计划：
+- explorer：叶子 agent；比较 dynamic compound CCD 与 rotational CCD 的当前
+  数据结构成本、测试可锁定性和最小切片。
+- worker：叶子 agent；高风险 physics slice，优先继承高质量模型或显式
+  `gpt-5.5`，只实现获批方向。
+- reviewer：叶子 agent；重点审查 TOI ordering、budget、false positive/negative、
+  trace 解释和未选方向边界。
+- verifier：叶子 agent；运行 CCD / lab / bench no-run gates。
+
+提交策略：
+- auto-commit：否。
+- message hint：`Add M26 CCD expansion slice`。
+
+风险 / 后续：
+- 如果两个方向都无法形成小 slice，停止并把 M26 改为 design-only milestone。
+
+## M27：Automatic Polygon Decomposition
+
+状态：计划中。
+
+目标：
+把 M22 的“手写 compound pieces”推进到受限自动 polygon decomposition。
+M27 完成后，静态或受限 authoring path 可以把合规 concave polygon 转换为
+deterministic convex pieces；core solver 仍然不直接求解 arbitrary concave
+contact。
+
+为什么现在做：
+只有在 M24 visualization/provenance foundation 和 M25 patch semantics 明确后，
+自动分解才不会变成不可解释的黑箱。M27 应该提升用户易用性，但保持 solver
+boundary 清楚。
+
+范围：
+- 探索并选择一个 deterministic decomposition strategy 或受限输入策略。
+- 支持静态 / authoring-time decomposition 的最小场景。
+- 锁定 invalid polygon、self-intersection、zero-area、winding、piece ordering、
+  material/filter/sensor inheritance。
+- 让 generated pieces 进入 M24 visualization/provenance surface。
+
+不做：
+- 不做 direct concave solver。
+- 不承诺任意复杂 polygon 都能自动分解。
+- 不做 dynamic concave mass/inertia 的广义支持。
+- 不做 runtime high-frequency decomposition。
+
+所有权：
+- 可能触及：`crates/picea/src/collider.rs`、`crates/picea/src/recipe.rs`、
+  `crates/picea-lab/src/scenario.rs`、`crates/picea-lab/src/artifact.rs`、
+  decomposition tests / fixtures。
+- 不应触及：contact solver row math、CCD expansion、broadphase tree heuristics。
+
+验收标准：
+- 合规输入 deterministic 地生成 convex pieces。
+- 非合规输入以稳定 nested error path 失败。
+- Piece ordering、继承关系和 provenance 可观察。
+- Core solver boundary 文档仍声明不支持 arbitrary concave contact。
+
+验证方式：
+- `rtk proxy cargo test -p picea --test core_model_world`
+- `rtk proxy cargo test -p picea --test v1_api_smoke`
+- `rtk proxy cargo test -p picea-lab`
+- `rtk proxy cargo test -p picea-lab --test artifact_run`
+- `rtk proxy git diff --check`
+
+Subagent 执行计划：
+- explorer：叶子 agent；调研当前 shape/recipe/lab constraints，提出最小可确定
+  decomposition strategy 和拒绝策略。
+- worker：叶子 agent；高风险 authoring/geometry slice，优先 `gpt-5.4` 或更高，
+  先测试后实现。
+- reviewer：叶子 agent；重点审查 determinism、degenerate geometry、错误路径、
+  solver boundary 泄漏。
+- verifier：叶子 agent；运行 core/lab/artifact gates。
+
+提交策略：
+- auto-commit：否。
+- message hint：`Add M27 polygon decomposition milestone`。
+
+风险 / 后续：
+- 自动分解算法选择可能需要更长 design review；如果无法小步落地，应降级为受限
+  authoring helper。
+
+## M28：Solver Ordering / Island Contract
+
+状态：计划中。
+
+目标：
+评估并收敛 contact/joint 是否应该共享更强的 island-owned ordering contract。
+M28 完成后，solver ordering、debug facts 和未来 parallel island solver 的边界
+应该更清楚，但不要求本 milestone 引入多线程。
+
+为什么现在做：
+M16 已经把 active island solver 收敛到 dense island-local slots。后续如果要做
+更稳定 joint/contact coupling 或并行 island solving，需要先把 ordering contract
+写清楚并锁住行为。
+
+范围：
+- 梳理 current separate-phase behavior 与 unified island-owned ordering 的差异。
+- 为 contact/joint ordering、warm-start、wake reason、sleep skip 增加行为锁。
+- 必要时调整 debug/lab facts，使 ordering 可解释。
+- 只做单线程 deterministic contract。
+
+不做：
+- 不做 multithreaded solver。
+- 不改 contact manifold generation。
+- 不改 public joint API。
+- 不做 broad material system redesign。
+
+所有权：
+- 可能触及：`crates/picea/src/pipeline/island.rs`、
+  `crates/picea/src/pipeline/joints.rs`、`crates/picea/src/solver/contact.rs`、
+  `crates/picea/src/pipeline/sleep.rs`、相关 stack/sleep tests。
+- 不应触及：query API、scene schema、CCD algorithms。
+
+验收标准：
+- Contact/joint ordering contract 在文档和测试中明确。
+- Existing stack stability、sleep、wake reason、warm-start 语义保持稳定。
+- Debug facts 足以解释 island-local ordering。
+- 如果不改变实现，也要有行为锁证明当前 contract 是刻意选择。
+
+验证方式：
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance stack`
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance sleep`
+- `rtk proxy cargo test -p picea --test world_step_review_regressions`
+- `rtk proxy cargo test -p picea --lib pipeline::island`
+- `rtk proxy cargo test -p picea --lib pipeline::sleep`
+- `rtk proxy cargo bench -p picea --no-run`
+
+Subagent 执行计划：
+- explorer：叶子 agent；读 island/joint/contact/sleep path，列出当前 ordering
+  facts 和需要锁定的行为。
+- worker：叶子 agent；高风险 solver slice，优先高质量模型；先补行为锁，再做
+  最小 contract change。
+- reviewer：叶子 agent；重点审查 warm-start、wake/sleep、joint/contact ordering
+  和 debug facts。
+- verifier：叶子 agent；运行 stack/sleep/island gates。
+
+提交策略：
+- auto-commit：否。
+- message hint：`Define M28 solver island ordering contract`。
+
+风险 / 后续：
+- 如果 contract change 影响物理结果，必须提供可解释 diff 和 rollback plan。
+
+## M29：Performance Threshold Gate
+
+状态：计划中。
+
+目标：
+把 M17/M23 累积的 baseline 证据推进到初始 perf regression guard。M29 完成后，
+关键场景可以有合理阈值或警戒线，但这些阈值必须来自多轮 baseline，而不是
+一次本机跑分。
+
+为什么现在做：
+M23 先补 counter 和 baseline，M29 再设置 threshold。这样可以避免过早把不稳定
+wall-clock 数据变成阻塞开发的假警报。
+
+范围：
+- 选择少量关键场景：query-heavy、broadphase-heavy、stack、CCD、recipe/lab
+  authoring。
+- 定义 baseline 采样策略、variance 记录和 threshold policy。
+- 增加 CI/local guard 文档或脚本，明确何时 fail、何时 warn。
+- 把 counters 与 wall-clock 结论一起记录，避免只看耗时。
+
+不做：
+- 不为所有 benchmark 设置阈值。
+- 不把 lab wall-clock 当 correctness oracle。
+- 不做大规模性能重写；M29 是 gate，不是 tuning milestone。
+
+所有权：
+- 可能触及：`crates/picea/benches/physics_scenarios.rs`、benchmark docs、
+  CI/local scripts、`docs/ai` routing。
+- 不应触及：core physics behavior、public API、artifact schema。
+
+验收标准：
+- Threshold policy 明确区分 fail / warn / informational。
+- Baseline 数据来源、重复次数、variance 解释可复现。
+- 至少覆盖 query/broadphase/CCD/stack/recipe 中的关键场景。
+- 不稳定环境下有明确 fallback，不阻塞正确性验证。
+
+验证方式：
+- `rtk proxy cargo bench -p picea --no-run`
+- 按文档执行一次 local baseline smoke，并记录输出位置。
+- `rtk proxy cargo test -p picea --test query_debug_contract`
+- `rtk proxy git diff --check`
+
+Subagent 执行计划：
+- explorer：叶子 agent；梳理现有 Criterion 场景和 M17/M23 counters，提出最小
+  threshold policy。
+- worker：叶子 agent；优先 `gpt-5.4`，只改 bench/docs/scripts。
+- reviewer：叶子 agent；重点审查阈值是否过早、是否可复现、是否误把性能当正确性。
+- verifier：叶子 agent；运行 bench no-run 和指定 smoke。
+
+提交策略：
+- auto-commit：否。
+- message hint：`Add M29 performance threshold gate`。
+
+风险 / 后续：
+- 本地机器差异会让硬阈值脆弱；默认先 warn，只有高置信场景才 fail。
+
+## M30：Public Beta Hardening
+
+状态：计划中。
+
+目标：
+把 M1-M29 的能力收束成可试用的 public beta：API surface、docs、examples、
+error messages、migration notes 和 verification checklist 足够稳定，让外部用户
+能在不读内部代码的情况下开始使用 Picea。
+
+为什么现在做：
+M30 是产品化收口，而不是继续扩功能。它应该发生在性能、query、authoring、
+CCD、solver contract 都有足够证据之后。
+
+范围：
+- Public API review：`prelude`、`World`、query、recipe、scene/lab entrypoints。
+- README / crate docs / examples / migration notes。
+- Error message audit：query errors、scene authoring errors、world lifecycle
+  errors。
+- Final beta verification matrix：core tests、lab tests、examples no-run、
+  docs/routing freshness、bench no-run。
+
+不做：
+- 不新增 major physics feature。
+- 不做 breaking API rename，除非 beta freeze 前明确批准。
+- 不承诺 1.0 semver；M30 是 public beta hardening。
+
+所有权：
+- 可能触及：`README.md`、`crates/picea/README.md`、`docs/*`、
+  examples/tests、`crates/picea/src/lib.rs` re-export docs。
+- 不应触及：solver algorithms、CCD algorithms、broadphase heuristics，除非只是
+  修复 beta-blocking bug。
+
+验收标准：
+- 新用户能从 README / examples 完成 world creation、query、scene recipe、
+  lab artifact inspection 的最小流程。
+- Public API smoke 覆盖主要 beta surface。
+- AI routing 和 milestone docs 不再指向过期能力标签。
+- Beta 风险、非目标和下一阶段路线写清楚。
+
+验证方式：
+- `rtk proxy cargo test -p picea --lib`
+- `rtk proxy cargo test -p picea --tests`
+- `rtk proxy cargo test -p picea-lab`
+- `rtk proxy cargo test -p picea --examples --no-run`
+- `rtk proxy cargo bench -p picea --no-run`
+- `rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'`
+- `rtk proxy git diff --check`
+
+Subagent 执行计划：
+- explorer：叶子 agent；审阅 public beta surface、docs gaps 和 stale routing。
+- worker：叶子 agent；优先 `gpt-5.4`，只做 docs/examples/API-smoke hardening。
+- reviewer：叶子 agent；重点审查 public API stability、docs accuracy、示例可运行性。
+- verifier：叶子 agent；运行完整 beta hardening gates。
+
+提交策略：
+- auto-commit：否。
+- message hint：`Prepare M30 public beta hardening`。
+
+风险 / 后续：
+- 如果发现 beta-blocking API 设计问题，必须暂停并让用户确认是否允许 breaking
+  change。
+
+## Post-M30 Follow-Up / Remaining Risks
 
 These items are real follow-up work. M11-M22 are completed in the current
-milestone line; the items below are not completed claims.
+milestone line; M23-M30 are planned gates and are not completed claims.
 
 - M17 completed: query/broadphase/solver-island counters, artifact summaries,
   and Criterion scenario coverage now exist as the evidence gate before tuning.
@@ -1843,19 +2452,22 @@ milestone line; the items below are not completed claims.
   regression, and authored dynamic compound pieces have an additive
   mass/inertia behavior lock that distinguishes overlapping pieces from boolean
   concave union semantics.
-- Post-M22 lab follow-up: expose richer compound-piece provenance in artifact
-  schemas/UI when that evidence becomes part of the user-facing replay
-  workflow.
-- Post-M22 authoring follow-up: consider automatic polygon decomposition,
-  per-piece material/filter overrides, stricter convex diagnostics, and broader
-  dynamic compound/concave support only behind fresh behavior locks.
-- Post-M22 solver follow-up: only later explore whether contact and joint
-  solving should share a stronger island-owned ordering contract or expose
-  denser debug/lab facts beyond the current accepted slice.
-- Rotational CCD, all-shape CCD, and dynamic compound CCD remain staged behind
-  focused behavior locks and benchmark evidence.
-- Absolute performance thresholds need multiple baseline runs before becoming
-  pass/fail gates.
+- M23 planned: harden broadphase/query performance evidence before larger feature
+  expansion.
+- M24 planned: upgrade `picea-lab-web` into a process visualization foundation
+  for broadphase tree traversal, island lifecycle, and compound provenance
+  without letting lab recompute physics.
+- M25 planned: define live scene patch semantics before editor-style mutation.
+- M26 planned: choose one CCD expansion slice with TOI ordering and budget locks.
+- M27 planned: consider automatic polygon decomposition behind strict authoring
+  constraints.
+- M28 planned: clarify solver ordering / island contract before parallel or
+  tighter joint/contact coupling.
+- M29 planned: convert repeated baseline evidence into initial threshold policy.
+- M30 planned: harden public beta API/docs/examples/migration.
+- Beyond M30: direct arbitrary concave contact solving, broad all-shape CCD,
+  multithreaded solver execution, full visual editor, and 1.0 semver freeze all
+  remain separate roadmap decisions.
 
 ## Picea Lab Role Across Milestones
 
@@ -1910,7 +2522,24 @@ milestone:
 - M22: show supported compound/concave authoring examples, generated convex
   piece ordering and validation facts, and stable validation errors for
   unsupported direct concave solver usage; richer artifact/schema/UI
-  provenance remains a Post-M22 follow-up.
+  provenance is planned in M24.
+- M23: show query/broadphase counter summaries and benchmark-cost facts without
+  treating wall-clock timing as the lab correctness oracle.
+- M24: show broadphase tree nodes/traversal/prune facts, island graph and
+  sleep/wake lifecycle, plus compound authored objects, generated convex pieces,
+  inheritance facts, and validation paths in artifacts/UI.
+- M25: show reset/patch/transaction provenance if live scene patching reaches
+  artifact or server workflows.
+- M26: show the selected CCD expansion slice through TOI ordering, budget
+  decisions, and selected/ignored impact facts.
+- M27: show polygon decomposition provenance, generated piece ordering, and
+  rejected-input diagnostics.
+- M28: show solver island ordering facts when contact/joint ordering becomes part
+  of the accepted contract.
+- M29: show benchmark scenario ids, counter summaries, baseline variance, and
+  threshold/warn/fail status where applicable.
+- M30: host public beta examples and docs-backed replay paths that demonstrate
+  the stable user-facing workflow.
 
 The lab should not run physics independently from `crates/picea`, and it should
 not be the only pass/fail signal for physics correctness.

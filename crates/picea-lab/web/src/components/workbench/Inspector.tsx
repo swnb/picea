@@ -43,6 +43,7 @@ export function Inspector({
             <EmptyInspector locale={locale} />
           )}
           <StageFactsCard frame={frame} locale={locale} />
+          <ProcessFactsCard frame={frame} locale={locale} />
           <PendingMeasurementsCard locale={locale} />
         </div>
       </div>
@@ -149,6 +150,113 @@ function PendingMeasurementsCard({ locale }: { locale: Locale }) {
   )
 }
 
+function ProcessFactsCard({
+  frame,
+  locale,
+}: {
+  frame: FrameRecord
+  locale: Locale
+}) {
+  const tree = frame.snapshot.broadphase_tree
+  const islands = frame.snapshot.islands ?? []
+  const provenance = frame.compound_provenance ?? []
+  const leafCount = tree?.nodes.filter((node) => node.collider != null).length ?? 0
+
+  return (
+    <section className="rounded-md border border-lab-line bg-lab-panel2/70 p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <Settings2 className="h-3.5 w-3.5 text-lab-accent" />
+        <h3 className="flex-1 text-[11px] font-semibold uppercase tracking-wider text-lab-muted">
+          {t(locale, "panel.processFacts")}
+        </h3>
+        <Badge tone="accent" className="tabular-nums">
+          {provenance.length + islands.length + (tree?.nodes.length ?? 0)}
+        </Badge>
+      </div>
+      <div className="space-y-3">
+        <FactGroup title={t(locale, "inspector.broadphaseTree")}>
+          <Fact
+            label={t(locale, "inspector.treeShape")}
+            value={
+              tree
+                ? `${tree.nodes.length} nodes / ${leafCount} leaves / depth ${tree.depth}`
+                : t(locale, "inspector.treeEmpty")
+            }
+            mono={false}
+          />
+          <Fact
+            label={t(locale, "inspector.treeCounters")}
+            value={`${frame.snapshot.stats.broadphase_candidate_count}/${frame.snapshot.stats.broadphase_traversal_count ?? 0}/${frame.snapshot.stats.broadphase_pruned_count ?? 0}`}
+          />
+        </FactGroup>
+        <FactGroup title={t(locale, "inspector.islandLifecycle")}>
+          <Fact
+            label={t(locale, "metric.step")}
+            value={`${frame.snapshot.stats.island_count ?? islands.length}/${frame.snapshot.stats.active_island_count ?? 0}/${frame.snapshot.stats.sleeping_island_skip_count ?? 0}`}
+          />
+          {islands.length === 0 ? (
+            <Fact
+              label={t(locale, "inspector.islandLifecycle")}
+              value={t(locale, "inspector.islandEmpty")}
+              mono={false}
+              muted
+            />
+          ) : (
+            islands.map((island) => (
+              <Fact
+                key={island.id}
+                label={`I${island.id}`}
+                value={`${island.bodies.length} bodies / ${booleanLabel(locale, island.sleeping)} / ${dynamicValueLabel(locale, island.reason)}`}
+                mono={false}
+              />
+            ))
+          )}
+        </FactGroup>
+        <FactGroup title={t(locale, "inspector.compoundProvenance")}>
+          {provenance.length === 0 ? (
+            <Fact
+              label={t(locale, "inspector.compoundProvenance")}
+              value={t(locale, "inspector.provenanceEmpty")}
+              mono={false}
+              muted
+            />
+          ) : (
+            provenance.map((entry) => (
+              <div key={`${entry.authored_body_index}-${entry.body_handle ?? "none"}`} className="space-y-1.5 rounded border border-lab-line/60 bg-lab-panel/60 p-2">
+                <Fact
+                  label={t(locale, "inspector.authoredBody")}
+                  value={`${entry.authored_body_index} -> ${entry.body_handle ?? t(locale, "common.unknown")}`}
+                  mono={false}
+                />
+                <Fact label={t(locale, "inspector.material")} value={dynamicValueLabel(locale, entry.inherited_material)} mono={false} />
+                <Fact label={t(locale, "inspector.filter")} value={dynamicValueLabel(locale, entry.inherited_filter)} mono={false} />
+                <Fact label={t(locale, "inspector.density")} value={entry.inherited_density.toFixed(2)} />
+                <Fact label={t(locale, "inspector.sensor")} value={booleanLabel(locale, entry.inherited_is_sensor)} mono={false} />
+                <Fact
+                  label={t(locale, "inspector.validationPath")}
+                  value={entry.validation_path}
+                />
+                <Fact
+                  label={t(locale, "inspector.generatedPieces")}
+                  value={String(entry.pieces.length)}
+                />
+                {entry.pieces.map((piece) => (
+                  <Fact
+                    key={piece.generated_piece_index}
+                    label={`${t(locale, "inspector.pieceOrder")} ${piece.generated_piece_index}`}
+                    value={`${piece.collider_handle ?? t(locale, "common.unknown")} / ${formatPoseTriplet(piece.local_pose)} / ${piece.validation_path}`}
+                    mono={false}
+                  />
+                ))}
+              </div>
+            ))
+          )}
+        </FactGroup>
+      </div>
+    </section>
+  )
+}
+
 function EmptyInspector({ locale }: { locale: Locale }) {
   return (
     <section className="flex flex-col items-start gap-3 rounded-md border border-dashed border-lab-line bg-lab-panel2/40 p-4">
@@ -171,6 +279,10 @@ function EmptyInspector({ locale }: { locale: Locale }) {
       </div>
     </section>
   )
+}
+
+function formatPoseTriplet([x, y, angle]: [number, number, number]) {
+  return `${x.toFixed(2)}, ${y.toFixed(2)}, ${angle.toFixed(2)}`
 }
 
 function EntityInspector({

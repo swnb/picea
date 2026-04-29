@@ -2,8 +2,8 @@ use std::{fs, path::Path};
 
 use picea::events::CcdTargetKind;
 use picea_lab::{
-    run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact, DebugRenderFrame, FrameRecord,
-    RunConfig, RunManifest, ScenarioId,
+    instantiate_scene_fixture, run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact,
+    DebugRenderFrame, FrameRecord, RunConfig, RunManifest, ScenarioId, SceneRecipeFixture,
 };
 
 #[test]
@@ -240,6 +240,66 @@ fn sat_polygon_artifacts_capture_manifold_points_and_normals() {
     assert_eq!(render_first.contacts.len(), 2);
     assert_eq!(render_first.manifolds.len(), 1);
     assert_eq!(render_first.manifolds[0].points.len(), 2);
+}
+
+#[test]
+fn compound_provenance_scenario_writes_frame_and_debug_render_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::CompoundProvenance,
+            frame_count: 2,
+            run_id: Some("m24-compound-provenance".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("compound provenance run should write artifacts");
+
+    let first = run.frames.first().expect("first frame should exist");
+    assert_eq!(first.compound_provenance.len(), 1);
+    let authored = &first.compound_provenance[0];
+    assert_eq!(authored.authored_body_index, 1);
+    assert_eq!(authored.validation_path, "scene.bodies[1].shape.pieces");
+    assert_eq!(authored.inherited_density, 1.75);
+    assert!(!authored.inherited_is_sensor);
+    assert_eq!(authored.pieces.len(), 3);
+    for (piece_index, piece) in authored.pieces.iter().enumerate() {
+        assert_eq!(piece.generated_piece_index, piece_index);
+        assert!(
+            piece.collider_handle.is_some(),
+            "piece {piece_index} should resolve to a public collider handle"
+        );
+        assert_eq!(
+            piece.validation_path,
+            format!("scene.bodies[1].shape.pieces[{piece_index}]")
+        );
+    }
+    assert!(
+        first.snapshot.broadphase_tree.depth > 0,
+        "compound provenance scenario should also expose a broadphase tree"
+    );
+
+    let frame_lines = fs::read_to_string(run.path.join(ArtifactFile::Frames.file_name()))
+        .expect("frames should be readable");
+    assert!(
+        frame_lines.contains("\"compound_provenance\""),
+        "frames.jsonl should preserve per-frame provenance facts"
+    );
+
+    let render: DebugRenderArtifact = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable"),
+    )
+    .expect("debug render should match schema");
+    let render_first = render
+        .frames
+        .first()
+        .expect("debug render should include provenance facts");
+    assert_eq!(render_first.broadphase_tree.depth, first.snapshot.broadphase_tree.depth);
+    assert_eq!(render_first.compound_provenance, first.compound_provenance);
 }
 
 #[test]
@@ -796,7 +856,9 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
         colliders: Vec::new(),
         contacts: Vec::new(),
         manifolds: Vec::new(),
+        broadphase_tree: Default::default(),
         islands: Vec::new(),
+        compound_provenance: Vec::new(),
         unmeasured: Vec::new(),
     };
     let mut value = serde_json::to_value(frame).expect("debug render frame should serialize");
@@ -818,7 +880,9 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     object.remove("ccd_hit_count");
     object.remove("ccd_miss_count");
     object.remove("ccd_clamp_count");
+    object.remove("broadphase_tree");
     object.remove("islands");
+    object.remove("compound_provenance");
 
     let decoded: DebugRenderFrame =
         serde_json::from_value(value).expect("older debug render frame should deserialize");
@@ -838,5 +902,57 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     assert_eq!(decoded.ccd_hit_count, 0);
     assert_eq!(decoded.ccd_miss_count, 0);
     assert_eq!(decoded.ccd_clamp_count, 0);
+    assert!(decoded.broadphase_tree.nodes.is_empty());
     assert!(decoded.islands.is_empty());
+    assert!(decoded.compound_provenance.is_empty());
+}
+
+#[test]
+fn legacy_frame_record_defaults_compound_provenance_when_missing() {
+    let frame = FrameRecord {
+        frame_index: 0,
+        simulated_time: 0.0,
+        state_hash: "legacy".to_owned(),
+        report: Default::default(),
+        stats: Default::default(),
+        events: Vec::new(),
+        snapshot: Default::default(),
+        compound_provenance: Vec::new(),
+    };
+    let mut value = serde_json::to_value(frame).expect("frame should serialize");
+    value
+        .as_object_mut()
+        .expect("frame should serialize as an object")
+        .remove("compound_provenance");
+
+    let decoded: FrameRecord =
+        serde_json::from_value(value).expect("older frame record should deserialize");
+    assert!(decoded.compound_provenance.is_empty());
+}
+
+#[test]
+fn direct_concave_fixture_rejection_remains_stable_for_m22_boundary() {
+    let json = r#"
+    {
+      "schema_version": 1,
+      "bodies": [
+        {
+          "body_type": "dynamic",
+          "shape": {
+            "type": "concave_polygon",
+            "vertices": [[-1.0, -1.0], [1.0, -1.0], [1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [-1.0, 1.0]]
+          }
+        }
+      ]
+    }
+    "#;
+
+    let fixture: SceneRecipeFixture =
+        serde_json::from_str(json).expect("fixture json should deserialize");
+    let error =
+        instantiate_scene_fixture(&fixture).expect_err("direct concave fixture should fail");
+    assert_eq!(
+        error.to_string(),
+        "world setup failed: scene.bodies[0].shape: concave_polygon is not supported directly; use compound with convex pieces"
+    );
 }

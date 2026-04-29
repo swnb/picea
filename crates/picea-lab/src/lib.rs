@@ -17,9 +17,9 @@ pub use artifact::{
 };
 pub use error::{LabError, LabResult};
 pub use scenario::{
-    instantiate_scene_fixture, list_scenarios, RunConfig, ScenarioDescriptor, ScenarioId,
-    ScenarioOverrides, SceneBodyFixture, SceneDistanceJointFixture, SceneFixtureWorld,
-    SceneJointFixture, SceneRecipeFixture, SceneShapeFixture, SceneWorldAnchorJointFixture,
-    SCENE_RECIPE_SCHEMA_VERSION,
+    instantiate_scene_fixture, list_scenarios, CompoundProvenance, CompoundProvenancePiece,
+    RunConfig, ScenarioDescriptor, ScenarioId, ScenarioOverrides, SceneBodyFixture,
+    SceneDistanceJointFixture, SceneFixtureWorld, SceneJointFixture, SceneRecipeFixture,
+    SceneShapeFixture, SceneWorldAnchorJointFixture, SCENE_RECIPE_SCHEMA_VERSION,
 };
 pub use server::SessionStatus;

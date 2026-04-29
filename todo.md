@@ -198,7 +198,7 @@ solver allocation work 转入 Post-M15。
 - [x] 明确文档边界：core solver 支持 convex pieces，不直接求解 arbitrary concave
   contacts。
 
-### Later Post-M22
+### M23-M30 / Later Post-M22
 
 - [ ] 改进 dynamic AABB tree 插入、平衡和 rebuild 策略。
 - [ ] 增加 query allocation/perf counters，并用 Criterion baseline variance 解释。
@@ -207,8 +207,9 @@ solver allocation work 转入 Post-M15。
 - [ ] 扩展 rotational CCD 和更广的 all-shape CCD 覆盖。
 - [ ] 在 M20 public scene schema 之后，再明确 live lab editing / scene patch
   语义。
-- [ ] 为 compound pieces 增加 artifact/schema/UI provenance，而不让 lab 重新
-  计算物理事实。
+- [ ] M24：增强 `picea-lab-web` 可视化基础，覆盖 broadphase tree traversal、
+  island lifecycle / solver rows、compound pieces provenance，并且不让 lab
+  重新计算物理事实。
 - [x] 为 dynamic concave-looking / compound authored pieces 补 additive
   mass/inertia 行为锁；是否支持更广 dynamic concave authoring 仍需后续设计。
 - [ ] M22 之后再评估是否引入更广的自动 polygon decomposition；默认不把

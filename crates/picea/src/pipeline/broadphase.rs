@@ -1,6 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{collider::ShapeAabb, handles::ColliderHandle, math::FloatNum};
+use crate::{
+    collider::ShapeAabb,
+    debug::{DebugAabb, DebugBroadphaseTree, DebugBroadphaseTreeNode},
+    handles::ColliderHandle,
+    math::FloatNum,
+};
 
 const FAT_AABB_MIN_MARGIN: FloatNum = 0.1;
 const FAT_AABB_EXTENT_RATIO: FloatNum = 0.1;
@@ -94,6 +99,10 @@ impl Broadphase {
             },
             candidate_pairs: candidate_output.pairs,
         }
+    }
+
+    pub(crate) fn debug_tree(&self) -> DebugBroadphaseTree {
+        self.tree.debug_tree()
     }
 }
 
@@ -615,6 +624,51 @@ impl DynamicAabbTree {
         out.sort_unstable();
         stats
     }
+
+    fn debug_tree(&self) -> DebugBroadphaseTree {
+        let Some(root) = self.root else {
+            return DebugBroadphaseTree::default();
+        };
+
+        let mut nodes = Vec::new();
+        let root_id = self.collect_debug_tree_node(root, None, 1, &mut nodes);
+        DebugBroadphaseTree {
+            root: Some(root_id),
+            depth: self.depth(),
+            nodes,
+        }
+    }
+
+    fn collect_debug_tree_node(
+        &self,
+        node_index: usize,
+        parent: Option<u32>,
+        depth: usize,
+        out: &mut Vec<DebugBroadphaseTreeNode>,
+    ) -> u32 {
+        let node = &self.nodes[node_index];
+        let id = out.len() as u32;
+        out.push(DebugBroadphaseTreeNode {
+            id,
+            parent,
+            depth,
+            aabb: DebugAabb::new(node.aabb.min, node.aabb.max),
+            collider: node.proxy_index.map(|_| node.handle),
+            ..DebugBroadphaseTreeNode::default()
+        });
+
+        let left = node
+            .left
+            .map(|child| self.collect_debug_tree_node(child, Some(id), depth + 1, out));
+        let right = node
+            .right
+            .map(|child| self.collect_debug_tree_node(child, Some(id), depth + 1, out));
+
+        let entry = &mut out[id as usize];
+        entry.left = left;
+        entry.right = right;
+        id
+    }
 }
 
 impl TreeNode {
@@ -759,6 +813,87 @@ fn ray_intersects_aabb(
 mod tests {
     use super::*;
     use crate::math::point::Point;
+
+    fn assert_debug_tree_contract(
+        tree: &DebugBroadphaseTree,
+        expected_leaf_colliders: &[ColliderHandle],
+        expected_depth: usize,
+        expected_node_count: usize,
+    ) {
+        let root_id = tree
+            .root
+            .expect("reachable debug tree should expose a root id");
+        let node_ids = tree.nodes.iter().map(|node| node.id).collect::<Vec<_>>();
+        let unique_ids = node_ids.iter().copied().collect::<BTreeSet<_>>();
+        let node_by_id = tree
+            .nodes
+            .iter()
+            .map(|node| (node.id, node))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(tree.nodes.len(), expected_node_count);
+        assert_eq!(tree.depth, expected_depth);
+        assert_eq!(
+            unique_ids.len(),
+            tree.nodes.len(),
+            "debug tree node ids should be unique within one snapshot"
+        );
+        assert!(
+            node_by_id.contains_key(&root_id),
+            "root id should reference a reachable node"
+        );
+
+        let root = node_by_id[&root_id];
+        assert!(root.parent.is_none(), "root node should not have a parent");
+
+        let mut leaf_colliders = Vec::new();
+        let mut visited = BTreeSet::new();
+        let mut stack = vec![root_id];
+        while let Some(node_id) = stack.pop() {
+            assert!(
+                visited.insert(node_id),
+                "tree edges should not revisit the same node twice"
+            );
+            let node = node_by_id[&node_id];
+            if let Some(parent_id) = node.parent {
+                let parent = node_by_id
+                    .get(&parent_id)
+                    .expect("every parent id should reference a reachable node");
+                assert!(
+                    parent.left == Some(node_id) || parent.right == Some(node_id),
+                    "parent should point back to its child"
+                );
+            }
+            match (node.collider, node.left, node.right) {
+                (Some(collider), None, None) => leaf_colliders.push(collider),
+                (None, Some(left_id), Some(right_id)) => {
+                    assert_ne!(left_id, right_id, "internal nodes should have two children");
+                    for child_id in [left_id, right_id] {
+                        let child = node_by_id
+                            .get(&child_id)
+                            .expect("child ids should reference reachable nodes");
+                        assert_eq!(
+                            child.parent,
+                            Some(node_id),
+                            "child should point back to its parent"
+                        );
+                        stack.push(child_id);
+                    }
+                }
+                _ => panic!("debug tree nodes should be leaves or binary internal nodes"),
+            }
+        }
+
+        leaf_colliders.sort();
+        let mut expected = expected_leaf_colliders.to_vec();
+        expected.sort();
+        assert_eq!(leaf_colliders, expected);
+        assert_eq!(
+            visited.len(),
+            tree.nodes.len(),
+            "all exported nodes should be reachable from the exported root"
+        );
+    }
 
     fn handle(index: u32) -> ColliderHandle {
         handle_with_generation(index, 0)
@@ -1001,6 +1136,30 @@ mod tests {
             "query tree should not inherit insertion-order depth; got {}",
             tree.depth()
         );
+    }
+
+    #[test]
+    fn debug_tree_exports_only_reachable_live_nodes_with_transient_ids() {
+        let mut broadphase = Broadphase::default();
+        let moving_handle = handle(0);
+        let stable_handle = handle(1);
+
+        broadphase.update(&[
+            proxy_with_handle(moving_handle, aabb(0.0, 0.0, 1.0, 1.0)),
+            proxy_with_handle(stable_handle, aabb(3.0, 0.0, 4.0, 1.0)),
+        ]);
+        broadphase.update(&[
+            proxy_with_handle(moving_handle, aabb(8.0, 0.0, 9.0, 1.0)),
+            proxy_with_handle(stable_handle, aabb(3.0, 0.0, 4.0, 1.0)),
+        ]);
+
+        assert!(
+            broadphase.tree.nodes.len() > 3,
+            "moving outside the fat AABB should leave internal tombstones before compaction"
+        );
+
+        let debug_tree = broadphase.debug_tree();
+        assert_debug_tree_contract(&debug_tree, &[moving_handle, stable_handle], 2, 3);
     }
 
     #[test]

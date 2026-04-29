@@ -99,6 +99,78 @@ impl DebugAabb {
     }
 }
 
+/// Debug-facing view of the retained broadphase tree for visualizers.
+///
+/// This is a read model, not authoritative world state. Node ids are allocated
+/// fresh while building each snapshot so consumers can draw edges without seeing
+/// the engine's private proxy or storage indices.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DebugBroadphaseTree {
+    /// Transient id of the root node in `nodes`, when the tree is non-empty.
+    #[serde(default)]
+    pub root: Option<u32>,
+    /// Reachable tree depth counted from the root to the deepest leaf.
+    #[serde(default)]
+    pub depth: usize,
+    /// Reachable live nodes only; removed/tombstoned storage slots are omitted.
+    #[serde(default)]
+    pub nodes: Vec<DebugBroadphaseTreeNode>,
+}
+
+impl DebugBroadphaseTree {
+    pub(crate) fn sanitized(&self) -> Self {
+        Self {
+            root: self.root,
+            depth: self.depth,
+            nodes: self
+                .nodes
+                .iter()
+                .map(DebugBroadphaseTreeNode::sanitized)
+                .collect(),
+        }
+    }
+}
+
+/// One transient broadphase tree node exported for debugging and replay tools.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DebugBroadphaseTreeNode {
+    /// Transient per-snapshot node id, stable only inside this `DebugSnapshot`.
+    #[serde(default)]
+    pub id: u32,
+    /// Parent node id, or `None` for the root.
+    #[serde(default)]
+    pub parent: Option<u32>,
+    /// Left child node id for internal nodes.
+    #[serde(default)]
+    pub left: Option<u32>,
+    /// Right child node id for internal nodes.
+    #[serde(default)]
+    pub right: Option<u32>,
+    /// Public collider handle for leaf nodes. Internal proxy/leaf ids stay private.
+    #[serde(default)]
+    pub collider: Option<ColliderHandle>,
+    /// Depth from the root, with the root at depth 1.
+    #[serde(default)]
+    pub depth: usize,
+    /// Broadphase AABB for this node. Leaf AABBs may be fat cache boxes.
+    #[serde(default)]
+    pub aabb: DebugAabb,
+}
+
+impl DebugBroadphaseTreeNode {
+    fn sanitized(&self) -> Self {
+        Self {
+            id: self.id,
+            parent: self.parent,
+            left: self.left,
+            right: self.right,
+            collider: self.collider,
+            depth: self.depth,
+            aabb: DebugAabb::new(self.aabb.min, self.aabb.max),
+        }
+    }
+}
+
 /// Shape facts exported in world space for query/debug consumers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -720,6 +792,13 @@ impl DebugSnapshotOptions {
             sanitize_non_finite: true,
         }
     }
+
+    fn include_broadphase_tree(&self) -> bool {
+        // Query snapshots only need stable collider facts. The retained
+        // broadphase tree is an M24 visualization carrier and would be thrown
+        // away when `QueryPipeline::sync(&World)` rebuilds its own query index.
+        *self != Self::for_query()
+    }
 }
 
 impl Default for DebugSnapshotOptions {
@@ -751,6 +830,13 @@ pub struct DebugSnapshot {
     /// Island facts used to explain sleep/wake behavior.
     #[serde(default)]
     pub islands: Vec<DebugIsland>,
+    /// Read-only broadphase tree facts for process visualization.
+    ///
+    /// The tree is a snapshot-local debug carrier. It intentionally exposes
+    /// public collider handles on leaves but not private broadphase proxy or
+    /// storage ids.
+    #[serde(default)]
+    pub broadphase_tree: DebugBroadphaseTree,
     /// Viewer-oriented draw hints.
     ///
     /// The authoritative simulation state lives in the structured facts above;
@@ -856,6 +942,11 @@ impl DebugSnapshot {
             .unwrap_or_else(|| world.last_step_events());
         let (contacts, manifolds) = debug_contacts_and_manifolds(step_events);
         let islands = debug_islands(&bodies, step_events);
+        let broadphase_tree = if options.include_broadphase_tree() {
+            world.debug_broadphase_tree()
+        } else {
+            DebugBroadphaseTree::default()
+        };
         let stats = report.map(|report| report.stats).unwrap_or(last_step);
         let contacts = if options.include_contacts {
             contacts
@@ -918,6 +1009,7 @@ impl DebugSnapshot {
             contacts,
             manifolds,
             islands,
+            broadphase_tree,
             primitives,
         };
 
@@ -947,6 +1039,7 @@ impl DebugSnapshot {
             contacts: self.contacts.iter().map(DebugContact::sanitized).collect(),
             manifolds: self.manifolds.iter().map(sanitize_manifold).collect(),
             islands: self.islands.clone(),
+            broadphase_tree: self.broadphase_tree.sanitized(),
             primitives: self
                 .primitives
                 .iter()
@@ -982,6 +1075,7 @@ impl Default for DebugSnapshot {
             contacts: Vec::new(),
             manifolds: Vec::new(),
             islands: Vec::new(),
+            broadphase_tree: DebugBroadphaseTree::default(),
             primitives: Vec::new(),
             stats: DebugStats::default(),
         }

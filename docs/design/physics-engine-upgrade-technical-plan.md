@@ -49,11 +49,16 @@ The remaining gap to top production 2D engines is now system quality:
   serializable lab fixture flows, a versioned v1 scene schema, and the M22
   compound/concave authoring boundary; direct concave contact solving remains
   outside the core solver.
+- lab artifacts now carry many core facts, but `picea-lab-web` process
+  visualization is still thin: broadphase tree traversal, query candidate
+  pruning, island lifecycle, solver rows, and compound provenance need a shared
+  viewer foundation instead of one-off inspector labels.
 
 This means the next upgrade line should optimize and deepen the system around
 the accepted M11-M22 capabilities, not treat those milestones as still open.
-M21 and M22 are now completed user-facing query and authoring slices, with
-deeper artifact provenance, decomposition, and performance work left staged.
+M21 and M22 are now completed user-facing query and authoring slices. The next
+planned line should pair performance hardening with richer process
+visualization before expanding into harder CCD, decomposition, and solver work.
 
 ## Broadphase Decision
 
@@ -260,10 +265,28 @@ flow rather than micro-optimizing isolated helpers:
 13. M22 compound and concave authoring boundary (completed 2026-04-28): support
    safe compound convex or pre-decomposed authoring while keeping arbitrary
    concave contact solving outside the core solver.
+14. M23 performance hardening (planned): deepen broadphase/query counters,
+   tree-cost evidence, and Criterion baselines without exposing proxy ids or
+   setting premature timing thresholds.
+15. M24 lab-web visualization foundation (planned): make broadphase tree
+   traversal, island lifecycle, and compound provenance visible from artifact /
+   debug facts without recomputing physics in the web viewer.
+16. M25 live scene patch semantics (planned): define reset/patch/transaction and
+   handle invalidation semantics before editor-style mutation.
+17. M26 CCD expansion slice (planned): choose one dynamic compound or rotational
+   CCD slice with TOI ordering, budget, and false-positive/false-negative locks.
+18. M27 automatic polygon decomposition (planned): add a constrained authoring
+   decomposition path while keeping direct concave contact solving outside core.
+19. M28 solver ordering / island contract (planned): clarify contact/joint
+   ordering before parallel solving or tighter coupling.
+20. M29 performance threshold gate (planned): convert repeated baseline evidence
+   into a cautious threshold/warn/fail policy.
+21. M30 public beta hardening (planned): harden public API, docs, examples, and
+   migration notes for a beta-quality user surface.
 
-## Post-M20 / M21-M22 Deepening
+## Post-M22 / M23-M30 Deepening
 
-The next line is no longer "finish M11-M20". M15-M20 have landed as concrete
+The next line is no longer "finish M11-M22". M15-M22 have landed as concrete
 follow-ups:
 
 - `QueryPipeline` now reuses an internal spatial index for semantic-match query
@@ -291,6 +314,11 @@ M21/M22 landed the first user-facing deepening line:
   geometry without rebuilding engine internals;
 - compound/concave authoring now lets users express common
   concave-looking objects through convex pieces or stable validation errors;
+- M23 should make the query/broadphase cost of those surfaces measurable before
+  more expensive features are added;
+- M24 should make the invisible processes users care about visible: tree
+  traversal/pruning, island split/wake/sleep, solver row membership, and
+  compound provenance;
 - extend CCD toward rotational, dynamic compound, and broader all-shape coverage
   only when behavior locks and benchmarks justify it;
 - add focused ramp-friction coverage and other realism regressions where the
