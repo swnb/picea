@@ -25,7 +25,7 @@ import {
   type StatusKind,
 } from "../../i18n"
 import type { ScenarioDescriptor } from "../../types"
-import type { LayerState, SourceKind } from "./types"
+import type { LayerState, RunMode, SourceKind } from "./types"
 
 export function Toolbar({
   locale,
@@ -42,6 +42,8 @@ export function Toolbar({
   finalSnapshotArtifact,
   finalSnapshotStep,
   onRun,
+  runMode,
+  onRunModeChange,
   layers,
   onLayerChange,
 }: {
@@ -59,6 +61,8 @@ export function Toolbar({
   finalSnapshotArtifact: string | null
   finalSnapshotStep: number | null
   onRun: () => void
+  runMode: RunMode
+  onRunModeChange: (value: RunMode) => void
   layers: LayerState
   onLayerChange: (key: keyof LayerState, value: boolean) => void
 }) {
@@ -77,15 +81,38 @@ export function Toolbar({
           </div>
         </div>
         <Select
+          value={runMode}
+          onValueChange={(value) => onRunModeChange(value as RunMode)}
+          items={[
+            {
+              value: "artifact_replay",
+              label: t(locale, "run.modeArtifact"),
+            },
+            {
+              value: "live_session",
+              label: t(locale, "run.modeLive"),
+            },
+          ]}
+          className="ml-2 w-40"
+        />
+        <Select
           value={selectedScenario}
           onValueChange={onScenarioChange}
           items={scenarios.map((entry) => ({
             value: entry.id,
             label: localizeScenario(locale, entry).name,
           }))}
-          className="ml-2 w-52"
+          className="w-52"
         />
-        <Badge tone={source === "server" ? "green" : "warn"}>
+        <Badge
+          tone={
+            source === "live"
+              ? "green"
+              : source === "artifact"
+                ? "accent"
+                : "warn"
+          }
+        >
           {sourceLabel(locale, source)}
         </Badge>
         <Badge

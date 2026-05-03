@@ -3,10 +3,11 @@ import { Gauge, Pause, RotateCcw, SkipForward } from "lucide-react"
 
 import { Input } from "../ui/input"
 import { PanelHeader } from "../ui/panel"
-import { Checkbox, Slider, Tooltip } from "../ui/radix"
+import { Checkbox, Select, Slider, Tooltip } from "../ui/radix"
 import { t, type Locale } from "../../i18n"
 import type { FrameRecord, WorkbenchLog } from "../../types"
 import { vec } from "./format"
+import type { RunMode } from "./types"
 
 export function BottomTimeline({
   frames,
@@ -20,6 +21,8 @@ export function BottomTimeline({
   gravityY,
   setGravityY,
   locale,
+  runMode,
+  setRunMode,
   onPlay,
   onPause,
   onStep,
@@ -36,6 +39,8 @@ export function BottomTimeline({
   gravityY: number
   setGravityY: (value: number) => void
   locale: Locale
+  runMode: RunMode
+  setRunMode: (value: RunMode) => void
   onPlay: () => void
   onPause: () => void
   onStep: () => void
@@ -187,6 +192,23 @@ export function BottomTimeline({
             onChange={(event) =>
               setFrameCount(Math.max(1, Number(event.target.value) || 1))
             }
+          />
+          <label className="text-sm text-lab-muted">
+            {t(locale, "run.mode")}
+          </label>
+          <Select
+            value={runMode}
+            onValueChange={(value) => setRunMode(value as RunMode)}
+            items={[
+              {
+                value: "artifact_replay",
+                label: t(locale, "run.modeArtifact"),
+              },
+              {
+                value: "live_session",
+                label: t(locale, "run.modeLive"),
+              },
+            ]}
           />
           <label className="text-sm text-lab-muted">
             {t(locale, "run.gravityOverride")}

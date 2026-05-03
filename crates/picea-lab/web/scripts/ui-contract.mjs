@@ -115,6 +115,36 @@ assert.match(
 );
 assert.match(
   appSource,
+  /live_session/,
+  "Workbench should expose a distinct Rust live session path alongside artifact replay.",
+);
+assert.match(
+  appSource,
+  /source === "artifact" && sessionId[\s\S]*handleArtifactControl\(action, sessionId\)/,
+  "Rust artifact replay controls should keep using the server session instead of falling back to local demo scrubbing.",
+);
+assert.match(
+  appSource,
+  /async function handleArtifactControl[\s\S]*controlSession\(activeSessionId, action\)[\s\S]*fetchFrames\(session\.run_id\)/,
+  "Artifact reset should ask the Rust server for a new run and reload its frames.",
+);
+assert.match(
+  appSource,
+  /liveGenerationRef/,
+  "Live controls should track a session generation so reset can invalidate older live responses.",
+);
+assert.match(
+  appSource,
+  /liveRequestTokenRef/,
+  "Live controls should track request tokens so older step/reset responses cannot overwrite the current buffer.",
+);
+assert.match(
+  appSource,
+  /if\s*\(\s*guard\.generation\s*!==\s*liveGenerationRef\.current\s*\|\|\s*guard\.token\s*!==\s*liveRequestTokenRef\.current\s*\)/,
+  "Workbench should discard stale live responses before mutating the buffered frame list.",
+);
+assert.match(
+  appSource,
   /panel\.processFacts/,
   "Inspector should expose a process facts panel for broadphase tree, island lifecycle, and compound provenance.",
 );

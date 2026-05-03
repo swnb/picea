@@ -3,7 +3,7 @@ import type { ScenarioDescriptor } from "./types";
 export const supportedLocales = ["zh-CN", "en-US"] as const;
 
 export type Locale = (typeof supportedLocales)[number];
-export type SourceKind = "server" | "demo";
+export type SourceKind = "demo" | "artifact" | "live";
 export type StatusKind = "idle" | "loading" | "playing" | "paused" | "failed" | "created" | "running" | "completed";
 export type EntityKind = "body" | "collider" | "contact" | "joint";
 export type BodyType = "static" | "dynamic" | "kinematic";
@@ -137,6 +137,9 @@ const enMessages = {
   "timeline.frameAt": "frame {frame}",
   "timeline.totalFrames": "{count} total",
   "run.frameCount": "frame count",
+  "run.mode": "run mode",
+  "run.modeArtifact": "Rust artifact replay",
+  "run.modeLive": "Rust live session",
   "run.gravityOverride": "gravity override",
   "run.sendOverride": "send override with next run",
   "run.gravityY": "gravity y",
@@ -154,6 +157,8 @@ const enMessages = {
   "log.generatedDemoFrames": "Generated {count} local demo frames for {scenarioId}.",
   "log.artifactsAvailable": "Replay artifacts: {manifest}, {finalSnapshot}.",
   "log.finalSnapshotLoaded": "Final snapshot loaded at step {step}.",
+  "log.liveSessionReady": "Live session {sessionId} is ready; backend step will append frames on demand.",
+  "log.liveFrameBuffered": "Live frame {frameIndex} buffered from Rust backend.",
   "log.sseFrame": "SSE frame {data}",
   "log.sseFailed": "SSE failed {data}",
   "log.sseIdle": "SSE idle {data}",
@@ -292,6 +297,9 @@ const zhMessages: Record<MessageKey, string> = {
   "timeline.frameAt": "第 {frame} 帧",
   "timeline.totalFrames": "共 {count} 帧",
   "run.frameCount": "帧数",
+  "run.mode": "运行模式",
+  "run.modeArtifact": "Rust 产物回放",
+  "run.modeLive": "Rust 实时会话",
   "run.gravityOverride": "重力覆盖",
   "run.sendOverride": "下次运行发送覆盖",
   "run.gravityY": "重力 y",
@@ -309,6 +317,8 @@ const zhMessages: Record<MessageKey, string> = {
   "log.generatedDemoFrames": "已为 {scenarioId} 生成 {count} 个本地演示帧。",
   "log.artifactsAvailable": "回放产物：{manifest}、{finalSnapshot}。",
   "log.finalSnapshotLoaded": "已加载 final_snapshot，第 {step} 步。",
+  "log.liveSessionReady": "实时会话 {sessionId} 已就绪；后端单步会按需追加帧。",
+  "log.liveFrameBuffered": "已从 Rust 后端缓存实时帧 {frameIndex}。",
   "log.sseFrame": "SSE 帧 {data}",
   "log.sseFailed": "SSE 失败 {data}",
   "log.sseIdle": "SSE 空队列 {data}",
@@ -384,8 +394,16 @@ const layerLabels: Record<Locale, Record<LayerKey, string>> = {
 };
 
 const sourceLabels: Record<Locale, Record<SourceKind, string>> = {
-  "zh-CN": { server: "Rust 回放", demo: "演示回放" },
-  "en-US": { server: "Rust replay", demo: "demo replay" },
+  "zh-CN": {
+    demo: "演示回放",
+    artifact: "Rust 产物回放",
+    live: "Rust 实时会话",
+  },
+  "en-US": {
+    demo: "demo replay",
+    artifact: "Rust artifact replay",
+    live: "Rust live session",
+  },
 };
 
 const statusLabels: Record<Locale, Record<StatusKind, string>> = {

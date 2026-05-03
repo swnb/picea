@@ -1,4 +1,10 @@
-import type { DebugSnapshot, FrameRecord, ScenarioDescriptor, SessionRecord } from "./types";
+import type {
+  DebugSnapshot,
+  FrameRecord,
+  ScenarioDescriptor,
+  SessionMode,
+  SessionRecord,
+} from "./types";
 
 const apiBase = import.meta.env.VITE_PICEA_LAB_API_BASE ?? "";
 
@@ -26,6 +32,7 @@ export async function fetchScenarios(): Promise<ScenarioDescriptor[]> {
 export async function createSession(
   scenarioId: string,
   frameCount: number,
+  mode: SessionMode,
   gravity?: [number, number] | null,
 ): Promise<SessionRecord> {
   const data = await requestJson<{ session: SessionRecord }>("/api/sessions", {
@@ -33,6 +40,7 @@ export async function createSession(
     body: JSON.stringify({
       scenario_id: scenarioId,
       frame_count: frameCount,
+      mode,
       overrides: {
         frame_count: frameCount,
         gravity: gravity ?? undefined,

@@ -294,6 +294,8 @@ export type FrameRecord = {
   compound_provenance?: CompoundProvenance[];
 };
 
+export type SessionMode = "artifact_replay" | "live_session";
+
 export type ScenarioDescriptor = {
   id: string;
   name: string;
@@ -303,9 +305,11 @@ export type ScenarioDescriptor = {
 export type SessionRecord = {
   id: string;
   scenario_id: string;
+  mode: SessionMode;
   status: "created" | "running" | "paused" | "completed" | "failed";
   run_id: string | null;
   frame_count: number;
+  buffered_frame_count: number;
   current_frame_index: number;
   overrides: {
     frame_count?: number | null;
@@ -314,6 +318,7 @@ export type SessionRecord = {
   final_state_hash: string | null;
   manifest_artifact?: string | null;
   final_snapshot_artifact?: string | null;
+  latest_frame?: FrameRecord | null;
   last_error: string | null;
 };
 

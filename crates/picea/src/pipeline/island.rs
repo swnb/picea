@@ -328,4 +328,91 @@ mod tests {
         assert!(plan.islands[0].joint_rows.is_empty());
         assert_eq!(plan.islands[0].body_slots, vec![awake_body, static_body]);
     }
+
+    #[test]
+    fn contact_and_joint_rows_share_slots_but_keep_separate_phase_order() {
+        let body_a = BodyHandle::from_raw_parts(10, 0);
+        let body_b = BodyHandle::from_raw_parts(20, 0);
+        let body_c = BodyHandle::from_raw_parts(30, 0);
+        let static_body = BodyHandle::from_raw_parts(1, 0);
+
+        let plan = build_island_solve_plan(
+            &[SolverIsland {
+                id: 3,
+                bodies: vec![body_a, body_b, body_c],
+                active: true,
+            }],
+            [(7usize, body_c, static_body), (2usize, body_b, body_c)],
+            [
+                JointDesc::Distance(DistanceJointDesc {
+                    body_a,
+                    body_b,
+                    local_anchor_a: Point::default(),
+                    local_anchor_b: Point::default(),
+                    rest_length: 1.0,
+                    stiffness: 1.0,
+                    damping: 0.0,
+                    user_data: 0,
+                }),
+                JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                    body: body_c,
+                    local_anchor: Point::default(),
+                    world_anchor: Point::default(),
+                    stiffness: 1.0,
+                    damping: 0.0,
+                    user_data: 0,
+                }),
+            ],
+        );
+
+        let island = &plan.islands[0];
+        assert_eq!(island.body_slots, vec![body_a, body_b, body_c, static_body]);
+        assert_eq!(
+            island.contact_rows,
+            vec![
+                ContactSolvePlanRow {
+                    contact_index: 7,
+                    body_a_slot: 2,
+                    body_b_slot: 3,
+                },
+                ContactSolvePlanRow {
+                    contact_index: 2,
+                    body_a_slot: 1,
+                    body_b_slot: 2,
+                },
+            ],
+            "contact rows keep gather order inside the island"
+        );
+        assert_eq!(
+            island.joint_rows,
+            vec![
+                JointSolvePlanRow::Distance {
+                    desc: DistanceJointDesc {
+                        body_a,
+                        body_b,
+                        local_anchor_a: Point::default(),
+                        local_anchor_b: Point::default(),
+                        rest_length: 1.0,
+                        stiffness: 1.0,
+                        damping: 0.0,
+                        user_data: 0,
+                    },
+                    body_a_slot: 0,
+                    body_b_slot: 1,
+                },
+                JointSolvePlanRow::WorldAnchor {
+                    desc: WorldAnchorJointDesc {
+                        body: body_c,
+                        local_anchor: Point::default(),
+                        world_anchor: Point::default(),
+                        stiffness: 1.0,
+                        damping: 0.0,
+                        user_data: 0,
+                    },
+                    body_slot: 2,
+                },
+            ],
+            "joint rows keep joint iteration order and use the same dense slots"
+        );
+    }
 }

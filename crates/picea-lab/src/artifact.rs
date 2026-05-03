@@ -197,6 +197,30 @@ pub struct RunResult {
     pub frames: Vec<FrameRecord>,
 }
 
+pub fn frame_record_from_step(
+    world: &World,
+    report: StepReport,
+    frame_index: usize,
+    compound_provenance: &[CompoundProvenance],
+) -> LabResult<FrameRecord> {
+    let snapshot = DebugSnapshot::from_world_with_step_report(
+        world,
+        &report,
+        &DebugSnapshotOptions::default(),
+    );
+    let state_hash = state_hash(&snapshot)?;
+    Ok(FrameRecord {
+        frame_index,
+        simulated_time: report.simulated_time,
+        state_hash,
+        stats: report.stats,
+        events: report.events.clone(),
+        report,
+        snapshot,
+        compound_provenance: compound_provenance.to_vec(),
+    })
+}
+
 /// Filesystem boundary that hides `target/picea-lab/runs/<run_id>` from higher
 /// level CLI and server flows.
 ///
@@ -254,22 +278,12 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
 
     for frame_index in 0..frame_count {
         let report = pipeline.step(&mut scenario.world);
-        let snapshot = DebugSnapshot::from_world_with_step_report(
+        frames.push(frame_record_from_step(
             &scenario.world,
-            &report,
-            &DebugSnapshotOptions::default(),
-        );
-        let state_hash = state_hash(&snapshot)?;
-        frames.push(FrameRecord {
-            frame_index,
-            simulated_time: report.simulated_time,
-            state_hash,
-            stats: report.stats,
-            events: report.events.clone(),
             report,
-            snapshot,
-            compound_provenance: scenario.compound_provenance.clone(),
-        });
+            frame_index,
+            &scenario.compound_provenance,
+        )?);
     }
 
     let final_snapshot = frames

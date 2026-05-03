@@ -25,22 +25,26 @@ pub enum ScenarioId {
     BroadphaseSparse,
     SatPolygon,
     CompoundProvenance,
+    ConcaveDecomposition,
     CcdFastCircleWall,
     CcdFastConvexWalls,
     CcdDynamicConvexPair,
+    CcdDynamicCompoundWall,
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 11] = [
         Self::FallingBoxContact,
         Self::Stack4,
         Self::JointAnchor,
         Self::BroadphaseSparse,
         Self::SatPolygon,
         Self::CompoundProvenance,
+        Self::ConcaveDecomposition,
         Self::CcdFastCircleWall,
         Self::CcdFastConvexWalls,
         Self::CcdDynamicConvexPair,
+        Self::CcdDynamicCompoundWall,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -51,9 +55,11 @@ impl ScenarioId {
             Self::BroadphaseSparse => "broadphase_sparse",
             Self::SatPolygon => "sat_polygon",
             Self::CompoundProvenance => "compound_provenance",
+            Self::ConcaveDecomposition => "concave_decomposition",
             Self::CcdFastCircleWall => "ccd_fast_circle_wall",
             Self::CcdFastConvexWalls => "ccd_fast_convex_walls",
             Self::CcdDynamicConvexPair => "ccd_dynamic_convex_pair",
+            Self::CcdDynamicCompoundWall => "ccd_dynamic_compound_wall",
         }
     }
 }
@@ -75,9 +81,11 @@ impl FromStr for ScenarioId {
             "broadphase_sparse" => Ok(Self::BroadphaseSparse),
             "sat_polygon" => Ok(Self::SatPolygon),
             "compound_provenance" => Ok(Self::CompoundProvenance),
+            "concave_decomposition" => Ok(Self::ConcaveDecomposition),
             "ccd_fast_circle_wall" => Ok(Self::CcdFastCircleWall),
             "ccd_fast_convex_walls" => Ok(Self::CcdFastConvexWalls),
             "ccd_dynamic_convex_pair" => Ok(Self::CcdDynamicConvexPair),
+            "ccd_dynamic_compound_wall" => Ok(Self::CcdDynamicCompoundWall),
             other => Err(LabError::UnknownScenario(other.to_owned())),
         }
     }
@@ -103,9 +111,11 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::BroadphaseSparse => "Sparse broadphase",
                 ScenarioId::SatPolygon => "SAT polygon manifold",
                 ScenarioId::CompoundProvenance => "Compound provenance fixture",
+                ScenarioId::ConcaveDecomposition => "Concave decomposition fixture",
                 ScenarioId::CcdFastCircleWall => "CCD fast circle wall",
                 ScenarioId::CcdFastConvexWalls => "CCD fast convex walls",
                 ScenarioId::CcdDynamicConvexPair => "CCD dynamic convex pair",
+                ScenarioId::CcdDynamicCompoundWall => "CCD dynamic compound wall",
             },
             description: match id {
                 ScenarioId::FallingBoxContact => "A dynamic box falling into static floor contact.",
@@ -120,6 +130,9 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::CompoundProvenance => {
                     "An authored compound body fixture exposing stable piece order and inherited collider semantics."
                 }
+                ScenarioId::ConcaveDecomposition => {
+                    "A static concave polygon decomposed into deterministic convex pieces."
+                }
                 ScenarioId::CcdFastCircleWall => {
                     "A fast dynamic circle swept against a static thin rectangle wall."
                 }
@@ -128,6 +141,9 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 }
                 ScenarioId::CcdDynamicConvexPair => {
                     "Two fast dynamic rectangles swept against each other."
+                }
+                ScenarioId::CcdDynamicCompoundWall => {
+                    "A fast compound body swept by its earliest convex piece against a static wall."
                 }
             },
         })
@@ -299,7 +315,7 @@ impl SceneBodyFixture {
     fn to_body_bundle(&self, body_index: usize) -> LabResult<BodyBundle> {
         let colliders = self
             .shape
-            .to_collider_bundles(body_index)?
+            .to_collider_bundles(body_index, self.body_type)?
             .into_iter()
             .map(|collider| {
                 collider
@@ -514,7 +530,11 @@ impl SceneCompoundPieceShapeFixture {
 }
 
 impl SceneShapeFixture {
-    fn to_collider_bundles(&self, body_index: usize) -> LabResult<Vec<ColliderBundle>> {
+    fn to_collider_bundles(
+        &self,
+        body_index: usize,
+        body_type: BodyType,
+    ) -> LabResult<Vec<ColliderBundle>> {
         match self {
             Self::Circle { radius } => Ok(vec![ColliderBundle::circle(*radius)]),
             Self::Rect { width, height } => Ok(vec![ColliderBundle::rect(*width, *height)]),
@@ -534,15 +554,34 @@ impl SceneShapeFixture {
                     .map(SceneCompoundPieceFixture::to_collider_bundle)
                     .collect())
             }
-            Self::ConcavePolygon { .. } => Err(LabError::World(format!(
-                "scene.bodies[{body_index}].shape: concave_polygon is not supported directly; use compound with convex pieces"
-            ))),
+            Self::ConcavePolygon { vertices } => {
+                if body_type != BodyType::Static {
+                    return Err(LabError::World(format!(
+                        "scene.bodies[{body_index}].shape: concave_polygon automatic decomposition is only supported for static bodies"
+                    )));
+                }
+                decompose_concave_polygon(
+                    &format!("scene.bodies[{body_index}].shape.vertices"),
+                    vertices,
+                )
+                .map(|pieces| {
+                    pieces
+                        .into_iter()
+                        .map(|piece| {
+                            ColliderBundle::new(SharedShape::convex_polygon(points_from_arrays(
+                                &piece,
+                            )))
+                        })
+                        .collect()
+                })
+            }
         }
     }
 
     fn collider_count(&self) -> usize {
         match self {
             Self::Compound { pieces } => pieces.len(),
+            Self::ConcavePolygon { vertices } => vertices.len().saturating_sub(2),
             _ => 1,
         }
     }
@@ -635,6 +674,92 @@ fn validate_convex_vertices(path: &str, vertices: &[[f32; 2]]) -> LabResult<()> 
     }
 }
 
+fn decompose_concave_polygon(path: &str, vertices: &[[f32; 2]]) -> LabResult<Vec<Vec<[f32; 2]>>> {
+    validate_concave_polygon_for_decomposition(path, vertices)?;
+
+    let mut oriented = vertices.to_vec();
+    if polygon_twice_area(&oriented) < 0.0 {
+        oriented.reverse();
+    }
+
+    let mut indices = (0..oriented.len()).collect::<Vec<_>>();
+    let mut pieces = Vec::with_capacity(oriented.len().saturating_sub(2));
+    while indices.len() > 3 {
+        let Some(ear_position) = find_next_ear(&oriented, &indices) else {
+            return Err(LabError::World(format!(
+                "{path}: concave_polygon could not be decomposed deterministically"
+            )));
+        };
+        let previous = indices[(ear_position + indices.len() - 1) % indices.len()];
+        let current = indices[ear_position];
+        let next = indices[(ear_position + 1) % indices.len()];
+        pieces.push(vec![oriented[previous], oriented[current], oriented[next]]);
+        indices.remove(ear_position);
+    }
+    pieces.push(indices.iter().map(|index| oriented[*index]).collect());
+    Ok(pieces)
+}
+
+fn validate_concave_polygon_for_decomposition(path: &str, vertices: &[[f32; 2]]) -> LabResult<()> {
+    let has_enough_vertices = vertices.len() >= 4 && distinct_vertex_count(vertices) >= 4;
+    let vertices_are_finite = polygon_vertices_are_finite(vertices);
+    let has_no_zero_length_edges = polygon_has_no_zero_length_edges(vertices);
+    let has_area = polygon_twice_area(vertices).abs() > f32::EPSILON;
+
+    if !has_enough_vertices || !vertices_are_finite || !has_no_zero_length_edges || !has_area {
+        return Err(LabError::World(format!(
+            "{path}: concave_polygon requires at least 4 non-degenerate vertices"
+        )));
+    }
+    if polygon_has_self_intersections(vertices) {
+        return Err(LabError::World(format!(
+            "{path}: concave_polygon must be simple and non-self-intersecting"
+        )));
+    }
+    if polygon_is_convex(vertices) {
+        return Err(LabError::World(format!(
+            "{path}: concave_polygon requires a concave vertex; use convex_polygon for convex loops"
+        )));
+    }
+    Ok(())
+}
+
+fn find_next_ear(vertices: &[[f32; 2]], indices: &[usize]) -> Option<usize> {
+    for position in 0..indices.len() {
+        let previous = indices[(position + indices.len() - 1) % indices.len()];
+        let current = indices[position];
+        let next = indices[(position + 1) % indices.len()];
+        if polygon_turn_cross(vertices[previous], vertices[current], vertices[next]) <= f32::EPSILON
+        {
+            continue;
+        }
+        if indices
+            .iter()
+            .copied()
+            .filter(|index| *index != previous && *index != current && *index != next)
+            .any(|index| {
+                point_in_triangle(
+                    vertices[index],
+                    vertices[previous],
+                    vertices[current],
+                    vertices[next],
+                )
+            })
+        {
+            continue;
+        }
+        return Some(position);
+    }
+    None
+}
+
+fn point_in_triangle(point: [f32; 2], a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> bool {
+    let ab = polygon_turn_cross(a, b, point);
+    let bc = polygon_turn_cross(b, c, point);
+    let ca = polygon_turn_cross(c, a, point);
+    ab >= -f32::EPSILON && bc >= -f32::EPSILON && ca >= -f32::EPSILON
+}
+
 fn validate_circle_radius(path: &str, radius: f32) -> LabResult<()> {
     if radius.is_finite() && radius > 0.0 {
         Ok(())
@@ -704,6 +829,60 @@ fn polygon_has_no_zero_length_edges(vertices: &[[f32; 2]]) -> bool {
     }
 
     true
+}
+
+fn polygon_has_self_intersections(vertices: &[[f32; 2]]) -> bool {
+    for first in 0..vertices.len() {
+        let first_next = (first + 1) % vertices.len();
+        for second in (first + 1)..vertices.len() {
+            let second_next = (second + 1) % vertices.len();
+            if first == second_next || first_next == second {
+                continue;
+            }
+            if segments_intersect(
+                vertices[first],
+                vertices[first_next],
+                vertices[second],
+                vertices[second_next],
+            ) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn segments_intersect(a: [f32; 2], b: [f32; 2], c: [f32; 2], d: [f32; 2]) -> bool {
+    let d1 = point_line_orientation(a, b, c);
+    let d2 = point_line_orientation(a, b, d);
+    let d3 = point_line_orientation(c, d, a);
+    let d4 = point_line_orientation(c, d, b);
+
+    if d1.abs() <= f32::EPSILON && point_on_segment(c, a, b) {
+        return true;
+    }
+    if d2.abs() <= f32::EPSILON && point_on_segment(d, a, b) {
+        return true;
+    }
+    if d3.abs() <= f32::EPSILON && point_on_segment(a, c, d) {
+        return true;
+    }
+    if d4.abs() <= f32::EPSILON && point_on_segment(b, c, d) {
+        return true;
+    }
+
+    d1.signum() != d2.signum() && d3.signum() != d4.signum()
+}
+
+fn point_line_orientation(a: [f32; 2], b: [f32; 2], point: [f32; 2]) -> f32 {
+    (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0])
+}
+
+fn point_on_segment(point: [f32; 2], a: [f32; 2], b: [f32; 2]) -> bool {
+    point[0] >= a[0].min(b[0]) - f32::EPSILON
+        && point[0] <= a[0].max(b[0]) + f32::EPSILON
+        && point[1] >= a[1].min(b[1]) - f32::EPSILON
+        && point[1] <= a[1].max(b[1]) + f32::EPSILON
 }
 
 fn polygon_twice_area(vertices: &[[f32; 2]]) -> f32 {
@@ -866,6 +1045,53 @@ fn compound_provenance_fixture() -> SceneRecipeFixture {
     }
 }
 
+fn concave_decomposition_fixture() -> SceneRecipeFixture {
+    SceneRecipeFixture {
+        schema_version: SCENE_RECIPE_SCHEMA_VERSION,
+        world: SceneFixtureWorld {
+            gravity: [0.0, 9.8],
+            enable_sleep: true,
+        },
+        bodies: vec![
+            SceneBodyFixture {
+                body_type: BodyType::Static,
+                pose: [0.0, 1.6, 0.0],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: false,
+                shape: SceneShapeFixture::ConcavePolygon {
+                    vertices: vec![
+                        [-2.0, -0.4],
+                        [2.0, -0.4],
+                        [2.0, 0.2],
+                        [0.4, 0.2],
+                        [0.4, 0.8],
+                        [-2.0, 0.8],
+                    ],
+                },
+                material: MaterialPreset::Rough,
+                filter: CollisionLayerPreset::StaticGeometry,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.0, -1.4, 0.0],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: false,
+                shape: SceneShapeFixture::Rect {
+                    width: 0.5,
+                    height: 0.5,
+                },
+                material: MaterialPreset::Default,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+        ],
+        joints: Vec::new(),
+    }
+}
+
 fn build_compound_provenance(
     fixture: &SceneRecipeFixture,
     created: &WorldCommandReport,
@@ -875,31 +1101,61 @@ fn build_compound_provenance(
 
     for (body_index, body) in fixture.bodies.iter().enumerate() {
         let body_handle = created.body_handles.get(body_index).copied();
-        if let SceneShapeFixture::Compound { pieces } = &body.shape {
-            provenance.push(CompoundProvenance {
-                authored_body_index: body_index,
-                body_handle,
-                validation_path: format!("scene.bodies[{body_index}].shape.pieces"),
-                inherited_material: body.material,
-                inherited_filter: body.filter,
-                inherited_density: body.density,
-                inherited_is_sensor: body.is_sensor,
-                pieces: pieces
-                    .iter()
-                    .enumerate()
-                    .map(|(piece_index, piece)| CompoundProvenancePiece {
-                        generated_piece_index: piece_index,
-                        collider_handle: created
-                            .collider_handles
-                            .get(collider_cursor + piece_index)
-                            .copied(),
-                        validation_path: format!(
-                            "scene.bodies[{body_index}].shape.pieces[{piece_index}]"
-                        ),
-                        local_pose: pose_to_array(piece.local_pose),
-                    })
-                    .collect(),
-            });
+        match &body.shape {
+            SceneShapeFixture::Compound { pieces } => {
+                provenance.push(CompoundProvenance {
+                    authored_body_index: body_index,
+                    body_handle,
+                    validation_path: format!("scene.bodies[{body_index}].shape.pieces"),
+                    inherited_material: body.material,
+                    inherited_filter: body.filter,
+                    inherited_density: body.density,
+                    inherited_is_sensor: body.is_sensor,
+                    pieces: pieces
+                        .iter()
+                        .enumerate()
+                        .map(|(piece_index, piece)| CompoundProvenancePiece {
+                            generated_piece_index: piece_index,
+                            collider_handle: created
+                                .collider_handles
+                                .get(collider_cursor + piece_index)
+                                .copied(),
+                            validation_path: format!(
+                                "scene.bodies[{body_index}].shape.pieces[{piece_index}]"
+                            ),
+                            local_pose: pose_to_array(piece.local_pose),
+                        })
+                        .collect(),
+                });
+            }
+            SceneShapeFixture::ConcavePolygon { vertices }
+                if body.body_type == BodyType::Static =>
+            {
+                let piece_count = vertices.len().saturating_sub(2);
+                provenance.push(CompoundProvenance {
+                    authored_body_index: body_index,
+                    body_handle,
+                    validation_path: format!("scene.bodies[{body_index}].shape.vertices"),
+                    inherited_material: body.material,
+                    inherited_filter: body.filter,
+                    inherited_density: body.density,
+                    inherited_is_sensor: body.is_sensor,
+                    pieces: (0..piece_count)
+                        .map(|piece_index| CompoundProvenancePiece {
+                            generated_piece_index: piece_index,
+                            collider_handle: created
+                                .collider_handles
+                                .get(collider_cursor + piece_index)
+                                .copied(),
+                            validation_path: format!(
+                                "scene.bodies[{body_index}].shape.generated_pieces[{piece_index}]"
+                            ),
+                            local_pose: [0.0, 0.0, 0.0],
+                        })
+                        .collect(),
+                });
+            }
+            _ => {}
         }
         collider_cursor += body.shape.collider_count();
     }
@@ -1009,6 +1265,14 @@ pub(crate) fn build_scenario(
                 compound_provenance: instantiated.compound_provenance,
             });
         }
+        ScenarioId::ConcaveDecomposition => {
+            let instantiated =
+                instantiate_scene_fixture_with_provenance(&concave_decomposition_fixture())?;
+            return Ok(BuiltScenario {
+                world: instantiated.world,
+                compound_provenance: instantiated.compound_provenance,
+            });
+        }
         ScenarioId::CcdFastCircleWall => {
             world = World::new(WorldDesc {
                 gravity: Vector::default(),
@@ -1063,6 +1327,21 @@ pub(crate) fn build_scenario(
                 0.1,
                 0.1,
                 Vector::new(-200.0, 0.0),
+            )?;
+        }
+        ScenarioId::CcdDynamicCompoundWall => {
+            world = World::new(WorldDesc {
+                gravity: Vector::default(),
+                enable_sleep: false,
+            });
+            add_box(&mut world, BodyType::Static, 0.0, 0.25, 0.1, 0.12)?;
+            add_compound_box_pair_with_velocity(
+                &mut world,
+                -1.0,
+                0.0,
+                0.1,
+                0.1,
+                Vector::new(200.0, 0.0),
             )?;
         }
     }
@@ -1157,6 +1436,40 @@ fn add_circle(
             },
         )
         .map_err(|error| LabError::World(error.to_string()))?;
+    Ok(body)
+}
+
+fn add_compound_box_pair_with_velocity(
+    world: &mut World,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    linear_velocity: Vector,
+) -> LabResult<BodyHandle> {
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(x, y, 0.0),
+            linear_velocity,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .map_err(|error| LabError::World(error.to_string()))?;
+
+    for local_y in [0.25, -0.25] {
+        world
+            .create_collider(
+                body,
+                ColliderDesc {
+                    shape: SharedShape::rect(width, height),
+                    local_pose: Pose::from_xy_angle(0.0, local_y, 0.0),
+                    ..ColliderDesc::default()
+                },
+            )
+            .map_err(|error| LabError::World(error.to_string()))?;
+    }
+
     Ok(body)
 }
 
@@ -1416,6 +1729,171 @@ mod tests {
             );
             assert!(collider.is_sensor());
         }
+    }
+
+    #[test]
+    fn static_concave_polygon_fixture_decomposes_into_ordered_convex_pieces() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "world": { "gravity": [0.0, 0.0], "enable_sleep": false },
+          "bodies": [
+            {
+              "body_type": "static",
+              "shape": {
+                "type": "concave_polygon",
+                "vertices": [[-1.0, -1.0], [1.0, -1.0], [1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [-1.0, 1.0]]
+              },
+              "material": "bouncy",
+              "filter": "sensor",
+              "density": 2.5,
+              "is_sensor": true
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let instantiated = instantiate_scene_fixture_with_provenance(&fixture)
+            .expect("static concave polygon should decompose into convex pieces");
+        let body = instantiated
+            .world
+            .bodies()
+            .next()
+            .expect("fixture should create one body");
+        let colliders: Vec<_> = instantiated
+            .world
+            .colliders_for_body(body)
+            .expect("decomposed body should resolve")
+            .collect();
+
+        assert_eq!(colliders.len(), 4);
+        for collider in &colliders {
+            let collider = instantiated
+                .world
+                .collider(*collider)
+                .expect("decomposed collider should resolve");
+            match collider.shape() {
+                SharedShape::ConvexPolygon { vertices } => assert_eq!(vertices.len(), 3),
+                shape => panic!("expected generated triangle, got {shape:?}"),
+            }
+            assert_eq!(collider.density(), 2.5);
+            assert_eq!(
+                collider.material(),
+                Material::preset(MaterialPreset::Bouncy)
+            );
+            assert_eq!(
+                collider.filter(),
+                CollisionFilter::preset(CollisionLayerPreset::Sensor)
+            );
+            assert!(collider.is_sensor());
+        }
+
+        let provenance = instantiated
+            .compound_provenance
+            .first()
+            .expect("decomposed pieces should enter provenance");
+        assert_eq!(provenance.validation_path, "scene.bodies[0].shape.vertices");
+        assert_eq!(provenance.pieces.len(), 4);
+        for (piece_index, piece) in provenance.pieces.iter().enumerate() {
+            assert_eq!(piece.generated_piece_index, piece_index);
+            assert_eq!(piece.collider_handle, Some(colliders[piece_index]));
+            assert_eq!(
+                piece.validation_path,
+                format!("scene.bodies[0].shape.generated_pieces[{piece_index}]")
+            );
+        }
+    }
+
+    #[test]
+    fn static_concave_polygon_fixture_accepts_clockwise_winding() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "static",
+              "shape": {
+                "type": "concave_polygon",
+                "vertices": [[-1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0], [1.0, -1.0], [-1.0, -1.0]]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let world = instantiate_scene_fixture(&fixture)
+            .expect("clockwise static concave polygon should normalize winding");
+        let body = world
+            .bodies()
+            .next()
+            .expect("fixture should create one body");
+        assert_eq!(
+            world
+                .colliders_for_body(body)
+                .expect("decomposed body should resolve")
+                .count(),
+            4
+        );
+    }
+
+    #[test]
+    fn self_intersecting_concave_polygon_fixture_fails_with_stable_path() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "static",
+              "shape": {
+                "type": "concave_polygon",
+                "vertices": [[0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0], [1.0, -1.0]]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("self-intersecting concave polygon should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.vertices: concave_polygon must be simple and non-self-intersecting"
+        );
+    }
+
+    #[test]
+    fn degenerate_concave_polygon_fixture_fails_with_stable_path() {
+        let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "static",
+              "shape": {
+                "type": "concave_polygon",
+                "vertices": [[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [0.0, 0.0]]
+              }
+            }
+          ]
+        }
+        "#;
+
+        let fixture: SceneRecipeFixture =
+            serde_json::from_str(json).expect("fixture json should deserialize");
+        let build_error = fixture
+            .to_world_recipe()
+            .expect_err("degenerate concave polygon should fail before instantiation");
+        assert_eq!(
+            build_error.to_string(),
+            "world setup failed: scene.bodies[0].shape.vertices: concave_polygon requires at least 4 non-degenerate vertices"
+        );
     }
 
     #[test]
@@ -1807,7 +2285,7 @@ mod tests {
             .expect_err("direct concave authoring should fail before instantiation");
         assert_eq!(
             build_error.to_string(),
-            "world setup failed: scene.bodies[0].shape: concave_polygon is not supported directly; use compound with convex pieces"
+            "world setup failed: scene.bodies[0].shape: concave_polygon automatic decomposition is only supported for static bodies"
         );
 
         let instantiate_error = instantiate_scene_fixture(&fixture)

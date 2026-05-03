@@ -17,6 +17,7 @@ import type {
   ControlAction,
   LayerState,
   ResolvedSelection,
+  RunMode,
   SourceKind,
 } from "./types"
 
@@ -35,6 +36,8 @@ export function WorkbenchLayout({
   finalSnapshotArtifact,
   finalSnapshotStep,
   onRun,
+  runMode,
+  onRunModeChange,
   layers,
   onLayerChange,
   currentFrame,
@@ -67,6 +70,8 @@ export function WorkbenchLayout({
   finalSnapshotArtifact: string | null
   finalSnapshotStep: number | null
   onRun: () => void
+  runMode: RunMode
+  onRunModeChange: (value: RunMode) => void
   layers: LayerState
   onLayerChange: (key: keyof LayerState, value: boolean) => void
   currentFrame: FrameRecord
@@ -102,6 +107,8 @@ export function WorkbenchLayout({
         finalSnapshotArtifact={finalSnapshotArtifact}
         finalSnapshotStep={finalSnapshotStep}
         onRun={onRun}
+        runMode={runMode}
+        onRunModeChange={onRunModeChange}
         layers={layers}
         onLayerChange={onLayerChange}
       />
@@ -155,6 +162,8 @@ export function WorkbenchLayout({
                 gravityY={gravityY}
                 setGravityY={setGravityY}
                 locale={locale}
+                runMode={runMode}
+                setRunMode={onRunModeChange}
                 onPlay={() => onControl("play")}
                 onPause={() => onControl("pause")}
                 onStep={() => onControl("step")}

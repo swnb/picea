@@ -22,7 +22,9 @@ export const defaultLayers: LayerState = {
   provenance: false,
 }
 
-export type SourceKind = "server" | "demo"
+export type SourceKind = "demo" | "artifact" | "live"
+
+export type RunMode = "artifact_replay" | "live_session"
 
 export type ControlAction = "play" | "pause" | "step" | "reset"
 

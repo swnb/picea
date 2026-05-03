@@ -14,6 +14,7 @@ pub enum LabError {
     InvalidArtifactFile(String),
     SessionNotFound(String),
     InvalidControlAction(String),
+    LiveOverridesUnavailable,
     World(String),
 }
 
@@ -32,6 +33,10 @@ impl Display for LabError {
             Self::InvalidArtifactFile(file) => write!(f, "invalid artifact file: {file}"),
             Self::SessionNotFound(id) => write!(f, "session not found: {id}"),
             Self::InvalidControlAction(action) => write!(f, "invalid control action: {action}"),
+            Self::LiveOverridesUnavailable => write!(
+                f,
+                "live session overrides require the M25-B paused transaction contract; current live sessions keep the runtime unchanged and artifact replay remains the reset-time override path"
+            ),
             Self::World(error) => write!(f, "world setup failed: {error}"),
         }
     }

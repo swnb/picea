@@ -64,6 +64,26 @@ fn attach_shape_with_density(
         .expect("collider should be created")
 }
 
+fn attach_shape_with_local_pose(
+    world: &mut World,
+    body: BodyHandle,
+    shape: SharedShape,
+    local_pose: Pose,
+    material: Material,
+) -> ColliderHandle {
+    world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape,
+                local_pose,
+                material,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("collider should be created")
+}
+
 fn step_world(world: &mut World, steps: usize) -> StepReport {
     step_world_with_config(world, fixed_step_config(), steps)
 }
@@ -2602,6 +2622,64 @@ fn ccd_dynamic_convex_multi_hit_budget_selects_earliest_dynamic_hit() {
     assert!(
         body_position(&world, bullet).x() < body_position(&world, far).x(),
         "CCD budget should select the nearer dynamic target before the farther hit"
+    );
+}
+
+#[test]
+fn ccd_dynamic_compound_body_clamps_on_earliest_piece_hit() {
+    let mut world = no_gravity_world();
+    let wall = create_body(&mut world, BodyType::Static, 0.0, 0.25, Vector::default());
+    let compound = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.0,
+        0.0,
+        Vector::new(200.0, 0.0),
+    );
+    let wall_collider = attach_shape(
+        &mut world,
+        wall,
+        SharedShape::rect(0.1, 0.12),
+        Material::default(),
+    );
+    let upper_piece = attach_shape_with_local_pose(
+        &mut world,
+        compound,
+        SharedShape::rect(0.1, 0.1),
+        Pose::from_xy_angle(0.0, 0.25, 0.0),
+        Material::default(),
+    );
+    let lower_piece = attach_shape_with_local_pose(
+        &mut world,
+        compound,
+        SharedShape::rect(0.1, 0.1),
+        Pose::from_xy_angle(0.0, -0.25, 0.0),
+        Material::default(),
+    );
+
+    let report = step_world(&mut world, 1);
+    let compound_position = body_position(&world, compound);
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("dynamic compound CCD should emit the selected swept piece contact");
+    let trace = contact.ccd_trace.expect("contact should carry CCD trace");
+
+    assert_eq!(report.stats.ccd_candidate_count, 1);
+    assert_eq!(report.stats.ccd_hit_count, 1);
+    assert_eq!(report.stats.ccd_miss_count, 0);
+    assert_eq!(report.stats.ccd_clamp_count, 1);
+    assert_eq!(trace.target_kind, CcdTargetKind::Static);
+    assert_eq!(trace.moving_body, compound);
+    assert_eq!(trace.static_body, wall);
+    assert_eq!(trace.moving_collider, upper_piece);
+    assert_eq!(trace.static_collider, wall_collider);
+    assert_ne!(trace.moving_collider, lower_piece);
+    assert!(trace.toi > 0.0 && trace.toi < 1.0);
+    assert!(
+        compound_position.x() <= -0.09,
+        "compound body should clamp before the upper piece crosses the wall; x={}",
+        compound_position.x()
     );
 }
 
