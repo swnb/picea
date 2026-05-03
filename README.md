@@ -12,24 +12,61 @@ This repository is a Rust workspace with three crate families:
 | `crates/picea-lab` | Local C/S simulator tooling: deterministic scenarios, artifact capture, HTTP/SSE server, CLI, and the React Canvas workbench under `crates/picea-lab/web`. |
 | `crates/macro-tools` | Standalone proc-macro crate in the workspace for derive helpers such as `Accessors`, `Builder`, and `Deref`, validated separately from the current `crates/picea` dependency graph. |
 
+## Public Beta Surface
+
+The current beta path is the `World` API plus explicit stepping and read-side
+inspection:
+
+- `World`, `WorldDesc`, body/collider/joint descriptors, and opaque handles own
+  authoritative state.
+- `SimulationPipeline`, `StepConfig`, and `StepReport` own fixed-step cadence and
+  per-step counters/events.
+- `DebugSnapshot` and `QueryPipeline` provide stable read-side inspection.
+- `WorldRecipe`, `BodyBundle`, `ColliderBundle`, and `JointBundle` provide
+  reproducible setup for examples, tests, and lab scenarios.
+- `picea-lab` hosts local scenarios, artifact capture, live request-driven
+  sessions, and the React Canvas workbench. It explains core facts rather than
+  recomputing physics in the browser.
+
+For the beta scope, non-goals, migration notes, and final verification matrix,
+see:
+
+- `docs/public-beta.md`
+
+The checked core example is:
+
+- `crates/picea/examples/public_beta_smoke.rs`
+
 ## Quick Start
 
 Run the core library tests:
 
 ```bash
-cargo test -p picea --lib
+rtk proxy cargo test -p picea --lib
+```
+
+Compile the public beta example:
+
+```bash
+rtk proxy cargo test -p picea --examples --no-run
 ```
 
 Run the standalone proc-macro crate tests:
 
 ```bash
-cargo test -p picea-macro-tools
+rtk proxy cargo test -p picea-macro-tools
 ```
 
 Run the local simulator crate tests:
 
 ```bash
-cargo test -p picea-lab
+rtk proxy cargo test -p picea-lab
+```
+
+Start the local simulator server for the web workbench:
+
+```bash
+rtk proxy cargo run -p picea-lab -- serve --bind 127.0.0.1:18080
 ```
 
 ## Development Workflow
@@ -55,6 +92,7 @@ The archived plan mixes old milestone boundaries with execution records from rem
 Before changing code, read:
 
 - `AGENTS.md` for repository rules and authority order.
+- `docs/public-beta.md` for the current beta surface and migration notes.
 - `crates/picea/src/lib.rs` for the current public crate-root surface.
 - `docs/ai/repo-map.md` for module ownership and test routing.
 - `docs/architecture/system-overview.md` for the current crate/module boundary map.
@@ -84,6 +122,7 @@ These are the common workspace gates used across the current repository:
 cargo test -p picea --lib
 cargo test -p picea-lab
 cargo test -p picea-macro-tools
+cargo test -p picea --examples --no-run
 cargo test --workspace --all-targets --no-run
 ```
 

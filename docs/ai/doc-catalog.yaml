@@ -15,8 +15,17 @@ documents:
   status: active
   owner: project
   applies_to: [onboarding, current-routing, usage, workspace, validation, dependency-graph]
-  keywords: [readme, quick-start, routing, lib-surface, workspace, dependency-graph, tests]
-  last_reviewed: 2026-04-23
+  keywords: [readme, quick-start, public-beta, routing, lib-surface, workspace, dependency-graph, tests]
+  last_reviewed: 2026-05-03
+- path: docs/public-beta.md
+  title: Picea Public Beta Guide
+  kind: module
+  authority: medium
+  status: active
+  owner: project
+  applies_to: [onboarding, public-beta, migration, examples, validation, picea-lab]
+  keywords: [public-beta, quick-start, world, simulation-pipeline, query, debug-snapshot, recipe, lab, migration, verification]
+  last_reviewed: 2026-05-03
 - path: crates/picea/README.md
   title: Picea Core Crate Entry
   kind: module
@@ -24,8 +33,8 @@ documents:
   status: active
   owner: picea-core
   applies_to: [core, crate, world, body, collider, joint, pipeline, query, debug]
-  keywords: [readme, core-crate, world, modules, tests, examples]
-  last_reviewed: 2026-04-23
+  keywords: [readme, core-crate, public-beta, world, pipeline, query, debug, recipe, tests, examples]
+  last_reviewed: 2026-05-03
 - path: crates/macro-tools/README.md
   title: Macro Tools Crate Entry
   kind: module
@@ -105,8 +114,8 @@ documents:
   status: active
   owner: architecture
   applies_to: [design, roadmap, decisions]
-  keywords: [design, intent, future-work, decisions]
-  last_reviewed: 2026-04-25
+  keywords: [design, intent, future-work, decisions, public-beta]
+  last_reviewed: 2026-05-03
 - path: docs/design/engine-design.md
   title: Engine Design
   kind: architecture
@@ -143,6 +152,33 @@ documents:
   applies_to: [observability, visualization, benchmarks, artifacts, viewer]
   keywords: [picea-lab, artifact-capture, debug-render, criterion, viewer, perf]
   last_reviewed: 2026-04-24
+- path: docs/design/picea-lab-live-session-semantics.md
+  title: Picea Lab Live Session Semantics
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [live-session, patch, transaction, reset, query-sync, handle-invalidation, picea-lab]
+  keywords: [m25, live-session, reset-time-override, running-world-patch, transaction, handle-invalidation, query-sync, provenance]
+  last_reviewed: 2026-05-03
+- path: docs/design/solver-island-ordering-contract.md
+  title: Solver Island Ordering Contract
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [solver, island, ordering, contacts, joints, sleep, warm-start]
+  keywords: [m28, island, solver-ordering, contact-rows, joint-rows, dense-slots, sleep, wake, warm-start]
+  last_reviewed: 2026-05-03
+- path: docs/design/performance-threshold-policy.md
+  title: Performance Threshold Policy
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [benchmarks, performance, thresholds, baseline, ci, local-validation]
+  keywords: [m29, performance-threshold, criterion, baseline, warn, fail, query-heavy, broadphase, stack, ccd, api-batch]
+  last_reviewed: 2026-05-03
 - path: docs/design/architecture-refactor-requirements.md
   title: Architecture Refactor Requirements
   kind: architecture

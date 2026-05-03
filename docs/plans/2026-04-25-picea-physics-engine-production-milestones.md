@@ -2061,73 +2061,229 @@ Subagent 执行计划：
   island lifecycle 和 3 个 generated pieces；layer menu 中 `宽阶段树` / `岛` /
   `来源` overlay 可打开，浏览器 console 无 warning/error。
 
-## M25：Live Scene Patch Semantics
+## M25：Lab Live Session / Patch Semantics
 
-状态：计划中。
+状态：已完成；Plan Gate 已确认 2026-05-03；M25-A / M25-B 已完成，下一步 M26。
 
 目标：
-在实现 live editing 前先固定语义。M25 完成后，文档和行为锁应该明确 reset、
+把 `picea-lab` 从“后端一次性跑完 artifacts，Web 本地 replay”推进到“可验证的
+后端 live session / tick 调试面”，再固定 live patch 的边界。M25-A 完成后，
+用户应该能区分 demo replay、Rust artifact replay、Rust live session 三种状态；
+live 模式下 `step` 必须在后端持有的 `World + SimulationPipeline` 上推进，而不是
+只移动已写好的 `frames.jsonl` index。M25-B 完成后，文档和行为锁再回答 reset、
 patch、transaction、handle invalidation、query pipeline sync、artifact
-provenance 的边界；必要时只落最小静态 patch contract，不做完整 editor。
+provenance 的边界。
 
 为什么现在做：
-M20/M22 都是静态 scene loading。直接在 running `World` 上热改会影响 handle
+M24 已经把 broadphase tree、island lifecycle、compound provenance 做成
+artifact/core facts 驱动的过程可视化；下一步的用户问题不是“有没有 overlay”，
+而是“Web 调试能否真实驱动后端物理状态”。当前 `server.rs` 的 session 是
+`run_scenario` 预计算结果，`control_session` 主要移动 `current_frame_index`；
+当前 Web 也是先 `fetchFrames`，再用前端 timer 播放本地数组。直接在这个模型上
+加入 patch 或 editor 会混淆 replay 与 authoritative world，还会影响 handle
 生命周期、contact cache、sleep island、query sync 和 artifact reproducibility。
 
+规划依据：
+- explorer：已运行；结论是 M24 不重开，M25 应拆成 live session / tick
+  transport 与 patch semantics 两个可验收子门。
+- reviewer：已运行；发现第一版草案把 transport / patch / export / SSE 假设揉在
+  一个 gate 里。已采纳：M25-A 固定为请求驱动的后端 `step` live session，M25-B
+  单独处理 patch / transaction / query contract。
+- 关键证据（M25-A 实施前）：`crates/picea-lab/src/artifact.rs::run_scenario` 一次性固定步进并写
+  `manifest.json` / `frames.jsonl` / `debug_render.json` / `final_snapshot.json` /
+  `perf.json`；`crates/picea-lab/src/server.rs` 当前 session 只持有 run metadata
+  和事件队列，不持有长生命周期 `World`；`crates/picea-lab/web/src/App.tsx`
+  当前 `playTimer` 驱动本地 frame index；`crates/picea-lab/web/src/api.ts`
+  没有 live tick / frame streaming contract。
+- 主要决策：M25-A 第一版选择 request-driven live step。`play` 可以由 Web 按
+  固定频率连续请求后端 `step`，`pause` 停止请求；不引入后台 worker 或强制
+  long-lived SSE tick。
+- 已解决：M25-A 已从 `artifact.rs` 抽出共享 `FrameRecord` 构造 helper，并保持
+  artifact schema additive / backward-compatible。
+- 已解决：M25-B 选择先落设计文档和红线测试，不实现 paused-only 最小 patch。
+
+计划验收：
+- reviewer：已运行；发现已采纳。
+- 审查结论：需要把 M25-A / M25-B 拆成独立 gate，并把 M25-A transport 选死为
+  request-driven step；本版已更新。
+- 用户确认：已确认 2026-05-03。
+
+执行拆分：
+- M25-A Backend-driven live step session：建立后端持有 authoritative session 的
+  最小运行面。V1 只要求 request-driven `step`；Web `play` 是客户端连续请求
+  backend `step`，不是后台 worker 自动推 tick。
+- M25-B Patch / transaction semantics：在 live session 边界稳定后，再定义
+  reset / patch / transaction / handle invalidation / query sync / provenance；
+  第一版只允许 paused 状态下的受限 patch 或只提交设计文档和红线测试。
+
 范围：
-- 设计 live scene patch 的 reset / rebuild / transactional apply 选项。
-- 明确哪些 patch 会保留 handles，哪些必须 invalidate / rebuild。
-- 为 query pipeline sync、contact cache 清理、sleep wake reason 增加行为锁。
-- 只实现最小可验证 patch path，或在探索后仅提交设计文档和红线测试。
+- 明确三种 source：`demo replay`、`Rust artifact replay`、`Rust live session`。
+- M25-A 定义 live session 的生命周期：create、step、play、pause、reset、fail、
+  close。`seek` 到历史帧只浏览已缓冲帧，不回滚后端 world。
+- M25-A 固定 live frame schema 为现有 `FrameRecord`；如果实现时发现无法 additive
+  复用，必须暂停并修订计划，不允许破坏旧 artifact。
+- M25-A 只定义 request/response 或短轮询所需的 frame/status contract；SSE 可用于
+  状态日志，但不是 V1 tick 的唯一承载。
+- M25-A 不要求 export；旧 artifact replay 仍由现有 run/artifact path 承担。
+- M25-B 定义 patch 语义：reset-time overrides、paused-only patch、transactional
+  apply、失败回滚、handle invalidation、contact cache 清理、sleep wake reason、
+  `QueryPipeline::sync` / `last_stats()` 行为。
+- 保持旧 artifact replay、旧 scene fixture、M24 process overlays 可用。
 
 不做：
 - 不做完整视觉编辑器。
 - 不承诺任意运行中 world mutation 都保持 handle 稳定。
 - 不把 `WorldCommands` 变成高频 runtime mutation API。
 - 不做 networking / collaborative editing。
+- M25-A 不做后台 worker、server-side autoplay loop、强制 long-lived SSE tick、
+  artifact export、running-world patch。
+- 不让 Web 重新执行 broadphase、island grouping、collision、mass/inertia、
+  decomposition 或 solver 逻辑。
+- 不修改 solver row math、CCD algorithms、narrowphase/contact manifold、
+  broadphase heuristics。
 
 所有权：
-- 可能触及：`docs/design/*`、`crates/picea/src/recipe.rs`、
-  `crates/picea/src/world/api.rs`、`crates/picea-lab/src/scenario.rs`、
-  `crates/picea-lab/src/server.rs`、相关 tests。
-- 不应触及：solver row math、CCD algorithms、broadphase heuristics。
+- M25-A 可能触及：`crates/picea-lab/src/server.rs`、
+  `crates/picea-lab/src/scenario.rs`、`crates/picea-lab/src/artifact.rs`（仅允许抽出
+  `FrameRecord` 构造 helper，不改 artifact schema）、`crates/picea-lab/tests/server_routes.rs`、
+  `crates/picea-lab/tests/artifact_run.rs`、`crates/picea-lab/web/src/App.tsx`、
+  `crates/picea-lab/web/src/api.ts`、`crates/picea-lab/web/src/types.ts`、
+  `crates/picea-lab/web/src/components/workbench/Toolbar.tsx`、
+  `crates/picea-lab/web/src/components/workbench/Timeline.tsx`、
+  `crates/picea-lab/web/src/components/workbench/WorkbenchLayout.tsx`、
+  `crates/picea-lab/web/scripts/ui-contract.mjs`、`crates/picea-lab/web/scripts/i18n-contract.mjs`。
+- M25-B 可能触及：`docs/design/picea-lab-live-session-semantics.md`（或同等设计文档）、
+  `docs/ai/repo-map.md`、`docs/ai/index.md`、`crates/picea/src/recipe.rs`、
+  `crates/picea/src/world/api.rs`、`crates/picea/src/query.rs`、
+  `crates/picea-lab/src/server.rs`、`crates/picea-lab/src/scenario.rs`、
+  `crates/picea/tests/v1_api_smoke.rs`、`crates/picea/tests/core_model_world.rs`、
+  `crates/picea/tests/world_step_review_regressions.rs`、
+  `crates/picea/tests/query_debug_contract.rs`、`crates/picea-lab/tests/server_routes.rs`。
+- 不应触及：`crates/picea/src/solver/contact.rs`、
+  `crates/picea/src/pipeline/ccd.rs`、`crates/picea/src/pipeline/gjk.rs`、
+  `crates/picea/src/pipeline/narrowphase.rs`、solver ordering、CCD coverage、
+  broadphase tree heuristics、public beta docs unrelated cleanup。
 
 验收标准：
-- 文档能回答 reset vs patch vs transaction 的语义差异。
-- 行为锁覆盖 handle invalidation、query sync、contact/sleep cleanup 的关键边界。
+- M25-A 完成后，Rust server 能创建 live session 并在后端持有真实
+  `World + SimulationPipeline`；每次 `step` 请求都会推进后端 world，并返回或
+  记录新的 `FrameRecord`。
+- M25-A 完成后，Web 能清楚显示当前 source 是 `Rust live session`；`step` 会等
+  backend frame 返回后推进 UI，`play` 只是连续触发 backend step，`pause` 停止
+  触发；它不再只是移动本地 replay index。
+- M25-A 完成后，`reset` 会重建 live world 并清空 live buffer；artifact replay
+  path、demo fallback 和 M24 overlays 仍可用。
+- M25-B 完成后，文档能回答 reset vs patch vs transaction 的语义差异。
+- M25-B 完成后，行为锁覆盖 handle invalidation、query sync、contact/sleep
+  cleanup 的关键边界。
 - 旧 static scene fixture path 不变。
 - 如果实现最小 patch，失败模式必须是显式错误，不允许静默半更新。
+- M24 的 broadphase tree、island lifecycle、compound provenance overlays 在
+  artifact replay 和 live frame 上都只消费 artifact/core facts，不制造物理结论。
 
 验证方式：
+M25-A：
+- `rtk proxy cargo test -p picea-lab --test server_routes`
+- `rtk proxy cargo test -p picea-lab --test artifact_run`
+- `rtk proxy cargo test -p picea-lab`
+- `cd crates/picea-lab/web && rtk proxy npm run build`
+- `cd crates/picea-lab/web && rtk proxy npm run test:ui-contract`
+- `cd crates/picea-lab/web && rtk proxy npm run test:i18n`
+- `rtk proxy git diff --check`
+- Browser 验收：启动 `rtk proxy cargo run -p picea-lab -- serve --bind 127.0.0.1:18080`
+  和 `picea-lab-web` dev server，用 `browser-use:browser` 打开本地页面，检查
+  source badge、backend step frame/status、play/pause/reset、artifact replay
+  fallback、M24 overlays 是否可见。
+
+M25-B：
 - `rtk proxy cargo test -p picea --test v1_api_smoke`
 - `rtk proxy cargo test -p picea --test core_model_world`
 - `rtk proxy cargo test -p picea --test world_step_review_regressions`
+- `rtk proxy cargo test -p picea --test query_debug_contract`
 - `rtk proxy cargo test -p picea-lab`
+- `rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'`
 - `rtk proxy git diff --check`
 
 Subagent 执行计划：
-- explorer：叶子 agent；先给出 handle/contact/query/sleep 语义风险清单和最小
-  design surface。
-- worker：叶子 agent；若计划批准实现，仅落最小设计/测试/patch contract。
+- explorer：叶子 agent；M25-A 先确认 server session ownership、SSE lifecycle、
+  frontend source model、`FrameRecord` helper 复用点；M25-B 再给出 handle/contact/query/
+  sleep 语义风险清单和最小 design surface。
+- worker：叶子 agent；优先 `gpt-5.4`。M25-A 只实现 live session / tick
+  transport 和 Web source 区分；M25-B 只落设计/测试/最小 patch contract。
 - reviewer：叶子 agent；重点审查 public API、兼容性、artifact reproducibility
-  和隐式 world mutation。
-- verifier：叶子 agent；运行 M25 验证方式。
+  和隐式 world mutation；同时确认 Web 没有重新计算物理事实。
+- verifier：叶子 agent；按 M25-A 或 M25-B 的验证方式分别运行，并报告验证过程中
+  产生或修改的文件。
 
 提交策略：
 - auto-commit：否。
-- message hint：`Define M25 live scene patch semantics`。
+- message hint：`Add M25 lab live session semantics`。
 
 风险 / 后续：
 - 如果 patch 语义影响 public API 或 handle lifecycle，必须暂停让用户确认。
+- 如果 M25-A 实现中必须引入后台 worker、server-side autoplay loop、long-lived
+  SSE tick 或非 additive API/schema 改动，必须暂停并修订计划。
+- 如果 M25-A 发现现有 `FrameRecord` 无法同时服务 live frame 和 artifact replay，
+  优先做 additive schema，不破坏旧 artifact。
+- 如果需求扩展到 visual editor、collaborative editing、arbitrary running-world
+  mutation、solver/CCD/ordering 改动，必须暂停并拆出新 milestone。
+
+进度记录：
+- 2026-05-03 - M25-A Backend-driven live step session：已完成；Commit：无。
+  Rust server 现在区分 `artifact_replay` 与 `live_session`，live session 在
+  server 端持有 authoritative `World + SimulationPipeline`，`step` request
+  推进后端 world 并返回 `latest_frame`。`PATCH /overrides` 对 live session
+  显式返回 400，避免在 M25-A 暗自引入 patch semantics；artifact replay 保持
+  reset-time override / artifact path 兼容。Web 现在明确区分 demo replay、
+  Rust artifact replay、Rust live session；live `play` 是前端连续请求 backend
+  `step`，并用 generation / request token 丢弃 stale live response；artifact
+  replay control 仍走 server session，`reset` 后重新加载新 run 的 frames 和
+  final snapshot。Server session storage 改为全局 map + per-session mutex，
+  artifact run 不再持有全局 server mutex 跑 physics / 写 artifacts。AI routing
+  已同步 M25-A / M25-B 拆分。
+- 验证：`rtk proxy cargo test -p picea-lab --test server_routes` 通过（3 tests）；
+  `rtk proxy cargo test -p picea-lab --test artifact_run` 通过（14 tests）；
+  `rtk proxy cargo test -p picea-lab` 通过；`cd crates/picea-lab/web &&
+  rtk proxy npm run build` 通过；`cd crates/picea-lab/web &&
+  rtk proxy npm run test:ui-contract` 通过；`cd crates/picea-lab/web &&
+  rtk proxy npm run test:i18n` 通过；`rtk proxy git diff --check` 通过。
+- Browser 验收：`browser-use:browser` 的 IAB backend 未发现可用实例，因此降级为
+  Playwright CLI。启动 `picea-lab serve --bind 127.0.0.1:18081` 与
+  Vite `127.0.0.1:5175` 后，真实页面验证 artifact replay 能创建/step/reset；
+  live session 能创建为 `Rust 实时会话`，step 后显示 `共 1 帧` / `步数 1`，
+  reset 后回到 `已创建` / `共 0 帧`；浏览器 console warning/error 为 0。
+- 风险 / 后续：M25-A 仍刻意不实现 live patch / transaction / handle
+  invalidation / query sync；这些进入 M25-B。Playwright CLI 生成了未跟踪
+  `.playwright-cli/` 验收记录目录，未纳入代码改动。
+- 2026-05-03 - M25-B Patch / transaction semantics：已完成；Commit：无。
+  新增 `docs/design/picea-lab-live-session-semantics.md`，把 reset-time override、
+  running-world patch、transaction、handle invalidation、query sync、provenance
+  的 M25-B 语义和后续产品升级路径固定下来。当前产品选择是显式拒绝 live
+  `PATCH /overrides`，不在未定义 paused transaction contract 前热改运行中
+  world；artifact replay 继续承担 reset-time override path。`server_routes`
+  新增 live `play` status-only 行为锁，确认 server 不会在 `play/run` 时偷偷推进
+  physics 或合成 frame event，backend world 只由 `step` 请求推进。
+- 验证：`rtk proxy cargo test -p picea --test v1_api_smoke` 通过（5 tests）；
+  `rtk proxy cargo test -p picea --test core_model_world` 通过（18 tests）；
+  `rtk proxy cargo test -p picea --test world_step_review_regressions` 通过（11 tests）；
+  `rtk proxy cargo test -p picea --test query_debug_contract` 通过（26 tests）；
+  `rtk proxy cargo test -p picea-lab` 通过（21 unit + 14 artifact + 4 server tests）；
+  `rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'`
+  通过；`rtk proxy git diff --check` 通过。
+- 风险 / 后续：M25-B 没有实现 paused-only patch endpoint。后续如果要做 live
+  patch，必须另开 preview/commit slice，通过 `WorldCommands` scratch clone
+  事务、query resync、handle invalidation 和 provenance response 后再暴露给 Web。
 
 ## M26：CCD Expansion Slice
 
-状态：计划中。
+状态：已完成；2026-05-03 选择 dynamic compound CCD 作为单片扩展，rotational CCD 保留后续。
 
 目标：
 选择 dynamic compound CCD 或 rotational CCD 中最小、最可验收的一片。M26
-完成后，选中的 CCD slice 应该有 TOI ordering、budget、false-positive /
-false-negative 行为锁和 trace facts；未选方向继续留在后续。
+已选择 dynamic compound CCD：复用现有 per-collider translational convex sweep，
+让一个 dynamic compound body 的 earliest convex piece hit 能 clamp 整个 body，并
+通过 artifact/debug render 保留 selected-piece `ccd_trace` facts。Rotational CCD
+仍是后续算法 slice。
 
 为什么现在做：
 M19 已完成 translational dynamic-vs-dynamic convex CCD。M22 引入 compound
@@ -2140,6 +2296,11 @@ TOI 候选、排序和预算复杂度。
 - 为 selected/ignored TOI、budget clamp、no false positive、missed impact
   增加行为锁。
 - 扩展 `CcdTrace` / debug facts 仅限解释选中 slice。
+- 本次选择理由：dynamic compound authoring 在 M22 已落为多个 convex colliders，
+  当前 CCD phase 已以 collider snapshot 为单位做 translational sweep；补 behavior
+  locks 和 lab evidence 即可验证 selected piece 与 body clamp。Rotational CCD
+  需要 angular sweep bound，当前 `pipeline/ccd.rs` 明确跳过转动 body，不能作为同等
+  小 slice。
 
 不做：
 - 不做全 shape CCD。
@@ -2160,6 +2321,23 @@ TOI 候选、排序和预算复杂度。
 - TOI ordering、budget 和 trace facts 对选中场景可观察。
 - 已有 M13/M19 CCD 行为保持绿色。
 - 未覆盖方向在文档中保留为后续，不伪装成已完成。
+
+进度记录：
+- 2026-05-03 - M26 CCD Expansion Slice：已完成；Commit：无。选择 dynamic
+  compound CCD 而非 rotational CCD。新增
+  `physics_realism_acceptance::ccd_dynamic_compound_body_clamps_on_earliest_piece_hit`，
+  锁定 dynamic compound body 由 earliest convex piece 命中静态墙时 clamp 整个 body，
+  并保持 candidate/hit/miss/clamp counters 为 `1/1/0/1`。新增
+  `ccd_dynamic_compound_wall` lab scenario 和 artifact test，确保 `frames.jsonl` 与
+  `debug_render.json` 都保留 selected-piece `ccd_trace`。
+- 验证：`rtk proxy cargo test -p picea --test physics_realism_acceptance ccd` 通过
+  （13 tests）；`rtk proxy cargo test -p picea --lib pipeline::ccd` 通过（4 tests）；
+  `rtk proxy cargo test -p picea --lib pipeline::gjk` 通过（5 tests）；
+  `rtk proxy cargo test -p picea-lab --test artifact_run` 通过（15 tests）；
+  `rtk proxy cargo bench -p picea --no-run` 通过。
+- 风险 / 后续：M26 没有实现 rotational CCD；现有
+  `ccd_dynamic_convex_pair_skips_rotating_bodies` 继续明确这个非目标。Dynamic circle
+  vs dynamic target、all-shape CCD、arbitrary concave CCD 也仍不在本 slice。
 
 验证方式：
 - `rtk proxy cargo test -p picea --test physics_realism_acceptance ccd`
@@ -2187,13 +2365,13 @@ Subagent 执行计划：
 
 ## M27：Automatic Polygon Decomposition
 
-状态：计划中。
+状态：已完成；2026-05-03 选择受限 static authoring-time ear clipping，不做 dynamic concave 或 direct concave solver。
 
 目标：
 把 M22 的“手写 compound pieces”推进到受限自动 polygon decomposition。
-M27 完成后，静态或受限 authoring path 可以把合规 concave polygon 转换为
-deterministic convex pieces；core solver 仍然不直接求解 arbitrary concave
-contact。
+M27 已支持 lab scene schema 中的 static `concave_polygon` 通过 deterministic
+ear clipping 转换为 convex triangle pieces；core solver 仍然不直接求解 arbitrary
+concave contact，dynamic concave 仍显式拒绝。
 
 为什么现在做：
 只有在 M24 visualization/provenance foundation 和 M25 patch semantics 明确后，
@@ -2206,6 +2384,9 @@ boundary 清楚。
 - 锁定 invalid polygon、self-intersection、zero-area、winding、piece ordering、
   material/filter/sensor inheritance。
 - 让 generated pieces 进入 M24 visualization/provenance surface。
+- 本次选择理由：ear clipping 对受限 simple polygon 足够小且 deterministic；只在
+  lab authoring 层运行，把结果转成现有 `ColliderBundle` convex pieces，不让
+  `SharedShape::ConcavePolygon` 进入 narrowphase/solver。
 
 不做：
 - 不做 direct concave solver。
@@ -2224,6 +2405,20 @@ boundary 清楚。
 - 非合规输入以稳定 nested error path 失败。
 - Piece ordering、继承关系和 provenance 可观察。
 - Core solver boundary 文档仍声明不支持 arbitrary concave contact。
+
+进度记录：
+- 2026-05-03 - M27 Automatic Polygon Decomposition：已完成；Commit：无。选择
+  static-only authoring-time ear clipping。`SceneShapeFixture::ConcavePolygon`
+  对 static body 生成 deterministic convex triangle colliders，继承 material /
+  filter / density / sensor，并把 generated pieces 写入 `compound_provenance`；
+  dynamic concave 仍以稳定错误拒绝。新增 `concave_decomposition` builtin scenario
+  和 artifact test，`frames.jsonl` / `debug_render.json` 都能看到
+  `shape.generated_pieces[*]` provenance。
+- 验证：新增 `picea-lab concave` targeted gate 通过（7 lib-filter tests + 2
+  artifact-filter tests）。完整 M27 gates 见本轮最终验证记录。
+- 风险 / 后续：M27 不承诺任意复杂 polygon；如果 ear clipping 无法稳定处理的输入，
+  会显式报错。Dynamic concave mass/inertia、runtime high-frequency decomposition、
+  direct concave contact 仍不属于当前路线。
 
 验证方式：
 - `rtk proxy cargo test -p picea --test core_model_world`
@@ -2251,12 +2446,13 @@ Subagent 执行计划：
 
 ## M28：Solver Ordering / Island Contract
 
-状态：计划中。
+状态：已完成；2026-05-03 固定当前 single-threaded separate-phase island-local ordering contract。
 
 目标：
 评估并收敛 contact/joint 是否应该共享更强的 island-owned ordering contract。
-M28 完成后，solver ordering、debug facts 和未来 parallel island solver 的边界
-应该更清楚，但不要求本 milestone 引入多线程。
+M28 已固定当前 contract：contact/joint rows 共享 island-local dense body slots，
+但仍保留 contact-solve / joint-solve separate phases；未来 parallel island solver
+或 unified row stream 需要另开 milestone。
 
 为什么现在做：
 M16 已经把 active island solver 收敛到 dense island-local slots。后续如果要做
@@ -2268,6 +2464,8 @@ M16 已经把 active island solver 收敛到 dense island-local slots。后续�
 - 为 contact/joint ordering、warm-start、wake reason、sleep skip 增加行为锁。
 - 必要时调整 debug/lab facts，使 ordering 可解释。
 - 只做单线程 deterministic contract。
+- 本次选择理由：当前 stack/sleep/warm-start 证据都围绕 separate-phase solver；直接
+  合并 contact/joint row stream 会改变物理结果，应该留给独立 solver milestone。
 
 不做：
 - 不做 multithreaded solver。
@@ -2286,6 +2484,17 @@ M16 已经把 active island solver 收敛到 dense island-local slots。后续�
 - Existing stack stability、sleep、wake reason、warm-start 语义保持稳定。
 - Debug facts 足以解释 island-local ordering。
 - 如果不改变实现，也要有行为锁证明当前 contract 是刻意选择。
+
+进度记录：
+- 2026-05-03 - M28 Solver Ordering / Island Contract：已完成；Commit：无。新增
+  `docs/design/solver-island-ordering-contract.md`，明确 active island ordering、
+  dense `body_slots`、contact row gather order、joint row iteration order、sleeping
+  island skip，以及 contact/joint 仍为 separate-phase vectors。新增
+  `contact_and_joint_rows_share_slots_but_keep_separate_phase_order` 单测，锁定同一
+  island 内 contact/joint rows 共享 slots 但不合并 row stream。
+- 验证：完整 M28 gates 见本轮最终验证记录。
+- 风险 / 后续：M28 没有引入 multithreaded solver、unified row stream 或 solver
+  数学变化；如果未来要改变 ordering，需要提供物理结果 diff 和 rollback plan。
 
 验证方式：
 - `rtk proxy cargo test -p picea --test physics_realism_acceptance stack`
@@ -2313,12 +2522,12 @@ Subagent 执行计划：
 
 ## M29：Performance Threshold Gate
 
-状态：计划中。
+状态：已完成；2026-05-03 固定 baseline / warn / fail policy，不设置默认 hard-fail 阈值。
 
 目标：
-把 M17/M23 累积的 baseline 证据推进到初始 perf regression guard。M29 完成后，
-关键场景可以有合理阈值或警戒线，但这些阈值必须来自多轮 baseline，而不是
-一次本机跑分。
+把 M17/M23 累积的 baseline 证据推进到初始 perf regression guard。M29 已新增
+`docs/design/performance-threshold-policy.md`：关键场景先进入 baseline / warn
+policy，不把一次本机 wall-clock 跑分变成 hard-fail。
 
 为什么现在做：
 M23 先补 counter 和 baseline，M29 再设置 threshold。这样可以避免过早把不稳定
@@ -2330,6 +2539,8 @@ wall-clock 数据变成阻塞开发的假警报。
 - 定义 baseline 采样策略、variance 记录和 threshold policy。
 - 增加 CI/local guard 文档或脚本，明确何时 fail、何时 warn。
 - 把 counters 与 wall-clock 结论一起记录，避免只看耗时。
+- 本次选择理由：当前只有本地 smoke，不足以建立可移植 hard threshold；先固定
+  scenario set、采样次数、counter 对照和 warn/fail 晋级规则。
 
 不做：
 - 不为所有 benchmark 设置阈值。
@@ -2346,6 +2557,18 @@ wall-clock 数据变成阻塞开发的假警报。
 - Baseline 数据来源、重复次数、variance 解释可复现。
 - 至少覆盖 query/broadphase/CCD/stack/recipe 中的关键场景。
 - 不稳定环境下有明确 fallback，不阻塞正确性验证。
+
+进度记录：
+- 2026-05-03 - M29 Performance Threshold Gate：已完成；Commit：无。新增
+  `docs/design/performance-threshold-policy.md`，覆盖 `query_heavy`、
+  `sparse_broadphase` / `dense_broadphase`、`stack_stability`、`ccd_bullet` /
+  `ccd_dynamic_pair`、`api_batch_creation`。策略明确 `informational`、`warn`、
+  `fail` 三级：M29 默认不 hard-fail，只有五轮可比 baseline + review-approved
+  wall-clock/counter 双阈值后才允许 fail。
+- 验证：完整 M29 gates 见本轮最终验证记录。Local baseline smoke 输出位置为
+  `target/criterion/`。
+- 风险 / 后续：M29 没有添加 CI hard threshold；后续要把 warning 升级为 failure，
+  必须先积累多轮 baseline 并保留 counter diff。
 
 验证方式：
 - `rtk proxy cargo bench -p picea --no-run`
@@ -2369,7 +2592,8 @@ Subagent 执行计划：
 
 ## M30：Public Beta Hardening
 
-状态：计划中。
+状态：已完成；2026-05-03 完成 public beta guide、README / crate README 入口、
+example compile smoke 和最终验证矩阵。
 
 目标：
 把 M1-M29 的能力收束成可试用的 public beta：API surface、docs、examples、
@@ -2429,10 +2653,39 @@ Subagent 执行计划：
 - 如果发现 beta-blocking API 设计问题，必须暂停并让用户确认是否允许 breaking
   change。
 
+进度记录：
+- 2026-05-03 - M30 Public Beta Hardening：已完成；Commit：无。新增
+  `docs/public-beta.md` 作为 beta 使用、非目标、迁移和验收矩阵入口；更新根
+  README 与 `crates/picea/README.md`，把当前公共入口收敛到 `World` /
+  `SimulationPipeline` / `DebugSnapshot` / `QueryPipeline` / `WorldRecipe`。
+  新增 `crates/picea/examples/public_beta_smoke.rs`，用 `picea::prelude::*`
+  覆盖 world creation、step、query 和 recipe instantiation 的最小流程。
+- 验证：完整 M30 gates 见本轮最终验证记录。
+- 风险 / 后续：M30 不承诺 1.0 semver、不实现 paused-only live patch、rotational
+  CCD、arbitrary concave solver 或 multithreaded solver；这些仍是后续 roadmap。
+
+最终验证记录（2026-05-03）：
+- Rust gates：`rtk proxy cargo test -p picea --lib`、`rtk proxy cargo test -p picea --tests`、
+  `rtk proxy cargo test -p picea-lab`、`rtk proxy cargo test -p picea --examples --no-run`、
+  `rtk proxy cargo bench -p picea --no-run` 均通过。
+- Web gates：`rtk proxy npm run build`、`rtk proxy npm run test:ui-contract`、
+  `rtk proxy npm run test:i18n` 均在 `crates/picea-lab/web` 通过。
+- Docs / hygiene：`rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'`
+  输出 `yaml ok`；`rtk proxy git diff --check` 通过。
+- Browser：`browser-use:browser` 已按 `iab` backend 尝试，但当前 Codex app 未暴露可连接的
+  in-app browser backend；随后用 Playwright CLI 降级验收 `http://127.0.0.1:5176/`
+  + `http://127.0.0.1:18081`。页面显示新场景
+  `Concave decomposition fixture` / `CCD dynamic compound wall`；运行 concave
+  artifact replay 后 inspector 显示 5 colliders、4 generated pieces 和
+  `scene.bodies[0].shape.generated_pieces[*]` 路径；切到 `Rust 实时会话` 后
+  request-driven `step` 返回 1 帧、step index 1、source badge 为 Rust live session。
+  Playwright console 检查为 0 errors / 0 warnings，网络请求均为 200/201。
+
 ## Post-M30 Follow-Up / Remaining Risks
 
-These items are real follow-up work. M11-M22 are completed in the current
-milestone line; M23-M30 are planned gates and are not completed claims.
+These items are real follow-up work. M11-M30 are completed in the current
+milestone line in this workspace; the items below are remaining roadmap risks,
+not hidden completion claims.
 
 - M17 completed: query/broadphase/solver-island counters, artifact summaries,
   and Criterion scenario coverage now exist as the evidence gate before tuning.
@@ -2452,19 +2705,23 @@ milestone line; M23-M30 are planned gates and are not completed claims.
   regression, and authored dynamic compound pieces have an additive
   mass/inertia behavior lock that distinguishes overlapping pieces from boolean
   concave union semantics.
-- M23 planned: harden broadphase/query performance evidence before larger feature
-  expansion.
-- M24 planned: upgrade `picea-lab-web` into a process visualization foundation
+- M23 completed: hardened broadphase/query performance evidence before larger
+  feature expansion.
+- M24 completed: upgraded `picea-lab-web` into a process visualization foundation
   for broadphase tree traversal, island lifecycle, and compound provenance
   without letting lab recompute physics.
-- M25 planned: define live scene patch semantics before editor-style mutation.
-- M26 planned: choose one CCD expansion slice with TOI ordering and budget locks.
-- M27 planned: consider automatic polygon decomposition behind strict authoring
-  constraints.
-- M28 planned: clarify solver ordering / island contract before parallel or
+- M25 completed: split live debugging into backend live session / tick transport
+  first, then documented reset/patch/transaction semantics before editor-style
+  mutation.
+- M26 completed: selected dynamic compound CCD as the narrow CCD expansion slice
+  with TOI ordering and budget locks.
+- M27 completed: added automatic static concave polygon decomposition behind
+  strict authoring constraints.
+- M28 completed: clarified solver ordering / island contract before parallel or
   tighter joint/contact coupling.
-- M29 planned: convert repeated baseline evidence into initial threshold policy.
-- M30 planned: harden public beta API/docs/examples/migration.
+- M29 completed: converted repeated baseline evidence into initial threshold
+  policy.
+- M30 completed: hardened public beta API/docs/examples/migration.
 - Beyond M30: direct arbitrary concave contact solving, broad all-shape CCD,
   multithreaded solver execution, full visual editor, and 1.0 semver freeze all
   remain separate roadmap decisions.
@@ -2521,15 +2778,19 @@ milestone:
   and query stats without exposing internal broadphase proxy ids.
 - M22: show supported compound/concave authoring examples, generated convex
   piece ordering and validation facts, and stable validation errors for
-  unsupported direct concave solver usage; richer artifact/schema/UI
-  provenance is planned in M24.
+  unsupported direct concave solver usage; richer artifact/schema/UI provenance
+  landed in M24.
 - M23: show query/broadphase counter summaries and benchmark-cost facts without
   treating wall-clock timing as the lab correctness oracle.
 - M24: show broadphase tree nodes/traversal/prune facts, island graph and
   sleep/wake lifecycle, plus compound authored objects, generated convex pieces,
   inheritance facts, and validation paths in artifacts/UI.
-- M25: show reset/patch/transaction provenance if live scene patching reaches
-  artifact or server workflows.
+- M25-A: distinguish demo replay, Rust artifact replay, and Rust live session;
+  show request-driven backend `step` frame/status changes without making Web
+  compute physics or silently replay old artifact frames.
+- M25-B: show reset/patch/transaction provenance, handle invalidation, query
+  sync, contact/sleep cleanup, and explicit failure paths if live scene patching
+  reaches artifact or server workflows.
 - M26: show the selected CCD expansion slice through TOI ordering, budget
   decisions, and selected/ignored impact facts.
 - M27: show polygon decomposition provenance, generated piece ordering, and
