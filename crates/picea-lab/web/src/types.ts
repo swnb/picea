@@ -290,8 +290,46 @@ export type FrameRecord = {
   frame_index: number;
   simulated_time: number;
   state_hash: string;
+  report?: StepReportRecord;
+  stats?: DebugSnapshot["stats"];
+  events?: WorldEventRecord[];
   snapshot: DebugSnapshot;
   compound_provenance?: CompoundProvenance[];
+  perturbation_provenance?: LivePerturbationProvenance[];
+};
+
+export type StepReportRecord = {
+  step_index?: number;
+  simulated_time?: number;
+  dt?: number;
+  revision?: number | null;
+  stats?: DebugSnapshot["stats"];
+  events?: WorldEventRecord[];
+};
+
+export type WorldEventRecord = Record<string, unknown>;
+
+export type PerfArtifact = {
+  frame_count: number;
+  elapsed_micros: number | string;
+  final_state_hash: string;
+  counter_summary?: PerfCounterSummary;
+};
+
+export type PerfCounterSummary = {
+  total_broadphase_candidate_count?: number;
+  total_broadphase_traversal_count?: number;
+  total_broadphase_pruned_count?: number;
+  max_broadphase_tree_depth?: number;
+  total_contact_count?: number;
+  total_contact_row_count?: number;
+  total_joint_row_count?: number;
+  total_solver_body_slot_count?: number;
+  total_island_count?: number;
+  total_active_island_count?: number;
+  total_sleeping_island_skip_count?: number;
+  total_ccd_candidate_count?: number;
+  total_ccd_hit_count?: number;
 };
 
 export type SessionMode = "artifact_replay" | "live_session";
@@ -307,6 +345,7 @@ export type SessionRecord = {
   scenario_id: string;
   mode: SessionMode;
   status: "created" | "running" | "paused" | "completed" | "failed";
+  session_epoch: number;
   run_id: string | null;
   frame_count: number;
   buffered_frame_count: number;
@@ -320,6 +359,76 @@ export type SessionRecord = {
   final_snapshot_artifact?: string | null;
   latest_frame?: FrameRecord | null;
   last_error: string | null;
+};
+
+// Server-side paused edit gate rejection reasons. These are domain responses
+// from the live session contract, not transport-level fetch errors.
+export type VelocityPerturbationRejectionReason =
+  | "not_live_session"
+  | "session_created"
+  | "session_running"
+  | "session_completed"
+  | "session_failed"
+  | "missing_frame_snapshot"
+  | "stale_world_revision"
+  | "stale_session_epoch"
+  | "stale_frame"
+  | "invalid_body_handle"
+  | "static_body"
+  | "kinematic_body"
+  | "invalid_velocity_delta"
+  | "missing_preview_action"
+  | "stale_preview_action"
+  | "body_patch_failed"
+  | "reused_action";
+
+export type LiveQuerySyncStatus = "synced" | "stale";
+
+export type LivePerturbationCommitOutcome = "accepted";
+
+export type VelocityPerturbationPreview = {
+  action_id: string;
+  session_id: string;
+  world_revision: number;
+  session_epoch: number;
+  body_handle: number;
+  frame_index: number;
+  before_velocity: Vec2 | null;
+  requested_delta: Vec2 | null;
+  computed_target_velocity: Vec2 | null;
+  wake_intent: boolean;
+  rejection_reason: VelocityPerturbationRejectionReason | null;
+};
+
+export type VelocityPerturbationCommit = {
+  action_id: string;
+  session_id: string;
+  accepted: boolean;
+  world_revision: number;
+  session_epoch: number;
+  body_handle: number;
+  frame_index: number;
+  before_velocity: Vec2 | null;
+  requested_delta: Vec2 | null;
+  computed_target_velocity: Vec2 | null;
+  wake_intent: boolean;
+  query_sync_status: LiveQuerySyncStatus | null;
+  rejection_reason: VelocityPerturbationRejectionReason | null;
+};
+
+export type LivePerturbationProvenance = {
+  action_id: string;
+  session_id: string;
+  world_revision: number;
+  session_epoch: number;
+  body_handle: number;
+  frame_index: number;
+  before_velocity: Vec2;
+  requested_delta: Vec2;
+  computed_target_velocity: Vec2;
+  wake_intent: boolean;
+  commit_outcome: LivePerturbationCommitOutcome;
+  query_sync_status: LiveQuerySyncStatus;
 };
 
 export type WorkbenchLog = {

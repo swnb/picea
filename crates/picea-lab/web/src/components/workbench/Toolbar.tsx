@@ -8,6 +8,7 @@ import {
   Languages,
   Layers,
   Play,
+  SlidersHorizontal,
 } from "lucide-react"
 
 import { Badge } from "../ui/badge"
@@ -17,11 +18,17 @@ import {
   layerLabel,
   localeLabels,
   localizeScenario,
+  overlayPresetDescription,
+  overlayPresetLabel,
+  scenarioGroupForId,
+  scenarioGroupLabel,
   sourceLabel,
   statusLabel,
   t,
   type LayerKey,
   type Locale,
+  type OverlayPresetId,
+  type ScenarioGroupId,
   type StatusKind,
 } from "../../i18n"
 import type { ScenarioDescriptor } from "../../types"
@@ -46,6 +53,7 @@ export function Toolbar({
   onRunModeChange,
   layers,
   onLayerChange,
+  onApplyOverlayPreset,
 }: {
   locale: Locale
   onLocaleChange: (locale: Locale) => void
@@ -65,7 +73,9 @@ export function Toolbar({
   onRunModeChange: (value: RunMode) => void
   layers: LayerState
   onLayerChange: (key: keyof LayerState, value: boolean) => void
+  onApplyOverlayPreset: (preset: OverlayPresetId) => void
 }) {
+  const groupedScenarios = buildScenarioGroups(locale, scenarios)
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-lab-line bg-lab-panel px-3">
       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -83,6 +93,7 @@ export function Toolbar({
         <Select
           value={runMode}
           onValueChange={(value) => onRunModeChange(value as RunMode)}
+          ariaLabel={t(locale, "run.mode")}
           items={[
             {
               value: "artifact_replay",
@@ -98,10 +109,8 @@ export function Toolbar({
         <Select
           value={selectedScenario}
           onValueChange={onScenarioChange}
-          items={scenarios.map((entry) => ({
-            value: entry.id,
-            label: localizeScenario(locale, entry).name,
-          }))}
+          ariaLabel={t(locale, "scenario.select")}
+          items={groupedScenarios}
           className="w-52"
         />
         <Badge
@@ -130,7 +139,12 @@ export function Toolbar({
 
       <div className="flex items-center gap-1">
         <Tooltip label={t(locale, "tooltip.runScenario")}>
-          <Button size="icon" onClick={onRun} disabled={status === "loading"}>
+          <Button
+            size="icon"
+            onClick={onRun}
+            disabled={status === "loading"}
+            aria-label={t(locale, "tooltip.runScenario")}
+          >
             <Play className="h-4 w-4" />
           </Button>
         </Tooltip>
@@ -139,6 +153,7 @@ export function Toolbar({
           layers={layers}
           onLayerChange={onLayerChange}
         />
+        <OverlayPresetMenu locale={locale} onApplyPreset={onApplyOverlayPreset} />
         <ArtifactMenu
           locale={locale}
           sessionId={sessionId}
@@ -151,6 +166,40 @@ export function Toolbar({
       </div>
     </header>
   )
+}
+
+function buildScenarioGroups(
+  locale: Locale,
+  scenarios: ScenarioDescriptor[],
+): Array<{ label: string; items: Array<{ value: string; label: string }> }> {
+  const groupOrder: ScenarioGroupId[] = [
+    "basics",
+    "stack",
+    "ccd",
+    "compound",
+    "lattice",
+    "diagnostics",
+  ]
+  const grouped = new Map<ScenarioGroupId, Array<{ value: string; label: string }>>()
+  for (const scenario of scenarios) {
+    const group = scenarioGroupForId(scenario.id)
+    const items = grouped.get(group)
+    const localized = localizeScenario(locale, scenario)
+    const entry = { value: scenario.id, label: localized.name }
+    if (items) {
+      items.push(entry)
+    } else {
+      grouped.set(group, [entry])
+    }
+  }
+  return groupOrder
+    .map((group) => ({
+      label: scenarioGroupLabel(locale, group),
+      items: (grouped.get(group) ?? []).sort((left, right) =>
+        left.label.localeCompare(right.label, locale),
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
 }
 
 function ArtifactMenu({
@@ -332,7 +381,12 @@ function LayerMenu({
     <DropdownMenu.Root open={open} onOpenChange={handleOpenChange}>
       <Tooltip label={t(locale, "tooltip.canvasLayers")}>
         <DropdownMenu.Trigger asChild>
-          <Button ref={triggerRef} size="icon" variant="outline">
+          <Button
+            ref={triggerRef}
+            size="icon"
+            variant="outline"
+            aria-label={t(locale, "tooltip.canvasLayers")}
+          >
             <Layers className="h-4 w-4" />
           </Button>
         </DropdownMenu.Trigger>
@@ -361,6 +415,65 @@ function LayerMenu({
               </DropdownMenu.ItemIndicator>
               <span>{layerLabel(locale, key)}</span>
             </DropdownMenu.CheckboxItem>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}
+
+function OverlayPresetMenu({
+  locale,
+  onApplyPreset,
+}: {
+  locale: Locale
+  onApplyPreset: (preset: OverlayPresetId) => void
+}) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const presetOrder: OverlayPresetId[] = [
+    "stackStability",
+    "trajectoryFocus",
+    "perturbationReview",
+    "latticeGrid",
+  ]
+
+  function handleCloseAutoFocus(event: Event) {
+    event.preventDefault()
+    triggerRef.current?.blur()
+  }
+
+  return (
+    <DropdownMenu.Root>
+      <Tooltip label={t(locale, "tooltip.overlayPresets")}>
+        <DropdownMenu.Trigger asChild>
+          <Button
+            ref={triggerRef}
+            size="icon"
+            variant="outline"
+            aria-label={t(locale, "tooltip.overlayPresets")}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenu.Trigger>
+      </Tooltip>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={8}
+          onCloseAutoFocus={handleCloseAutoFocus}
+          className="z-50 w-64 rounded-md border border-lab-line bg-lab-panel2 p-2 text-sm text-lab-text shadow-xl"
+        >
+          {presetOrder.map((preset) => (
+            <DropdownMenu.Item
+              key={preset}
+              onSelect={() => onApplyPreset(preset)}
+              className="grid cursor-default select-none gap-0.5 rounded px-2 py-1.5 outline-none data-[highlighted]:bg-lab-accent/[0.18]"
+            >
+              <span>{overlayPresetLabel(locale, preset)}</span>
+              <span className="text-[11px] text-lab-muted">
+                {overlayPresetDescription(locale, preset)}
+              </span>
+            </DropdownMenu.Item>
           ))}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

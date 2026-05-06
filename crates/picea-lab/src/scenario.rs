@@ -21,7 +21,9 @@ pub enum ScenarioId {
     FallingBoxContact,
     #[serde(rename = "stack_4")]
     Stack4,
+    StackStabilityTower,
     JointAnchor,
+    LatticeGrid,
     BroadphaseSparse,
     SatPolygon,
     CompoundProvenance,
@@ -33,10 +35,12 @@ pub enum ScenarioId {
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 13] = [
         Self::FallingBoxContact,
         Self::Stack4,
+        Self::StackStabilityTower,
         Self::JointAnchor,
+        Self::LatticeGrid,
         Self::BroadphaseSparse,
         Self::SatPolygon,
         Self::CompoundProvenance,
@@ -51,7 +55,9 @@ impl ScenarioId {
         match self {
             Self::FallingBoxContact => "falling_box_contact",
             Self::Stack4 => "stack_4",
+            Self::StackStabilityTower => "stack_stability_tower",
             Self::JointAnchor => "joint_anchor",
+            Self::LatticeGrid => "lattice_grid",
             Self::BroadphaseSparse => "broadphase_sparse",
             Self::SatPolygon => "sat_polygon",
             Self::CompoundProvenance => "compound_provenance",
@@ -77,7 +83,9 @@ impl FromStr for ScenarioId {
         match value {
             "falling_box_contact" => Ok(Self::FallingBoxContact),
             "stack_4" => Ok(Self::Stack4),
+            "stack_stability_tower" => Ok(Self::StackStabilityTower),
             "joint_anchor" => Ok(Self::JointAnchor),
+            "lattice_grid" => Ok(Self::LatticeGrid),
             "broadphase_sparse" => Ok(Self::BroadphaseSparse),
             "sat_polygon" => Ok(Self::SatPolygon),
             "compound_provenance" => Ok(Self::CompoundProvenance),
@@ -107,7 +115,9 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
             name: match id {
                 ScenarioId::FallingBoxContact => "Falling box contact",
                 ScenarioId::Stack4 => "Four box stack",
+                ScenarioId::StackStabilityTower => "Stack stability tower",
                 ScenarioId::JointAnchor => "World anchor joint",
+                ScenarioId::LatticeGrid => "Rigid-body lattice grid proxy",
                 ScenarioId::BroadphaseSparse => "Sparse broadphase",
                 ScenarioId::SatPolygon => "SAT polygon manifold",
                 ScenarioId::CompoundProvenance => "Compound provenance fixture",
@@ -120,7 +130,13 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
             description: match id {
                 ScenarioId::FallingBoxContact => "A dynamic box falling into static floor contact.",
                 ScenarioId::Stack4 => "Four dynamic boxes stacked above a static floor.",
+                ScenarioId::StackStabilityTower => {
+                    "A taller deterministic tower with narrow support, staged settling, and sleep-ready stack facts."
+                }
                 ScenarioId::JointAnchor => "A body constrained toward a fixed world-space anchor.",
+                ScenarioId::LatticeGrid => {
+                    "A rigid-body joint lattice / grid proxy built from dynamic nodes and distance/world-anchor joints, not a true soft-body solver."
+                }
                 ScenarioId::BroadphaseSparse => {
                     "Five static boxes with exactly one broadphase overlap."
                 }
@@ -987,6 +1003,114 @@ fn falling_box_contact_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
     }
 }
 
+/// M38 intentionally stops at a rigid-body proxy. Each "node" is still one
+/// ordinary rigid body, so any visible deformation comes from existing joint
+/// constraints and debug facts rather than a new soft-body solver.
+fn lattice_grid_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
+    const COLS: usize = 4;
+    const ROWS: usize = 3;
+    const SPACING_X: f32 = 0.62;
+    const SPACING_Y: f32 = 0.58;
+    const ORIGIN_X: f32 = -0.93;
+    const ORIGIN_Y: f32 = -1.22;
+
+    let mut bodies = Vec::with_capacity(COLS * ROWS);
+    for row in 0..ROWS {
+        for col in 0..COLS {
+            bodies.push(SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [
+                    ORIGIN_X + col as f32 * SPACING_X,
+                    ORIGIN_Y + row as f32 * SPACING_Y,
+                    0.0,
+                ],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Circle { radius: 0.12 },
+                material: if row == 0 {
+                    MaterialPreset::Rough
+                } else {
+                    MaterialPreset::Default
+                },
+                filter: CollisionLayerPreset::DynamicBody,
+                density: 0.9,
+                is_sensor: false,
+            });
+        }
+    }
+
+    let body_index = |row: usize, col: usize| row * COLS + col;
+    let mut joints = Vec::new();
+
+    for col in 0..COLS {
+        joints.push(SceneJointFixture::WorldAnchor(
+            SceneWorldAnchorJointFixture {
+                body: body_index(0, col),
+                world_anchor: Some([
+                    ORIGIN_X + col as f32 * SPACING_X,
+                    ORIGIN_Y + if col % 2 == 0 { -0.18 } else { -0.22 },
+                ]),
+                local_anchor: None,
+                stiffness: Some(6.5),
+                damping: Some(0.42),
+            },
+        ));
+    }
+
+    for row in 0..ROWS {
+        for col in 0..COLS {
+            if col + 1 < COLS {
+                joints.push(SceneJointFixture::Distance(SceneDistanceJointFixture {
+                    body_a: body_index(row, col),
+                    body_b: body_index(row, col + 1),
+                    rest_length: Some(SPACING_X),
+                    stiffness: Some(5.2),
+                    damping: Some(0.38),
+                    local_anchor_a: None,
+                    local_anchor_b: None,
+                }));
+            }
+            if row + 1 < ROWS {
+                joints.push(SceneJointFixture::Distance(SceneDistanceJointFixture {
+                    body_a: body_index(row, col),
+                    body_b: body_index(row + 1, col),
+                    rest_length: Some(SPACING_Y),
+                    stiffness: Some(5.0),
+                    damping: Some(0.36),
+                    local_anchor_a: None,
+                    local_anchor_b: None,
+                }));
+            }
+            if row + 1 < ROWS && col + 1 < COLS {
+                let (body_a, body_b) = if (row + col) % 2 == 0 {
+                    (body_index(row, col), body_index(row + 1, col + 1))
+                } else {
+                    (body_index(row, col + 1), body_index(row + 1, col))
+                };
+                joints.push(SceneJointFixture::Distance(SceneDistanceJointFixture {
+                    body_a,
+                    body_b,
+                    rest_length: Some((SPACING_X * SPACING_X + SPACING_Y * SPACING_Y).sqrt()),
+                    stiffness: Some(4.4),
+                    damping: Some(0.32),
+                    local_anchor_a: None,
+                    local_anchor_b: None,
+                }));
+            }
+        }
+    }
+
+    SceneRecipeFixture {
+        schema_version: SCENE_RECIPE_SCHEMA_VERSION,
+        world: SceneFixtureWorld {
+            gravity,
+            enable_sleep: true,
+        },
+        bodies,
+        joints,
+    }
+}
+
 fn compound_provenance_fixture() -> SceneRecipeFixture {
     SceneRecipeFixture {
         schema_version: SCENE_RECIPE_SCHEMA_VERSION,
@@ -1038,6 +1162,145 @@ fn compound_provenance_fixture() -> SceneRecipeFixture {
                 material: MaterialPreset::Sticky,
                 filter: CollisionLayerPreset::DynamicBody,
                 density: 1.75,
+                is_sensor: false,
+            },
+        ],
+        joints: Vec::new(),
+    }
+}
+
+fn stack_stability_tower_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
+    SceneRecipeFixture {
+        schema_version: SCENE_RECIPE_SCHEMA_VERSION,
+        world: SceneFixtureWorld {
+            gravity,
+            enable_sleep: true,
+        },
+        bodies: vec![
+            SceneBodyFixture {
+                body_type: BodyType::Static,
+                pose: [0.0, 2.6, 0.0],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: false,
+                shape: SceneShapeFixture::Rect {
+                    width: 9.0,
+                    height: 0.6,
+                },
+                material: MaterialPreset::Rough,
+                filter: CollisionLayerPreset::StaticGeometry,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Static,
+                pose: [0.15, 2.05, 0.0],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: false,
+                shape: SceneShapeFixture::Rect {
+                    width: 1.7,
+                    height: 0.25,
+                },
+                material: MaterialPreset::Rough,
+                filter: CollisionLayerPreset::StaticGeometry,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.0, 1.55, 0.03],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Rect {
+                    width: 1.35,
+                    height: 0.48,
+                },
+                material: MaterialPreset::Rough,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.08, 1.0, -0.035],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Rect {
+                    width: 1.1,
+                    height: 0.46,
+                },
+                material: MaterialPreset::Default,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [-0.05, 0.48, 0.045],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Rect {
+                    width: 0.92,
+                    height: 0.44,
+                },
+                material: MaterialPreset::Sticky,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.09, -0.02, -0.03],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Rect {
+                    width: 0.74,
+                    height: 0.42,
+                },
+                material: MaterialPreset::Default,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.0, -0.49, 0.02],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Rect {
+                    width: 0.58,
+                    height: 0.38,
+                },
+                material: MaterialPreset::Sticky,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [0.03, -0.93, -0.015],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Rect {
+                    width: 0.46,
+                    height: 0.34,
+                },
+                material: MaterialPreset::Default,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: default_fixture_density(),
+                is_sensor: false,
+            },
+            SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [-1.45, 1.2, 0.0],
+                linear_velocity: [1.2, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Rect {
+                    width: 0.36,
+                    height: 0.36,
+                },
+                material: MaterialPreset::Default,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: default_fixture_density(),
                 is_sensor: false,
             },
         ],
@@ -1201,6 +1464,12 @@ pub(crate) fn build_scenario(
                 )?;
             }
         }
+        ScenarioId::StackStabilityTower => {
+            world = instantiate_scene_fixture(&stack_stability_tower_fixture([
+                gravity.x(),
+                gravity.y(),
+            ]))?;
+        }
         ScenarioId::JointAnchor => {
             world = World::new(WorldDesc {
                 gravity: Vector::default(),
@@ -1216,6 +1485,9 @@ pub(crate) fn build_scenario(
                     ..WorldAnchorJointDesc::default()
                 }))
                 .map_err(|error| LabError::World(error.to_string()))?;
+        }
+        ScenarioId::LatticeGrid => {
+            world = instantiate_scene_fixture(&lattice_grid_fixture([gravity.x(), gravity.y()]))?;
         }
         ScenarioId::BroadphaseSparse => {
             world = World::new(WorldDesc {
@@ -1641,6 +1913,51 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1, 1]
         );
+    }
+
+    #[test]
+    fn lattice_grid_builtin_exports_distance_and_world_anchor_joint_grid() {
+        let builtin = build_scenario(ScenarioId::LatticeGrid, &ScenarioOverrides::default())
+            .expect("lattice grid scenario should build");
+        let dynamic_bodies = builtin
+            .world
+            .bodies()
+            .filter(|handle| {
+                builtin
+                    .world
+                    .body(*handle)
+                    .expect("body should resolve")
+                    .body_type()
+                    == BodyType::Dynamic
+            })
+            .count();
+        assert!(
+            dynamic_bodies >= 9,
+            "lattice grid should use a dynamic node lattice instead of one rigid body"
+        );
+
+        let joints: Vec<_> = builtin.world.joints().collect();
+        assert!(
+            joints.len() >= 12,
+            "lattice grid should include enough joints for a visible grid"
+        );
+
+        let mut distance_joint_count = 0usize;
+        let mut world_anchor_joint_count = 0usize;
+        for handle in joints {
+            match builtin
+                .world
+                .joint(handle)
+                .expect("joint should resolve")
+                .desc()
+            {
+                JointDesc::Distance(_) => distance_joint_count += 1,
+                JointDesc::WorldAnchor(_) => world_anchor_joint_count += 1,
+            }
+        }
+
+        assert!(distance_joint_count >= 8);
+        assert!(world_anchor_joint_count >= 2);
     }
 
     #[test]

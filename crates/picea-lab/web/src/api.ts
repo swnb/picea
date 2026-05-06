@@ -1,9 +1,13 @@
 import type {
   DebugSnapshot,
   FrameRecord,
+  PerfArtifact,
   ScenarioDescriptor,
   SessionMode,
   SessionRecord,
+  Vec2,
+  VelocityPerturbationCommit,
+  VelocityPerturbationPreview,
 } from "./types";
 
 const apiBase = import.meta.env.VITE_PICEA_LAB_API_BASE ?? "";
@@ -78,6 +82,55 @@ export async function fetchFinalSnapshot(runId: string): Promise<DebugSnapshot> 
   return requestJson(`/api/runs/${runId}/artifacts/final_snapshot.json`);
 }
 
+export async function fetchPerf(runId: string): Promise<PerfArtifact> {
+  return requestJson(`/api/runs/${runId}/artifacts/perf.json`);
+}
+
 export function openSessionEvents(sessionId: string): EventSource {
   return new EventSource(`${apiBase}/api/sessions/${sessionId}/events`);
+}
+
+type VelocityPerturbationRequestVector = [number, number] | Vec2;
+
+export async function previewVelocityPerturbation(
+  sessionId: string,
+  request: {
+    action_id: string;
+    world_revision: number;
+    session_epoch: number;
+    body_handle: number;
+    frame_index: number;
+    requested_delta: VelocityPerturbationRequestVector;
+    wake_intent?: boolean;
+  },
+): Promise<VelocityPerturbationPreview> {
+  const data = await requestJson<{ preview: VelocityPerturbationPreview }>(
+    `/api/sessions/${sessionId}/velocity-perturbations/preview`,
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    },
+  );
+  return data.preview;
+}
+
+export async function commitVelocityPerturbation(
+  sessionId: string,
+  request: {
+    action_id: string;
+    world_revision: number;
+    session_epoch: number;
+    body_handle: number;
+    frame_index: number;
+    requested_delta: VelocityPerturbationRequestVector;
+    computed_target_velocity?: VelocityPerturbationRequestVector;
+  },
+): Promise<{ commit: VelocityPerturbationCommit; session: SessionRecord }> {
+  return requestJson(
+    `/api/sessions/${sessionId}/velocity-perturbations/commit`,
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    },
+  );
 }

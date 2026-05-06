@@ -38,7 +38,9 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
         vec![
             "falling_box_contact",
             "stack_4",
+            "stack_stability_tower",
             "joint_anchor",
+            "lattice_grid",
             "broadphase_sparse",
             "sat_polygon",
             "compound_provenance",
@@ -426,6 +428,67 @@ async fn live_session_step_advances_backend_world_and_reset_clears_buffer() {
 }
 
 #[tokio::test]
+async fn live_lattice_grid_session_steps_with_joint_proxy_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "lattice_grid", 2).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(created_body["session"]["scenario_id"], "lattice_grid");
+    assert_eq!(created_body["session"]["mode"], "live_session");
+    assert_eq!(created_body["session"]["latest_frame"], Value::Null);
+
+    let step_body = control_session(&app, &session_id, "step").await;
+    let session = &step_body["session"];
+    assert_eq!(session["status"], "paused");
+    assert_eq!(session["scenario_id"], "lattice_grid");
+    assert_eq!(session["buffered_frame_count"], 1);
+
+    let snapshot = &session["latest_frame"]["snapshot"];
+    let bodies = snapshot["bodies"]
+        .as_array()
+        .expect("live lattice frame should include bodies");
+    let dynamic_body_count = bodies
+        .iter()
+        .filter(|body| body["body_type"] == "dynamic")
+        .count();
+    assert_eq!(
+        dynamic_body_count, 12,
+        "live lattice proxy should build the 4x3 rigid-body node grid"
+    );
+
+    let joints = snapshot["joints"]
+        .as_array()
+        .expect("live lattice frame should include joints");
+    let distance_joint_count = joints
+        .iter()
+        .filter(|joint| joint["kind"] == "distance")
+        .count();
+    let world_anchor_joint_count = joints
+        .iter()
+        .filter(|joint| joint["kind"] == "world_anchor")
+        .count();
+    assert_eq!(distance_joint_count, 23);
+    assert_eq!(world_anchor_joint_count, 4);
+    assert_eq!(joints.len(), 27);
+    assert!(
+        joints.iter().all(|joint| {
+            joint["anchors"]
+                .as_array()
+                .is_some_and(|anchors| anchors.len() >= 2)
+        }),
+        "lattice proxy joints should carry screen-drawable anchor pairs"
+    );
+    assert!(
+        snapshot["stats"]["joint_row_count"]
+            .as_u64()
+            .is_some_and(|rows| rows > 0),
+        "live lattice proxy should expose joint solver row facts"
+    );
+}
+
+#[tokio::test]
 async fn live_session_play_is_status_only_until_backend_step() {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
@@ -623,6 +686,961 @@ async fn live_session_overrides_patch_is_rejected_without_mutating_live_runtime(
     assert!(
         (stepped_gravity_y - 9.8).abs() < 1.0e-3,
         "live runtime should keep the original gravity after a rejected patch"
+    );
+}
+
+#[tokio::test]
+async fn live_velocity_perturbation_preview_is_read_only_for_paused_session() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "falling_box_contact", 3).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(created_body["session"]["session_epoch"], 0);
+
+    let step_body = control_session(&app, &session_id, "step").await;
+    assert_eq!(step_body["session"]["status"], "paused");
+    let paused_session = step_body["session"].clone();
+    let body = first_body_with_type(&paused_session, "dynamic");
+    let body_handle = body["handle"].clone();
+    let before_velocity = body["linear_velocity"].clone();
+    let before_x = vector_x(&before_velocity);
+    let before_y = vector_y(&before_velocity);
+    let world_revision = paused_session["latest_frame"]["snapshot"]["meta"]["revision"].clone();
+    let frame_index = paused_session["current_frame_index"].clone();
+
+    let preview_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/sessions/{session_id}/velocity-perturbations/preview"
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "action_id": "preview-happy",
+                        "world_revision": world_revision,
+                        "session_epoch": 0,
+                        "body_handle": body_handle,
+                        "frame_index": frame_index,
+                        "requested_delta": [0.75, -1.25],
+                        "wake_intent": true
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(preview_response.status(), StatusCode::OK);
+    let preview_body = json_body(preview_response).await;
+    let preview = &preview_body["preview"];
+    assert_eq!(preview["action_id"], "preview-happy");
+    assert_eq!(preview["session_id"], session_id);
+    assert_eq!(preview["world_revision"], world_revision);
+    assert_eq!(preview["session_epoch"], 0);
+    assert_eq!(preview["body_handle"], body_handle);
+    assert_eq!(preview["frame_index"], frame_index);
+    assert_eq!(preview["before_velocity"], before_velocity);
+    assert_eq!(preview["requested_delta"], json!({ "x": 0.75, "y": -1.25 }));
+    assert_close(
+        vector_x(&preview["computed_target_velocity"]),
+        before_x + 0.75,
+    );
+    assert_close(
+        vector_y(&preview["computed_target_velocity"]),
+        before_y - 1.25,
+    );
+    assert_eq!(preview["wake_intent"], true);
+    assert_eq!(preview["rejection_reason"], Value::Null);
+
+    let fetched = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(fetched.status(), StatusCode::OK);
+    let fetched_body = json_body(fetched).await;
+    let fetched_session = &fetched_body["session"];
+    assert_eq!(fetched_session["status"], paused_session["status"]);
+    assert_eq!(
+        fetched_session["buffered_frame_count"],
+        paused_session["buffered_frame_count"]
+    );
+    assert_eq!(
+        fetched_session["current_frame_index"],
+        paused_session["current_frame_index"]
+    );
+    assert_eq!(
+        fetched_session["latest_frame"],
+        paused_session["latest_frame"]
+    );
+    assert_eq!(fetched_session["run_id"], paused_session["run_id"]);
+    assert_eq!(
+        fetched_session["session_epoch"],
+        paused_session["session_epoch"]
+    );
+
+    let events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/sessions/{session_id}/events"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let events_body = body_text(events).await;
+    assert!(
+        events_body.contains("event: frame") && !events_body.contains("preview"),
+        "preview must neither clear existing frame events nor emit preview events, got {events_body:?}"
+    );
+}
+
+#[tokio::test]
+async fn live_velocity_perturbation_preview_rejects_stale_or_mutating_requests() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "falling_box_contact", 3).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    let step_body = control_session(&app, &session_id, "step").await;
+    let paused_session = step_body["session"].clone();
+    drain_session_events(&app, &session_id).await;
+    let world_revision = paused_session["latest_frame"]["snapshot"]["meta"]["revision"]
+        .as_u64()
+        .expect("world revision should be numeric");
+    let frame_index = paused_session["current_frame_index"]
+        .as_u64()
+        .expect("frame index should be numeric");
+    let dynamic_handle = first_body_with_type(&paused_session, "dynamic")["handle"].clone();
+    let static_handle = first_body_with_type(&paused_session, "static")["handle"].clone();
+
+    assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "stale-revision",
+            "world_revision": world_revision.saturating_sub(1),
+            "session_epoch": 0,
+            "body_handle": dynamic_handle,
+            "frame_index": frame_index,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "stale_world_revision",
+    )
+    .await;
+    assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "stale-epoch",
+            "world_revision": world_revision,
+            "session_epoch": 1,
+            "body_handle": dynamic_handle,
+            "frame_index": frame_index,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "stale_session_epoch",
+    )
+    .await;
+    assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "stale-frame",
+            "world_revision": world_revision,
+            "session_epoch": 0,
+            "body_handle": dynamic_handle,
+            "frame_index": frame_index + 1,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "stale_frame",
+    )
+    .await;
+    assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "static-handle",
+            "world_revision": world_revision,
+            "session_epoch": 0,
+            "body_handle": static_handle,
+            "frame_index": frame_index,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "static_body",
+    )
+    .await;
+    assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "stale-handle",
+            "world_revision": world_revision,
+            "session_epoch": 0,
+            "body_handle": 18446744073709551615u64,
+            "frame_index": frame_index,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "invalid_body_handle",
+    )
+    .await;
+    assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "invalid-delta",
+            "world_revision": world_revision,
+            "session_epoch": 0,
+            "body_handle": dynamic_handle,
+            "frame_index": frame_index,
+            "requested_delta": [0.0, 0.0]
+        }),
+        "invalid_velocity_delta",
+    )
+    .await;
+    assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "non-finite-delta",
+            "world_revision": world_revision,
+            "session_epoch": 0,
+            "body_handle": dynamic_handle,
+            "frame_index": frame_index,
+            "requested_delta": ["NaN", 0.0]
+        }),
+        "invalid_velocity_delta",
+    )
+    .await;
+
+    let _running = control_session(&app, &session_id, "play").await;
+    assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "running",
+            "world_revision": world_revision,
+            "session_epoch": 0,
+            "body_handle": dynamic_handle,
+            "frame_index": frame_index,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "session_running",
+    )
+    .await;
+
+    let next_step = control_session(&app, &session_id, "step").await;
+    assert_eq!(next_step["session"]["status"], "running");
+    assert_eq!(next_step["session"]["buffered_frame_count"], 2);
+    assert_eq!(next_step["session"]["current_frame_index"], frame_index + 1);
+    assert_eq!(
+        next_step["session"]["latest_frame"]["frame_index"],
+        frame_index + 1
+    );
+    let next_events = drain_session_events(&app, &session_id).await;
+    assert!(
+        next_events.contains("event: frame") && !next_events.contains("preview"),
+        "next live step should emit only frame events after rejected previews, got {next_events:?}"
+    );
+
+    let completed_body = create_live_session(&app, "falling_box_contact", 1).await;
+    let completed_session_id = completed_body["session"]["id"].as_str().unwrap().to_owned();
+    let completed_step = control_session(&app, &completed_session_id, "step").await;
+    let completed_session = &completed_step["session"];
+    assert_eq!(completed_session["status"], "completed");
+    drain_session_events(&app, &completed_session_id).await;
+    let completed_revision = completed_session["latest_frame"]["snapshot"]["meta"]["revision"]
+        .as_u64()
+        .expect("world revision should be numeric");
+    let completed_handle = first_body_with_type(completed_session, "dynamic")["handle"].clone();
+    assert_preview_rejection(
+        &app,
+        &completed_session_id,
+        json!({
+            "action_id": "completed",
+            "world_revision": completed_revision,
+            "session_epoch": 0,
+            "body_handle": completed_handle,
+            "frame_index": 0,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "session_completed",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn live_velocity_perturbation_commit_applies_previewed_velocity_and_provenance() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "falling_box_contact", 4).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    let step_body = control_session(&app, &session_id, "step").await;
+    let paused_session = step_body["session"].clone();
+    let body = first_body_with_type(&paused_session, "dynamic");
+    let body_handle = body["handle"].clone();
+    let before_velocity = body["linear_velocity"].clone();
+    let world_revision = paused_session["latest_frame"]["snapshot"]["meta"]["revision"].clone();
+    let frame_index = paused_session["current_frame_index"].clone();
+    let old_frame_hash = paused_session["latest_frame"]["state_hash"]
+        .as_str()
+        .expect("latest frame should carry a state hash")
+        .to_owned();
+
+    let preview_body = post_preview(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "commit-happy",
+            "world_revision": world_revision,
+            "session_epoch": 0,
+            "body_handle": body_handle,
+            "frame_index": frame_index,
+            "requested_delta": [2.0, 0.0],
+            "wake_intent": true
+        }),
+    )
+    .await;
+    let preview = &preview_body["preview"];
+    assert_eq!(preview["rejection_reason"], Value::Null);
+    let target_velocity = preview["computed_target_velocity"].clone();
+    let target_x = vector_x(&target_velocity);
+    let target_y = vector_y(&target_velocity);
+
+    let commit_body = post_commit(&app, &session_id, commit_request_from_preview(preview)).await;
+    let commit = &commit_body["commit"];
+    assert_eq!(commit["accepted"], true);
+    assert_eq!(commit["rejection_reason"], Value::Null);
+    assert_eq!(commit["action_id"], "commit-happy");
+    assert_eq!(commit["before_velocity"], before_velocity);
+    assert_eq!(commit["computed_target_velocity"], target_velocity);
+    assert_eq!(commit_body["session"]["status"], "paused");
+    assert_eq!(commit_body["session"]["session_epoch"], 1);
+    assert_eq!(commit_body["session"]["current_frame_index"], frame_index);
+    assert_eq!(
+        commit_body["session"]["latest_frame"]["frame_index"],
+        frame_index
+    );
+    let refreshed_frame_hash = commit_body["session"]["latest_frame"]["state_hash"]
+        .as_str()
+        .expect("refreshed frame should carry a state hash");
+    assert_ne!(
+        refreshed_frame_hash, old_frame_hash,
+        "accepted commit should refresh the current frame hash"
+    );
+    assert_eq!(commit_body["session"]["buffered_frame_count"], 1);
+    assert!(
+        commit_body["session"]["latest_frame"]["snapshot"]["meta"]["revision"]
+            .as_u64()
+            .expect("revision should be numeric")
+            > world_revision.as_u64().expect("revision should be numeric"),
+        "commit should bump world revision through World::apply_body_patch"
+    );
+
+    let committed_body = body_by_handle(
+        &commit_body["session"]["latest_frame"]["snapshot"],
+        &body_handle,
+    );
+    assert_close(vector_x(&committed_body["linear_velocity"]), target_x);
+    assert_close(vector_y(&committed_body["linear_velocity"]), target_y);
+
+    let provenance = commit_body["session"]["latest_frame"]["perturbation_provenance"]
+        .as_array()
+        .expect("perturbation provenance should be an array");
+    assert_eq!(provenance.len(), 1);
+    let entry = &provenance[0];
+    assert_eq!(entry["action_id"], "commit-happy");
+    assert_eq!(entry["session_id"], session_id);
+    assert_eq!(entry["body_handle"], body_handle);
+    assert_eq!(entry["frame_index"], frame_index);
+    assert_eq!(entry["before_velocity"], before_velocity);
+    assert_eq!(entry["requested_delta"], preview["requested_delta"]);
+    assert_eq!(entry["computed_target_velocity"], target_velocity);
+    assert_eq!(entry["wake_intent"], true);
+    assert_eq!(entry["commit_outcome"], "accepted");
+    assert_eq!(entry["query_sync_status"], "synced");
+
+    let commit_events = drain_session_events(&app, &session_id).await;
+    assert!(
+        !commit_events.contains(&old_frame_hash),
+        "accepted commit must not leave stale queued frame hashes, got {commit_events:?}"
+    );
+    if commit_events.contains("event: frame") {
+        assert!(
+            commit_events.contains(refreshed_frame_hash),
+            "queued frame events after commit must match latest_frame hash, got {commit_events:?}"
+        );
+    }
+
+    let after_commit = commit_body["session"].clone();
+    let reused = post_commit(&app, &session_id, commit_request_from_preview(preview)).await;
+    assert_eq!(reused["commit"]["accepted"], false);
+    assert_eq!(reused["commit"]["rejection_reason"], "reused_action");
+    let after_reused = fetch_session(&app, &session_id).await;
+    assert_commit_rejection_preserved_session(&after_commit, &after_reused);
+
+    let next_step = control_session(&app, &session_id, "step").await;
+    assert_eq!(next_step["session"]["current_frame_index"], 1);
+    let next_body = body_by_handle(
+        &next_step["session"]["latest_frame"]["snapshot"],
+        &body_handle,
+    );
+    assert_close(vector_x(&next_body["linear_velocity"]), target_x);
+}
+
+#[tokio::test]
+async fn live_velocity_perturbation_commit_rejects_stale_or_unpreviewed_transactions() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "falling_box_contact", 3).await;
+    let created_session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    let revision_probe = post_preview(
+        &app,
+        &created_session_id,
+        json!({
+            "action_id": "created-revision-probe",
+            "world_revision": 0,
+            "session_epoch": 0,
+            "body_handle": 0,
+            "frame_index": 0,
+            "requested_delta": [0.25, 0.0]
+        }),
+    )
+    .await;
+    assert_commit_rejection(
+        &app,
+        &created_session_id,
+        json!({
+            "action_id": "created",
+            "world_revision": revision_probe["preview"]["world_revision"],
+            "session_epoch": 0,
+            "body_handle": 0,
+            "frame_index": 0,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "session_created",
+    )
+    .await;
+
+    let fixture = paused_commit_fixture(&app, "missing-action", 3).await;
+    assert_commit_rejection(
+        &app,
+        &fixture.session_id,
+        json!({
+            "action_id": "missing-action",
+            "world_revision": fixture.world_revision,
+            "session_epoch": 0,
+            "body_handle": fixture.dynamic_handle,
+            "frame_index": fixture.frame_index,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "missing_preview_action",
+    )
+    .await;
+
+    let fixture = paused_commit_fixture(&app, "stale-revision", 3).await;
+    let preview = preview_fixture_action(&app, &fixture, "stale-revision").await;
+    let mut request = commit_request_from_preview(&preview);
+    request["world_revision"] = json!(fixture.world_revision.saturating_sub(1));
+    assert_commit_rejection(&app, &fixture.session_id, request, "stale_world_revision").await;
+    assert_eq!(
+        post_commit(
+            &app,
+            &fixture.session_id,
+            commit_request_from_preview(&preview)
+        )
+        .await["commit"]["accepted"],
+        true,
+        "a rejected stale revision must not consume the cached preview"
+    );
+
+    let fixture = paused_commit_fixture(&app, "stale-epoch", 3).await;
+    let preview = preview_fixture_action(&app, &fixture, "stale-epoch").await;
+    let mut request = commit_request_from_preview(&preview);
+    request["session_epoch"] = json!(1);
+    assert_commit_rejection(&app, &fixture.session_id, request, "stale_session_epoch").await;
+
+    let fixture = paused_commit_fixture(&app, "stale-frame", 3).await;
+    let preview = preview_fixture_action(&app, &fixture, "stale-frame").await;
+    let mut request = commit_request_from_preview(&preview);
+    request["frame_index"] = json!(fixture.frame_index + 1);
+    assert_commit_rejection(&app, &fixture.session_id, request, "stale_frame").await;
+
+    let fixture = paused_commit_fixture(&app, "stale-handle", 3).await;
+    let preview = preview_fixture_action(&app, &fixture, "stale-handle").await;
+    let mut request = commit_request_from_preview(&preview);
+    request["body_handle"] = json!(18446744073709551615u64);
+    assert_commit_rejection(&app, &fixture.session_id, request, "invalid_body_handle").await;
+
+    let fixture = paused_commit_fixture(&app, "static-body", 3).await;
+    assert_commit_rejection(
+        &app,
+        &fixture.session_id,
+        json!({
+            "action_id": "static-body",
+            "world_revision": fixture.world_revision,
+            "session_epoch": 0,
+            "body_handle": fixture.static_handle,
+            "frame_index": fixture.frame_index,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "static_body",
+    )
+    .await;
+
+    let fixture = paused_commit_fixture(&app, "invalid-delta", 3).await;
+    let preview = preview_fixture_action(&app, &fixture, "invalid-delta").await;
+    let mut request = commit_request_from_preview(&preview);
+    request["requested_delta"] = json!([0.0, 0.0]);
+    assert_commit_rejection(&app, &fixture.session_id, request, "invalid_velocity_delta").await;
+
+    let fixture = paused_commit_fixture(&app, "tampered-delta", 3).await;
+    let preview = preview_fixture_action(&app, &fixture, "tampered-delta").await;
+    let mut request = commit_request_from_preview(&preview);
+    request["requested_delta"] = json!([0.5, 0.0]);
+    assert_commit_rejection(&app, &fixture.session_id, request, "stale_preview_action").await;
+    assert_eq!(
+        post_commit(
+            &app,
+            &fixture.session_id,
+            commit_request_from_preview(&preview)
+        )
+        .await["commit"]["accepted"],
+        true,
+        "a rejected tampered delta must not consume the cached preview"
+    );
+
+    let fixture = paused_commit_fixture(&app, "tampered-target", 3).await;
+    let preview = preview_fixture_action(&app, &fixture, "tampered-target").await;
+    let mut request = commit_request_from_preview(&preview);
+    request["computed_target_velocity"] = json!({ "x": 999.0, "y": 999.0 });
+    assert_commit_rejection(&app, &fixture.session_id, request, "stale_preview_action").await;
+    assert_eq!(
+        post_commit(
+            &app,
+            &fixture.session_id,
+            commit_request_from_preview(&preview)
+        )
+        .await["commit"]["accepted"],
+        true,
+        "a rejected tampered target must not consume the cached preview"
+    );
+
+    let running = paused_commit_fixture(&app, "running", 3).await;
+    let preview = preview_fixture_action(&app, &running, "running").await;
+    let _ = control_session(&app, &running.session_id, "play").await;
+    assert_commit_rejection(
+        &app,
+        &running.session_id,
+        commit_request_from_preview(&preview),
+        "session_running",
+    )
+    .await;
+
+    let completed = paused_commit_fixture(&app, "completed", 1).await;
+    assert_eq!(
+        fetch_session(&app, &completed.session_id).await["status"],
+        "completed"
+    );
+    assert_commit_rejection(
+        &app,
+        &completed.session_id,
+        json!({
+            "action_id": "completed",
+            "world_revision": completed.world_revision,
+            "session_epoch": 0,
+            "body_handle": completed.dynamic_handle,
+            "frame_index": completed.frame_index,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "session_completed",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn live_session_epoch_starts_at_zero_and_reset_increments_without_preview_increment() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "falling_box_contact", 2).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(created_body["session"]["session_epoch"], 0);
+
+    let first_step = control_session(&app, &session_id, "step").await;
+    let first_step_session = &first_step["session"];
+    let body_handle = first_body_with_type(first_step_session, "dynamic")["handle"].clone();
+    let stale_revision = first_step_session["latest_frame"]["snapshot"]["meta"]["revision"]
+        .as_u64()
+        .expect("world revision should be numeric");
+
+    let reset_body = control_session(&app, &session_id, "reset").await;
+    assert_eq!(reset_body["session"]["session_epoch"], 1);
+    assert_eq!(reset_body["session"]["status"], "created");
+    assert_eq!(reset_body["session"]["latest_frame"], Value::Null);
+    drain_session_events(&app, &session_id).await;
+
+    let current_revision = assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "created-revision-probe",
+            "world_revision": stale_revision,
+            "session_epoch": 1,
+            "body_handle": body_handle,
+            "frame_index": 0,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "stale_world_revision",
+    )
+    .await;
+    let current_revision = current_revision["preview"]["world_revision"].clone();
+
+    assert_preview_rejection(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "created-preview",
+            "world_revision": current_revision,
+            "session_epoch": 1,
+            "body_handle": body_handle,
+            "frame_index": 0,
+            "requested_delta": [0.25, 0.0]
+        }),
+        "missing_frame_snapshot",
+    )
+    .await;
+
+    let fetched = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let fetched_session = json_body(fetched).await["session"].clone();
+    assert_eq!(fetched_session["session_epoch"], 1);
+    assert_eq!(fetched_session["status"], "created");
+    assert_eq!(fetched_session["buffered_frame_count"], 0);
+    assert_eq!(fetched_session["latest_frame"], Value::Null);
+
+    let step_after_rejected_preview = control_session(&app, &session_id, "step").await;
+    assert_eq!(step_after_rejected_preview["session"]["status"], "paused");
+    assert_eq!(step_after_rejected_preview["session"]["session_epoch"], 1);
+    assert_eq!(
+        step_after_rejected_preview["session"]["current_frame_index"],
+        0
+    );
+    assert_eq!(
+        step_after_rejected_preview["session"]["buffered_frame_count"],
+        1
+    );
+    assert_eq!(
+        step_after_rejected_preview["session"]["latest_frame"]["frame_index"],
+        0
+    );
+}
+
+async fn create_live_session(app: &axum::Router, scenario_id: &str, frame_count: usize) -> Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "scenario_id": scenario_id,
+                        "frame_count": frame_count,
+                        "mode": "live_session"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    json_body(response).await
+}
+
+async fn control_session(app: &axum::Router, session_id: &str, action: &str) -> Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/control"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "action": action }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await
+}
+
+async fn assert_preview_rejection(
+    app: &axum::Router,
+    session_id: &str,
+    request_body: Value,
+    expected_reason: &str,
+) -> Value {
+    let before = fetch_session(app, session_id).await;
+    let body = post_preview(app, session_id, request_body).await;
+    assert_eq!(
+        body["preview"]["rejection_reason"], expected_reason,
+        "preview rejection body was {body:#?}"
+    );
+    let after = fetch_session(app, session_id).await;
+    assert_preview_rejection_preserved_session(&before, &after);
+    let events = drain_session_events(app, session_id).await;
+    assert!(
+        events.contains("event: idle") && !events.contains("preview") && !events.contains("frame"),
+        "rejected preview should not emit live events, got {events:?}"
+    );
+    body
+}
+
+async fn post_preview(app: &axum::Router, session_id: &str, request_body: Value) -> Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/sessions/{session_id}/velocity-perturbations/preview"
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await
+}
+
+async fn post_commit(app: &axum::Router, session_id: &str, request_body: Value) -> Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/sessions/{session_id}/velocity-perturbations/commit"
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await
+}
+
+async fn fetch_session(app: &axum::Router, session_id: &str) -> Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await["session"].clone()
+}
+
+async fn assert_commit_rejection(
+    app: &axum::Router,
+    session_id: &str,
+    request_body: Value,
+    expected_reason: &str,
+) -> Value {
+    let before = fetch_session(app, session_id).await;
+    let body = post_commit(app, session_id, request_body).await;
+    assert_eq!(
+        body["commit"]["accepted"], false,
+        "commit rejection body was {body:#?}"
+    );
+    assert_eq!(
+        body["commit"]["rejection_reason"], expected_reason,
+        "commit rejection body was {body:#?}"
+    );
+    let after = fetch_session(app, session_id).await;
+    assert_commit_rejection_preserved_session(&before, &after);
+    let events = drain_session_events(app, session_id).await;
+    assert!(
+        events.contains("event: idle") && !events.contains("frame"),
+        "rejected commit should not emit live events, got {events:?}"
+    );
+    body
+}
+
+async fn drain_session_events(app: &axum::Router, session_id: &str) -> String {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/sessions/{session_id}/events"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    body_text(response).await
+}
+
+struct CommitFixture {
+    session_id: String,
+    world_revision: u64,
+    frame_index: u64,
+    dynamic_handle: Value,
+    static_handle: Value,
+}
+
+async fn paused_commit_fixture(
+    app: &axum::Router,
+    _action_id: &str,
+    frame_count: usize,
+) -> CommitFixture {
+    let created = create_live_session(app, "falling_box_contact", frame_count).await;
+    let session_id = created["session"]["id"].as_str().unwrap().to_owned();
+    let stepped = control_session(app, &session_id, "step").await;
+    drain_session_events(app, &session_id).await;
+    let session = &stepped["session"];
+    let world_revision = session["latest_frame"]["snapshot"]["meta"]["revision"]
+        .as_u64()
+        .expect("world revision should be numeric");
+    let frame_index = session["current_frame_index"]
+        .as_u64()
+        .expect("frame index should be numeric");
+    CommitFixture {
+        session_id,
+        world_revision,
+        frame_index,
+        dynamic_handle: first_body_with_type(session, "dynamic")["handle"].clone(),
+        static_handle: first_body_with_type(session, "static")["handle"].clone(),
+    }
+}
+
+async fn preview_fixture_action(
+    app: &axum::Router,
+    fixture: &CommitFixture,
+    action_id: &str,
+) -> Value {
+    let body = post_preview(
+        app,
+        &fixture.session_id,
+        json!({
+            "action_id": action_id,
+            "world_revision": fixture.world_revision,
+            "session_epoch": 0,
+            "body_handle": fixture.dynamic_handle,
+            "frame_index": fixture.frame_index,
+            "requested_delta": [0.25, 0.0],
+            "wake_intent": true
+        }),
+    )
+    .await;
+    assert_eq!(body["preview"]["rejection_reason"], Value::Null);
+    body["preview"].clone()
+}
+
+fn commit_request_from_preview(preview: &Value) -> Value {
+    json!({
+        "action_id": preview["action_id"],
+        "world_revision": preview["world_revision"],
+        "session_epoch": preview["session_epoch"],
+        "body_handle": preview["body_handle"],
+        "frame_index": preview["frame_index"],
+        "requested_delta": preview["requested_delta"],
+        "computed_target_velocity": preview["computed_target_velocity"]
+    })
+}
+
+fn assert_preview_rejection_preserved_session(before: &Value, after: &Value) {
+    for field in [
+        "status",
+        "session_epoch",
+        "latest_frame",
+        "buffered_frame_count",
+        "current_frame_index",
+        "run_id",
+    ] {
+        assert_eq!(
+            after[field], before[field],
+            "rejected preview changed session field {field}"
+        );
+    }
+}
+
+fn assert_commit_rejection_preserved_session(before: &Value, after: &Value) {
+    assert_preview_rejection_preserved_session(before, after);
+}
+
+fn first_body_with_type<'a>(session: &'a Value, body_type: &str) -> &'a Value {
+    session["latest_frame"]["snapshot"]["bodies"]
+        .as_array()
+        .expect("snapshot bodies should be an array")
+        .iter()
+        .find(|body| body["body_type"] == body_type)
+        .unwrap_or_else(|| panic!("snapshot should include a {body_type} body"))
+}
+
+fn body_by_handle<'a>(snapshot: &'a Value, handle: &Value) -> &'a Value {
+    snapshot["bodies"]
+        .as_array()
+        .expect("snapshot bodies should be an array")
+        .iter()
+        .find(|body| body["handle"] == *handle)
+        .unwrap_or_else(|| panic!("snapshot should include body handle {handle}"))
+}
+
+fn vector_x(value: &Value) -> f64 {
+    value["x"].as_f64().expect("vector x should be numeric")
+}
+
+fn vector_y(value: &Value) -> f64 {
+    value["y"].as_f64().expect("vector y should be numeric")
+}
+
+fn assert_close(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() < 1.0e-5,
+        "expected {actual} to be close to {expected}"
     );
 }
 

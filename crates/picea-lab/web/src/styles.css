@@ -41,4 +41,25 @@ canvas {
   .tab-trigger {
     @apply inline-flex h-7 items-center rounded-md px-2.5 text-xs font-medium text-lab-muted outline-none transition-colors hover:bg-white/[0.07] hover:text-lab-text data-[state=active]:bg-lab-accent/15 data-[state=active]:text-lab-text;
   }
+
+  [data-radix-select-viewport] {
+    scrollbar-width: thin !important;
+    scrollbar-color: #4b5563 transparent;
+  }
+
+  [data-radix-select-viewport]::-webkit-scrollbar {
+    display: block !important;
+    width: 8px;
+  }
+
+  [data-radix-select-viewport]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  [data-radix-select-viewport]::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: #4b5563;
+    background-clip: padding-box;
+  }
 }

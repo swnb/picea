@@ -69,6 +69,28 @@ Start the local simulator server for the web workbench:
 rtk proxy cargo run -p picea-lab -- serve --bind 127.0.0.1:18080
 ```
 
+Or start the Rust API and `picea-lab-web` Vite workbench together:
+
+```bash
+just picea-lab-web
+```
+
+The recipe uses `127.0.0.1:8080` for the Rust API and `127.0.0.1:5173`
+for Vite by default. Override with `PICEA_LAB_BIND` or
+`PICEA_LAB_WEB_PORT` when those ports are already occupied.
+
+When working on `picea-lab-web`, start here first:
+
+```bash
+rtk proxy just picea-lab-web
+```
+
+For acceptance, prefer `browser-use:browser` against the actual local dev URL
+and explicitly walk all three surfaces: demo fallback, Rust artifact replay,
+and Rust live session. M40 closeout expects browser checks for scenario
+grouping, overlay presets, stack stability, trajectory focus, paused
+perturbation review, lattice proxy wording, and copy-debug-context output.
+
 ## Development Workflow
 
 Start with current repo facts, not archived milestone notes:

@@ -91,7 +91,9 @@ export function Select({
 }: {
   value: string;
   onValueChange: (value: string) => void;
-  items: Array<{ value: string; label: string }>;
+  items: Array<
+    { value: string; label: string } | { label: string; items: Array<{ value: string; label: string }> }
+  >;
   className?: string;
   ariaLabel?: string;
 }) {
@@ -100,31 +102,55 @@ export function Select({
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={cn(
-          "inline-flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-lab-line bg-lab-panel2 px-2 text-sm text-lab-text",
+          "inline-grid h-8 min-w-40 grid-cols-[minmax(0,1fr)_1rem] items-center gap-2 rounded-md border border-lab-line bg-lab-panel2 px-2 text-left text-sm text-lab-text",
           "focus-visible:outline-none focus-visible:shadow-focus",
           className,
         )}
       >
-        <SelectPrimitive.Value />
-        <SelectPrimitive.Icon>
+        <SelectPrimitive.Value className="min-w-0 truncate" />
+        <SelectPrimitive.Icon className="grid h-4 w-4 shrink-0 place-items-center">
           <ChevronDown className="h-4 w-4 text-lab-muted" />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
-        <SelectPrimitive.Content className="z-50 overflow-hidden rounded-md border border-lab-line bg-lab-panel2 text-lab-text shadow-xl">
-          <SelectPrimitive.Viewport className="p-1">
-            {items.map((item) => (
-              <SelectPrimitive.Item
-                key={item.value}
-                value={item.value}
-                className="relative flex h-7 cursor-default select-none items-center rounded px-7 text-sm outline-none data-[highlighted]:bg-lab-accent/[0.18]"
-              >
-                <SelectPrimitive.ItemIndicator className="absolute left-2 inline-flex items-center">
-                  <Check className="h-3.5 w-3.5 text-lab-accent" />
-                </SelectPrimitive.ItemIndicator>
-                <SelectPrimitive.ItemText>{item.label}</SelectPrimitive.ItemText>
-              </SelectPrimitive.Item>
-            ))}
+        <SelectPrimitive.Content
+          position="popper"
+          sideOffset={6}
+          className="z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border border-lab-line bg-lab-panel2 text-lab-text shadow-xl"
+        >
+          <SelectPrimitive.Viewport className="lab-select-viewport max-h-[min(20rem,var(--radix-select-content-available-height))] overflow-y-auto overscroll-contain p-1 [scrollbar-gutter:stable]">
+            {items.map((item) =>
+              "items" in item ? (
+                <SelectPrimitive.Group key={item.label}>
+                  <SelectPrimitive.Label className="px-2 pb-1 pt-2 text-[11px] font-medium uppercase text-lab-muted">
+                    {item.label}
+                  </SelectPrimitive.Label>
+                  {item.items.map((groupItem) => (
+                    <SelectPrimitive.Item
+                      key={groupItem.value}
+                      value={groupItem.value}
+                      className="relative flex h-7 cursor-default select-none items-center rounded px-7 text-sm outline-none data-[highlighted]:bg-lab-accent/[0.18]"
+                    >
+                      <SelectPrimitive.ItemIndicator className="absolute left-2 inline-flex items-center">
+                        <Check className="h-3.5 w-3.5 text-lab-accent" />
+                      </SelectPrimitive.ItemIndicator>
+                      <SelectPrimitive.ItemText>{groupItem.label}</SelectPrimitive.ItemText>
+                    </SelectPrimitive.Item>
+                  ))}
+                </SelectPrimitive.Group>
+              ) : (
+                <SelectPrimitive.Item
+                  key={item.value}
+                  value={item.value}
+                  className="relative flex h-7 cursor-default select-none items-center rounded px-7 text-sm outline-none data-[highlighted]:bg-lab-accent/[0.18]"
+                >
+                  <SelectPrimitive.ItemIndicator className="absolute left-2 inline-flex items-center">
+                    <Check className="h-3.5 w-3.5 text-lab-accent" />
+                  </SelectPrimitive.ItemIndicator>
+                  <SelectPrimitive.ItemText>{item.label}</SelectPrimitive.ItemText>
+                </SelectPrimitive.Item>
+              ),
+            )}
           </SelectPrimitive.Viewport>
         </SelectPrimitive.Content>
       </SelectPrimitive.Portal>

@@ -1,0 +1,245 @@
+- generic:
+  - generic:
+    - generic:
+      - banner:
+        - generic:
+          - generic:
+            - img
+            - generic:
+              - generic: picea-lab-web
+              - generic: 动态箱体下落到静态地面接触，用于观察 AABB、轨迹和接触事实。
+          - combobox [expanded]:
+            - generic: Rust 产物回放
+            - generic:
+              - img
+          - combobox:
+            - generic: 落箱接触
+            - generic:
+              - img
+          - generic: Rust 产物回放
+          - generic: 已暂停
+        - generic:
+          - button:
+            - img
+          - button:
+            - img
+          - button:
+            - img
+          - button:
+            - img
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - heading [level=2]: 场景层级
+              - generic: "1"
+            - generic:
+              - generic:
+                - generic:
+                  - img
+                  - generic: 物体
+                  - generic: "2"
+                - generic:
+                  - generic:
+                    - button:
+                      - generic:
+                        - img
+                      - generic: 物体 0
+                      - generic: 静态
+                    - generic:
+                      - button:
+                        - generic:
+                          - img
+                        - generic: 碰撞体 0
+                        - generic: 多边形
+                  - generic:
+                    - button:
+                      - generic:
+                        - img
+                      - generic: 物体 1
+                      - generic: 动态
+                    - generic:
+                      - button:
+                        - generic:
+                          - img
+                        - generic: 碰撞体 1
+                        - generic: 多边形
+              - generic:
+                - generic:
+                  - img
+                  - generic: 接触点
+                  - generic: "0"
+                - generic:
+                  - generic: 空
+              - generic:
+                - generic:
+                  - img
+                  - generic: 关节
+                  - generic: "0"
+                - generic:
+                  - generic: 空
+        - separator
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic: 帧 0
+                  - generic: 2 碰撞体
+                  - generic: 0 接触点
+            - separator
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - button:
+                        - img
+                      - button:
+                        - img
+                      - button:
+                        - img
+                      - button:
+                        - img
+                    - tablist:
+                      - tab [selected]: 时间线
+                      - tab: 日志
+                      - tab: 运行设置
+                  - generic:
+                    - generic: 0.017s
+                    - generic: cd7fd9817f472252
+                - tabpanel:
+                  - generic:
+                    - generic: 第 0 帧
+                    - generic:
+                      - slider
+                    - generic: 共 120 帧
+                  - generic:
+                    - generic:
+                      - generic: 步数
+                      - generic: "1"
+                    - generic:
+                      - generic: 模拟时间
+                      - generic: "0.017"
+                    - generic:
+                      - generic: 重力
+                      - generic: 0.000, 9.800
+                    - generic:
+                      - generic: 流形
+                      - generic: "0"
+        - separator
+        - generic:
+          - generic:
+            - generic:
+              - heading [level=2]: 检查器
+              - generic: 首个切片事实
+            - generic:
+              - generic:
+                - generic:
+                  - generic: 物体
+                  - generic: "2"
+                - generic:
+                  - generic: 接触点
+                  - generic: "0"
+                - generic:
+                  - generic: dt
+                  - generic: "0.0167"
+              - generic:
+                - generic:
+                  - generic:
+                    - img
+                  - generic:
+                    - heading [level=4]: 未选中实体
+                    - paragraph: 在层级树或画布中选择物体、碰撞体、接触点或关节。
+                  - generic:
+                    - generic: Esc
+                    - generic: 清除当前选中
+                - generic:
+                  - generic:
+                    - img
+                    - heading [level=3]: 阶段事实
+                    - generic: "1"
+                  - generic:
+                    - generic:
+                      - generic: 宽阶段候选
+                      - generic: "0"
+                      - button:
+                        - img
+                    - generic:
+                      - generic: 暖启动
+                      - generic: 0/0/0
+                      - button:
+                        - img
+                    - generic:
+                      - generic: CCD 候选/命中/错过/钳制
+                      - generic: 0/0/0/0
+                      - button:
+                        - img
+                - generic:
+                  - generic:
+                    - img
+                    - heading [level=3]: 过程事实
+                    - generic: "4"
+                  - generic:
+                    - generic:
+                      - button [expanded]:
+                        - img
+                        - generic: 宽阶段树
+                      - generic:
+                        - generic:
+                          - generic: 树形态
+                          - generic: 3 nodes / 2 leaves / depth 2
+                          - button:
+                            - img
+                        - generic:
+                          - generic: 树计数器
+                          - generic: 0/1/1
+                          - button:
+                            - img
+                    - generic:
+                      - button [expanded]:
+                        - img
+                        - generic: 岛生命周期
+                      - generic:
+                        - generic:
+                          - generic: 步数
+                          - generic: 1/1/0
+                          - button:
+                            - img
+                        - generic:
+                          - generic: I0
+                          - generic: 1 bodies / 否 / 未知
+                          - button:
+                            - img
+                    - generic:
+                      - button [expanded]:
+                        - img
+                        - generic: 复合体来源
+                      - generic:
+                        - generic:
+                          - generic: 复合体来源
+                          - generic: 当前帧没有作者提供的复合体来源
+                          - button:
+                            - img
+                - generic:
+                  - generic:
+                    - img
+                    - heading [level=3]: 待测量项
+                    - generic: 未测量
+                  - generic:
+                    - generic:
+                      - generic: 力
+                      - generic: 未测量
+                      - button:
+                        - img
+                    - generic:
+                      - generic: 扭矩
+                      - generic: 未测量
+                      - button:
+                        - img
+  - listbox [ref=e431]:
+    - option "Rust 产物回放" [active] [selected] [ref=e432]:
+      - img [ref=e434]
+      - generic [ref=e436]: Rust 产物回放
+    - option "Rust 实时会话" [ref=e437]:
+      - generic [ref=e438]: Rust 实时会话

@@ -244,6 +244,58 @@ fn sat_polygon_artifacts_capture_manifold_points_and_normals() {
 }
 
 #[test]
+fn stack_stability_tower_artifacts_capture_multi_body_stack_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::StackStabilityTower,
+            frame_count: 240,
+            run_id: Some("m35-stack-stability".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("stack stability tower run should write artifacts");
+
+    let manifest: RunManifest = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::Manifest.file_name()))
+            .expect("manifest should be readable"),
+    )
+    .expect("manifest should match schema");
+    assert_eq!(manifest.scenario_id, ScenarioId::StackStabilityTower);
+
+    let dynamic_bodies = run.frames[0]
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+        .count();
+    assert!(
+        dynamic_bodies > 4,
+        "M35 tower should exercise a denser stack than stack_4"
+    );
+
+    assert!(
+        run.frames
+            .iter()
+            .any(|frame| frame.stats.contact_count >= 5),
+        "tower should expose multi-contact stack frames"
+    );
+    assert!(
+        run.frames.iter().any(|frame| frame.stats.island_count > 0),
+        "tower should expose island facts for the observatory"
+    );
+    assert!(
+        run.frames.iter().any(|frame| {
+            frame.stats.contact_row_count > 0 || frame.stats.solver_body_slot_count > 0
+        }),
+        "tower should carry solver-facing counts without modifying solver behavior"
+    );
+}
+
+#[test]
 fn compound_provenance_scenario_writes_frame_and_debug_render_facts() {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let store = ArtifactStore::new(temp.path().join("runs"));
@@ -778,6 +830,92 @@ fn ccd_dynamic_compound_wall_artifacts_capture_piece_trace_facts() {
 }
 
 #[test]
+fn lattice_grid_artifacts_capture_joint_lattice_proxy_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::LatticeGrid,
+            frame_count: 6,
+            run_id: Some("m38-lattice-grid".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("lattice grid run should write artifacts");
+
+    assert_eq!(run.manifest.scenario_id, ScenarioId::LatticeGrid);
+    assert_eq!(run.frames.len(), 6);
+
+    let first = run.frames.first().expect("first frame should exist");
+    let dynamic_body_count = first
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+        .count();
+    assert!(
+        dynamic_body_count >= 9,
+        "lattice proxy should export a grid of dynamic nodes"
+    );
+    assert!(
+        first.snapshot.joints.len() >= 12,
+        "lattice proxy should export enough debug joints for node/edge visualization"
+    );
+    assert!(
+        first
+            .snapshot
+            .joints
+            .iter()
+            .any(|joint| joint.kind == picea::debug::DebugJointKind::Distance),
+        "lattice proxy should include distance joints"
+    );
+    assert!(
+        first
+            .snapshot
+            .joints
+            .iter()
+            .any(|joint| joint.kind == picea::debug::DebugJointKind::WorldAnchor),
+        "lattice proxy should include world-anchor joints"
+    );
+    assert!(
+        first
+            .snapshot
+            .bodies
+            .iter()
+            .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+            .all(|body| body.island_id.is_some()),
+        "dynamic lattice nodes should export island membership"
+    );
+    assert!(
+        run.frames
+            .iter()
+            .any(|frame| frame.snapshot.stats.joint_row_count > 0),
+        "lattice proxy should produce joint solver rows"
+    );
+
+    let render: DebugRenderArtifact = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable"),
+    )
+    .expect("debug render should match schema");
+    let render_first = render
+        .frames
+        .first()
+        .expect("debug render should include first frame");
+    assert_eq!(
+        render_first.joints.len(),
+        first.snapshot.joints.len(),
+        "debug render should preserve lattice joint carriers"
+    );
+    assert!(
+        !render_first.islands.is_empty(),
+        "debug render should preserve island facts for lattice proxy frames"
+    );
+}
+
+#[test]
 fn artifact_schema_keeps_final_observability_fact_set() {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let store = ArtifactStore::new(temp.path().join("runs"));
@@ -982,6 +1120,7 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
         colliders: Vec::new(),
         contacts: Vec::new(),
         manifolds: Vec::new(),
+        joints: Vec::new(),
         broadphase_tree: Default::default(),
         islands: Vec::new(),
         compound_provenance: Vec::new(),
@@ -1006,6 +1145,7 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     object.remove("ccd_hit_count");
     object.remove("ccd_miss_count");
     object.remove("ccd_clamp_count");
+    object.remove("joints");
     object.remove("broadphase_tree");
     object.remove("islands");
     object.remove("compound_provenance");
@@ -1028,6 +1168,7 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     assert_eq!(decoded.ccd_hit_count, 0);
     assert_eq!(decoded.ccd_miss_count, 0);
     assert_eq!(decoded.ccd_clamp_count, 0);
+    assert!(decoded.joints.is_empty());
     assert!(decoded.broadphase_tree.nodes.is_empty());
     assert!(decoded.islands.is_empty());
     assert!(decoded.compound_provenance.is_empty());
@@ -1044,16 +1185,22 @@ fn legacy_frame_record_defaults_compound_provenance_when_missing() {
         events: Vec::new(),
         snapshot: Default::default(),
         compound_provenance: Vec::new(),
+        perturbation_provenance: Vec::new(),
     };
     let mut value = serde_json::to_value(frame).expect("frame should serialize");
     value
         .as_object_mut()
         .expect("frame should serialize as an object")
         .remove("compound_provenance");
+    value
+        .as_object_mut()
+        .expect("frame should serialize as an object")
+        .remove("perturbation_provenance");
 
     let decoded: FrameRecord =
         serde_json::from_value(value).expect("older frame record should deserialize");
     assert!(decoded.compound_provenance.is_empty());
+    assert!(decoded.perturbation_provenance.is_empty());
 }
 
 #[test]

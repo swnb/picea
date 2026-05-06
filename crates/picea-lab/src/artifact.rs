@@ -95,6 +95,39 @@ pub struct FrameRecord {
     /// not need a side channel or web-side fixture reconstruction.
     #[serde(default)]
     pub compound_provenance: Vec<CompoundProvenance>,
+    /// Server-side live perturbation provenance. This is additive to artifact
+    /// authoring provenance and remains empty for ordinary headless runs.
+    #[serde(default)]
+    pub perturbation_provenance: Vec<LivePerturbationProvenance>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LivePerturbationProvenance {
+    pub action_id: String,
+    pub session_id: String,
+    pub world_revision: WorldRevision,
+    pub session_epoch: u64,
+    pub body_handle: BodyHandle,
+    pub frame_index: usize,
+    pub before_velocity: Vector,
+    pub requested_delta: Vector,
+    pub computed_target_velocity: Vector,
+    pub wake_intent: bool,
+    pub commit_outcome: LivePerturbationCommitOutcome,
+    pub query_sync_status: LiveQuerySyncStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LivePerturbationCommitOutcome {
+    Accepted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveQuerySyncStatus {
+    Synced,
+    Stale,
 }
 
 /// Viewer-oriented, compact render summary derived from debug snapshots.
@@ -156,6 +189,8 @@ pub struct DebugRenderFrame {
     pub contacts: Vec<DebugContact>,
     pub manifolds: Vec<DebugManifold>,
     #[serde(default)]
+    pub joints: Vec<picea::debug::DebugJoint>,
+    #[serde(default)]
     pub broadphase_tree: picea::debug::DebugBroadphaseTree,
     #[serde(default)]
     pub islands: Vec<picea::debug::DebugIsland>,
@@ -203,6 +238,16 @@ pub fn frame_record_from_step(
     frame_index: usize,
     compound_provenance: &[CompoundProvenance],
 ) -> LabResult<FrameRecord> {
+    frame_record_from_step_with_provenance(world, report, frame_index, compound_provenance, &[])
+}
+
+pub fn frame_record_from_step_with_provenance(
+    world: &World,
+    report: StepReport,
+    frame_index: usize,
+    compound_provenance: &[CompoundProvenance],
+    perturbation_provenance: &[LivePerturbationProvenance],
+) -> LabResult<FrameRecord> {
     let snapshot = DebugSnapshot::from_world_with_step_report(
         world,
         &report,
@@ -218,7 +263,31 @@ pub fn frame_record_from_step(
         report,
         snapshot,
         compound_provenance: compound_provenance.to_vec(),
+        perturbation_provenance: perturbation_provenance.to_vec(),
     })
+}
+
+pub fn refreshed_frame_record_from_world(
+    world: &World,
+    base_frame: &FrameRecord,
+    compound_provenance: &[CompoundProvenance],
+    perturbation_provenance: &[LivePerturbationProvenance],
+) -> LabResult<FrameRecord> {
+    let report = StepReport {
+        revision: world.revision(),
+        simulated_time: base_frame.simulated_time,
+        step_index: base_frame.report.step_index,
+        dt: base_frame.report.dt,
+        stats: StepStats::default(),
+        events: Vec::new(),
+    };
+    frame_record_from_step_with_provenance(
+        world,
+        report,
+        base_frame.frame_index,
+        compound_provenance,
+        perturbation_provenance,
+    )
 }
 
 /// Filesystem boundary that hides `target/picea-lab/runs/<run_id>` from higher
@@ -351,6 +420,7 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     colliders: frame.snapshot.colliders.clone(),
                     contacts: frame.snapshot.contacts.clone(),
                     manifolds: frame.snapshot.manifolds.clone(),
+                    joints: frame.snapshot.joints.clone(),
                     broadphase_tree: frame.snapshot.broadphase_tree.clone(),
                     islands: frame.snapshot.islands.clone(),
                     compound_provenance: frame.compound_provenance.clone(),

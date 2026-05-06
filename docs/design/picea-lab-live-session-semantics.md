@@ -39,6 +39,90 @@ This is the conservative product choice. It keeps web debugging honest: the page
 can drive backend physics, but it cannot yet edit a world in ways that imply
 unsettled handle, contact-cache, sleep, and query-cache guarantees.
 
+## M37-A Velocity Perturbation Preview
+
+M37-A adds the first paused-world preview, but only as a server-side read model:
+
+- `POST /api/sessions/:id/velocity-perturbations/preview` accepts an
+  `action_id`, `world_revision`, `session_epoch`, `body_handle`, `frame_index`,
+  `requested_delta`, and optional `wake_intent`.
+- The endpoint is read-only. It does not call `step`, `run_scenario`, artifact
+  writing, live query sync, or `BodyPatch`; it reads the current
+  `latest_frame` snapshot after proving that snapshot matches the authoritative
+  live `World` revision, then computes `before_velocity + requested_delta`.
+- A live session starts with `session_epoch = 0`. Live `reset` increments the
+  epoch because it replaces the authoritative world and clears the live frame
+  buffer. Preview never increments the epoch.
+- `paused` live sessions may return a preview when the supplied revision, epoch,
+  frame index, handle, body type, and velocity delta are fresh and valid.
+- V1 preview requires an authoritative handle source: the requested
+  `body_handle` must be present in the current `latest_frame` snapshot, and that
+  snapshot must match the session's current frame index and live world revision.
+  `created` live sessions do not have a current frame snapshot yet, including
+  immediately after `reset`, so they reject preview with `rejection_reason`
+  rather than accepting a handle supplied only by the client.
+- `running`, `completed`, stale revision, stale epoch, stale frame, stale or
+  foreign body handle, missing current frame snapshot, static body, kinematic
+  body, zero/invalid delta, and non-finite delta all return a preview-shaped
+  response with `rejection_reason` set.
+- The response includes `action_id`, `session_id`, `world_revision`,
+  `session_epoch`, `body_handle`, `frame_index`, `before_velocity`,
+  `requested_delta`, `computed_target_velocity`, `wake_intent`, and
+  `rejection_reason`.
+
+This is intentionally not a commit endpoint. It gives the web or another client
+enough deterministic information to render a proposed velocity change later,
+without changing live world state, buffered frames, latest frame, status,
+selection/query state, events, artifacts, or run ids.
+
+## M37-B Velocity Perturbation Commit
+
+M37-B adds the matching paused-only commit gate:
+
+- `POST /api/sessions/:id/velocity-perturbations/commit` is a distinct route,
+  not an arm of `control_session`. The request must carry back the preview
+  `action_id`, `world_revision`, `session_epoch`, `body_handle`, `frame_index`,
+  `requested_delta`, and may include `computed_target_velocity` for consistency
+  checking.
+- A successful preview writes a live-runtime transient transaction cache keyed
+  by `action_id`. This cache is not physics state: it does not change the world,
+  frame buffer, latest frame, status, events, run id, query cache, or session
+  epoch. Commit consumes the cached action exactly once on success; rejected
+  commits leave it available unless the action was already successfully used.
+- Commit revalidates against the current authoritative live `World` and current
+  `latest_frame`. It does not trust the client-provided velocity fields. The
+  handle must still be present in the current frame snapshot, the session must
+  still be paused, and the supplied revision, epoch, and frame index must still
+  match.
+- Rejection reasons include `not_live_session`, `session_created`,
+  `session_running`, `session_completed`, `session_failed`,
+  `missing_frame_snapshot`, `stale_world_revision`, `stale_session_epoch`,
+  `stale_frame`, `invalid_body_handle`, `static_body`, `kinematic_body`,
+  `invalid_velocity_delta`, `missing_preview_action`, `stale_preview_action`,
+  `reused_action`, and `body_patch_failed`. Rejected commits do not mutate the
+  live world, frame buffer, latest frame, status, run id, events, session epoch,
+  query cache, or preview cache.
+- Accepted commit is intentionally narrow: it calls
+  `World::apply_body_patch` with only `linear_velocity` and `wake`. It does not
+  add continuous force integration, torque accumulation, a drag constraint,
+  mouse joint behavior, solver changes, contact changes, or CCD changes.
+- On success, `apply_body_patch` bumps the world revision and the server bumps
+  `session_epoch`. The live query cache is resynced after the patch. The server
+  refreshes the current frame at the same `frame_index`, replaces that frame in
+  the live buffer, and truncates any future buffered frames. This refreshed frame
+  is not a simulation step: it preserves the frame index and simulated time while
+  clearing step events/counters for the edit frame. If `/events` already has a
+  queued frame event for that edit frame, the server updates it to the refreshed
+  state hash; queued future frame events are dropped because their frames were
+  invalidated by the edit.
+- `FrameRecord.perturbation_provenance` is additive and separate from
+  `compound_provenance`. Each accepted perturbation records action id, session
+  id, accepted world revision, accepted session epoch, body handle, frame index,
+  before velocity, requested delta, computed target velocity, wake intent,
+  commit outcome, and query sync status. Later live step frames carry the same
+  perturbation provenance history so the downstream trajectory can be traced
+  back to the paused edit.
+
 ## Why Not Implement Arbitrary Live Patch Now
 
 Arbitrary live patch is not just a UI feature. It changes the core runtime
@@ -100,16 +184,45 @@ patch must reuse:
 - `server_routes::live_session_overrides_patch_is_rejected_without_mutating_live_runtime`
   proves live override rejection does not mutate session metadata or the next
   backend step.
+- `server_routes::live_velocity_perturbation_preview_is_read_only_for_paused_session`
+  proves velocity preview returns computed target velocity without changing
+  status, frame buffer, latest frame, run id, epoch, or queued events.
+- `server_routes::live_velocity_perturbation_preview_rejects_stale_or_mutating_requests`
+  proves the M37-A rejection reasons for running/completed sessions, stale
+  revision/epoch/frame, invalid handles, static bodies, and invalid deltas, and
+  proves rejected preview paths do not change status, epoch, frame buffers,
+  latest frame, run id, or event queues.
+- `server_routes::live_session_epoch_starts_at_zero_and_reset_increments_without_preview_increment`
+  proves `session_epoch` starts at zero, live reset increments it, and preview
+  leaves it unchanged. It also proves `created` preview after reset rejects until
+  a new authoritative frame snapshot exists.
+- `server::tests::live_velocity_preview_rejects_kinematic_body_from_current_snapshot`
+  proves the kinematic body rejection branch against a current frame snapshot
+  without adding a broader scenario or solver change.
+- `server_routes::live_velocity_perturbation_commit_applies_previewed_velocity_and_provenance`
+  proves previewed velocity commit is one-shot, bumps world revision and session
+  epoch, refreshes the current frame without advancing its frame index, writes
+  perturbation provenance, and lets the next backend step continue from the
+  committed velocity.
+- `server_routes::live_velocity_perturbation_commit_rejects_stale_or_unpreviewed_transactions`
+  proves commit rejection for created status, missing preview action,
+  stale revision, stale epoch, stale frame, invalid handle, static body, invalid
+  delta, tampered preview payloads, running session, and completed session while
+  preserving session state and leaving a rejected cached preview reusable.
 
 ## Product Upgrade Path
 
 - M25-B, current: refuse live patch explicitly, document semantics, keep live
   physics request-driven, and rely on reset-time overrides for deterministic
   scenario changes.
-- Next patch slice: add a paused-only transaction preview endpoint that validates
-  and returns proposed handle/query/provenance effects without committing.
-- Commit slice: allow a small transaction subset after preview is stable, with
-  query resync and provenance visible in the web inspector.
+- M37-A, current preview slice: expose a server-only paused velocity
+  perturbation preview with revision/epoch/frame/latest-frame handle-source
+  gates and no live mutation.
+- M37-B, current commit slice: accept the previewed paused velocity
+  perturbation as a one-shot absolute velocity patch, with query resync and
+  additive frame provenance.
+- Next patch slice: generalize this pattern toward other paused-only
+  transactions that validate and return handle/query/provenance effects before
+  committing.
 - Editor slice: only after the transaction subset is stable, expose web controls
   for body/collider/joint edits.
-

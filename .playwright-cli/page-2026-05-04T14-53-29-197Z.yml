@@ -1,0 +1,239 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - img [ref=e7]
+        - generic [ref=e9]:
+          - generic [ref=e10]: picea-lab-web
+          - generic [ref=e11]: 动态箱体下落到静态地面接触，用于观察 AABB、轨迹和接触事实。
+      - combobox "运行模式" [ref=e12] [cursor=pointer]:
+        - generic: Rust 实时会话
+        - img [ref=e14]
+      - combobox "运行当前场景" [ref=e16] [cursor=pointer]:
+        - generic: 落箱接触
+        - img [ref=e18]
+      - generic [ref=e20]: Rust 实时会话
+      - generic [ref=e21]: 播放中
+    - generic [ref=e22]:
+      - button "运行当前场景" [ref=e23] [cursor=pointer]:
+        - img [ref=e24]
+      - button "画布图层" [ref=e26] [cursor=pointer]:
+        - img [ref=e27]
+      - button "运行产物" [ref=e31] [cursor=pointer]:
+        - img [ref=e32]
+      - button "语言" [ref=e35] [cursor=pointer]:
+        - img [ref=e36]
+  - generic [ref=e40]:
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - heading "场景层级" [level=2] [ref=e44]
+        - generic [ref=e45]: "27"
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e48]:
+            - img [ref=e49]
+            - generic [ref=e52]: 物体
+            - generic [ref=e53]: "2"
+          - generic [ref=e54]:
+            - generic [ref=e426]:
+              - button "物体 0 静态" [ref=e427] [cursor=pointer]:
+                - img [ref=e429]
+                - generic [ref=e431]: 物体 0
+                - generic [ref=e432]: 静态
+              - button "碰撞体 0 多边形" [ref=e434] [cursor=pointer]:
+                - img [ref=e436]
+                - generic [ref=e439]: 碰撞体 0
+                - generic [ref=e440]: 多边形
+            - generic [ref=e441]:
+              - button "物体 1 动态" [ref=e442] [cursor=pointer]:
+                - img [ref=e444]
+                - generic [ref=e446]: 物体 1
+                - generic [ref=e447]: 动态
+              - button "碰撞体 1 多边形" [ref=e449] [cursor=pointer]:
+                - img [ref=e451]
+                - generic [ref=e454]: 碰撞体 1
+                - generic [ref=e455]: 多边形
+        - generic [ref=e85]:
+          - generic [ref=e86]:
+            - img [ref=e87]
+            - generic [ref=e94]: 接触点
+            - generic [ref=e95]: "0"
+          - generic [ref=e97]: 空
+        - generic [ref=e98]:
+          - generic [ref=e99]:
+            - img [ref=e100]
+            - generic [ref=e103]: 关节
+            - generic [ref=e104]: "0"
+          - generic [ref=e106]: 空
+    - separator [ref=e107]
+    - generic [ref=e109]:
+      - generic [ref=e111]:
+        - generic:
+          - generic: 帧 26
+          - generic: 2 碰撞体
+          - generic: 0 接触点
+          - generic: 模式 自由
+          - generic: 缩放 1.22x
+        - generic [ref=e113]:
+          - button "锁定核心区域" [ref=e114] [cursor=pointer]:
+            - img [ref=e115]
+          - button "缩小" [ref=e121] [cursor=pointer]:
+            - img [ref=e122]
+          - button "放大" [ref=e125] [cursor=pointer]:
+            - img [ref=e126]
+          - button "适配画布" [ref=e129] [cursor=pointer]:
+            - img [ref=e130]
+          - button "重置画布视图" [ref=e135] [cursor=pointer]:
+            - img [ref=e136]
+        - generic: 比例尺 1u = 58px
+      - separator [ref=e139]
+      - generic [ref=e141]:
+        - generic [ref=e142]:
+          - generic [ref=e143]:
+            - generic [ref=e144]:
+              - button "暂停播放" [ref=e145] [cursor=pointer]:
+                - img [ref=e146]
+              - button "播放时间线" [ref=e149] [cursor=pointer]:
+                - img [ref=e150]
+              - button "前进一帧" [ref=e153] [cursor=pointer]:
+                - img [ref=e154]
+              - button "重置时间线" [ref=e156] [cursor=pointer]:
+                - img [ref=e157]
+            - tablist [ref=e161]:
+              - tab "时间线" [selected] [ref=e162] [cursor=pointer]
+              - tab "日志" [ref=e163] [cursor=pointer]
+              - tab "诊断" [ref=e164] [cursor=pointer]
+              - tab "证据" [ref=e165] [cursor=pointer]
+              - tab "运行设置" [ref=e166] [cursor=pointer]
+          - generic [ref=e168]: Rust 实时会话 / 播放中
+        - tabpanel "时间线" [ref=e169]:
+          - generic [ref=e170]:
+            - generic [ref=e171]: 第 26 帧
+            - slider [ref=e173]
+            - generic [ref=e174]: 共 27 帧
+          - generic [ref=e175]: 会话 session-1 / 已缓存 27 / 当前 26
+          - generic [ref=e176]:
+            - generic [ref=e177]: 模拟时间
+            - generic [ref=e178]: 0.450s
+            - generic [ref=e179]: state hash
+            - generic [ref=e180]: 990e5e5a490b9ac2
+          - generic [ref=e181]:
+            - generic [ref=e182]:
+              - generic [ref=e183]: 步数
+              - generic [ref=e184]: "27"
+            - generic [ref=e185]:
+              - generic [ref=e186]: 模拟时间
+              - generic [ref=e187]: "0.450"
+            - generic [ref=e188]:
+              - generic [ref=e189]: 重力
+              - generic [ref=e190]: 0.000, 9.800
+            - generic [ref=e191]:
+              - generic [ref=e192]: 流形
+              - generic [ref=e193]: "0"
+    - separator [ref=e194]
+    - generic [ref=e196]:
+      - generic [ref=e197]:
+        - heading "检查器" [level=2] [ref=e198]
+        - generic [ref=e199]: 首个切片事实
+      - generic [ref=e200]:
+        - generic [ref=e201]:
+          - generic [ref=e202]:
+            - generic [ref=e203]: 物体
+            - generic [ref=e204]: "2"
+          - generic [ref=e205]:
+            - generic [ref=e206]: 接触点
+            - generic [ref=e207]: "0"
+          - generic [ref=e208]:
+            - generic [ref=e209]: dt
+            - generic [ref=e210]: "0.0167"
+        - generic [ref=e211]:
+          - generic [ref=e456]:
+            - img [ref=e458]
+            - generic [ref=e460]:
+              - heading "未选中实体" [level=4] [ref=e461]
+              - paragraph [ref=e462]: 在层级树或画布中选择物体、碰撞体、接触点或关节。
+            - generic [ref=e463]:
+              - generic [ref=e464]: Esc
+              - generic [ref=e465]: 清除当前选中
+          - generic [ref=e305]:
+            - generic [ref=e306]:
+              - img [ref=e307]
+              - heading "阶段事实" [level=3] [ref=e311]
+              - generic [ref=e312]: "27"
+            - generic [ref=e313]:
+              - generic [ref=e314]:
+                - generic [ref=e315]: 宽阶段候选
+                - generic [ref=e316]: "0"
+                - button "copy" [ref=e317] [cursor=pointer]:
+                  - img [ref=e318]
+              - generic [ref=e321]:
+                - generic [ref=e322]: 暖启动
+                - generic [ref=e323]: 0/0/0
+                - button "copy" [ref=e324] [cursor=pointer]:
+                  - img [ref=e325]
+              - generic [ref=e328]:
+                - generic [ref=e329]: CCD 候选/命中/错过/钳制
+                - generic [ref=e330]: 0/0/0/0
+                - button "copy" [ref=e331] [cursor=pointer]:
+                  - img [ref=e332]
+          - generic [ref=e335]:
+            - generic [ref=e336]:
+              - img [ref=e337]
+              - heading "过程事实" [level=3] [ref=e340]
+              - generic [ref=e341]: "4"
+            - generic [ref=e342]:
+              - generic [ref=e343]:
+                - button "宽阶段树" [expanded] [ref=e344] [cursor=pointer]:
+                  - img [ref=e345]
+                  - generic [ref=e347]: 宽阶段树
+                - generic [ref=e348]:
+                  - generic [ref=e349]:
+                    - generic [ref=e350]: 树形态
+                    - generic [ref=e351]: 3 nodes / 2 leaves / depth 2
+                    - button "copy" [ref=e352] [cursor=pointer]:
+                      - img [ref=e353]
+                  - generic [ref=e356]:
+                    - generic [ref=e357]: 树计数器
+                    - generic [ref=e358]: 0/1/1
+                    - button "copy" [ref=e359] [cursor=pointer]:
+                      - img [ref=e360]
+              - generic [ref=e363]:
+                - button "岛生命周期" [expanded] [ref=e364] [cursor=pointer]:
+                  - img [ref=e365]
+                  - generic [ref=e367]: 岛生命周期
+                - generic [ref=e368]:
+                  - generic [ref=e369]:
+                    - generic [ref=e370]: 步数
+                    - generic [ref=e371]: 1/1/0
+                    - button "copy" [ref=e372] [cursor=pointer]:
+                      - img [ref=e373]
+                  - generic [ref=e466]:
+                    - generic [ref=e467]: I0
+                    - generic [ref=e468]: 1 bodies / 否 / 未知
+                    - button "copy" [ref=e469] [cursor=pointer]:
+                      - img [ref=e470]
+              - generic [ref=e383]:
+                - button "复合体来源" [expanded] [ref=e384] [cursor=pointer]:
+                  - img [ref=e385]
+                  - generic [ref=e387]: 复合体来源
+                - generic [ref=e389]:
+                  - generic [ref=e390]: 复合体来源
+                  - generic [ref=e391]: 当前帧没有作者提供的复合体来源
+                  - button "copy" [ref=e392] [cursor=pointer]:
+                    - img [ref=e393]
+          - generic [ref=e396]:
+            - generic [ref=e397]:
+              - img [ref=e398]
+              - heading "待测量项" [level=3] [ref=e401]
+              - generic [ref=e402]: 未测量
+            - generic [ref=e403]:
+              - generic [ref=e404]:
+                - generic [ref=e405]: 力
+                - generic [ref=e406]: 未测量
+                - button "copy" [ref=e407] [cursor=pointer]:
+                  - img [ref=e408]
+              - generic [ref=e411]:
+                - generic [ref=e412]: 扭矩
+                - generic [ref=e413]: 未测量
+                - button "copy" [ref=e414] [cursor=pointer]:
+                  - img [ref=e415]

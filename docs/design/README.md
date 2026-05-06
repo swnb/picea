@@ -9,6 +9,7 @@ This directory records design intent and future-facing engineering decisions.
 - `debug-observability-design.md`: design for reproducible debug facts and stable read-side inspection.
 - `picea-lab-observability-architecture.md`: current target design for artifacts, visualization, and benchmark evidence.
 - `picea-lab-live-session-semantics.md`: M25-B live session reset/patch/transaction semantics and product upgrade path.
+- `deformable-body-roadmap.md`: RFC boundary for future soft-body, particle, cloth, and deformable mesh work; distinguishes true deformable physics from rigid-body lattice proxies.
 - `solver-island-ordering-contract.md`: M28 single-threaded island-local contact/joint ordering contract.
 - `performance-threshold-policy.md`: M29 benchmark baseline, warn/fail, and fallback policy.
 - `../public-beta.md`: M30 public beta surface, migration notes, examples, and final verification matrix.

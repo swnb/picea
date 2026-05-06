@@ -1,8 +1,15 @@
 import { Panel, PanelGroup } from "react-resizable-panels"
 
-import { t, type Locale, type StatusKind } from "../../i18n"
+import {
+  entityLabel,
+  t,
+  type Locale,
+  type OverlayPresetId,
+  type StatusKind,
+} from "../../i18n"
 import type {
   FrameRecord,
+  PerfArtifact,
   ScenarioDescriptor,
   SelectedEntity,
   WorkbenchLog,
@@ -15,10 +22,14 @@ import { Toolbar } from "./Toolbar"
 import { WorldCanvas } from "./WorldCanvas"
 import type {
   ControlAction,
+  CanvasDebugView,
   LayerState,
+  PerfEvidenceStatus,
   ResolvedSelection,
   RunMode,
   SourceKind,
+  TrajectorySettings,
+  VelocityPerturbationPanelState,
 } from "./types"
 
 export function WorkbenchLayout({
@@ -35,11 +46,17 @@ export function WorkbenchLayout({
   manifestArtifact,
   finalSnapshotArtifact,
   finalSnapshotStep,
+  perfArtifact,
+  perfStatus,
   onRun,
+  liveControlBusy,
   runMode,
   onRunModeChange,
   layers,
   onLayerChange,
+  onApplyOverlayPreset,
+  trajectorySettings,
+  onTrajectorySettingsChange,
   currentFrame,
   frames,
   frameIndex,
@@ -47,6 +64,9 @@ export function WorkbenchLayout({
   selectedEntity,
   selectedDetails,
   onSelectEntity,
+  canvasView,
+  debugContextText,
+  onCanvasViewChange,
   logs,
   frameCount,
   setFrameCount,
@@ -54,7 +74,12 @@ export function WorkbenchLayout({
   setUseCustomGravity,
   gravityY,
   setGravityY,
+  velocityPerturbation,
+  onVelocityPerturbationDeltaChange,
+  onVelocityPerturbationPreview,
+  onVelocityPerturbationSubmit,
   onControl,
+  onCopyDebugContext,
 }: {
   locale: Locale
   onLocaleChange: (locale: Locale) => void
@@ -69,11 +94,17 @@ export function WorkbenchLayout({
   manifestArtifact: string | null
   finalSnapshotArtifact: string | null
   finalSnapshotStep: number | null
+  perfArtifact: PerfArtifact | null
+  perfStatus: PerfEvidenceStatus
   onRun: () => void
+  liveControlBusy: boolean
   runMode: RunMode
   onRunModeChange: (value: RunMode) => void
   layers: LayerState
   onLayerChange: (key: keyof LayerState, value: boolean) => void
+  onApplyOverlayPreset: (preset: OverlayPresetId) => void
+  trajectorySettings: TrajectorySettings
+  onTrajectorySettingsChange: (value: TrajectorySettings) => void
   currentFrame: FrameRecord
   frames: FrameRecord[]
   frameIndex: number
@@ -81,6 +112,9 @@ export function WorkbenchLayout({
   selectedEntity: SelectedEntity | null
   selectedDetails: ResolvedSelection
   onSelectEntity: (entity: SelectedEntity | null) => void
+  canvasView: CanvasDebugView | null
+  debugContextText: string | null
+  onCanvasViewChange: (view: CanvasDebugView) => void
   logs: WorkbenchLog[]
   frameCount: number
   setFrameCount: (value: number) => void
@@ -88,7 +122,12 @@ export function WorkbenchLayout({
   setUseCustomGravity: (value: boolean) => void
   gravityY: number
   setGravityY: (value: number) => void
+  velocityPerturbation: VelocityPerturbationPanelState
+  onVelocityPerturbationDeltaChange: (axis: "x" | "y", value: string) => void
+  onVelocityPerturbationPreview: () => void
+  onVelocityPerturbationSubmit: () => void
   onControl: (action: ControlAction) => void
+  onCopyDebugContext: () => void
 }) {
   return (
     <div className="flex h-screen min-h-[720px] flex-col overflow-hidden bg-lab-canvas text-lab-text">
@@ -111,6 +150,7 @@ export function WorkbenchLayout({
         onRunModeChange={onRunModeChange}
         layers={layers}
         onLayerChange={onLayerChange}
+        onApplyOverlayPreset={onApplyOverlayPreset}
       />
 
       <PanelGroup direction="horizontal" className="min-h-0 flex-1">
@@ -132,16 +172,55 @@ export function WorkbenchLayout({
           <PanelGroup direction="vertical">
             <Panel defaultSize={72} minSize={45} className="min-h-[320px]">
               <WorldCanvas
+                frame={currentFrame}
                 frames={frames}
                 frameIndex={frameIndex}
                 selected={selectedEntity}
                 layers={layers}
+                trajectorySettings={trajectorySettings}
                 labels={{
                   frame: t(locale, "canvas.frame"),
                   colliders: t(locale, "canvas.colliders"),
                   contacts: t(locale, "canvas.contacts"),
+                  zoom: t(locale, "canvas.zoom"),
+                  scale: t(locale, "canvas.scale"),
+                  mode: t(locale, "canvas.mode"),
+                  modeFree: t(locale, "canvas.modeFree"),
+                  modeLockedCore: t(locale, "canvas.modeLockedCore"),
+                  fit: t(locale, "tooltip.canvasFit"),
+                  lock: t(locale, "tooltip.canvasLockCore"),
+                  unlock: t(locale, "tooltip.canvasUnlockCore"),
+                  reset: t(locale, "tooltip.canvasReset"),
+                  zoomIn: t(locale, "tooltip.canvasZoomIn"),
+                  zoomOut: t(locale, "tooltip.canvasZoomOut"),
+                  targetActive: t(locale, "canvas.targetActive"),
+                  targetAllColliders: t(locale, "canvas.targetAllColliders"),
+                  targetScene: t(locale, "canvas.targetScene"),
+                  trajectoryEmptySelectedBody: t(
+                    locale,
+                    "trajectory.empty.selectedBody",
+                  ),
+                  trajectoryEmptyAllDynamic: t(
+                    locale,
+                    "trajectory.empty.allDynamic",
+                  ),
+                  trajectoryEmptySelectedIsland: t(
+                    locale,
+                    "trajectory.empty.selectedIsland",
+                  ),
+                  trajectoryEmptyContacts: t(
+                    locale,
+                    "trajectory.empty.contacts",
+                  ),
+                  trajectoryEmptyCcd: t(locale, "trajectory.empty.ccd"),
+                  trajectoryEmptyUnsupportedSelection: t(
+                    locale,
+                    "trajectory.empty.unsupportedSelection",
+                  ),
+                  entity: (kind, id) => entityLabel(locale, kind, id),
                 }}
                 onSelect={onSelectEntity}
+                onViewChange={onCanvasViewChange}
               />
             </Panel>
             <ResizeHandle vertical />
@@ -162,12 +241,26 @@ export function WorkbenchLayout({
                 gravityY={gravityY}
                 setGravityY={setGravityY}
                 locale={locale}
+                source={source}
+                status={status}
+                sessionId={sessionId}
+                runId={runId}
+                selectedEntity={selectedEntity}
+                layers={layers}
+                trajectorySettings={trajectorySettings}
+                onTrajectorySettingsChange={onTrajectorySettingsChange}
+                canvasView={canvasView}
+                debugContextText={debugContextText}
+                perfArtifact={perfArtifact}
+                perfStatus={perfStatus}
+                controlBusy={status === "loading" || liveControlBusy}
                 runMode={runMode}
                 setRunMode={onRunModeChange}
                 onPlay={() => onControl("play")}
                 onPause={() => onControl("pause")}
                 onStep={() => onControl("step")}
                 onReset={() => onControl("reset")}
+                onCopyDebugContext={onCopyDebugContext}
               />
             </Panel>
           </PanelGroup>
@@ -181,7 +274,15 @@ export function WorkbenchLayout({
         >
           <Inspector
             frame={currentFrame}
+            frames={frames}
+            frameIndex={frameIndex}
             selected={selectedDetails}
+            selectedEntity={selectedEntity}
+            trajectorySettings={trajectorySettings}
+            velocityPerturbation={velocityPerturbation}
+            onVelocityPerturbationDeltaChange={onVelocityPerturbationDeltaChange}
+            onVelocityPerturbationPreview={onVelocityPerturbationPreview}
+            onVelocityPerturbationSubmit={onVelocityPerturbationSubmit}
             locale={locale}
           />
         </Panel>
