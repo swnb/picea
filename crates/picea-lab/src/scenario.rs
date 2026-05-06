@@ -22,6 +22,7 @@ pub enum ScenarioId {
     #[serde(rename = "stack_4")]
     Stack4,
     StackStabilityTower,
+    MatrixStack,
     JointAnchor,
     LatticeGrid,
     BroadphaseSparse,
@@ -35,10 +36,11 @@ pub enum ScenarioId {
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::FallingBoxContact,
         Self::Stack4,
         Self::StackStabilityTower,
+        Self::MatrixStack,
         Self::JointAnchor,
         Self::LatticeGrid,
         Self::BroadphaseSparse,
@@ -56,6 +58,7 @@ impl ScenarioId {
             Self::FallingBoxContact => "falling_box_contact",
             Self::Stack4 => "stack_4",
             Self::StackStabilityTower => "stack_stability_tower",
+            Self::MatrixStack => "matrix_stack",
             Self::JointAnchor => "joint_anchor",
             Self::LatticeGrid => "lattice_grid",
             Self::BroadphaseSparse => "broadphase_sparse",
@@ -84,6 +87,7 @@ impl FromStr for ScenarioId {
             "falling_box_contact" => Ok(Self::FallingBoxContact),
             "stack_4" => Ok(Self::Stack4),
             "stack_stability_tower" => Ok(Self::StackStabilityTower),
+            "matrix_stack" => Ok(Self::MatrixStack),
             "joint_anchor" => Ok(Self::JointAnchor),
             "lattice_grid" => Ok(Self::LatticeGrid),
             "broadphase_sparse" => Ok(Self::BroadphaseSparse),
@@ -116,6 +120,7 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::FallingBoxContact => "Falling box contact",
                 ScenarioId::Stack4 => "Four box stack",
                 ScenarioId::StackStabilityTower => "Stack stability tower",
+                ScenarioId::MatrixStack => "Matrix stack 8x6",
                 ScenarioId::JointAnchor => "World anchor joint",
                 ScenarioId::LatticeGrid => "Rigid-body lattice grid proxy",
                 ScenarioId::BroadphaseSparse => "Sparse broadphase",
@@ -132,6 +137,9 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::Stack4 => "Four dynamic boxes stacked above a static floor.",
                 ScenarioId::StackStabilityTower => {
                     "A taller deterministic tower with narrow support, staged settling, and sleep-ready stack facts."
+                }
+                ScenarioId::MatrixStack => {
+                    "An 8x6 dynamic box matrix on a static floor for dense resting-contact stability diagnostics."
                 }
                 ScenarioId::JointAnchor => "A body constrained toward a fixed world-space anchor.",
                 ScenarioId::LatticeGrid => {
@@ -1003,6 +1011,93 @@ fn falling_box_contact_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
     }
 }
 
+fn matrix_stack_fixture(gravity: [f32; 2], columns: usize, rows: usize) -> SceneRecipeFixture {
+    const BOX_WIDTH: f32 = 0.42;
+    const BOX_HEIGHT: f32 = 0.42;
+    const GAP_X: f32 = 0.035;
+    const GAP_Y: f32 = 0.035;
+    const FLOOR_Y: f32 = 2.62;
+    const FLOOR_HEIGHT: f32 = 0.45;
+
+    let columns = columns.max(1);
+    let rows = rows.max(1);
+    let spacing_x = BOX_WIDTH + GAP_X;
+    let spacing_y = BOX_HEIGHT + GAP_Y;
+    let total_width = columns as f32 * spacing_x;
+    let left = -0.5 * (total_width - spacing_x);
+    let bottom_center_y = FLOOR_Y - FLOOR_HEIGHT * 0.5 - BOX_HEIGHT * 0.5 - 0.015;
+
+    let mut bodies = Vec::with_capacity(columns * rows + 1);
+    bodies.push(SceneBodyFixture {
+        body_type: BodyType::Static,
+        pose: [0.0, FLOOR_Y, 0.0],
+        linear_velocity: [0.0, 0.0],
+        can_sleep: false,
+        shape: SceneShapeFixture::Rect {
+            width: total_width + 2.0,
+            height: FLOOR_HEIGHT,
+        },
+        material: MaterialPreset::Rough,
+        filter: CollisionLayerPreset::StaticGeometry,
+        density: default_fixture_density(),
+        is_sensor: false,
+    });
+
+    for row in 0..rows {
+        for column in 0..columns {
+            // Small deterministic offsets keep the matrix from being a perfectly
+            // symmetric toy case. That makes contact churn and solver handoff
+            // easier to inspect without adding any random input.
+            let row_offset = if row % 2 == 0 { 0.0 } else { spacing_x * 0.5 };
+            let centered_row_offset = if columns > 1 {
+                row_offset - spacing_x * 0.25
+            } else {
+                0.0
+            };
+            let column_bias = match (row + column) % 3 {
+                0 => -0.008,
+                1 => 0.0,
+                _ => 0.008,
+            };
+            let angle = match (row + column) % 4 {
+                0 => -0.012,
+                1 => 0.006,
+                2 => 0.012,
+                _ => -0.006,
+            };
+
+            bodies.push(SceneBodyFixture {
+                body_type: BodyType::Dynamic,
+                pose: [
+                    left + column as f32 * spacing_x + centered_row_offset + column_bias,
+                    bottom_center_y - row as f32 * spacing_y,
+                    angle,
+                ],
+                linear_velocity: [0.0, 0.0],
+                can_sleep: true,
+                shape: SceneShapeFixture::Rect {
+                    width: BOX_WIDTH,
+                    height: BOX_HEIGHT,
+                },
+                material: MaterialPreset::Rough,
+                filter: CollisionLayerPreset::DynamicBody,
+                density: default_fixture_density(),
+                is_sensor: false,
+            });
+        }
+    }
+
+    SceneRecipeFixture {
+        schema_version: SCENE_RECIPE_SCHEMA_VERSION,
+        world: SceneFixtureWorld {
+            gravity,
+            enable_sleep: true,
+        },
+        bodies,
+        joints: Vec::new(),
+    }
+}
+
 /// M38 intentionally stops at a rigid-body proxy. Each "node" is still one
 /// ordinary rigid body, so any visible deformation comes from existing joint
 /// constraints and debug facts rather than a new soft-body solver.
@@ -1469,6 +1564,10 @@ pub(crate) fn build_scenario(
                 gravity.x(),
                 gravity.y(),
             ]))?;
+        }
+        ScenarioId::MatrixStack => {
+            world =
+                instantiate_scene_fixture(&matrix_stack_fixture([gravity.x(), gravity.y()], 8, 6))?;
         }
         ScenarioId::JointAnchor => {
             world = World::new(WorldDesc {
@@ -1958,6 +2057,40 @@ mod tests {
 
         assert!(distance_joint_count >= 8);
         assert!(world_anchor_joint_count >= 2);
+    }
+
+    #[test]
+    fn matrix_stack_builtin_exports_default_nxm_dynamic_grid() {
+        let builtin = build_scenario(ScenarioId::MatrixStack, &ScenarioOverrides::default())
+            .expect("matrix stack scenario should build");
+
+        let dynamic_bodies = builtin
+            .world
+            .bodies()
+            .filter(|handle| {
+                builtin
+                    .world
+                    .body(*handle)
+                    .expect("body should resolve")
+                    .body_type()
+                    == BodyType::Dynamic
+            })
+            .count();
+        assert_eq!(dynamic_bodies, 48);
+
+        let static_bodies = builtin
+            .world
+            .bodies()
+            .filter(|handle| {
+                builtin
+                    .world
+                    .body(*handle)
+                    .expect("body should resolve")
+                    .body_type()
+                    == BodyType::Static
+            })
+            .count();
+        assert_eq!(static_bodies, 1);
     }
 
     #[test]

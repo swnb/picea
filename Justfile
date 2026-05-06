@@ -6,9 +6,14 @@ picea_lab_web_api_base := env_var_or_default("VITE_PICEA_LAB_API_BASE", picea_la
 picea_lab_ready_url := env_var_or_default("PICEA_LAB_READY_URL", picea_lab_api_base + "/api/scenarios")
 picea_lab_web_host := env_var_or_default("PICEA_LAB_WEB_HOST", "127.0.0.1")
 picea_lab_web_port := env_var_or_default("PICEA_LAB_WEB_PORT", "5173")
+picea_lab_service_dir := env_var_or_default("PICEA_LAB_SERVICE_DIR", "target/picea-lab-web")
 
 alias lab-web := picea-lab-web
 alias lab-api := picea-lab-api
+alias web-start := picea-lab-web-start
+alias web-stop := picea-lab-web-stop
+alias start := picea-lab-web-start
+alias stop := picea-lab-web-stop
 
 default:
     @just --list
@@ -72,3 +77,16 @@ picea-lab-web-ui:
         rtk proxy npm --prefix crates/picea-lab/web run dev -- \
         --host "{{ picea_lab_web_host }}" \
         --port "{{ picea_lab_web_port }}"
+
+# Start the full local workbench in the background.
+picea-lab-web-start:
+    PICEA_LAB_BIND="{{ picea_lab_bind }}" \
+    PICEA_LAB_WEB_HOST="{{ picea_lab_web_host }}" \
+    PICEA_LAB_WEB_PORT="{{ picea_lab_web_port }}" \
+    PICEA_LAB_SERVICE_DIR="{{ picea_lab_service_dir }}" \
+        node crates/picea-lab/web/scripts/dev-services.mjs start
+
+# Stop services started by picea-lab-web-start.
+picea-lab-web-stop:
+    PICEA_LAB_SERVICE_DIR="{{ picea_lab_service_dir }}" \
+        node crates/picea-lab/web/scripts/dev-services.mjs stop

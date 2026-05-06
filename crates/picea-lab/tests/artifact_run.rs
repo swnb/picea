@@ -4,7 +4,8 @@ use picea::events::CcdTargetKind;
 use picea::prelude::{CollisionLayerPreset, MaterialPreset};
 use picea_lab::{
     instantiate_scene_fixture, run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact,
-    DebugRenderFrame, FrameRecord, RunConfig, RunManifest, ScenarioId, SceneRecipeFixture,
+    DebugRenderFrame, DiagnosticMarkerKind, DiagnosticSeverity, DiagnosticSource, FrameRecord,
+    MissingEvidenceKind, RunConfig, RunManifest, ScenarioId, SceneRecipeFixture,
 };
 
 #[test]
@@ -292,6 +293,231 @@ fn stack_stability_tower_artifacts_capture_multi_body_stack_facts() {
             frame.stats.contact_row_count > 0 || frame.stats.solver_body_slot_count > 0
         }),
         "tower should carry solver-facing counts without modifying solver behavior"
+    );
+}
+
+#[test]
+fn matrix_stack_artifacts_capture_nxm_grid_stack_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::MatrixStack,
+            frame_count: 180,
+            run_id: Some("matrix-stack-acceptance".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("matrix stack run should write artifacts");
+
+    assert_eq!(run.manifest.scenario_id, ScenarioId::MatrixStack);
+
+    let first = run
+        .frames
+        .first()
+        .expect("matrix stack should write frames");
+    let dynamic_bodies = first
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+        .count();
+    assert_eq!(
+        dynamic_bodies, 48,
+        "default matrix stack should be an 8x6 dynamic-body grid"
+    );
+
+    assert!(
+        run.frames
+            .iter()
+            .any(|frame| frame.stats.contact_count >= 12),
+        "matrix stack should exercise dense multi-contact frames"
+    );
+    assert!(
+        run.frames
+            .iter()
+            .any(|frame| frame.stats.contact_row_count >= 12),
+        "matrix stack should expose solver-row pressure"
+    );
+    assert!(
+        run.frames
+            .iter()
+            .any(|frame| !frame.diagnostics.markers.is_empty()),
+        "matrix stack should produce diagnostics markers for acceptance triage"
+    );
+}
+
+#[test]
+fn stack_artifacts_capture_lab_frame_diagnostics_with_marker_sources() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::Stack4,
+            frame_count: 180,
+            run_id: Some("e1-stack-diagnostics".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("stack diagnostics run should write artifacts");
+    assert_eq!(run.frames.len(), 180);
+
+    let first = run.frames.first().expect("first frame should exist");
+    assert!(
+        first
+            .diagnostics
+            .missing_evidence
+            .iter()
+            .any(|missing| missing.kind == MissingEvidenceKind::PreviousFrame),
+        "first frame should explain that counter/churn deltas need a previous frame"
+    );
+    assert_eq!(
+        first.diagnostics.performance.counter_delta.source,
+        DiagnosticSource::Missing
+    );
+    assert_eq!(
+        first.diagnostics.stability.contact_churn.source,
+        DiagnosticSource::Missing,
+        "first-frame contact churn needs adjacent-frame evidence"
+    );
+    assert!(first
+        .diagnostics
+        .stability
+        .contact_churn
+        .missing_evidence
+        .contains(&MissingEvidenceKind::PreviousFrame));
+    assert_eq!(
+        run.frames[1].diagnostics.stability.contact_churn.source,
+        DiagnosticSource::LabDerived
+    );
+    assert_eq!(
+        first.diagnostics.stability.warm_start.counts_source,
+        DiagnosticSource::RustAuthoritative
+    );
+    assert_eq!(
+        first.diagnostics.stability.warm_start.drop_reasons_source,
+        DiagnosticSource::LabDerived
+    );
+    assert_eq!(
+        first.diagnostics.stability.sleep.transition_count_source,
+        DiagnosticSource::RustAuthoritative
+    );
+    assert_eq!(
+        first.diagnostics.stability.island.source,
+        DiagnosticSource::RustAuthoritative
+    );
+
+    let contact_frame = run
+        .frames
+        .iter()
+        .find(|frame| {
+            frame
+                .diagnostics
+                .stability
+                .penetration
+                .penetrating_contact_count
+                > 0
+        })
+        .expect("stack run should include a contact diagnostics frame");
+    assert_eq!(
+        contact_frame.diagnostics.stability.penetration.source,
+        DiagnosticSource::LabDerived
+    );
+    assert!(contact_frame.diagnostics.stability.penetration.max_depth >= 0.0);
+
+    let solver_marker = run
+        .frames
+        .iter()
+        .flat_map(|frame| frame.diagnostics.markers.iter())
+        .find(|marker| marker.kind == DiagnosticMarkerKind::SolverRowSpike)
+        .expect("stack diagnostics should expose a solver-row spike marker");
+    assert_eq!(solver_marker.source, DiagnosticSource::LabDerived);
+    assert!(matches!(
+        solver_marker.severity,
+        DiagnosticSeverity::Warning | DiagnosticSeverity::Severe
+    ));
+    assert!(
+        !solver_marker.evidence_fields.is_empty(),
+        "markers should report the fields used to compute them"
+    );
+    let solver_marker_frame_index = solver_marker.frame_index;
+
+    let frame_lines = fs::read_to_string(run.path.join(ArtifactFile::Frames.file_name()))
+        .expect("frames should be readable");
+    assert!(frame_lines.contains("\"diagnostics\""));
+    assert!(frame_lines.contains("\"source\""));
+    assert!(frame_lines.contains("\"counts_source\""));
+    assert!(frame_lines.contains("\"transition_count_source\""));
+
+    let render: DebugRenderArtifact = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::DebugRender.file_name()))
+            .expect("debug render should be readable"),
+    )
+    .expect("debug render should match schema");
+    assert_eq!(render.frames.len(), run.frames.len());
+    assert!(
+        render
+            .frames
+            .iter()
+            .any(|frame| !frame.diagnostics.markers.is_empty()),
+        "debug_render frames should preserve diagnostics markers for Web consumers"
+    );
+    let projected = &render.frames[solver_marker_frame_index].diagnostics;
+    let source = &run.frames[solver_marker_frame_index].diagnostics;
+    assert_eq!(projected.performance, source.performance);
+    assert_eq!(
+        projected.stability.contact_churn,
+        source.stability.contact_churn
+    );
+    assert_eq!(projected.stability.warm_start, source.stability.warm_start);
+    assert_eq!(projected.stability.sleep, source.stability.sleep);
+    assert_eq!(projected.stability.island, source.stability.island);
+    assert_eq!(
+        projected.stability.impulse.source,
+        source.stability.impulse.source
+    );
+    assert_eq!(projected.markers, source.markers);
+    assert_eq!(projected.missing_evidence, source.missing_evidence);
+    assert!(
+        (projected.stability.penetration.max_depth - source.stability.penetration.max_depth).abs()
+            < 1.0e-12
+    );
+    assert!(
+        (projected.stability.penetration.total_depth - source.stability.penetration.total_depth)
+            .abs()
+            < 1.0e-12
+    );
+    assert_eq!(
+        projected.stability.penetration.penetrating_contact_count,
+        source.stability.penetration.penetrating_contact_count
+    );
+    assert!(
+        (projected.stability.impulse.total_normal_impulse
+            - source.stability.impulse.total_normal_impulse)
+            .abs()
+            < 1.0e-12
+    );
+    assert!(
+        (projected.stability.impulse.total_tangent_impulse
+            - source.stability.impulse.total_tangent_impulse)
+            .abs()
+            < 1.0e-12
+    );
+    assert!(
+        (projected.stability.impulse.max_normal_impulse
+            - source.stability.impulse.max_normal_impulse)
+            .abs()
+            < 1.0e-12
+    );
+    assert!(
+        (projected.stability.impulse.max_tangent_impulse
+            - source.stability.impulse.max_tangent_impulse)
+            .abs()
+            < 1.0e-12
     );
 }
 
@@ -1124,6 +1350,7 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
         broadphase_tree: Default::default(),
         islands: Vec::new(),
         compound_provenance: Vec::new(),
+        diagnostics: Default::default(),
         unmeasured: Vec::new(),
     };
     let mut value = serde_json::to_value(frame).expect("debug render frame should serialize");
@@ -1149,6 +1376,7 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     object.remove("broadphase_tree");
     object.remove("islands");
     object.remove("compound_provenance");
+    object.remove("diagnostics");
 
     let decoded: DebugRenderFrame =
         serde_json::from_value(value).expect("older debug render frame should deserialize");
@@ -1172,10 +1400,60 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     assert!(decoded.broadphase_tree.nodes.is_empty());
     assert!(decoded.islands.is_empty());
     assert!(decoded.compound_provenance.is_empty());
+    assert!(decoded.diagnostics.markers.is_empty());
+    assert_eq!(
+        decoded.diagnostics.performance.counter_delta.source,
+        DiagnosticSource::Missing,
+        "older debug render frames should not decode missing diagnostics as lab-derived zero facts"
+    );
+    assert_eq!(
+        decoded.diagnostics.stability.penetration.source,
+        DiagnosticSource::Missing
+    );
+    assert_eq!(
+        decoded.diagnostics.stability.warm_start.counts_source,
+        DiagnosticSource::Missing
+    );
+    assert_eq!(
+        decoded.diagnostics.stability.contact_churn.source,
+        DiagnosticSource::Missing
+    );
 }
 
 #[test]
-fn legacy_frame_record_defaults_compound_provenance_when_missing() {
+fn diagnostics_marker_source_defaults_to_missing_when_deserializing_older_json() {
+    let value = serde_json::json!({
+        "performance": {},
+        "stability": {},
+        "markers": [
+            {
+                "kind": "solver_row_spike",
+                "severity": "warning",
+                "frame_index": 7,
+                "score": 4.0,
+                "threshold_name": "legacy_without_source",
+                "evidence_fields": ["stats.contact_row_count"]
+            }
+        ],
+        "missing_evidence": []
+    });
+
+    let decoded: picea_lab::FrameDiagnostics =
+        serde_json::from_value(value).expect("older diagnostics markers should deserialize");
+    let marker = decoded
+        .markers
+        .first()
+        .expect("legacy marker should be preserved");
+    assert_eq!(marker.kind, DiagnosticMarkerKind::SolverRowSpike);
+    assert_eq!(
+        marker.source,
+        DiagnosticSource::Missing,
+        "nested marker source should default to missing instead of rejecting older JSON"
+    );
+}
+
+#[test]
+fn legacy_frame_record_defaults_optional_evidence_when_missing() {
     let frame = FrameRecord {
         frame_index: 0,
         simulated_time: 0.0,
@@ -1186,6 +1464,7 @@ fn legacy_frame_record_defaults_compound_provenance_when_missing() {
         snapshot: Default::default(),
         compound_provenance: Vec::new(),
         perturbation_provenance: Vec::new(),
+        diagnostics: Default::default(),
     };
     let mut value = serde_json::to_value(frame).expect("frame should serialize");
     value
@@ -1196,11 +1475,33 @@ fn legacy_frame_record_defaults_compound_provenance_when_missing() {
         .as_object_mut()
         .expect("frame should serialize as an object")
         .remove("perturbation_provenance");
+    value
+        .as_object_mut()
+        .expect("frame should serialize as an object")
+        .remove("diagnostics");
 
     let decoded: FrameRecord =
         serde_json::from_value(value).expect("older frame record should deserialize");
     assert!(decoded.compound_provenance.is_empty());
     assert!(decoded.perturbation_provenance.is_empty());
+    assert!(decoded.diagnostics.markers.is_empty());
+    assert_eq!(
+        decoded.diagnostics.performance.counter_delta.source,
+        DiagnosticSource::Missing,
+        "older frame records should not decode missing diagnostics as lab-derived zero facts"
+    );
+    assert_eq!(
+        decoded.diagnostics.stability.penetration.source,
+        DiagnosticSource::Missing
+    );
+    assert_eq!(
+        decoded.diagnostics.stability.warm_start.counts_source,
+        DiagnosticSource::Missing
+    );
+    assert_eq!(
+        decoded.diagnostics.stability.contact_churn.source,
+        DiagnosticSource::Missing
+    );
 }
 
 #[test]

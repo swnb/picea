@@ -8,6 +8,8 @@ This directory records design intent and future-facing engineering decisions.
 - `physics-engine-upgrade-technical-plan.md`: current physics upgrade direction, algorithm choices, acceptance order, and landed slice.
 - `debug-observability-design.md`: design for reproducible debug facts and stable read-side inspection.
 - `picea-lab-observability-architecture.md`: current target design for artifacts, visualization, and benchmark evidence.
+- `performance-stability-diagnostics-contract.md`: D1 contract for performance and stack-stability diagnostics ownership, schema tiers, source labels, and UI mapping.
+- `stack-stability-repro-diagnostics.md`: D2 contract for stack repro roles, frame windows, first-bad-frame markers, and solver handoff shape.
 - `picea-lab-live-session-semantics.md`: M25-B live session reset/patch/transaction semantics and product upgrade path.
 - `deformable-body-roadmap.md`: RFC boundary for future soft-body, particle, cloth, and deformable mesh work; distinguishes true deformable physics from rigid-body lattice proxies.
 - `solver-island-ordering-contract.md`: M28 single-threaded island-local contact/joint ordering contract.

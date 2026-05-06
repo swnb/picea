@@ -13,7 +13,9 @@ pub mod server;
 
 pub use artifact::{
     run_scenario, ArtifactEntry, ArtifactFile, ArtifactStore, DebugRenderArtifact,
-    DebugRenderFrame, FrameRecord, PerfArtifact, RunManifest, RunResult,
+    DebugRenderFrame, DiagnosticMarker, DiagnosticMarkerKind, DiagnosticSeverity, DiagnosticSource,
+    FrameDiagnostics, FrameRecord, MissingEvidence, MissingEvidenceKind, PerfArtifact, RunManifest,
+    RunResult,
 };
 pub use error::{LabError, LabResult};
 pub use scenario::{

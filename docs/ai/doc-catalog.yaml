@@ -152,6 +152,24 @@ documents:
   applies_to: [observability, visualization, benchmarks, artifacts, viewer]
   keywords: [picea-lab, artifact-capture, debug-render, criterion, viewer, perf]
   last_reviewed: 2026-04-24
+- path: docs/design/performance-stability-diagnostics-contract.md
+  title: Performance And Stack Stability Diagnostics Contract
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [observability, performance, stack-stability, artifacts, picea-lab-web, diagnostics]
+  keywords: [performance, stability, diagnostics, frame-diagnostics, source-label, missing-evidence, counter-delta, copy-debug-context]
+  last_reviewed: 2026-05-06
+- path: docs/design/stack-stability-repro-diagnostics.md
+  title: Stack Stability Repro Diagnostics
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [stack-stability, first-bad-frame, solver-handoff, diagnostics, picea-lab]
+  keywords: [stack_4, stack-stability-tower, first-bad-frame, solver-row-spike, penetration-spike, contact-churn, missing-evidence, handoff]
+  last_reviewed: 2026-05-06
 - path: docs/design/picea-lab-live-session-semantics.md
   title: Picea Lab Live Session Semantics
   kind: architecture
@@ -296,6 +314,15 @@ documents:
   applies_to: [picea-lab-web, industrial-debugger, stack-stability, trajectory, perturbation, lattice, soft-body-roadmap]
   keywords: [picea-lab-web, industrial-debugger, stack-stability, stack-observatory, browser-baseline, multi-body-trajectory, trajectory-workbench, perturbation, velocity-perturbation, preview-contract, absolute-velocity-patch, world-revision, session-epoch, paused-transaction, force-controls, lattice-grid, rigid-body-lattice, soft-body-roadmap, deformable-body, browser-use]
   last_reviewed: 2026-05-05
+- path: docs/plans/2026-05-06-performance-stability-observability-milestones.md
+  title: Performance And Stack Stability Observability Milestones
+  kind: plan
+  authority: high
+  status: completed
+  owner: supervisor
+  applies_to: [observability, performance, stack-stability, picea-lab, picea-lab-web, solver-handoff]
+  keywords: [performance, stack-stability, frame-diagnostics, first-bad-frame, solver-row-spike, missing-evidence, diagnostics-surface, browser-acceptance]
+  last_reviewed: 2026-05-06
 - path: todo.md
   title: Picea Physics Engine Backlog Archive
   kind: plan

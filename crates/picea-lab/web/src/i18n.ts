@@ -1,4 +1,10 @@
-import type { ScenarioDescriptor } from "./types";
+import type {
+  DiagnosticMarkerKind,
+  DiagnosticSeverity,
+  DiagnosticSource,
+  MissingEvidenceKind,
+  ScenarioDescriptor,
+} from "./types";
 
 export const supportedLocales = ["zh-CN", "en-US"] as const;
 
@@ -184,12 +190,51 @@ const enMessages = {
   "timeline.sourceStatus": "{source} / {status}",
   "timeline.sessionStatus": "session {sessionId} / buffered {buffered} / current {current}",
   "diagnostics.empty": "No exported diagnostics for this frame.",
+  "diagnostics.exported": "exported diagnostics",
+  "diagnostics.performance": "performance",
+  "diagnostics.stability": "stability",
+  "diagnostics.markers": "markers",
+  "diagnostics.missingEvidence": "missing evidence",
   "diagnostics.current": "current",
   "diagnostics.delta": "delta",
   "diagnostics.events": "events",
   "diagnostics.noEvents": "no exported events",
   "diagnostics.report": "step report",
   "diagnostics.stateHash": "state hash",
+  "diagnostics.counterDelta": "counter delta",
+  "diagnostics.penetration": "penetration",
+  "diagnostics.contactChurn": "contact churn",
+  "diagnostics.warmStart": "warm-start",
+  "diagnostics.impulse": "impulse",
+  "diagnostics.sleep": "sleep",
+  "diagnostics.island": "island",
+  "diagnostics.threshold": "threshold",
+  "diagnostics.score": "score",
+  "diagnostics.evidenceFields": "evidence fields",
+  "diagnostics.source": "source",
+  "diagnostics.source.rustAuthoritative": "Rust authoritative",
+  "diagnostics.source.labDerived": "Lab derived",
+  "diagnostics.source.webDerived": "Web derived",
+  "diagnostics.source.missing": "Missing",
+  "diagnostics.severity.info": "Info",
+  "diagnostics.severity.warning": "Warning",
+  "diagnostics.severity.severe": "Severe",
+  "diagnostics.marker.performanceCounterSpike": "counter spike",
+  "diagnostics.marker.solverRowSpike": "solver row spike",
+  "diagnostics.marker.ccdSpike": "CCD spike",
+  "diagnostics.marker.numericWarning": "numeric warning",
+  "diagnostics.marker.penetrationSpike": "penetration spike",
+  "diagnostics.marker.contactChurnSpike": "contact churn spike",
+  "diagnostics.marker.warmStartDropSpike": "warm-start drop spike",
+  "diagnostics.marker.sleepTransition": "sleep transition",
+  "diagnostics.marker.sleepNeverConverged": "sleep never converged",
+  "diagnostics.marker.angularDriftSpike": "angular drift spike",
+  "diagnostics.marker.bodyDriftSpike": "body drift spike",
+  "diagnostics.missing.previousFrame": "previous frame",
+  "diagnostics.missing.contactFacts": "contact facts",
+  "diagnostics.missing.contactIds": "contact ids",
+  "diagnostics.missing.sleepEvents": "sleep events",
+  "diagnostics.missing.islandFacts": "island facts",
   "evidence.source": "source",
   "evidence.scenario": "scenario",
   "evidence.stateHash": "state hash",
@@ -209,6 +254,7 @@ const enMessages = {
   "evidence.perfSummary": "perf summary",
   "evidence.trajectory": "trajectory (Web-derived)",
   "evidence.stack": "stack (Web-derived)",
+  "evidence.diagnostics": "diagnostics",
   "evidence.lattice": "lattice proxy (not soft-body)",
   "evidence.perturbation": "perturbation",
   "evidence.noArtifact": "No persistent perf artifact for this source.",
@@ -539,12 +585,51 @@ const zhMessages: Record<MessageKey, string> = {
   "timeline.sourceStatus": "{source} / {status}",
   "timeline.sessionStatus": "会话 {sessionId} / 已缓存 {buffered} / 当前 {current}",
   "diagnostics.empty": "当前帧没有导出的诊断事实。",
+  "diagnostics.exported": "导出诊断",
+  "diagnostics.performance": "性能",
+  "diagnostics.stability": "稳定性",
+  "diagnostics.markers": "标记",
+  "diagnostics.missingEvidence": "缺失证据",
   "diagnostics.current": "当前值",
   "diagnostics.delta": "增量",
   "diagnostics.events": "事件",
   "diagnostics.noEvents": "无导出事件",
   "diagnostics.report": "step report",
   "diagnostics.stateHash": "state hash",
+  "diagnostics.counterDelta": "计数增量",
+  "diagnostics.penetration": "穿透",
+  "diagnostics.contactChurn": "接触 churn",
+  "diagnostics.warmStart": "暖启动",
+  "diagnostics.impulse": "冲量",
+  "diagnostics.sleep": "休眠",
+  "diagnostics.island": "岛",
+  "diagnostics.threshold": "阈值",
+  "diagnostics.score": "分值",
+  "diagnostics.evidenceFields": "证据字段",
+  "diagnostics.source": "来源",
+  "diagnostics.source.rustAuthoritative": "Rust 权威事实",
+  "diagnostics.source.labDerived": "Lab 派生",
+  "diagnostics.source.webDerived": "Web 派生",
+  "diagnostics.source.missing": "缺失",
+  "diagnostics.severity.info": "信息",
+  "diagnostics.severity.warning": "警告",
+  "diagnostics.severity.severe": "严重",
+  "diagnostics.marker.performanceCounterSpike": "计数尖峰",
+  "diagnostics.marker.solverRowSpike": "求解行尖峰",
+  "diagnostics.marker.ccdSpike": "CCD 尖峰",
+  "diagnostics.marker.numericWarning": "数值警告",
+  "diagnostics.marker.penetrationSpike": "穿透尖峰",
+  "diagnostics.marker.contactChurnSpike": "接触 churn 尖峰",
+  "diagnostics.marker.warmStartDropSpike": "暖启动丢弃尖峰",
+  "diagnostics.marker.sleepTransition": "休眠切换",
+  "diagnostics.marker.sleepNeverConverged": "休眠未收敛",
+  "diagnostics.marker.angularDriftSpike": "角漂移尖峰",
+  "diagnostics.marker.bodyDriftSpike": "位移漂移尖峰",
+  "diagnostics.missing.previousFrame": "上一帧",
+  "diagnostics.missing.contactFacts": "接触事实",
+  "diagnostics.missing.contactIds": "接触 id",
+  "diagnostics.missing.sleepEvents": "休眠事件",
+  "diagnostics.missing.islandFacts": "岛事实",
   "evidence.source": "来源",
   "evidence.scenario": "场景",
   "evidence.stateHash": "状态哈希",
@@ -564,6 +649,7 @@ const zhMessages: Record<MessageKey, string> = {
   "evidence.perfSummary": "perf 摘要",
   "evidence.trajectory": "轨迹（Web 派生）",
   "evidence.stack": "堆叠（Web 派生）",
+  "evidence.diagnostics": "诊断",
   "evidence.lattice": "格点代理（非软体）",
   "evidence.perturbation": "扰动",
   "evidence.noArtifact": "当前来源没有持久 perf 产物。",
@@ -762,6 +848,10 @@ const scenarioMessages: Record<string, Record<Locale, Pick<ScenarioDescriptor, "
   stack_stability_tower: {
     "zh-CN": { name: "稳定性塔堆", description: "更复杂的确定性塔堆，用于观察接触峰值、岛休眠、漂移和稳定窗口。" },
     "en-US": { name: "Stack stability tower", description: "A denser deterministic tower for contact spikes, island sleep, drift, and quiet-window observations." },
+  },
+  matrix_stack: {
+    "zh-CN": { name: "矩阵堆叠 8x6", description: "8x6 动态箱体矩阵堆叠，用于观察大规模静息接触、穿透、churn 和求解行压力。" },
+    "en-US": { name: "Matrix stack 8x6", description: "An 8x6 dynamic box matrix stack for dense resting-contact, penetration, churn, and solver-row diagnostics." },
   },
   joint_anchor: {
     "zh-CN": { name: "世界锚点关节", description: "带约束线的离线关节锚点预览。" },
@@ -1062,6 +1152,88 @@ export function overlayPresetLabel(locale: Locale, preset: OverlayPresetId): str
 
 export function overlayPresetDescription(locale: Locale, preset: OverlayPresetId): string {
   return t(locale, `overlay.presetDesc.${preset}` as MessageKey);
+}
+
+export function diagnosticSourceLabel(
+  locale: Locale,
+  source: DiagnosticSource | null | undefined,
+): string {
+  switch (source ?? "missing") {
+    case "rust_authoritative":
+      return t(locale, "diagnostics.source.rustAuthoritative");
+    case "lab_derived":
+      return t(locale, "diagnostics.source.labDerived");
+    case "web_derived":
+      return t(locale, "diagnostics.source.webDerived");
+    case "missing":
+      return t(locale, "diagnostics.source.missing");
+  }
+}
+
+export function diagnosticSeverityLabel(
+  locale: Locale,
+  severity: DiagnosticSeverity | null | undefined,
+): string {
+  switch (severity ?? "info") {
+    case "info":
+      return t(locale, "diagnostics.severity.info");
+    case "warning":
+      return t(locale, "diagnostics.severity.warning");
+    case "severe":
+      return t(locale, "diagnostics.severity.severe");
+  }
+}
+
+export function diagnosticMarkerLabel(
+  locale: Locale,
+  kind: DiagnosticMarkerKind | null | undefined,
+): string {
+  switch (kind) {
+    case "performance_counter_spike":
+      return t(locale, "diagnostics.marker.performanceCounterSpike");
+    case "solver_row_spike":
+      return t(locale, "diagnostics.marker.solverRowSpike");
+    case "ccd_spike":
+      return t(locale, "diagnostics.marker.ccdSpike");
+    case "numeric_warning":
+      return t(locale, "diagnostics.marker.numericWarning");
+    case "penetration_spike":
+      return t(locale, "diagnostics.marker.penetrationSpike");
+    case "contact_churn_spike":
+      return t(locale, "diagnostics.marker.contactChurnSpike");
+    case "warm_start_drop_spike":
+      return t(locale, "diagnostics.marker.warmStartDropSpike");
+    case "sleep_transition":
+      return t(locale, "diagnostics.marker.sleepTransition");
+    case "sleep_never_converged":
+      return t(locale, "diagnostics.marker.sleepNeverConverged");
+    case "angular_drift_spike":
+      return t(locale, "diagnostics.marker.angularDriftSpike");
+    case "body_drift_spike":
+      return t(locale, "diagnostics.marker.bodyDriftSpike");
+    default:
+      return kind ?? t(locale, "diagnostics.markers");
+  }
+}
+
+export function missingEvidenceLabel(
+  locale: Locale,
+  kind: MissingEvidenceKind | null | undefined,
+): string {
+  switch (kind) {
+    case "previous_frame":
+      return t(locale, "diagnostics.missing.previousFrame");
+    case "contact_facts":
+      return t(locale, "diagnostics.missing.contactFacts");
+    case "contact_ids":
+      return t(locale, "diagnostics.missing.contactIds");
+    case "sleep_events":
+      return t(locale, "diagnostics.missing.sleepEvents");
+    case "island_facts":
+      return t(locale, "diagnostics.missing.islandFacts");
+    default:
+      return kind ?? t(locale, "diagnostics.source.missing");
+  }
 }
 
 export function bodyTypeLabel(locale: Locale, value: BodyType): string {

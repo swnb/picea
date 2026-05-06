@@ -95,6 +95,17 @@ for (const locale of supportedLocales) {
   assert.equal(typeof messages[locale]["timeline.runSetup"], "string");
   assert.equal(typeof messages[locale]["timeline.diagnostics"], "string");
   assert.equal(typeof messages[locale]["timeline.evidence"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.exported"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.performance"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.stability"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.markers"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.missingEvidence"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.source.rustAuthoritative"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.source.labDerived"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.source.webDerived"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.source.missing"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.marker.solverRowSpike"], "string");
+  assert.equal(typeof messages[locale]["diagnostics.marker.penetrationSpike"], "string");
   assert.equal(typeof messages[locale]["canvas.contacts"], "string");
   assert.equal(typeof messages[locale]["canvas.zoom"], "string");
   assert.equal(typeof messages[locale]["canvas.scale"], "string");
@@ -130,6 +141,7 @@ for (const locale of supportedLocales) {
   assert.equal(typeof messages[locale]["evidence.noArtifact"], "string");
   assert.equal(typeof messages[locale]["evidence.trajectory"], "string");
   assert.equal(typeof messages[locale]["evidence.stack"], "string");
+  assert.equal(typeof messages[locale]["evidence.diagnostics"], "string");
   assert.equal(typeof messages[locale]["evidence.lattice"], "string");
   assert.equal(typeof messages[locale]["evidence.perturbation"], "string");
   assert.equal(typeof messages[locale]["debug.copyContext"], "string");

@@ -1187,6 +1187,7 @@ mod tests {
             snapshot,
             compound_provenance: Vec::new(),
             perturbation_provenance: Vec::new(),
+            diagnostics: crate::artifact::FrameDiagnostics::default(),
         };
         let mut session = SessionState {
             record: SessionRecord {

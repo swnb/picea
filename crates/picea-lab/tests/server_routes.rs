@@ -39,6 +39,7 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "falling_box_contact",
             "stack_4",
             "stack_stability_tower",
+            "matrix_stack",
             "joint_anchor",
             "lattice_grid",
             "broadphase_sparse",

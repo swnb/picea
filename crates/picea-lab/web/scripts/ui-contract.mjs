@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const contractSources = [
+  "../src/types.ts",
   "../src/App.tsx",
   "../src/api.ts",
   "../src/demo.ts",
@@ -306,9 +307,39 @@ assert.match(
   "Stack stability panel should expose labeled marker categories for timeline jumps.",
 );
 assert.match(
+  appSource,
+  /export type FrameDiagnostics/,
+  "Web types should model the lab-owned FrameDiagnostics artifact schema.",
+);
+assert.match(
+  appSource,
+  /diagnostics\?:\s*FrameDiagnostics/,
+  "FrameRecord should carry optional lab diagnostics so older artifacts remain readable.",
+);
+assert.match(
   timelineSource,
-  /<TimelineMarkerRail[\s\S]*markers=\{stackMarkers\}/,
-  "Timeline tab should render visible stack-stability markers near the slider, not only in the stack panel.",
+  /buildDiagnosticTimelineMarkers\(/,
+  "Timeline should include exported lab diagnostics markers as first-bad-frame jump targets.",
+);
+assert.match(
+  timelineSource,
+  /diagnosticSourceLabel\(/,
+  "Diagnostics UI should label Rust authoritative facts separately from lab-derived facts.",
+);
+assert.match(
+  timelineSource,
+  /diagnostics\.missingEvidence/,
+  "Diagnostics UI should expose missing evidence instead of showing absent facts as zero.",
+);
+assert.match(
+  timelineSource,
+  /<TimelineMarkerRail[\s\S]*markers=\{railMarkers\}/,
+  "Timeline tab should render a combined marker rail near the slider instead of hiding stack and diagnostics markers in subpanels.",
+);
+assert.match(
+  timelineSource,
+  /const railMarkers = pickRailMarkers\(\[[\s\S]*diagnosticMarkers[\s\S]*stackMarkers[\s\S]*trajectoryMarkers/,
+  "Timeline marker rail should combine exported diagnostics markers with existing stack and trajectory markers.",
 );
 assert.match(
   timelineSource,
@@ -347,6 +378,21 @@ assert.match(
 );
 assert.match(
   appSource,
+  /diagnostics:\s*\{\s*frame:\s*currentFrame\.diagnostics/,
+  "Copy debug context should include the current frame's exported diagnostics.",
+);
+assert.match(
+  appSource,
+  /available:\s*boolean[\s\S]*marker_count:\s*number \| null/,
+  "Diagnostics debug context summary should distinguish missing diagnostics from a real zero-marker frame.",
+);
+assert.match(
+  appSource,
+  /available:\s*false[\s\S]*marker_count:\s*null[\s\S]*frame_diagnostics/,
+  "Old artifacts without diagnostics should stay explicitly missing in copy debug context instead of becoming m0.",
+);
+assert.match(
+  appSource,
   /trajectory:\s*\{\s*settings:\s*trajectorySettings[\s\S]*overlay:/,
   "Copy debug context should include trajectory settings plus overlay summary.",
 );
@@ -369,6 +415,26 @@ assert.match(
   timelineSource,
   /evidence\.stack/,
   "Evidence panel should surface a stack summary row before the raw JSON preview.",
+);
+assert.match(
+  timelineSource,
+  /evidence\.diagnostics/,
+  "Evidence panel should summarize exported diagnostics before the raw JSON preview.",
+);
+assert.match(
+  timelineSource,
+  /summary\.available === false[\s\S]*"missing"/,
+  "Evidence diagnostics preview should show missing diagnostics explicitly instead of rendering marker_count null as zero.",
+);
+assert.match(
+  timelineSource,
+  /severityRank\([\s\S]*marker\.severity/,
+  "Timeline marker priority should preserve D2 first-bad-frame severity before later high-score spikes.",
+);
+assert.doesNotMatch(
+  timelineSource,
+  /diagnosticMarkerLabel\("en-US"/,
+  "Diagnostics missing-evidence details should use the active locale instead of hardcoding English.",
 );
 assert.match(
   timelineSource,

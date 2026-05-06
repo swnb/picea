@@ -17,6 +17,11 @@ export const demoScenarios: ScenarioDescriptor[] = [
     description: "Offline stability observatory preview with a denser tower, derived markers, and overlay facts.",
   },
   {
+    id: "matrix_stack",
+    name: "Matrix stack 8x6",
+    description: "Offline matrix stack preview for dense resting-contact diagnostics.",
+  },
+  {
     id: "joint_anchor",
     name: "World anchor joint",
     description: "Offline joint anchor preview with a constraint line.",
@@ -60,6 +65,9 @@ export function makeDemoFrames(scenarioId = "falling_box_contact", frameCount = 
     return makeStackFrames(frameCount);
   }
   if (scenarioId === "stack_stability_tower") {
+    return makeStackStabilityFrames(frameCount);
+  }
+  if (scenarioId === "matrix_stack") {
     return makeStackStabilityFrames(frameCount);
   }
   if (scenarioId === "compound_provenance") {

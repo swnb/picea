@@ -5,8 +5,12 @@ import { Input } from "../ui/input"
 import { PanelHeader } from "../ui/panel"
 import { Checkbox, Select, Slider, Tooltip } from "../ui/radix"
 import {
+  diagnosticMarkerLabel,
+  diagnosticSeverityLabel,
+  diagnosticSourceLabel,
   entityLabel,
   layerLabel,
+  missingEvidenceLabel,
   sourceLabel,
   statusLabel,
   t,
@@ -14,7 +18,18 @@ import {
   type Locale,
   type StatusKind,
 } from "../../i18n"
-import type { FrameRecord, PerfArtifact, SelectedEntity, WorkbenchLog } from "../../types"
+import type {
+  DiagnosticMarker,
+  DiagnosticSeverity,
+  DiagnosticSource,
+  FrameDiagnostics as FrameDiagnosticsRecord,
+  FrameRecord,
+  MissingEvidence,
+  MissingEvidenceKind,
+  PerfArtifact,
+  SelectedEntity,
+  WorkbenchLog,
+} from "../../types"
 import { vec } from "./format"
 import {
   buildStackMarkers,
@@ -51,8 +66,10 @@ type TimelineJumpMarker = {
   key: string
   frameIndex: number
   label: string
-  score: number
-  source: "stack" | "trajectory"
+  score: number | null
+  severity?: DiagnosticSeverity
+  source: "diagnostics" | "stack" | "trajectory"
+  evidenceSource: DiagnosticSource
 }
 
 export function BottomTimeline({
@@ -124,6 +141,7 @@ export function BottomTimeline({
   const previousFrame = frameIndex > 0 ? frames[frameIndex - 1] : null
   const stackSummary = buildStackStabilitySummary(frames, frameIndex)
   const stackMarkers = buildStackMarkers(frames)
+  const diagnosticMarkers = buildDiagnosticTimelineMarkers(locale, frames)
   const trajectoryOverlay = buildTrajectoryOverlay(
     frames,
     frameIndex,
@@ -133,12 +151,14 @@ export function BottomTimeline({
   const trajectoryMarkers = buildTrajectoryMarkers(frames)
   const latticeSummary = frame ? deriveLatticeProxy(frame, frames[0] ?? frame) : null
   const railMarkers = pickRailMarkers([
+    ...diagnosticMarkers,
     ...stackMarkers.map((marker) => ({
       key: `stack-${marker.kind}-${marker.frameIndex}`,
       frameIndex: marker.frameIndex,
       label: stackMarkerLabel(locale, marker.kind),
       score: marker.score,
       source: "stack" as const,
+      evidenceSource: "web_derived" as const,
     })),
     ...trajectoryMarkers.map((marker) => ({
       key: `trajectory-${marker.kind}-${marker.frameIndex}`,
@@ -146,6 +166,7 @@ export function BottomTimeline({
       label: trajectoryMarkerLabel(locale, marker.kind),
       score: marker.score,
       source: "trajectory" as const,
+      evidenceSource: "web_derived" as const,
     })),
   ])
   const handlePlay = useStableEvent(onPlay)
@@ -645,6 +666,7 @@ function TimelineMarkerRail({
             key={marker.key}
             type="button"
             onClick={() => onFrameChange(marker.frameIndex)}
+            title={`${marker.label} · ${diagnosticSourceLabel(locale, marker.evidenceSource)}`}
             className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] transition-colors ${
               active
                 ? "border-lab-accent bg-lab-accent/10 text-lab-text"
@@ -660,16 +682,44 @@ function TimelineMarkerRail({
   )
 }
 
+function buildDiagnosticTimelineMarkers(
+  locale: Locale,
+  frames: FrameRecord[],
+): TimelineJumpMarker[] {
+  return frames.flatMap((frame) =>
+    (frame.diagnostics?.markers ?? []).map((marker, index) => {
+      const markerFrameIndex = marker.frame_index ?? frame.frame_index
+      return {
+        key: `diagnostics-${marker.kind}-${markerFrameIndex}-${index}`,
+        frameIndex: markerFrameIndex,
+        label: diagnosticMarkerLabel(locale, marker.kind),
+        score: finiteNumberOrNull(marker.score),
+        severity: marker.severity,
+        source: "diagnostics" as const,
+        evidenceSource: sourceOrMissing(marker.source),
+      }
+    }),
+  )
+}
+
+function sourceOrMissing(source: DiagnosticSource | null | undefined): DiagnosticSource {
+  return source ?? "missing"
+}
+
+function finiteNumberOrNull(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
 function pickRailMarkers(markers: TimelineJumpMarker[]): TimelineJumpMarker[] {
   const limit = 12
-  const perSourceTarget = Math.max(1, Math.floor(limit / 2))
+  const sourceOrder = ["diagnostics", "stack", "trajectory"] as const
+  const perSourceTarget = Math.max(1, Math.floor(limit / sourceOrder.length))
   const selected = new Map<string, TimelineJumpMarker>()
   const leftovers: TimelineJumpMarker[] = []
 
-  // Keep the rail balanced across stack and trajectory signals first, then
-  // spend the remaining slots by score so later high-value markers are not
-  // silently dropped just because an earlier source filled the combined slice.
-  for (const source of ["stack", "trajectory"] as const) {
+  // Keep the rail balanced across exported diagnostics and Web-side fallback
+  // markers first, then spend the remaining slots by score.
+  for (const source of sourceOrder) {
     const sourceMarkers = markers
       .filter((marker) => marker.source === source)
       .sort(compareMarkerPriority)
@@ -687,12 +737,31 @@ function pickRailMarkers(markers: TimelineJumpMarker[]): TimelineJumpMarker[] {
   }
 
   return [...selected.values()].sort(
-    (left, right) => left.frameIndex - right.frameIndex || right.score - left.score,
+    (left, right) =>
+      left.frameIndex - right.frameIndex || markerScore(right) - markerScore(left),
   )
 }
 
 function compareMarkerPriority(left: TimelineJumpMarker, right: TimelineJumpMarker): number {
-  return right.score - left.score || left.frameIndex - right.frameIndex
+  return (
+    severityRank(right.severity) - severityRank(left.severity) ||
+    left.frameIndex - right.frameIndex ||
+    markerScore(right) - markerScore(left)
+  )
+}
+
+function markerScore(marker: TimelineJumpMarker): number {
+  return marker.score ?? Number.NEGATIVE_INFINITY
+}
+
+function severityRank(severity: DiagnosticSeverity | null | undefined): number {
+  if (severity === "severe") {
+    return 2
+  }
+  if (severity === "warning") {
+    return 1
+  }
+  return 0
 }
 
 function StackStabilityPanel({
@@ -1148,127 +1217,419 @@ function TrajectorySliderRow({
 function FrameDiagnostics({
   locale,
   frame,
-  previousFrame,
+  previousFrame: _previousFrame,
 }: {
   locale: Locale
   frame: FrameRecord | undefined
   previousFrame: FrameRecord | null
 }) {
-  if (!frame) {
+  if (!frame?.diagnostics) {
     return <EmptyState label={t(locale, "diagnostics.empty")} />
   }
-  const current = frame.stats ?? frame.report?.stats ?? frame.snapshot.stats
-  const previous =
-    previousFrame?.stats ??
-    previousFrame?.report?.stats ??
-    previousFrame?.snapshot.stats ??
-    null
-  const events = frame.events ?? frame.report?.events ?? []
-  const metrics: Array<keyof typeof current> = [
+  const diagnostics = frame.diagnostics
+  const counterDelta = diagnostics.performance?.counter_delta ?? {}
+  const stability = diagnostics.stability ?? {}
+  const penetration = stability.penetration ?? {}
+  const contactChurn = stability.contact_churn ?? {}
+  const warmStart = stability.warm_start ?? {}
+  const impulse = stability.impulse ?? {}
+  const sleep = stability.sleep ?? {}
+  const island = stability.island ?? {}
+  const markers = diagnostics.markers ?? []
+  const counterMetrics = [
     "broadphase_candidate_count",
     "broadphase_traversal_count",
     "broadphase_pruned_count",
     "contact_count",
-    "manifold_count",
     "island_count",
-    "active_island_count",
-    "sleeping_island_skip_count",
-    "solver_body_slot_count",
-    "contact_row_count",
-    "joint_row_count",
+    "solver_row_count",
     "ccd_candidate_count",
-    "ccd_hit_count",
-    "ccd_clamp_count",
-  ]
+  ] as const
+  const missingEvidence = collectDiagnosticsMissingEvidence(locale, diagnostics)
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
+    <div className="grid gap-3 lg:grid-cols-[1.05fr_0.95fr]">
       <div className="rounded-md border border-lab-line bg-lab-panel2 p-2">
-        <div className="mb-2 text-xs font-semibold text-lab-text">
-          {t(locale, "diagnostics.report")}
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-lab-text">
+            {t(locale, "diagnostics.exported")}
+          </div>
+          <SourceBadge locale={locale} source={counterDelta.source} />
         </div>
         <div className="mb-2 grid grid-cols-3 gap-2">
-          <Metric label={t(locale, "metric.step")} value={current.step_index ?? 0} />
-          <Metric label={t(locale, "metric.simTime")} value={(frame.report?.simulated_time ?? frame.simulated_time).toFixed(3)} />
+          <Metric
+            label={t(locale, "metric.step")}
+            value={frame.snapshot.stats.step_index ?? 0}
+          />
+          <Metric
+            label={t(locale, "metric.simTime")}
+            value={frame.simulated_time.toFixed(3)}
+          />
           <Metric label={t(locale, "diagnostics.stateHash")} value={frame.state_hash} />
         </div>
-        <div className="grid grid-cols-[1fr_88px_72px] gap-1 text-xs">
-          <span className="text-lab-muted">{t(locale, "fact.kind")}</span>
-          <span className="text-right text-lab-muted">{t(locale, "diagnostics.current")}</span>
-          <span className="text-right text-lab-muted">{t(locale, "diagnostics.delta")}</span>
-          {metrics.map((key) => {
-            const value = readOptionalCounter(current[key])
-            const previousValue = readOptionalCounter(previous?.[key])
-            const delta =
-              value != null && previousValue != null ? value - previousValue : null
-            return (
-              <DiagnosticsRow
-                key={String(key)}
+        <div className="mb-3 rounded border border-lab-line/70 bg-black/15 p-2">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-[11px] font-semibold text-lab-text">
+              {t(locale, "diagnostics.performance")} / {t(locale, "diagnostics.counterDelta")}
+            </div>
+            <SourceBadge locale={locale} source={counterDelta.source} />
+          </div>
+          <div className="grid grid-cols-[1fr_88px] gap-1 text-xs">
+            <span className="text-lab-muted">{t(locale, "fact.kind")}</span>
+            <span className="text-right text-lab-muted">{t(locale, "diagnostics.delta")}</span>
+            {counterMetrics.map((key) => (
+              <DiagnosticsValueRow
+                key={key}
                 locale={locale}
                 label={String(key)}
-                value={value}
-                delta={delta}
+                value={formatCounterValue(locale, counterDelta[key] ?? null)}
               />
-            )
-          })}
-        </div>
-      </div>
-      <div className="rounded-md border border-lab-line bg-lab-panel2 p-2">
-        <div className="mb-2 text-xs font-semibold text-lab-text">
-          {t(locale, "diagnostics.events")}
-        </div>
-        {events.length === 0 ? (
-          <EmptyState label={t(locale, "diagnostics.noEvents")} />
-        ) : (
-          <div className="space-y-1">
-            {events.slice(0, 12).map((event, index) => (
-              <div
-                key={index}
-                className="rounded border border-lab-line/70 bg-black/15 px-2 py-1 font-mono text-xs text-lab-muted"
-              >
-                <div className="mb-1 text-lab-text">{eventKind(event)}</div>
-                <div className="truncate">{JSON.stringify(event)}</div>
-              </div>
             ))}
           </div>
-        )}
+        </div>
+        <div className="grid gap-2 md:grid-cols-2">
+          <DiagnosticsFactCard
+            locale={locale}
+            title={t(locale, "diagnostics.penetration")}
+            source={penetration.source}
+            rows={[
+              { label: "max_depth", value: formatDiagnosticNumber(locale, penetration.max_depth) },
+              { label: "total_depth", value: formatDiagnosticNumber(locale, penetration.total_depth) },
+              {
+                label: "penetrating_contact_count",
+                value: formatDiagnosticInteger(locale, penetration.penetrating_contact_count),
+              },
+            ]}
+          />
+          <DiagnosticsFactCard
+            locale={locale}
+            title={t(locale, "diagnostics.contactChurn")}
+            source={contactChurn.source}
+            rows={[
+              { label: "entered", value: formatDiagnosticInteger(locale, contactChurn.entered) },
+              { label: "persisted", value: formatDiagnosticInteger(locale, contactChurn.persisted) },
+              { label: "exited", value: formatDiagnosticInteger(locale, contactChurn.exited) },
+            ]}
+          />
+          <DiagnosticsFactCard
+            locale={locale}
+            title={t(locale, "diagnostics.warmStart")}
+            source={warmStart.source}
+            rows={[
+              { label: "hit_count", value: formatDiagnosticInteger(locale, warmStart.hit_count) },
+              { label: "miss_count", value: formatDiagnosticInteger(locale, warmStart.miss_count) },
+              { label: "drop_count", value: formatDiagnosticInteger(locale, warmStart.drop_count) },
+              {
+                label: "counts_source",
+                value: diagnosticSourceLabel(locale, warmStart.counts_source),
+              },
+              {
+                label: "drop_reasons_source",
+                value: diagnosticSourceLabel(
+                  locale,
+                  warmStart.drop_reasons_source,
+                ),
+              },
+              {
+                label: "drop_reasons",
+                value: formatDiagnosticList(locale, warmStart.drop_reasons),
+              },
+            ]}
+          />
+          <DiagnosticsFactCard
+            locale={locale}
+            title={t(locale, "diagnostics.impulse")}
+            source={impulse.source}
+            rows={[
+              {
+                label: "total_normal_impulse",
+                value: formatDiagnosticNumber(locale, impulse.total_normal_impulse),
+              },
+              {
+                label: "total_tangent_impulse",
+                value: formatDiagnosticNumber(locale, impulse.total_tangent_impulse),
+              },
+              {
+                label: "max_normal_impulse",
+                value: formatDiagnosticNumber(locale, impulse.max_normal_impulse),
+              },
+              {
+                label: "max_tangent_impulse",
+                value: formatDiagnosticNumber(locale, impulse.max_tangent_impulse),
+              },
+            ]}
+          />
+          <DiagnosticsFactCard
+            locale={locale}
+            title={t(locale, "diagnostics.sleep")}
+            source={sleep.source}
+            rows={[
+              {
+                label: "awake_dynamic_body_count",
+                value: formatDiagnosticInteger(locale, sleep.awake_dynamic_body_count),
+              },
+              {
+                label: "sleeping_dynamic_body_count",
+                value: formatDiagnosticInteger(locale, sleep.sleeping_dynamic_body_count),
+              },
+              {
+                label: "transition_count",
+                value: formatDiagnosticInteger(locale, sleep.transition_count),
+              },
+              {
+                label: "transition_count_source",
+                value: diagnosticSourceLabel(
+                  locale,
+                  sleep.transition_count_source,
+                ),
+              },
+              {
+                label: "reasons",
+                value: formatDiagnosticList(locale, sleep.reasons),
+              },
+            ]}
+          />
+          <DiagnosticsFactCard
+            locale={locale}
+            title={t(locale, "diagnostics.island")}
+            source={island.source}
+            rows={[
+              { label: "island_count", value: formatDiagnosticInteger(locale, island.island_count) },
+              {
+                label: "active_island_count",
+                value: formatDiagnosticInteger(locale, island.active_island_count),
+              },
+              {
+                label: "sleeping_island_skip_count",
+                value: formatDiagnosticInteger(locale, island.sleeping_island_skip_count),
+              },
+              {
+                label: "solver_body_slot_count",
+                value: formatDiagnosticInteger(locale, island.solver_body_slot_count),
+              },
+              {
+                label: "contact_row_count",
+                value: formatDiagnosticInteger(locale, island.contact_row_count),
+              },
+              {
+                label: "joint_row_count",
+                value: formatDiagnosticInteger(locale, island.joint_row_count),
+              },
+            ]}
+          />
+        </div>
+      </div>
+      <div className="grid gap-3">
+        <div className="rounded-md border border-lab-line bg-lab-panel2 p-2">
+          <div className="mb-2 text-xs font-semibold text-lab-text">
+            {t(locale, "diagnostics.markers")}
+          </div>
+          {markers.length === 0 ? (
+            <EmptyState label={t(locale, "diagnostics.noEvents")} />
+          ) : (
+            <div className="space-y-2">
+              {markers.map((marker, index) => (
+                <DiagnosticsMarkerCard key={`${marker.kind}-${index}`} locale={locale} marker={marker} />
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="rounded-md border border-lab-line bg-lab-panel2 p-2">
+          <div className="mb-2 text-xs font-semibold text-lab-text">
+            {t(locale, "diagnostics.missingEvidence")}
+          </div>
+          {missingEvidence.length === 0 ? (
+            <EmptyState label={diagnosticSourceLabel(locale, "missing")} />
+          ) : (
+            <div className="space-y-1">
+              {missingEvidence.map((entry, index) => (
+                <div
+                  key={`${entry.kind}-${entry.detail ?? ""}-${index}`}
+                  className="rounded border border-lab-line/70 bg-black/15 px-2 py-1 text-xs"
+                >
+                  <div className="text-lab-text">{missingEvidenceLabel(locale, entry.kind)}</div>
+                  {entry.detail ? (
+                    <div className="mt-0.5 font-mono text-lab-muted">{entry.detail}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
-function DiagnosticsRow({
+function DiagnosticsValueRow({
   locale,
   label,
   value,
-  delta,
 }: {
   locale: Locale
   label: string
-  value: number | null
-  delta: number | null
+  value: string
 }) {
   return (
     <>
       <span className="truncate font-mono text-lab-muted">{label}</span>
       <span className="text-right font-mono tabular-nums text-lab-text">
-        {formatCounterValue(locale, value)}
-      </span>
-      <span
-        className={`text-right font-mono tabular-nums ${
-          delta == null
-            ? "text-lab-muted"
-            : delta > 0
-            ? "text-lab-accent"
-            : delta < 0
-              ? "text-lab-warn"
-              : "text-lab-muted"
-        }`}
-      >
-        {formatDeltaValue(locale, delta)}
+        {value || formatCounterValue(locale, null)}
       </span>
     </>
   )
+}
+
+function formatDiagnosticNumber(
+  locale: Locale,
+  value: number | null | undefined,
+  digits = 4,
+): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(digits)
+    : diagnosticSourceLabel(locale, "missing")
+}
+
+function formatDiagnosticInteger(
+  locale: Locale,
+  value: number | null | undefined,
+): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? String(value)
+    : diagnosticSourceLabel(locale, "missing")
+}
+
+function formatDiagnosticList(
+  locale: Locale,
+  values: string[] | null | undefined,
+): string {
+  return values?.length ? values.join(", ") : diagnosticSourceLabel(locale, "missing")
+}
+
+function DiagnosticsFactCard({
+  locale,
+  title,
+  source,
+  rows,
+}: {
+  locale: Locale
+  title: string
+  source: DiagnosticSource | null | undefined
+  rows: Array<{ label: string; value: string }>
+}) {
+  return (
+    <div className="rounded border border-lab-line/70 bg-black/15 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold text-lab-text">{title}</div>
+        <SourceBadge locale={locale} source={source} />
+      </div>
+      <div className="grid grid-cols-[1fr_auto] gap-1 text-xs">
+        {rows.map((row) => (
+          <DiagnosticsValueRow
+            key={`${title}-${row.label}`}
+            locale={locale}
+            label={row.label}
+            value={row.value}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function DiagnosticsMarkerCard({
+  locale,
+  marker,
+}: {
+  locale: Locale
+  marker: DiagnosticMarker
+}) {
+  const missingMarkerEvidence = marker.missing_evidence ?? []
+  return (
+    <div className="rounded border border-lab-line/70 bg-black/15 p-2 text-xs">
+      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+        <span className="font-semibold text-lab-text">
+          {diagnosticMarkerLabel(locale, marker.kind)}
+        </span>
+        <span className="rounded border border-lab-line px-1.5 py-0.5 text-[10px] text-lab-muted">
+          {diagnosticSeverityLabel(locale, marker.severity)}
+        </span>
+        <SourceBadge locale={locale} source={marker.source} />
+        <span className="font-mono text-lab-muted">
+          f{marker.frame_index ?? diagnosticSourceLabel(locale, "missing")}
+        </span>
+      </div>
+      <div className="grid grid-cols-[110px_1fr] gap-1">
+        <EvidenceRow
+          label={t(locale, "diagnostics.threshold")}
+          value={marker.threshold_name ?? diagnosticSourceLabel(locale, "missing")}
+        />
+        <EvidenceRow
+          label={t(locale, "diagnostics.score")}
+          value={formatDiagnosticNumber(locale, marker.score, 2)}
+        />
+        <EvidenceRow
+          label={t(locale, "diagnostics.evidenceFields")}
+          value={marker.evidence_fields?.join(", ") || "-"}
+        />
+        <EvidenceRow
+          label={t(locale, "diagnostics.missingEvidence")}
+          value={
+            missingMarkerEvidence
+              .map((kind) => missingEvidenceLabel(locale, kind))
+              .join(", ") || "-"
+          }
+        />
+      </div>
+    </div>
+  )
+}
+
+function SourceBadge({
+  locale,
+  source,
+}: {
+  locale: Locale
+  source: DiagnosticSource | null | undefined
+}) {
+  return (
+    <span className="rounded border border-lab-line px-1.5 py-0.5 text-[10px] text-lab-muted">
+      {diagnosticSourceLabel(locale, source)}
+    </span>
+  )
+}
+
+function collectDiagnosticsMissingEvidence(
+  locale: Locale,
+  diagnostics: FrameDiagnosticsRecord,
+): MissingEvidence[] {
+  const seen = new Set<string>()
+  const entries: MissingEvidence[] = []
+
+  const push = (kind: MissingEvidenceKind | null | undefined, detail = "") => {
+    if (!kind) {
+      return
+    }
+    const key = `${kind}:${detail}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      entries.push({ kind, detail })
+    }
+  }
+
+  ;(diagnostics.missing_evidence ?? []).forEach((entry) =>
+    push(entry.kind, entry.detail),
+  )
+  ;(diagnostics.stability?.contact_churn?.missing_evidence ?? []).forEach((kind) =>
+    push(kind, "diagnostics.stability.contact_churn"),
+  )
+  ;(diagnostics.markers ?? []).forEach((marker) => {
+    ;(marker.missing_evidence ?? []).forEach((kind) =>
+      push(kind, diagnosticMarkerLabel(locale, marker.kind)),
+    )
+  })
+
+  return entries
 }
 
 function EvidencePanel({
@@ -1453,6 +1814,10 @@ function EvidencePanel({
             value={contextPreview.stack}
           />
           <EvidenceRow
+            label={t(locale, "evidence.diagnostics")}
+            value={contextPreview.diagnostics}
+          />
+          <EvidenceRow
             label={t(locale, "evidence.lattice")}
             value={contextPreview.lattice}
           />
@@ -1496,10 +1861,6 @@ function EmptyState({ label }: { label: string }) {
   )
 }
 
-function eventKind(event: Record<string, unknown>): string {
-  return Object.keys(event)[0] ?? "event"
-}
-
 function enabledLayerKeys(layers: LayerState): LayerKey[] {
   return (Object.keys(layers) as LayerKey[]).filter((key) => layers[key])
 }
@@ -1533,6 +1894,7 @@ function summarizeDebugContext(debugContextText: string | null): {
   stateHash: string
   trajectory: string
   stack: string
+  diagnostics: string
   lattice: string
   perturbation: string
 } {
@@ -1542,6 +1904,7 @@ function summarizeDebugContext(debugContextText: string | null): {
       stateHash: "-",
       trajectory: "-",
       stack: "-",
+      diagnostics: "-",
       lattice: "-",
       perturbation: "-",
     }
@@ -1566,6 +1929,16 @@ function summarizeDebugContext(debugContextText: string | null): {
         quietFrames?: number
         activeIslandCount?: number | null
         sleepingIslandCount?: number | null
+      }
+      diagnostics?: {
+        summary?: {
+          available?: boolean
+          marker_count?: number | null
+          marker_kinds?: string[]
+          missing_evidence?: string[]
+          counter_delta_source?: string | null
+          top_marker_threshold?: string | null
+        }
       }
       latticeProxy?: {
         enabled?: boolean
@@ -1605,6 +1978,28 @@ function summarizeDebugContext(debugContextText: string | null): {
     const stack = context.stackStability
       ? `derived c${context.stackStability.contactCount ?? 0} spike+${context.stackStability.contactSpike ?? 0} quiet ${context.stackStability.quietFrames ?? 0} island ${context.stackStability.activeIslandCount ?? "?"}/${context.stackStability.sleepingIslandCount ?? "?"}`
       : "-"
+    const diagnostics = context.diagnostics?.summary
+      ? [
+          context.diagnostics.summary.counter_delta_source
+            ? `perf:${context.diagnostics.summary.counter_delta_source}`
+            : null,
+          context.diagnostics.summary.available === false ? "missing" : null,
+          context.diagnostics.summary.marker_count != null
+            ? `m${context.diagnostics.summary.marker_count}`
+            : null,
+          context.diagnostics.summary.marker_kinds?.length
+            ? `top:${context.diagnostics.summary.marker_kinds.join("/")}`
+            : null,
+          context.diagnostics.summary.top_marker_threshold
+            ? `th:${context.diagnostics.summary.top_marker_threshold}`
+            : null,
+          context.diagnostics.summary.missing_evidence?.length
+            ? `miss:${context.diagnostics.summary.missing_evidence.join("/")}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : "-"
     const lattice = context.latticeProxy?.enabled
       ? `proxy/not-soft-body n${context.latticeProxy.nodeCount ?? 0} e${context.latticeProxy.edgeCount ?? 0} stretch ${formatCompactNumber(context.latticeProxy.maxStretchRatio)}`
       : "proxy off / not-soft-body"
@@ -1636,6 +2031,7 @@ function summarizeDebugContext(debugContextText: string | null): {
       stateHash: context.session?.stateHash ?? "-",
       trajectory: trajectoryLabel || "-",
       stack,
+      diagnostics: diagnostics || "-",
       lattice,
       perturbation: perturbationParts || "-",
     }
@@ -1645,6 +2041,7 @@ function summarizeDebugContext(debugContextText: string | null): {
       stateHash: "-",
       trajectory: "-",
       stack: "-",
+      diagnostics: "-",
       lattice: "-",
       perturbation: "-",
     }
@@ -1753,22 +2150,11 @@ function clampValue(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function readOptionalCounter(value: unknown): number | null {
-  return typeof value === "number" ? value : null
-}
-
 function formatCounterValue(
   locale: Locale,
   value: number | string | null,
 ): string {
   return value == null ? t(locale, "stability.missing") : String(value)
-}
-
-function formatDeltaValue(locale: Locale, value: number | null): string {
-  if (value == null) {
-    return t(locale, "stability.missing")
-  }
-  return value > 0 ? `+${value}` : String(value)
 }
 
 function formatCounterGroup(

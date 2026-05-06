@@ -286,6 +286,140 @@ export type DebugSnapshot = {
   };
 };
 
+// Diagnostics are lab-owned summaries built from exported Rust frame facts.
+// They preserve snake_case so Web mirrors the artifact contract exactly.
+export type DiagnosticSource =
+  | "rust_authoritative"
+  | "lab_derived"
+  | "web_derived"
+  | "missing";
+
+export type DiagnosticSeverity = "info" | "warning" | "severe";
+
+export type DiagnosticMarkerKind =
+  | "performance_counter_spike"
+  | "solver_row_spike"
+  | "ccd_spike"
+  | "numeric_warning"
+  | "penetration_spike"
+  | "contact_churn_spike"
+  | "warm_start_drop_spike"
+  | "sleep_transition"
+  | "sleep_never_converged"
+  | "angular_drift_spike"
+  | "body_drift_spike";
+
+export type MissingEvidenceKind =
+  | "previous_frame"
+  | "contact_facts"
+  | "contact_ids"
+  | "sleep_events"
+  | "island_facts";
+
+export type MissingEvidence = {
+  kind: MissingEvidenceKind;
+  detail?: string;
+};
+
+export type DiagnosticMarker = {
+  kind: DiagnosticMarkerKind;
+  severity?: DiagnosticSeverity;
+  frame_index?: number;
+  score?: number;
+  threshold_name?: string;
+  source?: DiagnosticSource;
+  body_handles?: number[];
+  contact_ids?: number[];
+  island_ids?: number[];
+  evidence_fields?: string[];
+  missing_evidence?: MissingEvidenceKind[];
+};
+
+export type PerformanceCounterDelta = {
+  source?: DiagnosticSource;
+  broadphase_candidate_count?: number | null;
+  broadphase_traversal_count?: number | null;
+  broadphase_pruned_count?: number | null;
+  contact_count?: number | null;
+  island_count?: number | null;
+  solver_row_count?: number | null;
+  ccd_candidate_count?: number | null;
+};
+
+export type FramePerformanceDiagnostics = {
+  counter_delta?: PerformanceCounterDelta;
+};
+
+export type PenetrationDiagnostics = {
+  source?: DiagnosticSource;
+  max_depth?: number;
+  total_depth?: number;
+  penetrating_contact_count?: number;
+};
+
+export type ContactChurnDiagnostics = {
+  source?: DiagnosticSource;
+  missing_evidence?: MissingEvidenceKind[];
+  entered?: number;
+  persisted?: number;
+  exited?: number;
+};
+
+export type WarmStartDiagnostics = {
+  source?: DiagnosticSource;
+  counts_source?: DiagnosticSource;
+  drop_reasons_source?: DiagnosticSource;
+  hit_count?: number;
+  miss_count?: number;
+  drop_count?: number;
+  drop_reasons?: string[];
+};
+
+export type ImpulseDiagnostics = {
+  source?: DiagnosticSource;
+  total_normal_impulse?: number;
+  total_tangent_impulse?: number;
+  max_normal_impulse?: number;
+  max_tangent_impulse?: number;
+};
+
+export type SleepDiagnostics = {
+  source?: DiagnosticSource;
+  body_counts_source?: DiagnosticSource;
+  transition_count_source?: DiagnosticSource;
+  reasons_source?: DiagnosticSource;
+  awake_dynamic_body_count?: number;
+  sleeping_dynamic_body_count?: number;
+  transition_count?: number;
+  reasons?: string[];
+};
+
+export type IslandDiagnostics = {
+  source?: DiagnosticSource;
+  island_count?: number;
+  active_island_count?: number;
+  sleeping_island_skip_count?: number;
+  solver_body_slot_count?: number;
+  contact_row_count?: number;
+  joint_row_count?: number;
+};
+
+export type FrameStabilityDiagnostics = {
+  penetration?: PenetrationDiagnostics;
+  contact_churn?: ContactChurnDiagnostics;
+  warm_start?: WarmStartDiagnostics;
+  impulse?: ImpulseDiagnostics;
+  sleep?: SleepDiagnostics;
+  island?: IslandDiagnostics;
+};
+
+export type FrameDiagnostics = {
+  performance?: FramePerformanceDiagnostics;
+  stability?: FrameStabilityDiagnostics;
+  markers?: DiagnosticMarker[];
+  missing_evidence?: MissingEvidence[];
+};
+
 export type FrameRecord = {
   frame_index: number;
   simulated_time: number;
@@ -296,6 +430,7 @@ export type FrameRecord = {
   snapshot: DebugSnapshot;
   compound_provenance?: CompoundProvenance[];
   perturbation_provenance?: LivePerturbationProvenance[];
+  diagnostics?: FrameDiagnostics;
 };
 
 export type StepReportRecord = {

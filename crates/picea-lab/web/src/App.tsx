@@ -54,6 +54,7 @@ import {
 } from "./i18n"
 import type {
   DebugSnapshot,
+  FrameDiagnostics,
   FrameRecord,
   PerfArtifact,
   ScenarioDescriptor,
@@ -177,6 +178,17 @@ type DebugContextPayload = {
     markers: Array<{ kind: string; frameIndex: number; score: number }>
   }
   stackStability: StackStabilitySummary
+  diagnostics: {
+    frame: FrameDiagnostics | null
+    summary: {
+      available: boolean
+      marker_count: number | null
+      marker_kinds: string[]
+      missing_evidence: string[]
+      counter_delta_source: string | null
+      top_marker_threshold: string | null
+    }
+  }
   latticeProxy: {
     enabled: boolean
     nodeCount: number
@@ -405,6 +417,33 @@ function selectTrajectoryContextMarkers(
     )
     .slice(0, 6)
     .sort((left, right) => left.frameIndex - right.frameIndex)
+}
+
+function summarizeFrameDiagnostics(
+  diagnostics: FrameDiagnostics | null | undefined,
+): DebugContextPayload["diagnostics"]["summary"] {
+  if (!diagnostics) {
+    return {
+      available: false,
+      marker_count: null,
+      marker_kinds: [],
+      missing_evidence: ["frame_diagnostics"],
+      counter_delta_source: "missing",
+      top_marker_threshold: null,
+    }
+  }
+
+  const markers = diagnostics.markers ?? []
+  const missingEvidence = diagnostics.missing_evidence ?? []
+
+  return {
+    available: true,
+    marker_count: markers.length,
+    marker_kinds: markers.slice(0, 4).map((marker) => marker.kind),
+    missing_evidence: missingEvidence.map((entry) => entry.kind),
+    counter_delta_source: diagnostics.performance?.counter_delta?.source ?? null,
+    top_marker_threshold: markers[0]?.threshold_name ?? null,
+  }
 }
 
 export function App() {
@@ -1550,6 +1589,10 @@ export function App() {
         })),
       },
       stackStability: stackSummary,
+      diagnostics: {
+        frame: currentFrame.diagnostics ?? null,
+        summary: summarizeFrameDiagnostics(currentFrame.diagnostics),
+      },
       latticeProxy: {
         enabled: latticeSummary.enabled,
         nodeCount: latticeSummary.nodes.length,
