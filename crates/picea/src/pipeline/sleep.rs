@@ -10,8 +10,10 @@ use crate::{
 };
 
 const SLEEP_STABILITY_SECONDS: FloatNum = 0.5;
-const SLEEP_LINEAR_THRESHOLD: FloatNum = 0.0001;
-const SLEEP_ANGULAR_THRESHOLD: FloatNum = 0.0001;
+// Match the D2 quiet-window behavior lock: sleep is allowed only after an
+// island remains visibly quiet, not merely after exact-zero velocity.
+const SLEEP_LINEAR_THRESHOLD: FloatNum = 0.04;
+const SLEEP_ANGULAR_THRESHOLD: FloatNum = 0.08;
 
 #[derive(Clone, Debug)]
 struct Island {

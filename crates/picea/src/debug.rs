@@ -312,6 +312,24 @@ pub struct DebugStats {
     /// Number of dynamic bodies clamped by CCD before contact generation.
     #[serde(default)]
     pub ccd_clamp_count: usize,
+    /// Number of contact points that fed residual position correction.
+    #[serde(default)]
+    pub position_correction_input_contact_count: usize,
+    /// Maximum pre-correction contact depth seen by residual position correction.
+    #[serde(default)]
+    pub position_correction_input_max_depth: FloatNum,
+    /// Sum of pre-correction contact depths seen by residual position correction.
+    #[serde(default)]
+    pub position_correction_input_total_depth: FloatNum,
+    /// Number of dynamic bodies translated by residual position correction.
+    #[serde(default)]
+    pub position_correction_body_count: usize,
+    /// Maximum accumulated translation applied to one body by residual correction.
+    #[serde(default)]
+    pub position_correction_max_translation: FloatNum,
+    /// Sum of accumulated dynamic-body translations applied by residual correction.
+    #[serde(default)]
+    pub position_correction_total_translation: FloatNum,
 }
 
 /// Translation/rotation facts exported without exposing engine internals.
@@ -493,18 +511,66 @@ pub struct DebugContact {
     /// Warm-start cache decision for this contact point.
     #[serde(default)]
     pub warm_start_reason: WarmStartCacheReason,
+    /// Max anchor drift observed during warm-start validation.
+    #[serde(default, skip_serializing)]
+    pub warm_start_anchor_drift: FloatNum,
+    /// Anchor drift projected along the current contact normal.
+    #[serde(default, skip_serializing)]
+    pub warm_start_normal_anchor_drift: FloatNum,
+    /// Anchor drift projected along the current contact tangent.
+    #[serde(default, skip_serializing)]
+    pub warm_start_tangent_anchor_drift: FloatNum,
     /// Warm-start normal impulse transferred from the previous step, or zero when not trusted.
     #[serde(default)]
     pub normal_impulse: FloatNum,
     /// Warm-start tangent impulse transferred from the previous step, or zero when not trusted.
     #[serde(default)]
     pub tangent_impulse: FloatNum,
+    /// Same-pair, local-anchor-continuous feature miss reserved for source-row position gating.
+    #[serde(default)]
+    pub source_row_continuity_candidate: bool,
     /// Final normal impulse accumulated by the current step's contact solver.
     #[serde(default)]
     pub solver_normal_impulse: FloatNum,
     /// Final tangent impulse accumulated by the current step's contact solver.
     #[serde(default)]
     pub solver_tangent_impulse: FloatNum,
+    /// Relative normal speed before the velocity solver touched this row.
+    #[serde(default)]
+    pub solver_initial_normal_speed: FloatNum,
+    /// Relative tangent speed before the velocity solver touched this row.
+    #[serde(default)]
+    pub solver_initial_tangent_speed: FloatNum,
+    /// Relative normal speed after this step's velocity solver finished.
+    #[serde(default)]
+    pub solver_final_normal_speed: FloatNum,
+    /// Relative tangent speed after this step's velocity solver finished.
+    #[serde(default)]
+    pub solver_final_tangent_speed: FloatNum,
+    /// Normal velocity bias contributed by resting penetration.
+    #[serde(default)]
+    pub solver_position_bias: FloatNum,
+    /// Normal velocity bias contributed by restitution.
+    #[serde(default)]
+    pub solver_restitution_bias: FloatNum,
+    /// Extra shallow-overlap support budget available only to dense-stack friction rows.
+    #[serde(default)]
+    pub solver_support_friction_impulse: FloatNum,
+    /// Residual position-correction depth consumed by this contact row.
+    #[serde(default, skip_serializing)]
+    pub solver_position_correction_depth: FloatNum,
+    /// Translation magnitude applied to body A by residual position correction for this row.
+    #[serde(default, skip_serializing)]
+    pub solver_position_correction_body_a_translation: FloatNum,
+    /// Translation magnitude applied to body B by residual position correction for this row.
+    #[serde(default, skip_serializing)]
+    pub solver_position_correction_body_b_translation: FloatNum,
+    /// Difference between final and warm-start normal impulses.
+    #[serde(default)]
+    pub solver_normal_impulse_delta: FloatNum,
+    /// Difference between final and warm-start tangent impulses.
+    #[serde(default)]
+    pub solver_tangent_impulse_delta: FloatNum,
     /// Whether the normal row tried to go below zero and was clamped.
     #[serde(default)]
     pub normal_impulse_clamped: bool,
@@ -537,10 +603,32 @@ impl DebugContact {
             depth: sanitize_scalar(self.depth),
             reduction_reason: self.reduction_reason,
             warm_start_reason: self.warm_start_reason,
+            warm_start_anchor_drift: sanitize_scalar(self.warm_start_anchor_drift),
+            warm_start_normal_anchor_drift: sanitize_scalar(self.warm_start_normal_anchor_drift),
+            warm_start_tangent_anchor_drift: sanitize_scalar(self.warm_start_tangent_anchor_drift),
             normal_impulse: sanitize_scalar(self.normal_impulse),
             tangent_impulse: sanitize_scalar(self.tangent_impulse),
+            source_row_continuity_candidate: self.source_row_continuity_candidate,
             solver_normal_impulse: sanitize_scalar(self.solver_normal_impulse),
             solver_tangent_impulse: sanitize_scalar(self.solver_tangent_impulse),
+            solver_initial_normal_speed: sanitize_scalar(self.solver_initial_normal_speed),
+            solver_initial_tangent_speed: sanitize_scalar(self.solver_initial_tangent_speed),
+            solver_final_normal_speed: sanitize_scalar(self.solver_final_normal_speed),
+            solver_final_tangent_speed: sanitize_scalar(self.solver_final_tangent_speed),
+            solver_position_bias: sanitize_scalar(self.solver_position_bias),
+            solver_restitution_bias: sanitize_scalar(self.solver_restitution_bias),
+            solver_support_friction_impulse: sanitize_scalar(self.solver_support_friction_impulse),
+            solver_position_correction_depth: sanitize_scalar(
+                self.solver_position_correction_depth,
+            ),
+            solver_position_correction_body_a_translation: sanitize_scalar(
+                self.solver_position_correction_body_a_translation,
+            ),
+            solver_position_correction_body_b_translation: sanitize_scalar(
+                self.solver_position_correction_body_b_translation,
+            ),
+            solver_normal_impulse_delta: sanitize_scalar(self.solver_normal_impulse_delta),
+            solver_tangent_impulse_delta: sanitize_scalar(self.solver_tangent_impulse_delta),
             normal_impulse_clamped: self.normal_impulse_clamped,
             tangent_impulse_clamped: self.tangent_impulse_clamped,
             restitution_velocity_threshold: sanitize_scalar(self.restitution_velocity_threshold),
@@ -1001,6 +1089,13 @@ impl DebugSnapshot {
                 ccd_hit_count: stats.ccd_hit_count,
                 ccd_miss_count: stats.ccd_miss_count,
                 ccd_clamp_count: stats.ccd_clamp_count,
+                position_correction_input_contact_count: stats
+                    .position_correction_input_contact_count,
+                position_correction_input_max_depth: stats.position_correction_input_max_depth,
+                position_correction_input_total_depth: stats.position_correction_input_total_depth,
+                position_correction_body_count: stats.position_correction_body_count,
+                position_correction_max_translation: stats.position_correction_max_translation,
+                position_correction_total_translation: stats.position_correction_total_translation,
                 ..DebugStats::default()
             },
             bodies,
@@ -1134,10 +1229,28 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             depth: event.depth,
             reduction_reason: event.reduction_reason,
             warm_start_reason: event.warm_start_reason,
+            warm_start_anchor_drift: event.warm_start_anchor_drift,
+            warm_start_normal_anchor_drift: event.warm_start_normal_anchor_drift,
+            warm_start_tangent_anchor_drift: event.warm_start_tangent_anchor_drift,
             normal_impulse: event.warm_start_normal_impulse,
             tangent_impulse: event.warm_start_tangent_impulse,
+            source_row_continuity_candidate: event.source_row_continuity_candidate,
             solver_normal_impulse: event.solver_normal_impulse,
             solver_tangent_impulse: event.solver_tangent_impulse,
+            solver_initial_normal_speed: event.solver_initial_normal_speed,
+            solver_initial_tangent_speed: event.solver_initial_tangent_speed,
+            solver_final_normal_speed: event.solver_final_normal_speed,
+            solver_final_tangent_speed: event.solver_final_tangent_speed,
+            solver_position_bias: event.solver_position_bias,
+            solver_restitution_bias: event.solver_restitution_bias,
+            solver_support_friction_impulse: event.solver_support_friction_impulse,
+            solver_position_correction_depth: event.solver_position_correction_depth,
+            solver_position_correction_body_a_translation: event
+                .solver_position_correction_body_a_translation,
+            solver_position_correction_body_b_translation: event
+                .solver_position_correction_body_b_translation,
+            solver_normal_impulse_delta: event.solver_normal_impulse_delta,
+            solver_tangent_impulse_delta: event.solver_tangent_impulse_delta,
             normal_impulse_clamped: event.normal_impulse_clamped,
             tangent_impulse_clamped: event.tangent_impulse_clamped,
             restitution_velocity_threshold: event.restitution_velocity_threshold,

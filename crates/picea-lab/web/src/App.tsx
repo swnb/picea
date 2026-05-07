@@ -6,6 +6,7 @@ import {
   createSession,
   fetchFinalSnapshot,
   fetchFrames,
+  fetchLiveFrame,
   fetchPerf,
   fetchScenarios,
   openSessionEvents,
@@ -31,6 +32,7 @@ import {
   type CanvasDebugView,
   type ControlAction,
   type LayerState,
+  type LiveCadenceStatus,
   type PerfEvidenceStatus,
   type RunMode,
   type SourceKind,
@@ -52,12 +54,16 @@ import {
   type OverlayPresetId,
   type StatusKind,
 } from "./i18n"
+import { profileAsync, profileMeasure, profileStart } from "./profile"
 import type {
   DebugSnapshot,
   FrameDiagnostics,
   FrameRecord,
+  LiveFrameAuthority,
+  LiveFrameSummary,
   PerfArtifact,
   ScenarioDescriptor,
+  SessionControlResponse,
   SelectedEntity,
   SessionRecord,
   VelocityPerturbationCommit,
@@ -66,6 +72,7 @@ import type {
 } from "./types"
 
 const EMPTY_FRAME: FrameRecord = {
+  kind: "full",
   frame_index: 0,
   simulated_time: 0,
   state_hash: "pending-live-frame",
@@ -96,6 +103,96 @@ const EMPTY_FRAME: FrameRecord = {
   },
   compound_provenance: [],
   perturbation_provenance: [],
+}
+
+const LIVE_TARGET_FPS = 30
+const LIVE_TARGET_FRAME_MS = 1000 / LIVE_TARGET_FPS
+
+function idleLiveCadenceStatus(): LiveCadenceStatus {
+  return {
+    targetFps: LIVE_TARGET_FPS,
+    actualFps: null,
+    lastStepMs: null,
+    nextDelayMs: null,
+    degraded: false,
+    pending: false,
+  }
+}
+
+function liveAuthorityFromSummary(summary: LiveFrameSummary): LiveFrameAuthority {
+  return {
+    session_id: summary.session_id,
+    session_epoch: summary.session_epoch,
+    world_revision: summary.world_revision,
+    status: summary.status,
+    buffered_frame_count: summary.buffered_frame_count,
+    frame_count: summary.frame_count,
+    not_hydrated: true,
+  }
+}
+
+function annotateFullLiveFrame(
+  frame: FrameRecord,
+  authority: Omit<LiveFrameAuthority, "not_hydrated">,
+): FrameRecord {
+  return {
+    ...frame,
+    kind: "full",
+    live_authority: {
+      ...authority,
+      not_hydrated: false,
+    },
+  }
+}
+
+function frameFromLiveSummary(summary: LiveFrameSummary): FrameRecord {
+  return {
+    kind: "summary",
+    frame_index: summary.frame_index,
+    simulated_time: summary.simulated_time,
+    state_hash: summary.state_hash,
+    stats: summary.stats,
+    snapshot: {
+      meta: summary.snapshot.meta,
+      bodies: summary.snapshot.bodies,
+      colliders: summary.snapshot.colliders,
+      joints: summary.snapshot.joints,
+      contacts: [],
+      manifolds: [],
+      islands: undefined,
+      broadphase_tree: undefined,
+      primitives: summary.snapshot.primitives,
+      stats: summary.snapshot.stats,
+    },
+    live_authority: liveAuthorityFromSummary(summary),
+  }
+}
+
+function liveFrameFromControlResponse(
+  response: SessionControlResponse,
+): FrameRecord | null {
+  const summary = response.live_frame_summary ?? null
+  if (response.session.latest_frame) {
+    return annotateFullLiveFrame(response.session.latest_frame, {
+      session_id: response.session.id,
+      session_epoch: response.session.session_epoch,
+      world_revision:
+        summary?.world_revision ??
+        response.session.latest_frame.snapshot.meta.revision ??
+        null,
+      status: response.session.status,
+      buffered_frame_count: response.session.buffered_frame_count,
+      frame_count: response.session.frame_count,
+    })
+  }
+  if (summary) {
+    return frameFromLiveSummary(summary)
+  }
+  return null
+}
+
+function isSummaryFrame(frame: FrameRecord | null | undefined): boolean {
+  return frame?.kind === "summary" || frame?.live_authority?.not_hydrated === true
 }
 
 type LiveResponseGuard = {
@@ -173,11 +270,12 @@ type DebugContextPayload = {
       bodyTrailCount: number
       contactTrailCount: number
       ccdTrailCount: number
-    }
-    summary: ReturnType<typeof buildTrajectorySummary>
+    } | null
+    summary: ReturnType<typeof buildTrajectorySummary> | null
     markers: Array<{ kind: string; frameIndex: number; score: number }>
+    notHydrated: boolean
   }
-  stackStability: StackStabilitySummary
+  stackStability: StackStabilitySummary | null
   diagnostics: {
     frame: FrameDiagnostics | null
     summary: {
@@ -191,16 +289,17 @@ type DebugContextPayload = {
   }
   latticeProxy: {
     enabled: boolean
-    nodeCount: number
-    edgeCount: number
-    worldAnchorEdgeCount: number
+    nodeCount: number | null
+    edgeCount: number | null
+    worldAnchorEdgeCount: number | null
     maxStretchRatio: number | null
     jointRowCount: number | null
-    contactCount: number
+    contactCount: number | null
     islandCount: number | null
     activeIslandCount: number | null
     sleepingIslandCount: number | null
     proxyOnly: true
+    notHydrated: boolean
   }
   perturbation: {
     selectedBodyHandle: number | null
@@ -485,6 +584,9 @@ export function App() {
   const [useCustomGravity, setUseCustomGravity] = useState(false)
   const [gravityY, setGravityY] = useState(9.8)
   const [liveControlBusy, setLiveControlBusy] = useState(false)
+  const [liveCadence, setLiveCadence] = useState<LiveCadenceStatus>(() =>
+    idleLiveCadenceStatus(),
+  )
   const [sessionEpoch, setSessionEpoch] = useState(0)
   const [perturbationDeltaX, setPerturbationDeltaX] = useState("0.0")
   const [perturbationDeltaY, setPerturbationDeltaY] = useState("0.0")
@@ -498,8 +600,10 @@ export function App() {
     useState<string | null>(null)
   const playTimer = useRef<number | null>(null)
   const liveStepInFlight = useRef(false)
+  const liveHydrationInFlight = useRef<string | null>(null)
   const liveGenerationRef = useRef(0)
   const liveRequestTokenRef = useRef(0)
+  const liveLoopGenerationRef = useRef(0)
   const perturbationRequestTokenRef = useRef(0)
 
   const currentFrame =
@@ -549,29 +653,84 @@ export function App() {
   }, [locale])
 
   useEffect(() => {
-    if (status !== "playing") {
-      if (playTimer.current !== null) {
-        window.clearInterval(playTimer.current)
-        playTimer.current = null
-      }
+    if (source !== "live" || status !== "playing") {
       return
     }
 
-    if (source === "live") {
-      playTimer.current = window.setInterval(() => {
-        void advanceLiveFrame()
-      }, 1000 / 30)
-    } else {
-      playTimer.current = window.setInterval(() => {
-        setFrameIndex((next) => {
-          if (next >= frames.length - 1) {
-            setStatus("paused")
-            return next
-          }
-          return next + 1
-        })
-      }, 1000 / 30)
+    let cancelled = false
+    const loopGeneration = ++liveLoopGenerationRef.current
+
+    async function tick() {
+      if (cancelled || loopGeneration !== liveLoopGenerationRef.current) {
+        return
+      }
+
+      const startedAt = profileStart()
+      setLiveCadence((current) => ({
+        ...current,
+        pending: true,
+        nextDelayMs: null,
+      }))
+
+      await advanceLiveFrame()
+
+      const stepMs = performance.now() - startedAt
+      const nextDelayMs = Math.max(0, LIVE_TARGET_FRAME_MS - stepMs)
+      const actualFps = 1000 / Math.max(LIVE_TARGET_FRAME_MS, stepMs)
+      const degraded = stepMs > LIVE_TARGET_FRAME_MS * 1.15
+
+      setLiveCadence({
+        targetFps: LIVE_TARGET_FPS,
+        actualFps,
+        lastStepMs: stepMs,
+        nextDelayMs,
+        degraded,
+        pending: false,
+      })
+      profileMeasure("live.cadence", startedAt, {
+        targetFps: LIVE_TARGET_FPS,
+        actualFps: Number(actualFps.toFixed(1)),
+        stepMs: Number(stepMs.toFixed(1)),
+        nextDelayMs: Number(nextDelayMs.toFixed(1)),
+        degraded,
+      })
+
+      if (!cancelled && loopGeneration === liveLoopGenerationRef.current) {
+        playTimer.current = window.setTimeout(tick, nextDelayMs)
+      }
     }
+
+    void tick()
+
+    return () => {
+      cancelled = true
+      liveLoopGenerationRef.current += 1
+      if (playTimer.current !== null) {
+        window.clearTimeout(playTimer.current)
+        playTimer.current = null
+      }
+      setLiveCadence((current) => ({
+        ...current,
+        pending: false,
+        nextDelayMs: null,
+      }))
+    }
+  }, [source, status]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (source === "live" || status !== "playing") {
+      return
+    }
+
+    playTimer.current = window.setInterval(() => {
+      setFrameIndex((next) => {
+        if (next >= frames.length - 1) {
+          setStatus("paused")
+          return next
+        }
+        return next + 1
+      })
+    }, LIVE_TARGET_FRAME_MS)
 
     return () => {
       if (playTimer.current !== null) {
@@ -579,7 +738,7 @@ export function App() {
         playTimer.current = null
       }
     }
-  }, [frames.length, source, status]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [frames.length, source, status])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -622,6 +781,24 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [status, frameIndex, frames.length, source]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (source !== "live" || status !== "paused" || !sessionId) {
+      return
+    }
+    if (!isSummaryFrame(currentFrame)) {
+      return
+    }
+    void hydrateLiveFrameIfNeeded(frameIndex)
+  }, [
+    currentFrame.kind,
+    currentFrame.state_hash,
+    frameIndex,
+    sessionEpoch,
+    sessionId,
+    source,
+    status,
+  ])
+
   const selectedDetails = useMemo(
     () => resolveSelection(currentFrame, selectedEntity),
     [currentFrame, selectedEntity],
@@ -654,6 +831,11 @@ export function App() {
   const latticeSummary = useMemo(
     () => deriveLatticeProxy(currentFrame, frames[0] ?? currentFrame),
     [currentFrame, frames],
+  )
+  const currentFrameNotHydrated = isSummaryFrame(currentFrame)
+  const hasUnhydratedLiveFrames = useMemo(
+    () => frames.some(isSummaryFrame),
+    [frames],
   )
 
   const selectedPerturbationTarget = useMemo<VelocityPerturbationTarget | null>(
@@ -813,78 +995,158 @@ export function App() {
 
   async function advanceLiveFrame({
     logAccepted = false,
-  }: { logAccepted?: boolean } = {}) {
-    if (!sessionId || liveStepInFlight.current) {
-      return
-    }
-    liveStepInFlight.current = true
-    const guard = issueLiveGuard(sessionId)
-    try {
-      const session = await controlSession(sessionId, "step")
-      applyLiveSessionFrame(session, guard)
-      const nextFrameIndex = session.latest_frame?.frame_index
-      if (
-        logAccepted ||
-        (nextFrameIndex !== undefined && shouldLogLiveFrameBuffer(nextFrameIndex))
-      ) {
+    detail = "summary",
+  }: { logAccepted?: boolean; detail?: "summary" | "full" } = {}) {
+    await profileAsync("live.advanceFrame", async () => {
+      if (!sessionId || liveStepInFlight.current) {
+        return
+      }
+      liveStepInFlight.current = true
+      const guard = issueLiveGuard(sessionId)
+      try {
+        const result = await controlSession(sessionId, "step", detail)
+        applyLiveSessionFrame(result, guard)
+        const nextFrame = liveFrameFromControlResponse(result)
+        const nextFrameIndex = nextFrame?.frame_index
+        if (
+          logAccepted ||
+          (nextFrameIndex !== undefined && shouldLogLiveFrameBuffer(nextFrameIndex))
+        ) {
+          pushLogs(
+            log(
+              "info",
+              t(locale, "log.serverAccepted", {
+                action: actionLabel(locale, "step"),
+                status: statusLabel(locale, result.session.status),
+              }),
+            ),
+          )
+        }
+      } catch (error) {
+        setStatus("paused")
         pushLogs(
           log(
-            "info",
-            t(locale, "log.serverAccepted", {
+            "warn",
+            t(locale, "log.serverControlFailed", {
               action: actionLabel(locale, "step"),
-              status: statusLabel(locale, session.status),
+              message: messageOf(error),
             }),
           ),
         )
+      } finally {
+        liveStepInFlight.current = false
       }
-    } catch (error) {
-      setStatus("paused")
-      pushLogs(
-        log(
-          "warn",
-          t(locale, "log.serverControlFailed", {
-            action: actionLabel(locale, "step"),
-            message: messageOf(error),
-          }),
-        ),
-      )
-    } finally {
-      liveStepInFlight.current = false
-    }
+    }, () => ({
+      bufferedFrames: frames.length,
+      frameIndex,
+      scenarioId: selectedScenario,
+    }))
   }
 
   function applyLiveSessionFrame(
-    session: SessionRecord,
+    result: SessionControlResponse | { session: SessionRecord; live_frame_summary?: LiveFrameSummary | null },
     guard: LiveResponseGuard,
   ) {
-    if (shouldIgnoreLiveResponse(guard, session)) {
+    const startedAt = profileStart()
+    const session = result.session
+    const nextFrame = liveFrameFromControlResponse(result)
+    const accepted = !shouldIgnoreLiveResponse(guard, session)
+    try {
+      if (!accepted) {
+        return
+      }
+      setSessionEpoch(session.session_epoch)
+      if (nextFrame) {
+        setFrames((prev) => {
+          if (
+            prev[nextFrame.frame_index]?.state_hash === nextFrame.state_hash &&
+            prev[nextFrame.frame_index]?.kind === nextFrame.kind
+          ) {
+            return prev
+          }
+          const next = prev.slice(0, nextFrame.frame_index)
+          next.push(nextFrame)
+          return next
+        })
+        setFrameIndex(nextFrame.frame_index)
+        if (shouldLogLiveFrameBuffer(nextFrame.frame_index)) {
+          pushLogs(
+            log(
+              "info",
+              t(locale, "log.liveFrameBuffered", { frameIndex: nextFrame.frame_index }),
+            ),
+          )
+        }
+      }
+      if (session.status === "completed") {
+        setStatus("paused")
+      } else if (status !== "playing") {
+        setStatus(session.status)
+      }
+    } finally {
+      profileMeasure("live.applyFrame", startedAt, {
+        accepted,
+        nextFrameIndex: nextFrame?.frame_index ?? null,
+        bodies: nextFrame?.snapshot.bodies.length ?? 0,
+        contacts: nextFrame?.snapshot.contacts.length ?? 0,
+        detail: nextFrame?.kind ?? null,
+      })
+    }
+  }
+
+  async function hydrateLiveFrameIfNeeded(targetFrameIndex: number): Promise<void> {
+    if (source !== "live" || !sessionId) {
       return
     }
-    setSessionEpoch(session.session_epoch)
-    const nextFrame = session.latest_frame
-    if (nextFrame) {
+    const frame = frames[targetFrameIndex]
+    if (!frame || !isSummaryFrame(frame) || !frame.live_authority) {
+      return
+    }
+    const authority = frame.live_authority
+    const hydrationKey = [
+      authority.session_id,
+      authority.session_epoch,
+      frame.frame_index,
+      frame.state_hash,
+    ].join(":")
+    if (liveHydrationInFlight.current === hydrationKey) {
+      return
+    }
+    liveHydrationInFlight.current = hydrationKey
+    try {
+      const result = await fetchLiveFrame(sessionId, frame.frame_index)
       setFrames((prev) => {
-        if (prev[nextFrame.frame_index]?.state_hash === nextFrame.state_hash) {
+        const current = prev[targetFrameIndex]
+        if (
+          !current ||
+          !isSummaryFrame(current) ||
+          !current.live_authority ||
+          current.frame_index !== result.frame_index ||
+          current.state_hash !== result.frame.state_hash ||
+          current.live_authority.session_id !== result.session_id ||
+          current.live_authority.session_epoch !== result.session_epoch ||
+          current.live_authority.world_revision !== result.world_revision
+        ) {
           return prev
         }
-        const next = prev.slice(0, nextFrame.frame_index)
-        next.push(nextFrame)
+        const next = prev.slice()
+        next[targetFrameIndex] = annotateFullLiveFrame(result.frame, {
+          session_id: result.session_id,
+          session_epoch: result.session_epoch,
+          world_revision: result.world_revision,
+          status: current.live_authority.status,
+          buffered_frame_count: current.live_authority.buffered_frame_count,
+          frame_count: current.live_authority.frame_count,
+        })
         return next
       })
-      setFrameIndex(nextFrame.frame_index)
-      if (shouldLogLiveFrameBuffer(nextFrame.frame_index)) {
-        pushLogs(
-          log(
-            "info",
-            t(locale, "log.liveFrameBuffered", { frameIndex: nextFrame.frame_index }),
-          ),
-        )
+    } catch {
+      // Keep the summary frame visible; diagnostics panels already expose this
+      // as not hydrated instead of silently claiming zero evidence.
+    } finally {
+      if (liveHydrationInFlight.current === hydrationKey) {
+        liveHydrationInFlight.current = null
       }
-    }
-    if (session.status === "completed") {
-      setStatus("paused")
-    } else if (status !== "playing") {
-      setStatus(session.status)
     }
   }
 
@@ -897,7 +1159,8 @@ export function App() {
     const guard = issueLiveGuard(nextSessionId)
     setLiveControlBusy(true)
     try {
-      const session = await controlSession(nextSessionId, "play")
+      const result = await controlSession(nextSessionId, "play")
+      const session = result.session
       if (shouldIgnoreLiveResponse(guard, session)) {
         return
       }
@@ -931,7 +1194,10 @@ export function App() {
   function invalidateLiveResponses() {
     liveGenerationRef.current += 1
     liveRequestTokenRef.current = 0
+    liveLoopGenerationRef.current += 1
     liveStepInFlight.current = false
+    liveHydrationInFlight.current = null
+    setLiveCadence(idleLiveCadenceStatus())
     invalidatePerturbationResponses()
     setLiveControlBusy(false)
   }
@@ -1115,13 +1381,14 @@ export function App() {
 
     try {
       if (action === "step") {
-        await advanceLiveFrame({ logAccepted: true })
+        await advanceLiveFrame({ logAccepted: true, detail: "full" })
         return
       }
 
       const guard = issueLiveGuard(activeSessionId, action === "reset")
       setLiveControlBusy(true)
-      const session = await controlSession(activeSessionId, action)
+      const result = await controlSession(activeSessionId, action)
+      const session = result.session
       if (shouldIgnoreLiveResponse(guard, session)) {
         return
       }
@@ -1171,7 +1438,8 @@ export function App() {
     handleLocalControl(action)
 
     try {
-      const session = await controlSession(activeSessionId, action)
+      const result = await controlSession(activeSessionId, action)
+      const session = result.session
       setSessionEpoch(session.session_epoch)
       pushLogs(
         log(
@@ -1308,7 +1576,7 @@ export function App() {
       }
       setPerturbationCommit(result.commit)
       setSessionEpoch(result.session.session_epoch)
-      applyLiveSessionFrame(result.session, liveGuard)
+      applyLiveSessionFrame({ session: result.session }, liveGuard)
       if (result.session.status !== "completed") {
         setStatus(result.session.status)
       }
@@ -1567,44 +1835,65 @@ export function App() {
         : null,
       trajectory: {
         settings: trajectorySettings,
-        overlay: {
-          mode: trajectoryOverlay.mode,
-          windowStart: trajectoryOverlay.windowStart,
-          windowEnd: trajectoryOverlay.windowEnd,
-          emptyState: trajectoryOverlay.emptyState,
-          bodyTrailCount: trajectoryOverlay.bodyTrails.length,
-          contactTrailCount: trajectoryOverlay.contactTrails.length,
-          ccdTrailCount: trajectoryOverlay.ccdTrails.length,
-        },
-        summary: trajectorySummary,
-        markers: selectTrajectoryContextMarkers(
-          trajectoryMarkers,
-          trajectoryOverlay.windowStart,
-          trajectoryOverlay.windowEnd,
-          frameIndex,
-        ).map((marker) => ({
-          kind: marker.kind,
-          frameIndex: marker.frameIndex,
-          score: marker.score,
-        })),
+        overlay: hasUnhydratedLiveFrames
+          ? null
+          : {
+              mode: trajectoryOverlay.mode,
+              windowStart: trajectoryOverlay.windowStart,
+              windowEnd: trajectoryOverlay.windowEnd,
+              emptyState: trajectoryOverlay.emptyState,
+              bodyTrailCount: trajectoryOverlay.bodyTrails.length,
+              contactTrailCount: trajectoryOverlay.contactTrails.length,
+              ccdTrailCount: trajectoryOverlay.ccdTrails.length,
+            },
+        summary: hasUnhydratedLiveFrames ? null : trajectorySummary,
+        markers: hasUnhydratedLiveFrames
+          ? []
+          : selectTrajectoryContextMarkers(
+              trajectoryMarkers,
+              trajectoryOverlay.windowStart,
+              trajectoryOverlay.windowEnd,
+              frameIndex,
+            ).map((marker) => ({
+              kind: marker.kind,
+              frameIndex: marker.frameIndex,
+              score: marker.score,
+            })),
+        notHydrated: hasUnhydratedLiveFrames,
       },
-      stackStability: stackSummary,
+      stackStability: hasUnhydratedLiveFrames ? null : stackSummary,
       diagnostics: {
-        frame: currentFrame.diagnostics ?? null,
-        summary: summarizeFrameDiagnostics(currentFrame.diagnostics),
+        frame: currentFrameNotHydrated ? null : currentFrame.diagnostics ?? null,
+        summary: currentFrameNotHydrated
+          ? {
+              available: false,
+              marker_count: null,
+              marker_kinds: [],
+              missing_evidence: ["live_summary_not_hydrated"],
+              counter_delta_source: "missing",
+              top_marker_threshold: null,
+            }
+          : summarizeFrameDiagnostics(currentFrame.diagnostics),
       },
       latticeProxy: {
-        enabled: latticeSummary.enabled,
-        nodeCount: latticeSummary.nodes.length,
-        edgeCount: latticeSummary.edges.length,
-        worldAnchorEdgeCount: latticeSummary.worldAnchorEdgeCount,
-        maxStretchRatio: latticeSummary.maxStretchRatio,
-        jointRowCount: latticeSummary.jointRowCount,
-        contactCount: latticeSummary.contactCount,
-        islandCount: latticeSummary.islandCount,
-        activeIslandCount: latticeSummary.activeIslandCount,
-        sleepingIslandCount: latticeSummary.sleepingIslandCount,
+        enabled: !hasUnhydratedLiveFrames && latticeSummary.enabled,
+        nodeCount: hasUnhydratedLiveFrames ? null : latticeSummary.nodes.length,
+        edgeCount: hasUnhydratedLiveFrames ? null : latticeSummary.edges.length,
+        worldAnchorEdgeCount: hasUnhydratedLiveFrames
+          ? null
+          : latticeSummary.worldAnchorEdgeCount,
+        maxStretchRatio: hasUnhydratedLiveFrames ? null : latticeSummary.maxStretchRatio,
+        jointRowCount: hasUnhydratedLiveFrames ? null : latticeSummary.jointRowCount,
+        contactCount: hasUnhydratedLiveFrames ? null : latticeSummary.contactCount,
+        islandCount: hasUnhydratedLiveFrames ? null : latticeSummary.islandCount,
+        activeIslandCount: hasUnhydratedLiveFrames
+          ? null
+          : latticeSummary.activeIslandCount,
+        sleepingIslandCount: hasUnhydratedLiveFrames
+          ? null
+          : latticeSummary.sleepingIslandCount,
         proxyOnly: true,
+        notHydrated: hasUnhydratedLiveFrames,
       },
       perturbation: {
         selectedBodyHandle: selectedPerturbationTarget?.bodyHandle ?? null,
@@ -1654,8 +1943,10 @@ export function App() {
       canvasView,
       currentFrame,
       currentFramePerturbationProvenance,
+      currentFrameNotHydrated,
       frameIndex,
       frames.length,
+      hasUnhydratedLiveFrames,
       isAuthoritativeLiveFrameSelected,
       latticeSummary,
       latestAuthoritativeLiveFrame?.frame_index,
@@ -1728,6 +2019,7 @@ export function App() {
       perfStatus={perfStatus}
       onRun={() => void runScenario()}
       liveControlBusy={liveControlBusy}
+      liveCadence={liveCadence}
       runMode={runMode}
       onRunModeChange={setRunMode}
       layers={layers}

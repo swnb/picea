@@ -879,13 +879,13 @@ fn stabilize_normal(normal: Vector) -> Vector {
 mod tests {
     use super::{
         contact_from_shapes, contact_from_shapes_with_cached_vertices, feature_id,
-        overlap_from_aabbs, reduce_contact_points, ContactPointGeometry,
+        overlap_from_aabbs, reduce_contact_points, ContactManifoldGeometry, ContactPointGeometry,
     };
     use crate::{
         body::Pose,
         collider::{ShapeAabb, SharedShape},
         events::ContactReductionReason,
-        math::{point::Point, vector::Vector},
+        math::{point::Point, vector::Vector, FloatNum},
     };
 
     fn aabb(min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> ShapeAabb {
@@ -893,6 +893,48 @@ mod tests {
             min: Point::new(min_x, min_y),
             max: Point::new(max_x, max_y),
         }
+    }
+
+    fn feature_indices(contact: &ContactManifoldGeometry) -> Vec<Option<usize>> {
+        let mut indices = contact
+            .points
+            .iter()
+            .map(|point| point.feature_id.index())
+            .collect::<Vec<_>>();
+        indices.sort();
+        indices.dedup();
+        indices
+    }
+
+    fn max_local_anchor_drift(
+        first: &ContactManifoldGeometry,
+        first_pose_a: Pose,
+        first_pose_b: Pose,
+        second: &ContactManifoldGeometry,
+        second_pose_a: Pose,
+        second_pose_b: Pose,
+    ) -> FloatNum {
+        first
+            .points
+            .iter()
+            .map(|first_point| {
+                let first_anchor_a = first_pose_a.inverse_transform_point(first_point.point);
+                let first_anchor_b = first_pose_b.inverse_transform_point(first_point.point);
+                second
+                    .points
+                    .iter()
+                    .map(|second_point| {
+                        let second_anchor_a =
+                            second_pose_a.inverse_transform_point(second_point.point);
+                        let second_anchor_b =
+                            second_pose_b.inverse_transform_point(second_point.point);
+                        (first_anchor_a - second_anchor_a)
+                            .length()
+                            .max((first_anchor_b - second_anchor_b).length())
+                    })
+                    .fold(FloatNum::INFINITY, FloatNum::min)
+            })
+            .fold(0.0, FloatNum::max)
     }
 
     #[test]
@@ -1046,6 +1088,51 @@ mod tests {
             assert!((point.point.x() - 0.75).abs() < 1.0e-4);
             assert!((point.depth - 0.5).abs() < 1.0e-4);
         }
+    }
+
+    #[test]
+    #[ignore = "diagnostic red lock for future SAT manifold-persistence design; direct canonicalization regresses matrix_stack"]
+    fn stacked_rectangles_keep_feature_id_when_sat_reference_face_swaps() {
+        let shape_a = SharedShape::rect(2.0, 2.0);
+        let shape_b = SharedShape::rect(2.0, 2.0);
+        let pose_a = Pose::from_xy_angle(0.0, 0.0, -0.12);
+        let first_pose_b = Pose::from_xy_angle(-0.25, 1.8, -0.17);
+        let nudged_pose_b = Pose::from_xy_angle(-0.25, 1.8, -0.15);
+
+        let first = contact_from_shapes(
+            &shape_a,
+            pose_a,
+            shape_a.aabb(pose_a),
+            &shape_b,
+            first_pose_b,
+            shape_b.aabb(first_pose_b),
+        )
+        .expect("stacked rectangles should contact");
+        let nudged = contact_from_shapes(
+            &shape_a,
+            pose_a,
+            shape_a.aabb(pose_a),
+            &shape_b,
+            nudged_pose_b,
+            shape_b.aabb(nudged_pose_b),
+        )
+        .expect("nudged stacked rectangles should still contact");
+
+        assert!(
+            first.normal.dot(nudged.normal) > 0.999,
+            "the SAT reference face should only swap for nearly continuous normals"
+        );
+        let local_anchor_drift =
+            max_local_anchor_drift(&first, pose_a, first_pose_b, &nudged, pose_a, nudged_pose_b);
+        assert!(
+            local_anchor_drift < 0.25,
+            "feature identity should only be preserved for locally continuous anchors; drift={local_anchor_drift}"
+        );
+        assert_eq!(
+            feature_indices(&first),
+            feature_indices(&nudged),
+            "reference/incident role changes must not churn the ordered-pair feature identity"
+        );
     }
 
     #[test]

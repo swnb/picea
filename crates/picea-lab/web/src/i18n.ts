@@ -189,6 +189,9 @@ const enMessages = {
   "timeline.totalFrames": "{count} total",
   "timeline.sourceStatus": "{source} / {status}",
   "timeline.sessionStatus": "session {sessionId} / buffered {buffered} / current {current}",
+  "timeline.liveCadence": "live {actual}/{target} fps · {stepMs}ms",
+  "timeline.liveCadenceDegraded": "degraded {actual}/{target} fps · {stepMs}ms",
+  "timeline.liveCadencePending": "live measuring",
   "diagnostics.empty": "No exported diagnostics for this frame.",
   "diagnostics.exported": "exported diagnostics",
   "diagnostics.performance": "performance",
@@ -584,6 +587,9 @@ const zhMessages: Record<MessageKey, string> = {
   "timeline.totalFrames": "共 {count} 帧",
   "timeline.sourceStatus": "{source} / {status}",
   "timeline.sessionStatus": "会话 {sessionId} / 已缓存 {buffered} / 当前 {current}",
+  "timeline.liveCadence": "live {actual}/{target} fps · {stepMs}ms",
+  "timeline.liveCadenceDegraded": "降级 {actual}/{target} fps · {stepMs}ms",
+  "timeline.liveCadencePending": "live 测量中",
   "diagnostics.empty": "当前帧没有导出的诊断事实。",
   "diagnostics.exported": "导出诊断",
   "diagnostics.performance": "性能",
@@ -852,6 +858,10 @@ const scenarioMessages: Record<string, Record<Locale, Pick<ScenarioDescriptor, "
   matrix_stack: {
     "zh-CN": { name: "矩阵堆叠 8x6", description: "8x6 动态箱体矩阵堆叠，用于观察大规模静息接触、穿透、churn 和求解行压力。" },
     "en-US": { name: "Matrix stack 8x6", description: "An 8x6 dynamic box matrix stack for dense resting-contact, penetration, churn, and solver-row diagnostics." },
+  },
+  matrix_stack_aligned: {
+    "zh-CN": { name: "对齐矩阵堆叠 4x3", description: "4x3 对齐动态箱体矩阵，用作稳定矩阵形态的行为锁。" },
+    "en-US": { name: "Aligned matrix stack 4x3", description: "An aligned 4x3 dynamic box matrix for stable matrix-form behavior locks." },
   },
   joint_anchor: {
     "zh-CN": { name: "世界锚点关节", description: "带约束线的离线关节锚点预览。" },

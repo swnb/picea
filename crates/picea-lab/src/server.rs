@@ -22,7 +22,7 @@ use picea::prelude::{
     BodyHandle, BodyPatch, BodyType, QueryPipeline, SimulationPipeline, StepConfig, Vector, World,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::{
@@ -148,6 +148,16 @@ struct CreateSessionRequest {
 #[derive(Clone, Debug, Deserialize)]
 struct ControlRequest {
     action: String,
+    #[serde(default)]
+    detail: LiveFrameDetail,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LiveFrameDetail {
+    #[default]
+    Summary,
+    Full,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -231,6 +241,7 @@ pub fn app(state: LabServerState) -> Router {
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/:id", get(get_session))
         .route("/api/sessions/:id/control", post(control_session))
+        .route("/api/sessions/:id/frames/:index", get(get_live_frame))
         .route(
             "/api/sessions/:id/velocity-perturbations/preview",
             post(preview_velocity_perturbation),
@@ -371,7 +382,36 @@ async fn control_session(
         SessionMode::LiveSession => control_live_session(&mut session, &request.action)?,
     }
 
-    Ok(Json(json!({ "session": session.record.clone() })))
+    Ok(Json(build_control_response(
+        &session,
+        &request.action,
+        request.detail,
+    )))
+}
+
+async fn get_live_frame(
+    State(state): State<LabServerState>,
+    Path((id, index)): Path<(String, usize)>,
+) -> Result<Json<serde_json::Value>, LabHttpError> {
+    let session = get_session_handle(&state, &id)?;
+    let session = session.lock().expect("session mutex should not poison");
+    let SessionRuntime::Live(runtime) = &session.runtime else {
+        return Err(LabHttpError::bad_request(
+            "live frame lookup is only available for live_session",
+        ));
+    };
+    let Some(frame) = runtime.frames.get(index) else {
+        return Err(LabHttpError::not_found(format!(
+            "live frame {index} not found for session {id}"
+        )));
+    };
+    Ok(Json(json!({
+        "session_id": &session.record.id,
+        "session_epoch": session.record.session_epoch,
+        "frame_index": frame.frame_index,
+        "world_revision": frame.report.revision,
+        "frame": frame,
+    })))
 }
 
 async fn preview_velocity_perturbation(
@@ -492,6 +532,66 @@ fn control_live_session(session: &mut SessionState, action: &str) -> Result<(), 
         _ => return Err(LabError::InvalidControlAction(action.to_owned()).into()),
     }
     Ok(())
+}
+
+fn build_control_response(
+    session: &SessionState,
+    _action: &str,
+    detail: LiveFrameDetail,
+) -> Value {
+    let mut response_session = session.record.clone();
+    let live_frame_summary = match session.record.mode {
+        SessionMode::LiveSession => session
+            .record
+            .latest_frame
+            .as_ref()
+            .map(|frame| build_live_frame_summary(&session.record, frame)),
+        SessionMode::ArtifactReplay => None,
+    };
+    if matches!(session.record.mode, SessionMode::LiveSession)
+        && matches!(detail, LiveFrameDetail::Summary)
+    {
+        response_session.latest_frame = None;
+    }
+    json!({
+        "session": response_session,
+        "live_frame_summary": live_frame_summary,
+    })
+}
+
+fn build_live_frame_summary(session: &SessionRecord, frame: &FrameRecord) -> Value {
+    // The live runtime keeps the full FrameRecord authoritative in memory. This
+    // summary is only a transport-layer projection for the hot playback path.
+    json!({
+        "kind": "summary",
+        "frame_index": frame.frame_index,
+        "simulated_time": frame.simulated_time,
+        "state_hash": &frame.state_hash,
+        "session_id": &session.id,
+        "session_epoch": session.session_epoch,
+        "world_revision": frame.report.revision,
+        "status": session.status,
+        "buffered_frame_count": session.buffered_frame_count,
+        "frame_count": session.frame_count,
+        "snapshot": {
+            "meta": &frame.snapshot.meta,
+            "bodies": &frame.snapshot.bodies,
+            "colliders": &frame.snapshot.colliders,
+            "joints": &frame.snapshot.joints,
+            "primitives": &frame.snapshot.primitives,
+            "stats": &frame.snapshot.stats,
+            "contacts": Value::Null,
+            "manifolds": Value::Null,
+            "islands": Value::Null,
+            "broadphase_tree": Value::Null,
+        },
+        "stats": &frame.stats,
+        "report": Value::Null,
+        "events": Value::Null,
+        "diagnostics": Value::Null,
+        "compound_provenance": Value::Null,
+        "perturbation_provenance": Value::Null,
+    })
 }
 
 fn preview_live_velocity_perturbation(
@@ -948,15 +1048,16 @@ fn step_live_session(session: &mut SessionState) -> Result<(), LabHttpError> {
         &runtime.compound_provenance,
         &runtime.perturbation_provenance,
     )?;
-    session.record.final_state_hash = Some(frame.state_hash.clone());
+    let state_hash = frame.state_hash.clone();
+    session.record.final_state_hash = Some(state_hash.clone());
     session.record.buffered_frame_count = frame_index + 1;
     session.record.current_frame_index = frame_index;
-    session.record.latest_frame = Some(frame.clone());
     session.record.last_error = None;
     runtime.frames.push(frame.clone());
+    session.record.latest_frame = Some(frame);
     session.record.events.push(SessionEvent::Frame {
         frame_index,
-        state_hash: frame.state_hash,
+        state_hash,
     });
     session.record.status = if session.record.buffered_frame_count >= session.record.frame_count {
         SessionStatus::Completed
@@ -1118,17 +1219,14 @@ fn read_frame_hash(store: &ArtifactStore, run_id: &str, frame_index: usize) -> O
 }
 
 #[derive(Debug)]
-struct LabHttpError(LabError);
+struct LabHttpError {
+    status: StatusCode,
+    message: String,
+}
 
 impl From<LabError> for LabHttpError {
     fn from(value: LabError) -> Self {
-        Self(value)
-    }
-}
-
-impl IntoResponse for LabHttpError {
-    fn into_response(self) -> Response {
-        let status = match self.0 {
+        let status = match value {
             LabError::SessionNotFound(_) => StatusCode::NOT_FOUND,
             LabError::UnknownScenario(_)
             | LabError::InvalidArtifactFile(_)
@@ -1136,7 +1234,32 @@ impl IntoResponse for LabHttpError {
             | LabError::LiveOverridesUnavailable => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        (status, Json(json!({ "error": self.0.to_string() }))).into_response()
+        Self {
+            status,
+            message: value.to_string(),
+        }
+    }
+}
+
+impl IntoResponse for LabHttpError {
+    fn into_response(self) -> Response {
+        (self.status, Json(json!({ "error": self.message }))).into_response()
+    }
+}
+
+impl LabHttpError {
+    fn bad_request(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: message.into(),
+        }
+    }
+
+    fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: message.into(),
+        }
     }
 }
 

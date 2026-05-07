@@ -290,18 +290,66 @@ pub struct ContactEvent {
     /// Warm-start cache decision for this contact point.
     #[serde(default)]
     pub warm_start_reason: WarmStartCacheReason,
+    /// Max anchor drift observed during warm-start validation.
+    #[serde(default)]
+    pub warm_start_anchor_drift: FloatNum,
+    /// Anchor drift projected along the current contact normal.
+    #[serde(default)]
+    pub warm_start_normal_anchor_drift: FloatNum,
+    /// Anchor drift projected along the current contact tangent.
+    #[serde(default)]
+    pub warm_start_tangent_anchor_drift: FloatNum,
     /// Previous normal impulse transferred into this step, or zero when not trusted.
     #[serde(default)]
     pub warm_start_normal_impulse: FloatNum,
     /// Previous tangent impulse transferred into this step, or zero when not trusted.
     #[serde(default)]
     pub warm_start_tangent_impulse: FloatNum,
+    /// Same-pair, local-anchor-continuous feature miss reserved for source-row position gating.
+    #[serde(default)]
+    pub source_row_continuity_candidate: bool,
     /// Final normal impulse accumulated by the current step's contact solver.
     #[serde(default)]
     pub solver_normal_impulse: FloatNum,
     /// Final tangent impulse accumulated by the current step's contact solver.
     #[serde(default)]
     pub solver_tangent_impulse: FloatNum,
+    /// Relative normal speed before the velocity solver touched this row.
+    #[serde(default)]
+    pub solver_initial_normal_speed: FloatNum,
+    /// Relative tangent speed before the velocity solver touched this row.
+    #[serde(default)]
+    pub solver_initial_tangent_speed: FloatNum,
+    /// Relative normal speed after this step's velocity solver finished.
+    #[serde(default)]
+    pub solver_final_normal_speed: FloatNum,
+    /// Relative tangent speed after this step's velocity solver finished.
+    #[serde(default)]
+    pub solver_final_tangent_speed: FloatNum,
+    /// Normal velocity bias contributed by resting penetration.
+    #[serde(default)]
+    pub solver_position_bias: FloatNum,
+    /// Normal velocity bias contributed by restitution.
+    #[serde(default)]
+    pub solver_restitution_bias: FloatNum,
+    /// Extra shallow-overlap support budget available only to dense-stack friction rows.
+    #[serde(default)]
+    pub solver_support_friction_impulse: FloatNum,
+    /// Residual position-correction depth consumed by this contact row.
+    #[serde(default)]
+    pub solver_position_correction_depth: FloatNum,
+    /// Translation magnitude applied to body A by residual position correction for this row.
+    #[serde(default)]
+    pub solver_position_correction_body_a_translation: FloatNum,
+    /// Translation magnitude applied to body B by residual position correction for this row.
+    #[serde(default)]
+    pub solver_position_correction_body_b_translation: FloatNum,
+    /// Difference between final and warm-start normal impulses.
+    #[serde(default)]
+    pub solver_normal_impulse_delta: FloatNum,
+    /// Difference between final and warm-start tangent impulses.
+    #[serde(default)]
+    pub solver_tangent_impulse_delta: FloatNum,
     /// Whether the normal row tried to go below zero and was clamped.
     #[serde(default)]
     pub normal_impulse_clamped: bool,
@@ -397,10 +445,26 @@ mod tests {
             depth: 0.25,
             reduction_reason: ContactReductionReason::Clipped,
             warm_start_reason: WarmStartCacheReason::Hit,
+            warm_start_anchor_drift: 0.03,
+            warm_start_normal_anchor_drift: 0.01,
+            warm_start_tangent_anchor_drift: 0.02,
             warm_start_normal_impulse: 1.0,
             warm_start_tangent_impulse: -0.25,
+            source_row_continuity_candidate: true,
             solver_normal_impulse: 1.25,
             solver_tangent_impulse: -0.125,
+            solver_initial_normal_speed: -0.75,
+            solver_initial_tangent_speed: 0.5,
+            solver_final_normal_speed: 0.0,
+            solver_final_tangent_speed: 0.1,
+            solver_position_bias: 0.25,
+            solver_restitution_bias: 0.5,
+            solver_support_friction_impulse: 0.125,
+            solver_position_correction_depth: 0.03,
+            solver_position_correction_body_a_translation: 0.01,
+            solver_position_correction_body_b_translation: 0.02,
+            solver_normal_impulse_delta: 0.25,
+            solver_tangent_impulse_delta: 0.125,
             normal_impulse_clamped: false,
             tangent_impulse_clamped: true,
             restitution_velocity_threshold: 1.0,

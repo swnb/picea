@@ -185,6 +185,22 @@ impl StepContext {
             ccd_hit_count: self.pose_clamp.stats.hit_count,
             ccd_miss_count: self.pose_clamp.stats.miss_count,
             ccd_clamp_count: self.pose_clamp.stats.clamp_count,
+            position_correction_input_contact_count: self
+                .solver_stats
+                .position_correction_input_contact_count,
+            position_correction_input_max_depth: self
+                .solver_stats
+                .position_correction_input_max_depth,
+            position_correction_input_total_depth: self
+                .solver_stats
+                .position_correction_input_total_depth,
+            position_correction_body_count: self.solver_stats.position_correction_body_count,
+            position_correction_max_translation: self
+                .solver_stats
+                .position_correction_max_translation,
+            position_correction_total_translation: self
+                .solver_stats
+                .position_correction_total_translation,
             velocity_iterations: config.velocity_iterations,
             position_iterations: config.position_iterations,
             sleep_transition_count: self.sleep_transition_count,

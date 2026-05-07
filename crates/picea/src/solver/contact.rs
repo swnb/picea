@@ -1,16 +1,24 @@
 use std::collections::BTreeMap;
 
 use crate::{
+    events::ContactReductionReason,
     events::SleepTransitionReason,
     handles::BodyHandle,
     math::{point::Point, vector::Vector, FloatNum},
     pipeline::{contacts::ContactObservation, island, sleep, StepConfig},
-    world::World,
+    world::{contact_state::ContactPairKey, World},
 };
 
 const POSITION_CORRECTION_PERCENT: FloatNum = 0.8;
 const POSITION_CORRECTION_SLOP: FloatNum = 0.005;
+const POSITION_CORRECTION_SLEEP_RESET_TRANSLATION: FloatNum = POSITION_CORRECTION_SLOP;
 const CONTACT_VELOCITY_BIAS: FloatNum = 0.5;
+const SHALLOW_SUPPORT_FRICTION_BUDGET_SCALE: FloatNum = 0.5;
+const MANIFOLD_BLOCK_SOLVE_TANGENT_SPEED_THRESHOLD: FloatNum = 0.25;
+// Dense contact graphs are the matrix-stack case: many overlapping rows can
+// reuse stale frame-start depth and over-correct the same bodies. Small stacks
+// keep the legacy path because it currently satisfies the quiet behavior lock.
+const DENSE_POSITION_CORRECTION_CONTACT_THRESHOLD: usize = 16;
 
 #[derive(Clone, Copy, Debug)]
 struct SolverBody {
@@ -25,6 +33,7 @@ struct SolverBody {
 #[derive(Clone, Debug)]
 struct ContactSolverRow {
     contact_index: usize,
+    pair_key: ContactPairKey,
     body_a_slot: usize,
     body_b_slot: usize,
     normal: Vector,
@@ -34,8 +43,12 @@ struct ContactSolverRow {
     normal_mass: FloatNum,
     tangent_mass: FloatNum,
     friction: FloatNum,
+    reduction_reason: ContactReductionReason,
+    support_friction_impulse: FloatNum,
     restitution_bias: FloatNum,
     position_bias: FloatNum,
+    initial_normal_speed: FloatNum,
+    initial_tangent_speed: FloatNum,
     normal_impulse: FloatNum,
     tangent_impulse: FloatNum,
     normal_impulse_clamped: bool,
@@ -47,6 +60,36 @@ struct ContactSolverRow {
 struct ContactSolveBatch {
     body_slots: Vec<BodyHandle>,
     rows: Vec<ContactSolverRow>,
+    normal_pair_partners: Vec<Option<usize>>,
+}
+
+#[derive(Default)]
+struct PositionCorrectionStats {
+    input_contact_count: usize,
+    input_max_depth: FloatNum,
+    input_total_depth: FloatNum,
+    corrected_body_count: usize,
+    max_translation: FloatNum,
+    total_translation: FloatNum,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ContactPositionRow {
+    contact_index: usize,
+    body_a: BodyHandle,
+    body_b: BodyHandle,
+    normal: Vector,
+    inverse_mass_a: FloatNum,
+    inverse_mass_b: FloatNum,
+    frame_start_depth: FloatNum,
+    raw_depth: FloatNum,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct QueuedPositionTranslation {
+    translation: Vector,
+    distance_sum: FloatNum,
+    reset_idle: bool,
 }
 
 pub(crate) fn resolve_contacts(
@@ -81,7 +124,8 @@ pub(crate) fn resolve_contacts(
         contact.restitution_applied = false;
     }
 
-    let (mut batches, stats) = contact_solver_row_batches(world, contacts, &islands, plan, config);
+    let (mut batches, mut stats) =
+        contact_solver_row_batches(world, contacts, &islands, plan, config);
 
     for batch in &mut batches {
         let mut solver_bodies = solver_body_cache(world, &batch.body_slots);
@@ -92,9 +136,26 @@ pub(crate) fn resolve_contacts(
         }
 
         for _ in 0..config.velocity_iterations {
-            for row in &mut batch.rows {
-                solve_normal_impulse(&mut solver_bodies, row);
-                solve_tangent_impulse(&mut solver_bodies, row);
+            for row_index in 0..batch.rows.len() {
+                match batch.normal_pair_partners[row_index] {
+                    Some(partner_index) if partner_index > row_index => {
+                        if !solve_normal_impulse_pair(
+                            &mut solver_bodies,
+                            &mut batch.rows,
+                            row_index,
+                            partner_index,
+                        ) {
+                            solve_normal_impulse(&mut solver_bodies, &mut batch.rows[row_index]);
+                            solve_normal_impulse(
+                                &mut solver_bodies,
+                                &mut batch.rows[partner_index],
+                            );
+                        }
+                    }
+                    Some(_) => {}
+                    None => solve_normal_impulse(&mut solver_bodies, &mut batch.rows[row_index]),
+                }
+                solve_tangent_impulse(&mut solver_bodies, &mut batch.rows[row_index]);
             }
         }
 
@@ -102,6 +163,20 @@ pub(crate) fn resolve_contacts(
             let contact = &mut contacts[row.contact_index];
             contact.normal_impulse = row.normal_impulse.max(0.0);
             contact.tangent_impulse = row.tangent_impulse;
+            contact.solver_initial_normal_speed = row.initial_normal_speed;
+            contact.solver_initial_tangent_speed = row.initial_tangent_speed;
+            let (final_normal_speed, final_tangent_speed) =
+                contact_row_relative_speeds(&solver_bodies, row)
+                    .unwrap_or((row.initial_normal_speed, row.initial_tangent_speed));
+            contact.solver_final_normal_speed = final_normal_speed;
+            contact.solver_final_tangent_speed = final_tangent_speed;
+            contact.solver_position_bias = row.position_bias;
+            contact.solver_restitution_bias = row.restitution_bias;
+            contact.solver_support_friction_impulse = row.support_friction_impulse;
+            contact.solver_normal_impulse_delta =
+                contact.normal_impulse - contact.warm_start_normal_impulse;
+            contact.solver_tangent_impulse_delta =
+                contact.tangent_impulse - contact.warm_start_tangent_impulse;
             contact.normal_impulse_clamped = row.normal_impulse_clamped;
             contact.tangent_impulse_clamped = row.tangent_impulse_clamped;
             contact.restitution_velocity_threshold = row.restitution_velocity_threshold;
@@ -111,12 +186,18 @@ pub(crate) fn resolve_contacts(
         write_solver_velocities(world, &batch.body_slots, &solver_bodies, wake_reasons);
     }
 
-    apply_residual_contact_position_correction(
+    let position_correction_stats = apply_residual_contact_position_correction(
         world,
         contacts,
         config.position_iterations,
         wake_reasons,
     );
+    stats.position_correction_input_contact_count = position_correction_stats.input_contact_count;
+    stats.position_correction_input_max_depth = position_correction_stats.input_max_depth;
+    stats.position_correction_input_total_depth = position_correction_stats.input_total_depth;
+    stats.position_correction_body_count = position_correction_stats.corrected_body_count;
+    stats.position_correction_max_translation = position_correction_stats.max_translation;
+    stats.position_correction_total_translation = position_correction_stats.total_translation;
     stats
 }
 
@@ -132,6 +213,8 @@ fn contact_solver_row_batches(
         .into_iter()
         .filter_map(|island| {
             let bodies = solver_body_cache(world, &island.body_slots);
+            let dense_contact_graph =
+                island.contact_rows.len() >= DENSE_POSITION_CORRECTION_CONTACT_THRESHOLD;
             let rows = island
                 .contact_rows
                 .iter()
@@ -143,12 +226,15 @@ fn contact_solver_row_batches(
                         &contacts[row.contact_index],
                         &bodies,
                         config,
+                        dense_contact_graph,
                     )
                 })
                 .collect::<Vec<_>>();
+            let normal_pair_partners = manifold_normal_pair_partners(&rows, dense_contact_graph);
             (!rows.is_empty()).then_some(ContactSolveBatch {
                 body_slots: island.body_slots,
                 rows,
+                normal_pair_partners,
             })
         })
         .collect::<Vec<_>>();
@@ -159,6 +245,7 @@ fn contact_solver_row_batches(
         body_slot_count: batches.iter().map(|batch| batch.body_slots.len()).sum(),
         contact_row_count: batches.iter().map(|batch| batch.rows.len()).sum(),
         joint_row_count: 0,
+        ..island::SolverStepStats::default()
     };
     (batches, stats)
 }
@@ -190,6 +277,7 @@ fn contact_solver_row(
     contact: &ContactObservation,
     bodies: &[SolverBody],
     config: &StepConfig,
+    dense_contact_graph: bool,
 ) -> Option<ContactSolverRow> {
     if contact.is_sensor {
         return None;
@@ -209,8 +297,9 @@ fn contact_solver_row(
         return None;
     }
 
-    let relative_normal_speed =
-        relative_contact_velocity(body_a, body_b, anchor_a, anchor_b).dot(normal);
+    let initial_velocity = relative_contact_velocity(body_a, body_b, anchor_a, anchor_b);
+    let relative_normal_speed = initial_velocity.dot(normal);
+    let relative_tangent_speed = initial_velocity.dot(tangent);
     let restitution_threshold = config.restitution_velocity_threshold;
     let restitution_applied =
         -relative_normal_speed > restitution_threshold && contact.material.restitution > 0.0;
@@ -227,14 +316,24 @@ fn contact_solver_row(
         0.0
     };
     let friction = contact.material.friction.max(0.0);
+    let support_friction_impulse = if dense_contact_graph
+        && contact.depth > 0.0
+        && contact.depth <= POSITION_CORRECTION_SLOP
+        && relative_normal_speed >= 0.0
+    {
+        (contact.depth * SHALLOW_SUPPORT_FRICTION_BUDGET_SCALE / config.dt) * normal_mass
+    } else {
+        0.0
+    };
     let normal_impulse = contact.warm_start_normal_impulse.max(0.0);
-    let max_friction = friction * normal_impulse;
+    let max_friction = friction * normal_impulse.max(support_friction_impulse);
     let tangent_impulse = contact
         .warm_start_tangent_impulse
         .clamp(-max_friction, max_friction);
 
     Some(ContactSolverRow {
         contact_index,
+        pair_key: contact.pair_key,
         body_a_slot,
         body_b_slot,
         normal,
@@ -244,8 +343,12 @@ fn contact_solver_row(
         normal_mass,
         tangent_mass,
         friction,
+        reduction_reason: contact.reduction_reason,
+        support_friction_impulse,
         restitution_bias,
         position_bias,
+        initial_normal_speed: relative_normal_speed,
+        initial_tangent_speed: relative_tangent_speed,
         normal_impulse,
         tangent_impulse,
         normal_impulse_clamped: false,
@@ -318,70 +421,388 @@ fn contact_counterpart_can_wake(world: &World, other: BodyHandle) -> bool {
 
 fn apply_residual_contact_position_correction(
     world: &mut World,
-    contacts: &[ContactObservation],
+    contacts: &mut [ContactObservation],
     iterations: u16,
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
-) {
+) -> PositionCorrectionStats {
+    let mut stats = PositionCorrectionStats::default();
     if iterations == 0 {
-        return;
+        return stats;
     }
 
-    for _ in 0..iterations {
-        for contact in contacts.iter().filter(|contact| !contact.is_sensor) {
-            let normal = contact.normal.normalized_or_zero();
-            let depth = (contact.depth - POSITION_CORRECTION_SLOP).max(0.0);
-            if normal.length() <= FloatNum::EPSILON || depth <= FloatNum::EPSILON {
+    let eligible_contact_count = contacts
+        .iter()
+        .filter(|contact| !contact.is_sensor && residual_correction_depth(contact) > 0.0)
+        .count();
+    let dense_correction_mode =
+        eligible_contact_count >= DENSE_POSITION_CORRECTION_CONTACT_THRESHOLD;
+
+    let mut queued_translations = BTreeMap::<BodyHandle, QueuedPositionTranslation>::new();
+    // Dense stacks reuse frame-start contact depths across many overlapping
+    // rows. Track the pseudo-translation accumulated in this correction phase
+    // so later rows see less stale penetration. The writeback is deferred until
+    // all rows have accumulated into a pseudo-position state, which is the seam
+    // needed for the later Box2D-style position row pass.
+    let mut body_translation_vectors = BTreeMap::<BodyHandle, Vector>::new();
+    let rows = contact_position_rows(world, contacts);
+    for iteration in 0..iterations {
+        for row in &rows {
+            if iteration == 0 {
+                stats.input_contact_count += 1;
+                stats.input_max_depth = stats.input_max_depth.max(row.raw_depth.max(0.0));
+                stats.input_total_depth += row.raw_depth.max(0.0);
+            }
+            let depth = if dense_correction_mode {
+                let translation_a = body_translation_vectors
+                    .get(&row.body_a)
+                    .copied()
+                    .unwrap_or_default();
+                let translation_b = body_translation_vectors
+                    .get(&row.body_b)
+                    .copied()
+                    .unwrap_or_default();
+                ((row.raw_depth - (translation_a - translation_b).dot(row.normal)).max(0.0)
+                    - POSITION_CORRECTION_SLOP)
+                    .max(0.0)
+            } else {
+                row.frame_start_depth
+            };
+            if depth <= FloatNum::EPSILON {
                 continue;
             }
-            let inv_mass_a = world
-                .body_record(contact.body_a)
-                .map(|record| record.mass_properties.inverse_mass)
-                .unwrap_or(0.0);
-            let inv_mass_b = world
-                .body_record(contact.body_b)
-                .map(|record| record.mass_properties.inverse_mass)
-                .unwrap_or(0.0);
-            let inv_mass_sum = inv_mass_a + inv_mass_b;
-            if inv_mass_sum <= FloatNum::EPSILON {
-                continue;
-            }
+            let contact = &mut contacts[row.contact_index];
+            contact.solver_position_correction_depth += depth;
             let correction = depth * POSITION_CORRECTION_PERCENT / FloatNum::from(iterations);
-            let correction_a = normal * (correction * inv_mass_a / inv_mass_sum);
-            let correction_b = -normal * (correction * inv_mass_b / inv_mass_sum);
-            let wake_a = contact_counterpart_can_wake(world, contact.body_b);
-            let wake_b = contact_counterpart_can_wake(world, contact.body_a);
-            apply_position_translation(world, contact.body_a, correction_a, wake_a, wake_reasons);
-            apply_position_translation(world, contact.body_b, correction_b, wake_b, wake_reasons);
+            let inv_mass_sum = row.inverse_mass_a + row.inverse_mass_b;
+            let correction_a = row.normal * (correction * row.inverse_mass_a / inv_mass_sum);
+            let correction_b = -row.normal * (correction * row.inverse_mass_b / inv_mass_sum);
+            let wake_a =
+                contact_counterpart_can_wake_with_queued(world, row.body_b, &queued_translations);
+            let wake_b =
+                contact_counterpart_can_wake_with_queued(world, row.body_a, &queued_translations);
+            if let Some(distance) = queue_position_translation(
+                world,
+                &mut queued_translations,
+                row.body_a,
+                correction_a,
+                wake_a,
+            ) {
+                contact.solver_position_correction_body_a_translation += distance;
+                if dense_correction_mode {
+                    *body_translation_vectors.entry(row.body_a).or_default() += correction_a;
+                }
+            }
+            if let Some(distance) = queue_position_translation(
+                world,
+                &mut queued_translations,
+                row.body_b,
+                correction_b,
+                wake_b,
+            ) {
+                contact.solver_position_correction_body_b_translation += distance;
+                if dense_correction_mode {
+                    *body_translation_vectors.entry(row.body_b).or_default() += correction_b;
+                }
+            }
+        }
+    }
+    stats.corrected_body_count = queued_translations.len();
+    stats.max_translation = queued_translations
+        .values()
+        .map(|translation| translation.distance_sum)
+        .fold(0.0, FloatNum::max);
+    stats.total_translation = queued_translations
+        .values()
+        .map(|translation| translation.distance_sum)
+        .sum();
+    apply_queued_position_translations(world, queued_translations, wake_reasons);
+    stats
+}
+
+fn contact_position_rows(
+    world: &World,
+    contacts: &[ContactObservation],
+) -> Vec<ContactPositionRow> {
+    contacts
+        .iter()
+        .enumerate()
+        .filter_map(|(contact_index, contact)| contact_position_row(world, contact_index, contact))
+        .collect()
+}
+
+fn contact_position_row(
+    world: &World,
+    contact_index: usize,
+    contact: &ContactObservation,
+) -> Option<ContactPositionRow> {
+    if contact.is_sensor {
+        return None;
+    }
+    let normal = contact.normal.normalized_or_zero();
+    let frame_start_depth = residual_correction_depth(contact);
+    if normal.length() <= FloatNum::EPSILON || frame_start_depth <= FloatNum::EPSILON {
+        return None;
+    }
+    let inverse_mass_a = world
+        .body_record(contact.body_a)
+        .map(|record| record.mass_properties.inverse_mass)
+        .unwrap_or(0.0);
+    let inverse_mass_b = world
+        .body_record(contact.body_b)
+        .map(|record| record.mass_properties.inverse_mass)
+        .unwrap_or(0.0);
+    if inverse_mass_a + inverse_mass_b <= FloatNum::EPSILON {
+        return None;
+    }
+    Some(ContactPositionRow {
+        contact_index,
+        body_a: contact.body_a,
+        body_b: contact.body_b,
+        normal,
+        inverse_mass_a,
+        inverse_mass_b,
+        frame_start_depth,
+        raw_depth: contact.depth,
+    })
+}
+
+fn residual_correction_depth(contact: &ContactObservation) -> FloatNum {
+    (contact.depth - POSITION_CORRECTION_SLOP).max(0.0)
+}
+
+fn contact_counterpart_can_wake_with_queued(
+    world: &World,
+    other: BodyHandle,
+    queued_translations: &BTreeMap<BodyHandle, QueuedPositionTranslation>,
+) -> bool {
+    if queued_translations.contains_key(&other) {
+        return true;
+    }
+    contact_counterpart_can_wake(world, other)
+}
+
+fn queue_position_translation(
+    world: &World,
+    queued_translations: &mut BTreeMap<BodyHandle, QueuedPositionTranslation>,
+    body: BodyHandle,
+    translation: Vector,
+    wake_sleeping_body: bool,
+) -> Option<FloatNum> {
+    if translation.length() <= FloatNum::EPSILON {
+        return None;
+    }
+    let Ok(record) = world.body_record(body) else {
+        return None;
+    };
+    if !record.body_type.is_dynamic() {
+        return None;
+    }
+    let already_queued = queued_translations.contains_key(&body);
+    if record.sleeping && !wake_sleeping_body && !already_queued {
+        return None;
+    }
+    let distance = translation.length();
+    let queued = queued_translations.entry(body).or_default();
+    queued.translation += translation;
+    queued.distance_sum += distance;
+    queued.reset_idle |= record.sleeping || distance > POSITION_CORRECTION_SLEEP_RESET_TRANSLATION;
+    Some(distance)
+}
+
+fn apply_queued_position_translations(
+    world: &mut World,
+    queued_translations: BTreeMap<BodyHandle, QueuedPositionTranslation>,
+    wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
+) {
+    for (body, queued) in queued_translations {
+        if queued.translation.length() <= FloatNum::EPSILON {
+            continue;
+        }
+        let Ok(record) = world.body_record_mut(body) else {
+            continue;
+        };
+        if !record.body_type.is_dynamic() {
+            continue;
+        }
+        let was_sleeping = record.sleeping;
+        crate::solver::body_state::translate_pose(&mut record.pose, queued.translation, 0.0);
+        record.sleeping = false;
+        if queued.reset_idle {
+            record.sleep_idle_time = 0.0;
+        }
+        if was_sleeping {
+            sleep::record_wake_reason(wake_reasons, body, SleepTransitionReason::ContactImpulse);
         }
     }
 }
 
-fn apply_position_translation(
-    world: &mut World,
-    body: BodyHandle,
-    translation: Vector,
-    wake_sleeping_body: bool,
-    wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
-) {
-    if translation.length() <= FloatNum::EPSILON {
-        return;
+fn manifold_normal_pair_partners(
+    rows: &[ContactSolverRow],
+    dense_contact_graph: bool,
+) -> Vec<Option<usize>> {
+    let mut partners = vec![None; rows.len()];
+    if dense_contact_graph {
+        return partners;
     }
-    let Ok(record) = world.body_record_mut(body) else {
-        return;
+
+    let mut by_pair = BTreeMap::<ContactPairKey, Vec<usize>>::new();
+    for (index, row) in rows.iter().enumerate() {
+        if !matches!(
+            row.reduction_reason,
+            ContactReductionReason::Clipped | ContactReductionReason::DuplicateReduced
+        ) {
+            continue;
+        }
+        by_pair.entry(row.pair_key).or_default().push(index);
+    }
+
+    for indices in by_pair.values() {
+        if indices.len() != 2 {
+            continue;
+        }
+        let first = indices[0];
+        let second = indices[1];
+        let row_a = &rows[first];
+        let row_b = &rows[second];
+        let same_solver_pair = row_a.body_a_slot == row_b.body_a_slot
+            && row_a.body_b_slot == row_b.body_b_slot
+            && row_a.normal.dot(row_b.normal) > 0.999;
+        let sliding_velocity_pair = row_a.position_bias <= FloatNum::EPSILON
+            && row_b.position_bias <= FloatNum::EPSILON
+            && row_a
+                .initial_tangent_speed
+                .abs()
+                .max(row_b.initial_tangent_speed.abs())
+                >= MANIFOLD_BLOCK_SOLVE_TANGENT_SPEED_THRESHOLD;
+        if same_solver_pair && sliding_velocity_pair {
+            partners[first] = Some(second);
+            partners[second] = Some(first);
+        }
+    }
+
+    partners
+}
+
+fn solve_normal_impulse_pair(
+    bodies: &mut [SolverBody],
+    rows: &mut [ContactSolverRow],
+    first_index: usize,
+    second_index: usize,
+) -> bool {
+    debug_assert!(first_index < second_index);
+    let (head, tail) = rows.split_at_mut(second_index);
+    let first = &mut head[first_index];
+    let second = &mut tail[0];
+    solve_normal_impulse_pair_rows(bodies, first, second)
+}
+
+fn solve_normal_impulse_pair_rows(
+    bodies: &mut [SolverBody],
+    first: &mut ContactSolverRow,
+    second: &mut ContactSolverRow,
+) -> bool {
+    if first.normal_mass <= 0.0 || second.normal_mass <= 0.0 {
+        return false;
+    }
+    if first.body_a_slot != second.body_a_slot || first.body_b_slot != second.body_b_slot {
+        return false;
+    }
+    let Some((body_a, body_b)) = solver_pair(bodies, first) else {
+        return false;
     };
-    if !record.body_type.is_dynamic() {
-        return;
+
+    let k11 = normal_effective_denominator(body_a, body_b, first, first);
+    let k22 = normal_effective_denominator(body_a, body_b, second, second);
+    let k12 = normal_effective_denominator(body_a, body_b, first, second);
+    let determinant = k11 * k22 - k12 * k12;
+    if !determinant.is_finite() || determinant <= FloatNum::EPSILON {
+        return false;
     }
-    let was_sleeping = record.sleeping;
-    if was_sleeping && !wake_sleeping_body {
-        return;
+
+    let vn1 =
+        relative_contact_velocity(body_a, body_b, first.anchor_a, first.anchor_b).dot(first.normal);
+    let vn2 = relative_contact_velocity(body_a, body_b, second.anchor_a, second.anchor_b)
+        .dot(second.normal);
+    let bias1 = first.restitution_bias + first.position_bias;
+    let bias2 = second.restitution_bias + second.position_bias;
+    let old1 = first.normal_impulse;
+    let old2 = second.normal_impulse;
+    let rhs1 = bias1 - vn1 + k11 * old1 + k12 * old2;
+    let rhs2 = bias2 - vn2 + k12 * old1 + k22 * old2;
+
+    let inv_det = 1.0 / determinant;
+    let x1 = inv_det * (k22 * rhs1 - k12 * rhs2);
+    let x2 = inv_det * (k11 * rhs2 - k12 * rhs1);
+    if x1 >= 0.0 && x2 >= 0.0 {
+        apply_normal_pair_solution(bodies, first, second, x1, x2);
+        return true;
     }
-    crate::solver::body_state::translate_pose(&mut record.pose, translation, 0.0);
-    record.sleeping = false;
-    record.sleep_idle_time = 0.0;
-    if was_sleeping {
-        sleep::record_wake_reason(wake_reasons, body, SleepTransitionReason::ContactImpulse);
+
+    let x1 = 0.0;
+    let x2 = rhs2 / k22;
+    if x2 >= 0.0 {
+        let vn1_after_bias = vn1 - bias1 + k11 * (x1 - old1) + k12 * (x2 - old2);
+        if vn1_after_bias >= -1.0e-5 {
+            apply_normal_pair_solution(bodies, first, second, x1, x2);
+            first.normal_impulse_clamped = true;
+            return true;
+        }
     }
+
+    let x1 = rhs1 / k11;
+    let x2 = 0.0;
+    if x1 >= 0.0 {
+        let vn2_after_bias = vn2 - bias2 + k12 * (x1 - old1) + k22 * (x2 - old2);
+        if vn2_after_bias >= -1.0e-5 {
+            apply_normal_pair_solution(bodies, first, second, x1, x2);
+            second.normal_impulse_clamped = true;
+            return true;
+        }
+    }
+
+    let x1 = 0.0;
+    let x2 = 0.0;
+    let vn1_after_bias = vn1 - bias1 + k11 * (x1 - old1) + k12 * (x2 - old2);
+    let vn2_after_bias = vn2 - bias2 + k12 * (x1 - old1) + k22 * (x2 - old2);
+    if vn1_after_bias >= -1.0e-5 && vn2_after_bias >= -1.0e-5 {
+        apply_normal_pair_solution(bodies, first, second, x1, x2);
+        first.normal_impulse_clamped = true;
+        second.normal_impulse_clamped = true;
+        return true;
+    }
+
+    false
+}
+
+fn normal_effective_denominator(
+    body_a: SolverBody,
+    body_b: SolverBody,
+    first: &ContactSolverRow,
+    second: &ContactSolverRow,
+) -> FloatNum {
+    body_a.inverse_mass
+        + body_b.inverse_mass
+        + body_a.inverse_inertia
+            * first.anchor_a.cross(first.normal)
+            * second.anchor_a.cross(second.normal)
+        + body_b.inverse_inertia
+            * first.anchor_b.cross(first.normal)
+            * second.anchor_b.cross(second.normal)
+}
+
+fn apply_normal_pair_solution(
+    bodies: &mut [SolverBody],
+    first: &mut ContactSolverRow,
+    second: &mut ContactSolverRow,
+    impulse1: FloatNum,
+    impulse2: FloatNum,
+) {
+    let delta1 = impulse1 - first.normal_impulse;
+    let delta2 = impulse2 - second.normal_impulse;
+    first.normal_impulse = impulse1.max(0.0);
+    second.normal_impulse = impulse2.max(0.0);
+    apply_solver_impulse(bodies, first, first.normal * delta1);
+    apply_solver_impulse(bodies, second, second.normal * delta2);
 }
 
 fn solve_normal_impulse(bodies: &mut [SolverBody], row: &mut ContactSolverRow) {
@@ -417,7 +838,7 @@ fn solve_tangent_impulse(bodies: &mut [SolverBody], row: &mut ContactSolverRow) 
     let candidate = previous - tangent_speed * row.tangent_mass;
     // Coulomb friction limits the tangent row by the normal support impulse
     // solved so far: |jt| <= mu * jn.
-    let max_friction = row.friction * row.normal_impulse;
+    let max_friction = row.friction * row.normal_impulse.max(row.support_friction_impulse);
     row.tangent_impulse = candidate.clamp(-max_friction, max_friction);
     row.tangent_impulse_clamped |= (row.tangent_impulse - candidate).abs() > FloatNum::EPSILON;
     let delta = row.tangent_impulse - previous;
@@ -426,6 +847,15 @@ fn solve_tangent_impulse(bodies: &mut [SolverBody], row: &mut ContactSolverRow) 
 
 fn solver_pair(bodies: &[SolverBody], row: &ContactSolverRow) -> Option<(SolverBody, SolverBody)> {
     Some((*bodies.get(row.body_a_slot)?, *bodies.get(row.body_b_slot)?))
+}
+
+fn contact_row_relative_speeds(
+    bodies: &[SolverBody],
+    row: &ContactSolverRow,
+) -> Option<(FloatNum, FloatNum)> {
+    let (body_a, body_b) = solver_pair(bodies, row)?;
+    let relative = relative_contact_velocity(body_a, body_b, row.anchor_a, row.anchor_b);
+    Some((relative.dot(row.normal), relative.dot(row.tangent)))
 }
 
 fn apply_solver_impulse(bodies: &mut [SolverBody], row: &ContactSolverRow, impulse: Vector) {

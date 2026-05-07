@@ -1,0 +1,54 @@
+version = 1
+name = "Picea Local"
+
+[setup]
+script = """
+set -euo pipefail
+rtk proxy just --list >/dev/null
+"""
+
+[cleanup]
+script = """
+set -euo pipefail
+rtk proxy just stop || true
+"""
+
+[[actions]]
+name = "Start"
+icon = "run"
+command = "rtk proxy just start"
+
+[[actions]]
+name = "Stop"
+icon = "tool"
+command = "rtk proxy just stop"
+
+[[actions]]
+name = "Status"
+icon = "tool"
+command = "rtk proxy just status"
+
+[[actions]]
+name = "Logs"
+icon = "debug"
+command = "rtk proxy just logs"
+
+[[actions]]
+name = "Foreground"
+icon = "run"
+command = "rtk proxy just picea-lab-web"
+
+[[actions]]
+name = "API"
+icon = "run"
+command = "rtk proxy just lab-api"
+
+[[actions]]
+name = "UI"
+icon = "run"
+command = "rtk proxy just picea-lab-web-ui"
+
+[[actions]]
+name = "Web Contract"
+icon = "test"
+command = "rtk proxy just picea-lab-web-check"

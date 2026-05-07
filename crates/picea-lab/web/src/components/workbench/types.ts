@@ -68,6 +68,15 @@ export type RunMode = "artifact_replay" | "live_session"
 
 export type ControlAction = "play" | "pause" | "step" | "reset"
 
+export type LiveCadenceStatus = {
+  targetFps: number
+  actualFps: number | null
+  lastStepMs: number | null
+  nextDelayMs: number | null
+  degraded: boolean
+  pending: boolean
+}
+
 export type CanvasDebugView = {
   mode: "free" | "locked_core"
   zoom: number

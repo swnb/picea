@@ -14,6 +14,8 @@ alias web-start := picea-lab-web-start
 alias web-stop := picea-lab-web-stop
 alias start := picea-lab-web-start
 alias stop := picea-lab-web-stop
+alias status := picea-lab-web-status
+alias logs := picea-lab-web-logs
 
 default:
     @just --list
@@ -90,3 +92,29 @@ picea-lab-web-start:
 picea-lab-web-stop:
     PICEA_LAB_SERVICE_DIR="{{ picea_lab_service_dir }}" \
         node crates/picea-lab/web/scripts/dev-services.mjs stop
+
+# Report the background workbench lifecycle state and URLs.
+picea-lab-web-status:
+    PICEA_LAB_SERVICE_DIR="{{ picea_lab_service_dir }}" \
+        node crates/picea-lab/web/scripts/dev-services.mjs status
+
+# Show recent background service logs.
+picea-lab-web-logs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    service_dir="{{ picea_lab_service_dir }}"
+    for name in manager api ui; do
+        path="${service_dir}/${name}.log"
+        echo "==> ${path}"
+        if [[ -f "${path}" ]]; then
+            tail -n 80 "${path}"
+        else
+            echo "missing"
+        fi
+        echo
+    done
+
+# Validate the picea-lab-web dev-server orchestration contract.
+picea-lab-web-check:
+    rtk proxy npm --prefix crates/picea-lab/web run test:dev-server

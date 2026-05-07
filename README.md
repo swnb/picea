@@ -80,6 +80,8 @@ For a background service lifecycle, use:
 ```bash
 just web-start
 just web-stop
+just status
+just logs
 ```
 
 The recipe uses `127.0.0.1:8080` for the Rust API and `127.0.0.1:5173`
@@ -87,6 +89,10 @@ for Vite by default. Override with `PICEA_LAB_BIND` or
 `PICEA_LAB_WEB_PORT` when those ports are already occupied. Background service
 state and logs live under `target/picea-lab-web/` by default; override that
 with `PICEA_LAB_SERVICE_DIR` if needed.
+
+Codex App users can select the local environment at
+`.codex/environments/environment.toml`; it exposes the same Start, Stop,
+Status, Logs, foreground workbench, API-only, UI-only, and web contract actions.
 
 When working on `picea-lab-web`, start here first:
 

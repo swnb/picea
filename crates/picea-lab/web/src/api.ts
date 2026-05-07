@@ -1,31 +1,36 @@
 import type {
   DebugSnapshot,
   FrameRecord,
+  LiveFrameHydration,
   PerfArtifact,
   ScenarioDescriptor,
+  SessionControlResponse,
   SessionMode,
   SessionRecord,
   Vec2,
   VelocityPerturbationCommit,
   VelocityPerturbationPreview,
 } from "./types";
+import { profileJsonRequest } from "./profile";
 
 const apiBase = import.meta.env.VITE_PICEA_LAB_API_BASE ?? "";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      ...init?.headers,
+  return profileJsonRequest<T>(
+    `${apiBase}${path}`,
+    {
+      path,
+      method: init?.method ?? "GET",
     },
-  });
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-
-  return response.json() as Promise<T>;
+    () =>
+      fetch(`${apiBase}${path}`, {
+        ...init,
+        headers: {
+          "content-type": "application/json",
+          ...init?.headers,
+        },
+      }),
+  );
 }
 
 export async function fetchScenarios(): Promise<ScenarioDescriptor[]> {
@@ -57,12 +62,15 @@ export async function createSession(
 export async function controlSession(
   sessionId: string,
   action: "play" | "run" | "reset" | "step" | "pause",
-): Promise<SessionRecord> {
-  const data = await requestJson<{ session: SessionRecord }>(`/api/sessions/${sessionId}/control`, {
+  detail?: "summary" | "full",
+): Promise<SessionControlResponse> {
+  return requestJson<SessionControlResponse>(`/api/sessions/${sessionId}/control`, {
     method: "POST",
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({
+      action,
+      detail,
+    }),
   });
-  return data.session;
 }
 
 export async function fetchFrames(runId: string): Promise<FrameRecord[]> {
@@ -84,6 +92,13 @@ export async function fetchFinalSnapshot(runId: string): Promise<DebugSnapshot> 
 
 export async function fetchPerf(runId: string): Promise<PerfArtifact> {
   return requestJson(`/api/runs/${runId}/artifacts/perf.json`);
+}
+
+export async function fetchLiveFrame(
+  sessionId: string,
+  frameIndex: number,
+): Promise<LiveFrameHydration> {
+  return requestJson(`/api/sessions/${sessionId}/frames/${frameIndex}`);
 }
 
 export function openSessionEvents(sessionId: string): EventSource {

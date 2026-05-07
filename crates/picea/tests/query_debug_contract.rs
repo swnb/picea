@@ -479,10 +479,26 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
             depth: 0.125,
             reduction_reason: ContactReductionReason::Clipped,
             warm_start_reason: WarmStartCacheReason::Hit,
+            warm_start_anchor_drift: 0.03,
+            warm_start_normal_anchor_drift: 0.01,
+            warm_start_tangent_anchor_drift: 0.02,
             warm_start_normal_impulse: 1.25,
             warm_start_tangent_impulse: -0.5,
+            source_row_continuity_candidate: true,
             solver_normal_impulse: 1.5,
             solver_tangent_impulse: -0.25,
+            solver_initial_normal_speed: -0.6,
+            solver_initial_tangent_speed: 0.2,
+            solver_final_normal_speed: -0.01,
+            solver_final_tangent_speed: 0.0,
+            solver_position_bias: 0.3,
+            solver_restitution_bias: 0.1,
+            solver_support_friction_impulse: 0.05,
+            solver_position_correction_depth: 0.04,
+            solver_position_correction_body_a_translation: 0.01,
+            solver_position_correction_body_b_translation: 0.03,
+            solver_normal_impulse_delta: 0.25,
+            solver_tangent_impulse_delta: 0.25,
             normal_impulse_clamped: false,
             tangent_impulse_clamped: true,
             restitution_velocity_threshold: 1.75,
@@ -670,10 +686,26 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
         &mut contact_value,
         &[
             "warm_start_reason",
+            "warm_start_anchor_drift",
+            "warm_start_normal_anchor_drift",
+            "warm_start_tangent_anchor_drift",
             "warm_start_normal_impulse",
             "warm_start_tangent_impulse",
+            "source_row_continuity_candidate",
             "solver_normal_impulse",
             "solver_tangent_impulse",
+            "solver_initial_normal_speed",
+            "solver_initial_tangent_speed",
+            "solver_final_normal_speed",
+            "solver_final_tangent_speed",
+            "solver_position_bias",
+            "solver_restitution_bias",
+            "solver_support_friction_impulse",
+            "solver_position_correction_depth",
+            "solver_position_correction_body_a_translation",
+            "solver_position_correction_body_b_translation",
+            "solver_normal_impulse_delta",
+            "solver_tangent_impulse_delta",
             "normal_impulse_clamped",
             "tangent_impulse_clamped",
             "restitution_velocity_threshold",
@@ -688,10 +720,26 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
         contact.warm_start_reason,
         WarmStartCacheReason::MissNoPrevious
     );
+    assert_eq!(contact.warm_start_anchor_drift, 0.0);
+    assert_eq!(contact.warm_start_normal_anchor_drift, 0.0);
+    assert_eq!(contact.warm_start_tangent_anchor_drift, 0.0);
     assert_eq!(contact.warm_start_normal_impulse, 0.0);
     assert_eq!(contact.warm_start_tangent_impulse, 0.0);
+    assert!(!contact.source_row_continuity_candidate);
     assert_eq!(contact.solver_normal_impulse, 0.0);
     assert_eq!(contact.solver_tangent_impulse, 0.0);
+    assert_eq!(contact.solver_initial_normal_speed, 0.0);
+    assert_eq!(contact.solver_initial_tangent_speed, 0.0);
+    assert_eq!(contact.solver_final_normal_speed, 0.0);
+    assert_eq!(contact.solver_final_tangent_speed, 0.0);
+    assert_eq!(contact.solver_position_bias, 0.0);
+    assert_eq!(contact.solver_restitution_bias, 0.0);
+    assert_eq!(contact.solver_support_friction_impulse, 0.0);
+    assert_eq!(contact.solver_position_correction_depth, 0.0);
+    assert_eq!(contact.solver_position_correction_body_a_translation, 0.0);
+    assert_eq!(contact.solver_position_correction_body_b_translation, 0.0);
+    assert_eq!(contact.solver_normal_impulse_delta, 0.0);
+    assert_eq!(contact.solver_tangent_impulse_delta, 0.0);
     assert!(!contact.normal_impulse_clamped);
     assert!(!contact.tangent_impulse_clamped);
     assert_eq!(contact.restitution_velocity_threshold, 0.0);
@@ -789,10 +837,26 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
         depth: 0.0,
         reduction_reason: ContactReductionReason::SinglePoint,
         warm_start_reason: WarmStartCacheReason::Hit,
+        warm_start_anchor_drift: 0.03,
+        warm_start_normal_anchor_drift: 0.01,
+        warm_start_tangent_anchor_drift: 0.02,
         normal_impulse: 1.0,
         tangent_impulse: -1.0,
+        source_row_continuity_candidate: true,
         solver_normal_impulse: 1.5,
         solver_tangent_impulse: -0.25,
+        solver_initial_normal_speed: -0.6,
+        solver_initial_tangent_speed: 0.2,
+        solver_final_normal_speed: 0.0,
+        solver_final_tangent_speed: 0.05,
+        solver_position_bias: 0.3,
+        solver_restitution_bias: 0.1,
+        solver_support_friction_impulse: 0.05,
+        solver_position_correction_depth: 0.04,
+        solver_position_correction_body_a_translation: 0.01,
+        solver_position_correction_body_b_translation: 0.03,
+        solver_normal_impulse_delta: 0.5,
+        solver_tangent_impulse_delta: 0.75,
         normal_impulse_clamped: false,
         tangent_impulse_clamped: true,
         restitution_velocity_threshold: 1.75,
@@ -813,10 +877,26 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
         &mut debug_contact_value,
         &[
             "warm_start_reason",
+            "warm_start_anchor_drift",
+            "warm_start_normal_anchor_drift",
+            "warm_start_tangent_anchor_drift",
             "normal_impulse",
             "tangent_impulse",
+            "source_row_continuity_candidate",
             "solver_normal_impulse",
             "solver_tangent_impulse",
+            "solver_initial_normal_speed",
+            "solver_initial_tangent_speed",
+            "solver_final_normal_speed",
+            "solver_final_tangent_speed",
+            "solver_position_bias",
+            "solver_restitution_bias",
+            "solver_support_friction_impulse",
+            "solver_position_correction_depth",
+            "solver_position_correction_body_a_translation",
+            "solver_position_correction_body_b_translation",
+            "solver_normal_impulse_delta",
+            "solver_tangent_impulse_delta",
             "normal_impulse_clamped",
             "tangent_impulse_clamped",
             "restitution_velocity_threshold",
@@ -831,10 +911,32 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
         decoded_debug_contact.warm_start_reason,
         WarmStartCacheReason::MissNoPrevious
     );
+    assert_eq!(decoded_debug_contact.warm_start_anchor_drift, 0.0);
+    assert_eq!(decoded_debug_contact.warm_start_normal_anchor_drift, 0.0);
+    assert_eq!(decoded_debug_contact.warm_start_tangent_anchor_drift, 0.0);
     assert_eq!(decoded_debug_contact.normal_impulse, 0.0);
     assert_eq!(decoded_debug_contact.tangent_impulse, 0.0);
+    assert!(!decoded_debug_contact.source_row_continuity_candidate);
     assert_eq!(decoded_debug_contact.solver_normal_impulse, 0.0);
     assert_eq!(decoded_debug_contact.solver_tangent_impulse, 0.0);
+    assert_eq!(decoded_debug_contact.solver_initial_normal_speed, 0.0);
+    assert_eq!(decoded_debug_contact.solver_initial_tangent_speed, 0.0);
+    assert_eq!(decoded_debug_contact.solver_final_normal_speed, 0.0);
+    assert_eq!(decoded_debug_contact.solver_final_tangent_speed, 0.0);
+    assert_eq!(decoded_debug_contact.solver_position_bias, 0.0);
+    assert_eq!(decoded_debug_contact.solver_restitution_bias, 0.0);
+    assert_eq!(decoded_debug_contact.solver_support_friction_impulse, 0.0);
+    assert_eq!(decoded_debug_contact.solver_position_correction_depth, 0.0);
+    assert_eq!(
+        decoded_debug_contact.solver_position_correction_body_a_translation,
+        0.0
+    );
+    assert_eq!(
+        decoded_debug_contact.solver_position_correction_body_b_translation,
+        0.0
+    );
+    assert_eq!(decoded_debug_contact.solver_normal_impulse_delta, 0.0);
+    assert_eq!(decoded_debug_contact.solver_tangent_impulse_delta, 0.0);
     assert!(!decoded_debug_contact.normal_impulse_clamped);
     assert!(!decoded_debug_contact.tangent_impulse_clamped);
     assert_eq!(decoded_debug_contact.restitution_velocity_threshold, 0.0);

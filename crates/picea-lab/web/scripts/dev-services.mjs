@@ -39,7 +39,12 @@ async function main() {
     return;
   }
 
-  throw new Error(`expected start or stop, got ${command ?? "<missing>"}`);
+  if (command === "status") {
+    await printStatus();
+    return;
+  }
+
+  throw new Error(`expected start, stop, or status, got ${command ?? "<missing>"}`);
 }
 
 async function startServices() {
@@ -184,6 +189,49 @@ async function stopServices() {
   }
 
   await requestStop(state.socketPath);
+}
+
+async function printStatus() {
+  const state = await readState();
+  if (!state) {
+    console.log("picea-lab-web services: not running");
+    console.log(`Service dir: ${path.relative(repoRoot, serviceDir)}`);
+    return;
+  }
+
+  const managerRunning = isManagedProcessRunning(state.managerPid);
+  const apiRunning =
+    managerRunning && (isManagedProcessRunning(state.apiPid) || isPidRunning(state.apiListenerPid));
+  const uiRunning =
+    managerRunning && (isManagedProcessRunning(state.uiPid) || isPidRunning(state.uiListenerPid));
+  const status = state.error
+    ? "error"
+    : state.ready && managerRunning && apiRunning && uiRunning
+      ? "running"
+      : "stale";
+
+  console.log(`picea-lab-web services: ${status}`);
+  console.log(`Service dir: ${path.relative(repoRoot, serviceDir)}`);
+
+  if (state.readyUrl) {
+    console.log(`API: ${state.readyUrl} (${apiRunning ? "running" : "not running"})`);
+  }
+
+  if (state.webUrl) {
+    console.log(`Web: ${state.webUrl} (${uiRunning ? "running" : "not running"})`);
+  }
+
+  if (state.apiLogPath) {
+    console.log(`API log: ${path.relative(repoRoot, state.apiLogPath)}`);
+  }
+
+  if (state.uiLogPath) {
+    console.log(`Web log: ${path.relative(repoRoot, state.uiLogPath)}`);
+  }
+
+  if (state.error) {
+    console.log(`Error: ${state.error}`);
+  }
 }
 
 async function stopState(state, { removeState }) {

@@ -23,6 +23,7 @@ pub enum ScenarioId {
     Stack4,
     StackStabilityTower,
     MatrixStack,
+    MatrixStackAligned,
     JointAnchor,
     LatticeGrid,
     BroadphaseSparse,
@@ -36,11 +37,12 @@ pub enum ScenarioId {
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::FallingBoxContact,
         Self::Stack4,
         Self::StackStabilityTower,
         Self::MatrixStack,
+        Self::MatrixStackAligned,
         Self::JointAnchor,
         Self::LatticeGrid,
         Self::BroadphaseSparse,
@@ -59,6 +61,7 @@ impl ScenarioId {
             Self::Stack4 => "stack_4",
             Self::StackStabilityTower => "stack_stability_tower",
             Self::MatrixStack => "matrix_stack",
+            Self::MatrixStackAligned => "matrix_stack_aligned",
             Self::JointAnchor => "joint_anchor",
             Self::LatticeGrid => "lattice_grid",
             Self::BroadphaseSparse => "broadphase_sparse",
@@ -88,6 +91,7 @@ impl FromStr for ScenarioId {
             "stack_4" => Ok(Self::Stack4),
             "stack_stability_tower" => Ok(Self::StackStabilityTower),
             "matrix_stack" => Ok(Self::MatrixStack),
+            "matrix_stack_aligned" => Ok(Self::MatrixStackAligned),
             "joint_anchor" => Ok(Self::JointAnchor),
             "lattice_grid" => Ok(Self::LatticeGrid),
             "broadphase_sparse" => Ok(Self::BroadphaseSparse),
@@ -121,6 +125,7 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::Stack4 => "Four box stack",
                 ScenarioId::StackStabilityTower => "Stack stability tower",
                 ScenarioId::MatrixStack => "Matrix stack 8x6",
+                ScenarioId::MatrixStackAligned => "Aligned matrix stack 4x3",
                 ScenarioId::JointAnchor => "World anchor joint",
                 ScenarioId::LatticeGrid => "Rigid-body lattice grid proxy",
                 ScenarioId::BroadphaseSparse => "Sparse broadphase",
@@ -139,7 +144,10 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                     "A taller deterministic tower with narrow support, staged settling, and sleep-ready stack facts."
                 }
                 ScenarioId::MatrixStack => {
-                    "An 8x6 dynamic box matrix on a static floor for dense resting-contact stability diagnostics."
+                    "A staggered 8x6 dynamic box matrix on a static floor for edge-ejection stress diagnostics."
+                }
+                ScenarioId::MatrixStackAligned => {
+                    "An aligned 4x3 dynamic box matrix on a static floor for stable matrix-form behavior locks."
                 }
                 ScenarioId::JointAnchor => "A body constrained toward a fixed world-space anchor.",
                 ScenarioId::LatticeGrid => {
@@ -1011,7 +1019,20 @@ fn falling_box_contact_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
     }
 }
 
-fn matrix_stack_fixture(gravity: [f32; 2], columns: usize, rows: usize) -> SceneRecipeFixture {
+#[derive(Clone, Copy)]
+enum MatrixStackLayout {
+    /// A deliberately asymmetric matrix that exercises edge ejection and churn.
+    StaggeredStress,
+    /// A centered matrix with column-aligned support for stable-form behavior locks.
+    Aligned,
+}
+
+fn matrix_stack_fixture(
+    gravity: [f32; 2],
+    columns: usize,
+    rows: usize,
+    layout: MatrixStackLayout,
+) -> SceneRecipeFixture {
     const BOX_WIDTH: f32 = 0.42;
     const BOX_HEIGHT: f32 = 0.42;
     const GAP_X: f32 = 0.035;
@@ -1045,25 +1066,31 @@ fn matrix_stack_fixture(gravity: [f32; 2], columns: usize, rows: usize) -> Scene
 
     for row in 0..rows {
         for column in 0..columns {
-            // Small deterministic offsets keep the matrix from being a perfectly
-            // symmetric toy case. That makes contact churn and solver handoff
-            // easier to inspect without adding any random input.
-            let row_offset = if row % 2 == 0 { 0.0 } else { spacing_x * 0.5 };
-            let centered_row_offset = if columns > 1 {
-                row_offset - spacing_x * 0.25
-            } else {
-                0.0
-            };
-            let column_bias = match (row + column) % 3 {
-                0 => -0.008,
-                1 => 0.0,
-                _ => 0.008,
-            };
-            let angle = match (row + column) % 4 {
-                0 => -0.012,
-                1 => 0.006,
-                2 => 0.012,
-                _ => -0.006,
+            let (centered_row_offset, column_bias, angle) = match layout {
+                MatrixStackLayout::StaggeredStress => {
+                    // Small deterministic offsets keep the stress scene from
+                    // being a perfectly symmetric toy case. This makes contact
+                    // churn and solver handoff easier to inspect.
+                    let row_offset = if row % 2 == 0 { 0.0 } else { spacing_x * 0.5 };
+                    let centered_row_offset = if columns > 1 {
+                        row_offset - spacing_x * 0.25
+                    } else {
+                        0.0
+                    };
+                    let column_bias = match (row + column) % 3 {
+                        0 => -0.008,
+                        1 => 0.0,
+                        _ => 0.008,
+                    };
+                    let angle = match (row + column) % 4 {
+                        0 => -0.012,
+                        1 => 0.006,
+                        2 => 0.012,
+                        _ => -0.006,
+                    };
+                    (centered_row_offset, column_bias, angle)
+                }
+                MatrixStackLayout::Aligned => (0.0, 0.0, 0.0),
             };
 
             bodies.push(SceneBodyFixture {
@@ -1566,8 +1593,20 @@ pub(crate) fn build_scenario(
             ]))?;
         }
         ScenarioId::MatrixStack => {
-            world =
-                instantiate_scene_fixture(&matrix_stack_fixture([gravity.x(), gravity.y()], 8, 6))?;
+            world = instantiate_scene_fixture(&matrix_stack_fixture(
+                [gravity.x(), gravity.y()],
+                8,
+                6,
+                MatrixStackLayout::StaggeredStress,
+            ))?;
+        }
+        ScenarioId::MatrixStackAligned => {
+            world = instantiate_scene_fixture(&matrix_stack_fixture(
+                [gravity.x(), gravity.y()],
+                4,
+                3,
+                MatrixStackLayout::Aligned,
+            ))?;
         }
         ScenarioId::JointAnchor => {
             world = World::new(WorldDesc {
@@ -2077,6 +2116,43 @@ mod tests {
             })
             .count();
         assert_eq!(dynamic_bodies, 48);
+
+        let static_bodies = builtin
+            .world
+            .bodies()
+            .filter(|handle| {
+                builtin
+                    .world
+                    .body(*handle)
+                    .expect("body should resolve")
+                    .body_type()
+                    == BodyType::Static
+            })
+            .count();
+        assert_eq!(static_bodies, 1);
+    }
+
+    #[test]
+    fn aligned_matrix_stack_builtin_exports_small_nxm_behavior_lock_grid() {
+        let builtin = build_scenario(
+            ScenarioId::MatrixStackAligned,
+            &ScenarioOverrides::default(),
+        )
+        .expect("aligned matrix stack scenario should build");
+
+        let dynamic_bodies = builtin
+            .world
+            .bodies()
+            .filter(|handle| {
+                builtin
+                    .world
+                    .body(*handle)
+                    .expect("body should resolve")
+                    .body_type()
+                    == BodyType::Dynamic
+            })
+            .count();
+        assert_eq!(dynamic_bodies, 12);
 
         let static_bodies = builtin
             .world

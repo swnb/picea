@@ -39,6 +39,40 @@ This is the conservative product choice. It keeps web debugging honest: the page
 can drive backend physics, but it cannot yet edit a world in ways that imply
 unsettled handle, contact-cache, sleep, and query-cache guarantees.
 
+## Live Frame Detail Contract
+
+Live playback may request either a lightweight summary frame or a full
+`FrameRecord`. This is a transport/detail choice only; the Rust live runtime
+remains authoritative and physics still advances only through backend `step`
+requests.
+
+- `summary` is the default for running live playback. It contains enough
+  authoritative data to draw the latest frame and keep session freshness gates:
+  frame index, simulated time, state hash, session id, session epoch, world
+  revision, status, buffered frame counts, body/collider transforms, body type
+  and compact stats.
+- `full` returns the existing `FrameRecord` facts for inspection, diagnostics,
+  evidence, copy-debug-context, and paused velocity perturbation gates.
+- Summary frames must not be interpreted as full diagnostic facts. Missing
+  `diagnostics`, `events`, contact lists, broadphase tree, island details, or
+  provenance details means "not hydrated", not "zero issues".
+- A full-frame response is usable only when its session id, session epoch, frame
+  index, and world revision still match the active live session. Stale responses
+  are discarded by the web client.
+- Hydrating a summary frame into a full frame invalidates any marker,
+  diagnostics, or missing-evidence cache derived from the summary-only view.
+
+The expected routes are:
+
+- `POST /api/sessions/:id/control` with `action = "step"` and
+  `detail = "summary" | "full"`.
+- `GET /api/sessions/:id/frames/:index` for on-demand full frame lookup from the
+  live buffer.
+
+`artifact replay` remains full-frame based. This avoids changing artifact schema
+or weakening existing diagnostics contracts while still making live playback
+cheap enough to degrade gracefully on dense scenes.
+
 ## M37-A Velocity Perturbation Preview
 
 M37-A adds the first paused-world preview, but only as a server-side read model:

@@ -402,6 +402,18 @@ pub struct DebugRenderFrame {
     pub ccd_miss_count: usize,
     #[serde(default)]
     pub ccd_clamp_count: usize,
+    #[serde(default)]
+    pub position_correction_input_contact_count: usize,
+    #[serde(default)]
+    pub position_correction_input_max_depth: f32,
+    #[serde(default)]
+    pub position_correction_input_total_depth: f32,
+    #[serde(default)]
+    pub position_correction_body_count: usize,
+    #[serde(default)]
+    pub position_correction_max_translation: f32,
+    #[serde(default)]
+    pub position_correction_total_translation: f32,
     pub world_bounds: Option<DebugAabb>,
     pub bodies: Vec<DebugBody>,
     pub colliders: Vec<DebugCollider>,
@@ -638,6 +650,30 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
                     ccd_hit_count: frame.snapshot.stats.ccd_hit_count,
                     ccd_miss_count: frame.snapshot.stats.ccd_miss_count,
                     ccd_clamp_count: frame.snapshot.stats.ccd_clamp_count,
+                    position_correction_input_contact_count: frame
+                        .snapshot
+                        .stats
+                        .position_correction_input_contact_count,
+                    position_correction_input_max_depth: frame
+                        .snapshot
+                        .stats
+                        .position_correction_input_max_depth,
+                    position_correction_input_total_depth: frame
+                        .snapshot
+                        .stats
+                        .position_correction_input_total_depth,
+                    position_correction_body_count: frame
+                        .snapshot
+                        .stats
+                        .position_correction_body_count,
+                    position_correction_max_translation: frame
+                        .snapshot
+                        .stats
+                        .position_correction_max_translation,
+                    position_correction_total_translation: frame
+                        .snapshot
+                        .stats
+                        .position_correction_total_translation,
                     world_bounds: frame.snapshot.world_bounds(),
                     bodies: frame.snapshot.bodies.clone(),
                     colliders: frame.snapshot.colliders.clone(),
@@ -1227,8 +1263,12 @@ fn make_run_id() -> String {
 
 fn state_hash(value: &impl Serialize) -> LabResult<String> {
     let bytes = serde_json::to_vec(value)?;
+    state_hash_bytes(&bytes)
+}
+
+fn state_hash_bytes(bytes: &[u8]) -> LabResult<String> {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    for byte in bytes {
+    for byte in bytes.iter().copied() {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }

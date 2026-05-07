@@ -18,6 +18,7 @@ import {
   type Locale,
   type StatusKind,
 } from "../../i18n"
+import { profileMeasure, profileStart } from "../../profile"
 import type {
   DiagnosticMarker,
   DiagnosticSeverity,
@@ -46,6 +47,7 @@ import { deriveLatticeProxy } from "./types"
 import type {
   CanvasDebugView,
   LayerState,
+  LiveCadenceStatus,
   PerfEvidenceStatus,
   RunMode,
   SourceKind,
@@ -61,6 +63,10 @@ type BottomPanelId =
   | "diagnostics"
   | "evidence"
   | "run"
+
+function isLiveSummaryFrame(frame: FrameRecord | undefined): boolean {
+  return frame?.kind === "summary" || frame?.live_authority?.not_hydrated === true
+}
 
 type TimelineJumpMarker = {
   key: string
@@ -97,6 +103,7 @@ export function BottomTimeline({
   perfArtifact,
   perfStatus,
   controlBusy,
+  liveCadence,
   runMode,
   setRunMode,
   onPlay,
@@ -135,40 +142,91 @@ export function BottomTimeline({
   perfArtifact: PerfArtifact | null
   perfStatus: PerfEvidenceStatus
   controlBusy: boolean
+  liveCadence: LiveCadenceStatus
   onCopyDebugContext: () => void
 }) {
-  const frame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))]
-  const previousFrame = frameIndex > 0 ? frames[frameIndex - 1] : null
-  const stackSummary = buildStackStabilitySummary(frames, frameIndex)
-  const stackMarkers = buildStackMarkers(frames)
-  const diagnosticMarkers = buildDiagnosticTimelineMarkers(locale, frames)
-  const trajectoryOverlay = buildTrajectoryOverlay(
-    frames,
-    frameIndex,
-    selectedEntity,
-    trajectorySettings,
-  )
-  const trajectoryMarkers = buildTrajectoryMarkers(frames)
-  const latticeSummary = frame ? deriveLatticeProxy(frame, frames[0] ?? frame) : null
-  const railMarkers = pickRailMarkers([
-    ...diagnosticMarkers,
-    ...stackMarkers.map((marker) => ({
-      key: `stack-${marker.kind}-${marker.frameIndex}`,
-      frameIndex: marker.frameIndex,
-      label: stackMarkerLabel(locale, marker.kind),
-      score: marker.score,
-      source: "stack" as const,
-      evidenceSource: "web_derived" as const,
-    })),
-    ...trajectoryMarkers.map((marker) => ({
-      key: `trajectory-${marker.kind}-${marker.frameIndex}`,
-      frameIndex: marker.frameIndex,
-      label: trajectoryMarkerLabel(locale, marker.kind),
-      score: marker.score,
-      source: "trajectory" as const,
-      evidenceSource: "web_derived" as const,
-    })),
-  ])
+  const {
+    frame,
+    previousFrame,
+    stackSummary,
+    stackMarkers,
+    trajectoryOverlay,
+    trajectoryMarkers,
+    latticeSummary,
+    railMarkers,
+    hasUnhydratedFrames,
+  } = useMemo(() => {
+    const startedAt = profileStart()
+    const nextFrame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))]
+    const nextPreviousFrame = frameIndex > 0 ? frames[frameIndex - 1] : null
+    const hasUnhydratedFrames = frames.some(isLiveSummaryFrame)
+    if (hasUnhydratedFrames) {
+      profileMeasure("timeline.derive", startedAt, {
+        frames: frames.length,
+        frameIndex,
+        skipped: "live-summary-not-hydrated",
+      })
+      return {
+        frame: nextFrame,
+        previousFrame: nextPreviousFrame,
+        stackSummary: null,
+        stackMarkers: [],
+        trajectoryOverlay: null,
+        trajectoryMarkers: [],
+        latticeSummary: null,
+        railMarkers: [],
+        hasUnhydratedFrames,
+      }
+    }
+    const nextStackSummary = buildStackStabilitySummary(frames, frameIndex)
+    const stackMarkers = buildStackMarkers(frames)
+    const diagnosticMarkers = buildDiagnosticTimelineMarkers(locale, frames)
+    const nextTrajectoryOverlay = buildTrajectoryOverlay(
+      frames,
+      frameIndex,
+      selectedEntity,
+      trajectorySettings,
+    )
+    const trajectoryMarkers = buildTrajectoryMarkers(frames)
+    const nextLatticeSummary = nextFrame ? deriveLatticeProxy(nextFrame, frames[0] ?? nextFrame) : null
+    const railMarkers = pickRailMarkers([
+      ...diagnosticMarkers,
+      ...stackMarkers.map((marker) => ({
+        key: `stack-${marker.kind}-${marker.frameIndex}`,
+        frameIndex: marker.frameIndex,
+        label: stackMarkerLabel(locale, marker.kind),
+        score: marker.score,
+        source: "stack" as const,
+        evidenceSource: "web_derived" as const,
+      })),
+      ...trajectoryMarkers.map((marker) => ({
+        key: `trajectory-${marker.kind}-${marker.frameIndex}`,
+        frameIndex: marker.frameIndex,
+        label: trajectoryMarkerLabel(locale, marker.kind),
+        score: marker.score,
+        source: "trajectory" as const,
+        evidenceSource: "web_derived" as const,
+      })),
+    ])
+    profileMeasure("timeline.derive", startedAt, {
+      frames: frames.length,
+      frameIndex,
+      stackMarkers: stackMarkers.length,
+      trajectoryMarkers: trajectoryMarkers.length,
+      railMarkers: railMarkers.length,
+    })
+    return {
+      frame: nextFrame,
+      previousFrame: nextPreviousFrame,
+      stackSummary: nextStackSummary,
+      stackMarkers,
+      trajectoryOverlay: nextTrajectoryOverlay,
+      trajectoryMarkers,
+      latticeSummary: nextLatticeSummary,
+      railMarkers,
+      hasUnhydratedFrames,
+    }
+  }, [frameIndex, frames, locale, selectedEntity, trajectorySettings])
   const handlePlay = useStableEvent(onPlay)
   const handlePause = useStableEvent(onPause)
   const handleStep = useStableEvent(onStep)
@@ -185,6 +243,7 @@ export function BottomTimeline({
         status={status}
         activePanel={activePanel}
         controlBusy={controlBusy}
+        liveCadence={liveCadence}
         onPanelChange={handlePanelChange}
         onPlay={handlePlay}
         onPause={handlePause}
@@ -243,7 +302,7 @@ export function BottomTimeline({
           />
           <Metric
             label={t(locale, "metric.manifolds")}
-            value={frame?.snapshot.manifolds.length ?? 0}
+            value={isLiveSummaryFrame(frame) ? "-" : frame?.snapshot.manifolds.length ?? 0}
           />
         </div>
       </div>
@@ -256,13 +315,17 @@ export function BottomTimeline({
         aria-labelledby="bottom-panel-tab-stack"
         className="min-h-0 flex-1 overflow-auto p-3 outline-none"
       >
-        <StackStabilityPanel
-          locale={locale}
-          frameIndex={frameIndex}
-          summary={stackSummary}
-          markers={stackMarkers}
-          onFrameChange={onFrameChange}
-        />
+        {hasUnhydratedFrames ? (
+          <EmptyState label={`${t(locale, "stability.missing")} (live summary not hydrated)`} />
+        ) : (
+          <StackStabilityPanel
+            locale={locale}
+            frameIndex={frameIndex}
+            summary={stackSummary!}
+            markers={stackMarkers}
+            onFrameChange={onFrameChange}
+          />
+        )}
       </div>
       ) : null}
 
@@ -273,15 +336,19 @@ export function BottomTimeline({
         aria-labelledby="bottom-panel-tab-trajectory"
         className="min-h-0 flex-1 overflow-auto p-3 outline-none"
       >
-        <TrajectoryPanel
-          locale={locale}
-          frameIndex={frameIndex}
-          settings={trajectorySettings}
-          overlay={trajectoryOverlay}
-          markers={trajectoryMarkers}
-          onSettingsChange={onTrajectorySettingsChange}
-          onFrameChange={onFrameChange}
-        />
+        {hasUnhydratedFrames ? (
+          <EmptyState label={`${t(locale, "trajectory.empty.contacts")} (live summary not hydrated)`} />
+        ) : (
+          <TrajectoryPanel
+            locale={locale}
+            frameIndex={frameIndex}
+            settings={trajectorySettings}
+            overlay={trajectoryOverlay!}
+            markers={trajectoryMarkers}
+            onSettingsChange={onTrajectorySettingsChange}
+            onFrameChange={onFrameChange}
+          />
+        )}
       </div>
       ) : null}
 
@@ -292,11 +359,15 @@ export function BottomTimeline({
         aria-labelledby="bottom-panel-tab-lattice"
         className="min-h-0 flex-1 overflow-auto p-3 outline-none"
       >
-        <LatticeProxyPanel
-          locale={locale}
-          summary={latticeSummary}
-          frameIndex={frameIndex}
-        />
+        {hasUnhydratedFrames ? (
+          <EmptyState label={`${t(locale, "stability.missing")} (live summary not hydrated)`} />
+        ) : (
+          <LatticeProxyPanel
+            locale={locale}
+            summary={latticeSummary}
+            frameIndex={frameIndex}
+          />
+        )}
       </div>
       ) : null}
 
@@ -450,6 +521,7 @@ const TimelineHeader = memo(function TimelineHeader({
   status,
   activePanel,
   controlBusy,
+  liveCadence,
   onPanelChange,
   onPlay,
   onPause,
@@ -461,6 +533,7 @@ const TimelineHeader = memo(function TimelineHeader({
   status: StatusKind
   activePanel: BottomPanelId
   controlBusy: boolean
+  liveCadence: LiveCadenceStatus
   onPanelChange: (panel: BottomPanelId) => void
   onPlay: () => void
   onPause: () => void
@@ -557,6 +630,9 @@ const TimelineHeader = memo(function TimelineHeader({
         </div>
       </div>
       <div className="flex items-center gap-2 text-xs text-lab-muted">
+        {source === "live" ? (
+          <LiveCadenceBadge locale={locale} status={liveCadence} />
+        ) : null}
         <span>
           {t(locale, "timeline.sourceStatus", {
             source: sourceLabel(locale, source),
@@ -567,6 +643,42 @@ const TimelineHeader = memo(function TimelineHeader({
     </PanelHeader>
   )
 })
+
+function LiveCadenceBadge({
+  locale,
+  status,
+}: {
+  locale: Locale
+  status: LiveCadenceStatus
+}) {
+  const actualFps =
+    status.actualFps == null ? "-" : status.actualFps.toFixed(1)
+  const stepMs =
+    status.lastStepMs == null ? "-" : status.lastStepMs.toFixed(1)
+  const label = t(
+    locale,
+    status.degraded ? "timeline.liveCadenceDegraded" : "timeline.liveCadence",
+    {
+      actual: actualFps,
+      target: status.targetFps,
+      stepMs,
+    },
+  )
+
+  return (
+    <span
+      className={`rounded border px-2 py-0.5 font-mono tabular-nums ${
+        status.degraded
+          ? "border-lab-warn/60 bg-lab-warn/10 text-lab-warn"
+          : "border-lab-line bg-black/15 text-lab-muted"
+      }`}
+    >
+      {status.pending && status.actualFps == null
+        ? t(locale, "timeline.liveCadencePending")
+        : label}
+    </span>
+  )
+}
 
 function BottomPanelTabButton({
   panel,
@@ -1223,6 +1335,13 @@ function FrameDiagnostics({
   frame: FrameRecord | undefined
   previousFrame: FrameRecord | null
 }) {
+  if (frame?.kind === "summary" || frame?.live_authority?.not_hydrated) {
+    return (
+      <EmptyState
+        label={`${t(locale, "diagnostics.empty")} (live summary not hydrated)`}
+      />
+    )
+  }
   if (!frame?.diagnostics) {
     return <EmptyState label={t(locale, "diagnostics.empty")} />
   }

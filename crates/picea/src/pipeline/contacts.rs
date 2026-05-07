@@ -23,6 +23,8 @@ use crate::{
 
 const WARM_START_NORMAL_DOT_THRESHOLD: FloatNum = 0.98;
 const WARM_START_POINT_DRIFT_THRESHOLD: FloatNum = 0.05;
+const WARM_START_TANGENTIAL_DRIFT_THRESHOLD: FloatNum = 0.10;
+const PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD: FloatNum = 0.25;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ContactObservation {
@@ -44,8 +46,24 @@ pub(crate) struct ContactObservation {
     pub(crate) normal_impulse: FloatNum,
     pub(crate) tangent_impulse: FloatNum,
     pub(crate) warm_start_reason: WarmStartCacheReason,
+    pub(crate) warm_start_anchor_drift: FloatNum,
+    pub(crate) warm_start_normal_anchor_drift: FloatNum,
+    pub(crate) warm_start_tangent_anchor_drift: FloatNum,
     pub(crate) warm_start_normal_impulse: FloatNum,
     pub(crate) warm_start_tangent_impulse: FloatNum,
+    pub(crate) source_row_continuity_candidate: bool,
+    pub(crate) solver_initial_normal_speed: FloatNum,
+    pub(crate) solver_initial_tangent_speed: FloatNum,
+    pub(crate) solver_final_normal_speed: FloatNum,
+    pub(crate) solver_final_tangent_speed: FloatNum,
+    pub(crate) solver_position_bias: FloatNum,
+    pub(crate) solver_restitution_bias: FloatNum,
+    pub(crate) solver_support_friction_impulse: FloatNum,
+    pub(crate) solver_position_correction_depth: FloatNum,
+    pub(crate) solver_position_correction_body_a_translation: FloatNum,
+    pub(crate) solver_position_correction_body_b_translation: FloatNum,
+    pub(crate) solver_normal_impulse_delta: FloatNum,
+    pub(crate) solver_tangent_impulse_delta: FloatNum,
     pub(crate) normal_impulse_clamped: bool,
     pub(crate) tangent_impulse_clamped: bool,
     pub(crate) restitution_velocity_threshold: FloatNum,
@@ -200,8 +218,24 @@ impl World {
                     normal_impulse: 0.0,
                     tangent_impulse: 0.0,
                     warm_start_reason: WarmStartCacheReason::MissNoPrevious,
+                    warm_start_anchor_drift: 0.0,
+                    warm_start_normal_anchor_drift: 0.0,
+                    warm_start_tangent_anchor_drift: 0.0,
                     warm_start_normal_impulse: 0.0,
                     warm_start_tangent_impulse: 0.0,
+                    source_row_continuity_candidate: false,
+                    solver_initial_normal_speed: 0.0,
+                    solver_initial_tangent_speed: 0.0,
+                    solver_final_normal_speed: 0.0,
+                    solver_final_tangent_speed: 0.0,
+                    solver_position_bias: 0.0,
+                    solver_restitution_bias: 0.0,
+                    solver_support_friction_impulse: 0.0,
+                    solver_position_correction_depth: 0.0,
+                    solver_position_correction_body_a_translation: 0.0,
+                    solver_position_correction_body_b_translation: 0.0,
+                    solver_normal_impulse_delta: 0.0,
+                    solver_tangent_impulse_delta: 0.0,
                     normal_impulse_clamped: false,
                     tangent_impulse_clamped: false,
                     restitution_velocity_threshold: 0.0,
@@ -229,16 +263,29 @@ impl World {
             .collect::<BTreeSet<_>>();
 
         for contact in contacts {
-            let (reason, normal_impulse, tangent_impulse) = warm_start_transfer(
-                previous_contacts.get(&contact.key),
-                contact,
-                previous_pairs.contains(&contact.pair_key),
-            );
-            contact.warm_start_reason = reason;
-            contact.warm_start_normal_impulse = normal_impulse;
-            contact.warm_start_tangent_impulse = tangent_impulse;
-            contact.normal_impulse = normal_impulse.max(0.0);
-            contact.tangent_impulse = tangent_impulse;
+            let exact_previous = previous_contacts.get(&contact.key);
+            let fallback_previous = exact_previous
+                .is_none()
+                .then(|| same_feature_index_warm_start_candidate(previous_contacts, contact))
+                .flatten();
+            let warm_start = if let Some(previous) = exact_previous.or(fallback_previous) {
+                warm_start_transfer(Some(previous), contact, true)
+            } else {
+                warm_start_transfer(None, contact, previous_pairs.contains(&contact.pair_key))
+            };
+            contact.warm_start_reason = warm_start.reason;
+            contact.warm_start_anchor_drift = warm_start.anchor_drift;
+            contact.warm_start_normal_anchor_drift = warm_start.normal_anchor_drift;
+            contact.warm_start_tangent_anchor_drift = warm_start.tangent_anchor_drift;
+            contact.warm_start_normal_impulse = warm_start.normal_impulse;
+            contact.warm_start_tangent_impulse = warm_start.tangent_impulse;
+            contact.source_row_continuity_candidate =
+                matches!(
+                    contact.warm_start_reason,
+                    WarmStartCacheReason::MissFeatureId
+                ) && source_row_continuity_candidate(&previous_contacts, contact);
+            contact.normal_impulse = warm_start.normal_impulse.max(0.0);
+            contact.tangent_impulse = warm_start.tangent_impulse;
         }
     }
 
@@ -261,7 +308,10 @@ impl World {
         let mut warm_start_stats = WarmStartStats::default();
 
         for contact in contacts {
-            let existing = previous.remove(&contact.key);
+            let existing = previous.remove(&contact.key).or_else(|| {
+                persistent_manifold_lifecycle_candidate_key(&previous, &contact)
+                    .and_then(|key| previous.remove(&key))
+            });
             let is_persisted = existing.is_some();
             warm_start_stats.record(contact.warm_start_reason);
             let event = if let Some(existing) = existing {
@@ -278,10 +328,28 @@ impl World {
                     depth: contact.depth,
                     reduction_reason: contact.reduction_reason,
                     warm_start_reason: contact.warm_start_reason,
+                    warm_start_anchor_drift: contact.warm_start_anchor_drift,
+                    warm_start_normal_anchor_drift: contact.warm_start_normal_anchor_drift,
+                    warm_start_tangent_anchor_drift: contact.warm_start_tangent_anchor_drift,
                     warm_start_normal_impulse: contact.warm_start_normal_impulse,
                     warm_start_tangent_impulse: contact.warm_start_tangent_impulse,
+                    source_row_continuity_candidate: contact.source_row_continuity_candidate,
                     solver_normal_impulse: contact.normal_impulse,
                     solver_tangent_impulse: contact.tangent_impulse,
+                    solver_initial_normal_speed: contact.solver_initial_normal_speed,
+                    solver_initial_tangent_speed: contact.solver_initial_tangent_speed,
+                    solver_final_normal_speed: contact.solver_final_normal_speed,
+                    solver_final_tangent_speed: contact.solver_final_tangent_speed,
+                    solver_position_bias: contact.solver_position_bias,
+                    solver_restitution_bias: contact.solver_restitution_bias,
+                    solver_support_friction_impulse: contact.solver_support_friction_impulse,
+                    solver_position_correction_depth: contact.solver_position_correction_depth,
+                    solver_position_correction_body_a_translation: contact
+                        .solver_position_correction_body_a_translation,
+                    solver_position_correction_body_b_translation: contact
+                        .solver_position_correction_body_b_translation,
+                    solver_normal_impulse_delta: contact.solver_normal_impulse_delta,
+                    solver_tangent_impulse_delta: contact.solver_tangent_impulse_delta,
                     normal_impulse_clamped: contact.normal_impulse_clamped,
                     tangent_impulse_clamped: contact.tangent_impulse_clamped,
                     restitution_velocity_threshold: contact.restitution_velocity_threshold,
@@ -306,10 +374,28 @@ impl World {
                     depth: contact.depth,
                     reduction_reason: contact.reduction_reason,
                     warm_start_reason: contact.warm_start_reason,
+                    warm_start_anchor_drift: contact.warm_start_anchor_drift,
+                    warm_start_normal_anchor_drift: contact.warm_start_normal_anchor_drift,
+                    warm_start_tangent_anchor_drift: contact.warm_start_tangent_anchor_drift,
                     warm_start_normal_impulse: contact.warm_start_normal_impulse,
                     warm_start_tangent_impulse: contact.warm_start_tangent_impulse,
+                    source_row_continuity_candidate: contact.source_row_continuity_candidate,
                     solver_normal_impulse: contact.normal_impulse,
                     solver_tangent_impulse: contact.tangent_impulse,
+                    solver_initial_normal_speed: contact.solver_initial_normal_speed,
+                    solver_initial_tangent_speed: contact.solver_initial_tangent_speed,
+                    solver_final_normal_speed: contact.solver_final_normal_speed,
+                    solver_final_tangent_speed: contact.solver_final_tangent_speed,
+                    solver_position_bias: contact.solver_position_bias,
+                    solver_restitution_bias: contact.solver_restitution_bias,
+                    solver_support_friction_impulse: contact.solver_support_friction_impulse,
+                    solver_position_correction_depth: contact.solver_position_correction_depth,
+                    solver_position_correction_body_a_translation: contact
+                        .solver_position_correction_body_a_translation,
+                    solver_position_correction_body_b_translation: contact
+                        .solver_position_correction_body_b_translation,
+                    solver_normal_impulse_delta: contact.solver_normal_impulse_delta,
+                    solver_tangent_impulse_delta: contact.solver_tangent_impulse_delta,
                     normal_impulse_clamped: contact.normal_impulse_clamped,
                     tangent_impulse_clamped: contact.tangent_impulse_clamped,
                     restitution_velocity_threshold: contact.restitution_velocity_threshold,
@@ -373,29 +459,190 @@ impl World {
     }
 }
 
+fn same_feature_index_warm_start_candidate<'a>(
+    previous_contacts: &'a BTreeMap<ContactKey, ContactRecord>,
+    contact: &ContactObservation,
+) -> Option<&'a ContactRecord> {
+    previous_contacts
+        .values()
+        .filter(|record| {
+            record.contact.collider_a == contact.collider_a
+                && record.contact.collider_b == contact.collider_b
+                && record.contact.reduction_reason == contact.reduction_reason
+                && record.contact.feature_id.index() == contact.feature_id.index()
+                && warm_start_transfer(Some(record), contact, true)
+                    .reason
+                    .is_hit()
+        })
+        .min_by(|lhs, rhs| {
+            let lhs_drift = contact_anchor_drift(lhs, contact);
+            let rhs_drift = contact_anchor_drift(rhs, contact);
+            lhs_drift.total_cmp(&rhs_drift)
+        })
+}
+
+fn persistent_manifold_lifecycle_candidate_key(
+    previous_contacts: &BTreeMap<ContactKey, ContactRecord>,
+    contact: &ContactObservation,
+) -> Option<ContactKey> {
+    previous_contacts
+        .iter()
+        .filter(|(_, record)| persistent_manifold_lifecycle_candidate(record, contact))
+        .min_by(|(_, lhs), (_, rhs)| {
+            let lhs_drift = contact_anchor_drift(lhs, contact);
+            let rhs_drift = contact_anchor_drift(rhs, contact);
+            lhs_drift.total_cmp(&rhs_drift)
+        })
+        .map(|(key, _)| *key)
+}
+
+fn persistent_manifold_lifecycle_candidate(
+    previous: &ContactRecord,
+    contact: &ContactObservation,
+) -> bool {
+    if contact.is_sensor
+        || previous.contact.collider_a != contact.collider_a
+        || previous.contact.collider_b != contact.collider_b
+        || !clipped_manifold_reduction(previous.contact.reduction_reason)
+        || !clipped_manifold_reduction(contact.reduction_reason)
+        || !feature_id_edge_swap(previous.contact.feature_id, contact.feature_id)
+    {
+        return false;
+    }
+
+    let previous_normal = previous.contact.normal.normalized_or_zero();
+    let current_normal = contact.normal.normalized_or_zero();
+    if previous_normal.length() <= FloatNum::EPSILON
+        || current_normal.length() <= FloatNum::EPSILON
+        || previous_normal.dot(current_normal) < WARM_START_NORMAL_DOT_THRESHOLD
+    {
+        return false;
+    }
+
+    let drift_a = contact.anchor_a - previous.anchor_a;
+    let drift_b = contact.anchor_b - previous.anchor_b;
+    let local_anchor_drift = drift_a.length().max(drift_b.length());
+
+    local_anchor_drift.is_finite()
+        && local_anchor_drift <= PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD
+}
+
+fn source_row_continuity_candidate(
+    previous_contacts: &BTreeMap<ContactKey, ContactRecord>,
+    contact: &ContactObservation,
+) -> bool {
+    if contact.is_sensor {
+        return false;
+    }
+
+    previous_contacts
+        .values()
+        .any(|record| source_row_continuity_candidate_record(record, contact))
+}
+
+fn source_row_continuity_candidate_record(
+    previous: &ContactRecord,
+    contact: &ContactObservation,
+) -> bool {
+    if previous.contact.collider_a != contact.collider_a
+        || previous.contact.collider_b != contact.collider_b
+        || feature_id_edge_swap(previous.contact.feature_id, contact.feature_id)
+    {
+        return false;
+    }
+
+    let previous_normal = previous.contact.normal.normalized_or_zero();
+    let current_normal = contact.normal.normalized_or_zero();
+    if previous_normal.length() <= FloatNum::EPSILON
+        || current_normal.length() <= FloatNum::EPSILON
+        || previous_normal.dot(current_normal) < WARM_START_NORMAL_DOT_THRESHOLD
+    {
+        return false;
+    }
+
+    let local_anchor_drift = contact_anchor_drift(previous, contact);
+    local_anchor_drift.is_finite()
+        && local_anchor_drift <= PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD
+}
+
+fn contact_anchor_drift(previous: &ContactRecord, contact: &ContactObservation) -> FloatNum {
+    let drift_a = contact.anchor_a - previous.anchor_a;
+    let drift_b = contact.anchor_b - previous.anchor_b;
+    drift_a.length().max(drift_b.length())
+}
+
+fn clipped_manifold_reduction(reason: ContactReductionReason) -> bool {
+    matches!(
+        reason,
+        ContactReductionReason::Clipped | ContactReductionReason::DuplicateReduced
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DecodedFeatureId {
+    kind: usize,
+    reference_edge: usize,
+    incident_edge: usize,
+}
+
+fn feature_id_edge_swap(
+    previous: crate::handles::ContactFeatureId,
+    current: crate::handles::ContactFeatureId,
+) -> bool {
+    let Some(previous) = decode_feature_id(previous) else {
+        return false;
+    };
+    let Some(current) = decode_feature_id(current) else {
+        return false;
+    };
+
+    previous.kind == current.kind
+        && previous.reference_edge == current.incident_edge
+        && previous.incident_edge == current.reference_edge
+}
+
+fn decode_feature_id(feature_id: crate::handles::ContactFeatureId) -> Option<DecodedFeatureId> {
+    let raw = feature_id.index()?;
+    Some(DecodedFeatureId {
+        kind: (raw >> 24) & 0xff,
+        reference_edge: (raw >> 12) & 0xfff,
+        incident_edge: raw & 0xfff,
+    })
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct WarmStartTransfer {
+    reason: WarmStartCacheReason,
+    anchor_drift: FloatNum,
+    normal_anchor_drift: FloatNum,
+    tangent_anchor_drift: FloatNum,
+    normal_impulse: FloatNum,
+    tangent_impulse: FloatNum,
+}
+
 fn warm_start_transfer(
     previous: Option<&ContactRecord>,
     contact: &ContactObservation,
     had_previous_pair: bool,
-) -> (WarmStartCacheReason, FloatNum, FloatNum) {
+) -> WarmStartTransfer {
     if contact.is_sensor {
-        return (WarmStartCacheReason::SkippedSensor, 0.0, 0.0);
+        return warm_start_transfer_result(WarmStartCacheReason::SkippedSensor, 0.0, 0.0);
     }
 
     let Some(previous) = previous else {
         return if had_previous_pair {
-            (WarmStartCacheReason::MissFeatureId, 0.0, 0.0)
+            warm_start_transfer_result(WarmStartCacheReason::MissFeatureId, 0.0, 0.0)
         } else {
-            (WarmStartCacheReason::MissNoPrevious, 0.0, 0.0)
+            warm_start_transfer_result(WarmStartCacheReason::MissNoPrevious, 0.0, 0.0)
         };
     };
 
     if previous.contact.warm_start_reason == WarmStartCacheReason::SkippedSensor {
-        return (WarmStartCacheReason::MissPreviousSensor, 0.0, 0.0);
+        return warm_start_transfer_result(WarmStartCacheReason::MissPreviousSensor, 0.0, 0.0);
     }
 
     if !previous.normal_impulse.is_finite() || !previous.tangent_impulse.is_finite() {
-        return (WarmStartCacheReason::DroppedInvalidImpulse, 0.0, 0.0);
+        return warm_start_transfer_result(WarmStartCacheReason::DroppedInvalidImpulse, 0.0, 0.0);
     }
 
     let previous_normal = previous.contact.normal.normalized_or_zero();
@@ -406,24 +653,63 @@ fn warm_start_transfer(
         || current_normal.length() <= FloatNum::EPSILON
         || previous_normal.dot(current_normal) < WARM_START_NORMAL_DOT_THRESHOLD
     {
-        return (WarmStartCacheReason::DroppedNormalMismatch, 0.0, 0.0);
+        return warm_start_transfer_result(WarmStartCacheReason::DroppedNormalMismatch, 0.0, 0.0);
     }
 
     // Feature ids are local geometric names, not raw world-space guarantees.
     // Compare contact anchors relative to both colliders so a pair translating
     // together keeps its cache, while contact movement on either shape drops it.
-    let drift_a = (contact.anchor_a - previous.anchor_a).length();
-    let drift_b = (contact.anchor_b - previous.anchor_b).length();
-    let drift = drift_a.max(drift_b);
-    if !drift.is_finite() || drift > WARM_START_POINT_DRIFT_THRESHOLD {
-        return (WarmStartCacheReason::DroppedPointDrift, 0.0, 0.0);
+    let drift_a = contact.anchor_a - previous.anchor_a;
+    let drift_b = contact.anchor_b - previous.anchor_b;
+    let normal_drift = drift_a
+        .dot(current_normal)
+        .abs()
+        .max(drift_b.dot(current_normal).abs());
+    let tangent = current_normal.perp().normalized_or_zero();
+    let tangential_drift = drift_a.dot(tangent).abs().max(drift_b.dot(tangent).abs());
+    let drift = drift_a.length().max(drift_b.length());
+    let anchor_drift = WarmStartTransfer {
+        anchor_drift: drift,
+        normal_anchor_drift: normal_drift,
+        tangent_anchor_drift: tangential_drift,
+        ..WarmStartTransfer::default()
+    };
+    if !drift.is_finite()
+        || !normal_drift.is_finite()
+        || !tangential_drift.is_finite()
+        || normal_drift > WARM_START_POINT_DRIFT_THRESHOLD
+    {
+        return WarmStartTransfer {
+            reason: WarmStartCacheReason::DroppedPointDrift,
+            ..anchor_drift
+        };
+    }
+    if tangential_drift > WARM_START_TANGENTIAL_DRIFT_THRESHOLD {
+        return WarmStartTransfer {
+            reason: WarmStartCacheReason::DroppedPointDrift,
+            ..anchor_drift
+        };
     }
 
-    (
-        WarmStartCacheReason::Hit,
-        previous.normal_impulse,
-        previous.tangent_impulse,
-    )
+    WarmStartTransfer {
+        reason: WarmStartCacheReason::Hit,
+        normal_impulse: previous.normal_impulse,
+        tangent_impulse: previous.tangent_impulse,
+        ..anchor_drift
+    }
+}
+
+fn warm_start_transfer_result(
+    reason: WarmStartCacheReason,
+    normal_impulse: FloatNum,
+    tangent_impulse: FloatNum,
+) -> WarmStartTransfer {
+    WarmStartTransfer {
+        reason,
+        normal_impulse,
+        tangent_impulse,
+        ..WarmStartTransfer::default()
+    }
 }
 
 fn combine_materials(a: Material, b: Material) -> Material {
@@ -449,5 +735,201 @@ fn ordered_pair(a: ColliderHandle, b: ColliderHandle) -> (ColliderHandle, Collid
         (a, b)
     } else {
         (b, a)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        handles::{ContactFeatureId, ContactId, ManifoldId},
+        world::WorldDesc,
+    };
+
+    fn test_body(raw: u32) -> BodyHandle {
+        BodyHandle::from_raw_parts(raw, 0)
+    }
+
+    fn test_collider(raw: u32) -> ColliderHandle {
+        ColliderHandle::from_raw_parts(raw, 0)
+    }
+
+    fn test_feature(index: u32, point_slot: u32) -> ContactFeatureId {
+        ContactFeatureId::from_raw_parts(index, point_slot)
+    }
+
+    fn test_contact_event(feature_id: ContactFeatureId) -> ContactEvent {
+        ContactEvent {
+            contact_id: ContactId::from_raw_parts(1, 0),
+            manifold_id: ManifoldId::from_raw_parts(1, 0),
+            body_a: test_body(1),
+            body_b: test_body(2),
+            collider_a: test_collider(1),
+            collider_b: test_collider(2),
+            feature_id,
+            point: Point::new(0.0, 0.0),
+            normal: Vector::new(1.0, 0.0),
+            depth: 0.01,
+            reduction_reason: ContactReductionReason::Clipped,
+            warm_start_reason: WarmStartCacheReason::Hit,
+            warm_start_anchor_drift: 0.0,
+            warm_start_normal_anchor_drift: 0.0,
+            warm_start_tangent_anchor_drift: 0.0,
+            warm_start_normal_impulse: 0.25,
+            warm_start_tangent_impulse: 0.05,
+            source_row_continuity_candidate: false,
+            solver_normal_impulse: 0.25,
+            solver_tangent_impulse: 0.05,
+            solver_initial_normal_speed: 0.0,
+            solver_initial_tangent_speed: 0.0,
+            solver_final_normal_speed: 0.0,
+            solver_final_tangent_speed: 0.0,
+            solver_position_bias: 0.0,
+            solver_restitution_bias: 0.0,
+            solver_support_friction_impulse: 0.0,
+            solver_position_correction_depth: 0.0,
+            solver_position_correction_body_a_translation: 0.0,
+            solver_position_correction_body_b_translation: 0.0,
+            solver_normal_impulse_delta: 0.0,
+            solver_tangent_impulse_delta: 0.0,
+            normal_impulse_clamped: false,
+            tangent_impulse_clamped: false,
+            restitution_velocity_threshold: 0.0,
+            restitution_applied: false,
+            generic_convex_trace: None,
+            ccd_trace: None,
+        }
+    }
+
+    fn test_contact_observation(feature_id: ContactFeatureId) -> ContactObservation {
+        let collider_a = test_collider(1);
+        let collider_b = test_collider(2);
+        ContactObservation {
+            key: ContactKey::new(collider_a, collider_b, feature_id),
+            pair_key: ContactPairKey::new(collider_a, collider_b),
+            body_a: test_body(1),
+            body_b: test_body(2),
+            collider_a,
+            collider_b,
+            anchor_a: Vector::new(0.25, 0.0),
+            anchor_b: Vector::new(-0.25, 0.0),
+            point: Point::new(0.0, 0.0),
+            normal: Vector::new(1.0, 0.0),
+            depth: 0.01,
+            feature_id,
+            reduction_reason: ContactReductionReason::Clipped,
+            is_sensor: false,
+            material: Material::default(),
+            normal_impulse: 0.0,
+            tangent_impulse: 0.0,
+            warm_start_reason: WarmStartCacheReason::MissNoPrevious,
+            warm_start_anchor_drift: 0.0,
+            warm_start_normal_anchor_drift: 0.0,
+            warm_start_tangent_anchor_drift: 0.0,
+            warm_start_normal_impulse: 0.0,
+            warm_start_tangent_impulse: 0.0,
+            source_row_continuity_candidate: false,
+            solver_initial_normal_speed: 0.0,
+            solver_initial_tangent_speed: 0.0,
+            solver_final_normal_speed: 0.0,
+            solver_final_tangent_speed: 0.0,
+            solver_position_bias: 0.0,
+            solver_restitution_bias: 0.0,
+            solver_support_friction_impulse: 0.0,
+            solver_position_correction_depth: 0.0,
+            solver_position_correction_body_a_translation: 0.0,
+            solver_position_correction_body_b_translation: 0.0,
+            solver_normal_impulse_delta: 0.0,
+            solver_tangent_impulse_delta: 0.0,
+            normal_impulse_clamped: false,
+            tangent_impulse_clamped: false,
+            restitution_velocity_threshold: 0.0,
+            restitution_applied: false,
+            generic_convex_trace: None,
+            ccd_trace: None,
+        }
+    }
+
+    #[test]
+    fn warm_start_fallback_transfers_between_same_feature_index_point_slots() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_1003, 1);
+        let previous_record = ContactRecord {
+            contact: test_contact_event(previous_feature),
+            anchor_a: Vector::new(0.25, 0.0),
+            anchor_b: Vector::new(-0.25, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut contacts = vec![test_contact_observation(current_feature)];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(contacts[0].warm_start_reason, WarmStartCacheReason::Hit);
+        assert_eq!(contacts[0].warm_start_normal_impulse, 0.25);
+        assert_eq!(contacts[0].warm_start_tangent_impulse, 0.05);
+        assert!(!contacts[0].source_row_continuity_candidate);
+    }
+
+    #[test]
+    fn source_row_continuity_candidate_marks_non_edge_swap_feature_miss() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_1004, 0);
+        let previous_record = ContactRecord {
+            contact: test_contact_event(previous_feature),
+            anchor_a: Vector::new(0.25, 0.0),
+            anchor_b: Vector::new(-0.25, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut contacts = vec![test_contact_observation(current_feature)];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(
+            contacts[0].warm_start_reason,
+            WarmStartCacheReason::MissFeatureId
+        );
+        assert!(contacts[0].source_row_continuity_candidate);
+    }
+
+    #[test]
+    fn source_row_continuity_candidate_excludes_edge_swap_lifecycle_path() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_3001, 0);
+        let previous_record = ContactRecord {
+            contact: test_contact_event(previous_feature),
+            anchor_a: Vector::new(0.25, 0.0),
+            anchor_b: Vector::new(-0.25, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut contacts = vec![test_contact_observation(current_feature)];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(
+            contacts[0].warm_start_reason,
+            WarmStartCacheReason::MissFeatureId
+        );
+        assert!(!contacts[0].source_row_continuity_candidate);
     }
 }

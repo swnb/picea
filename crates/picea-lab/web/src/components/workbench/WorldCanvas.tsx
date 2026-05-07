@@ -20,6 +20,7 @@ import type {
   SelectedEntity,
   Vec2,
 } from "../../types";
+import { profileMeasure, profileStart } from "../../profile";
 import { Button } from "../ui/button";
 import { Tooltip } from "../ui/radix";
 import {
@@ -316,6 +317,7 @@ export function WorldCanvas({
       return;
     }
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    const startedAt = profileStart();
     drawWorld(
       ctx,
       frame,
@@ -327,6 +329,17 @@ export function WorldCanvas({
       trajectorySettings,
       labels,
     );
+    profileMeasure("canvas.drawWorld", startedAt, {
+      frameIndex: frame.frame_index,
+      bodies: frame.snapshot.bodies.length,
+      colliders: frame.snapshot.colliders.length,
+      contacts: frame.snapshot.contacts.length,
+      previousFrames: frameIndex + 1,
+      layers: Object.entries(layers)
+        .filter(([, enabled]) => enabled)
+        .map(([name]) => name)
+        .join(","),
+    });
   }, [
     camera,
     frame,

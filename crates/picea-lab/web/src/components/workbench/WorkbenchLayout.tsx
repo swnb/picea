@@ -24,6 +24,7 @@ import type {
   ControlAction,
   CanvasDebugView,
   LayerState,
+  LiveCadenceStatus,
   PerfEvidenceStatus,
   ResolvedSelection,
   RunMode,
@@ -50,6 +51,7 @@ export function WorkbenchLayout({
   perfStatus,
   onRun,
   liveControlBusy,
+  liveCadence,
   runMode,
   onRunModeChange,
   layers,
@@ -98,6 +100,7 @@ export function WorkbenchLayout({
   perfStatus: PerfEvidenceStatus
   onRun: () => void
   liveControlBusy: boolean
+  liveCadence: LiveCadenceStatus
   runMode: RunMode
   onRunModeChange: (value: RunMode) => void
   layers: LayerState
@@ -254,6 +257,7 @@ export function WorkbenchLayout({
                 perfArtifact={perfArtifact}
                 perfStatus={perfStatus}
                 controlBusy={status === "loading" || liveControlBusy}
+                liveCadence={liveCadence}
                 runMode={runMode}
                 setRunMode={onRunModeChange}
                 onPlay={() => onControl("play")}

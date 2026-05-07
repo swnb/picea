@@ -1,12 +1,3841 @@
-use std::{fs, path::Path};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    env, fs,
+    path::Path,
+};
 
-use picea::events::CcdTargetKind;
-use picea::prelude::{CollisionLayerPreset, MaterialPreset};
+use picea::debug::DebugShape;
+use picea::events::{CcdTargetKind, WarmStartCacheReason};
+use picea::prelude::{
+    BodyHandle, ColliderHandle, CollisionLayerPreset, DebugCollider, DebugContact, MaterialPreset,
+};
 use picea_lab::{
     instantiate_scene_fixture, run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact,
     DebugRenderFrame, DiagnosticMarkerKind, DiagnosticSeverity, DiagnosticSource, FrameRecord,
-    MissingEvidenceKind, RunConfig, RunManifest, ScenarioId, SceneRecipeFixture,
+    MissingEvidenceKind, RunConfig, RunManifest, RunResult, ScenarioId, SceneRecipeFixture,
 };
+
+const MATRIX_STACK_QUIET_WINDOW_START_FRAME: usize = 120;
+const MATRIX_STACK_PRESSURE_WINDOW_START_FRAME: usize = 12;
+const MATRIX_STACK_PRESSURE_WINDOW_END_FRAME: usize = 46;
+const SUPPORT_GAP_TANGENT_LINEAR_ONSET_THRESHOLD: f32 = 1.0;
+const SUPPORT_GAP_TANGENT_ANGULAR_ONSET_THRESHOLD: f32 = 0.5;
+const SUPPORT_ELIGIBILITY_COUNTERPART_TANGENT_THRESHOLD: f32 = 0.05;
+const SUPPORT_ELIGIBILITY_NORMAL_ANCHOR_DRIFT_THRESHOLD: f32 = 0.01;
+const SUPPORT_ELIGIBILITY_TANGENT_ANCHOR_DRIFT_THRESHOLD: f32 = 0.25;
+const FEATURE_CHURN_LOCAL_ANCHOR_DRIFT_THRESHOLD: f32 = 0.05;
+const SOURCE_ROW_NORMAL_DOT_DRY_RUN_THRESHOLD: f32 = 0.98;
+const SOURCE_ROW_PSEUDO_SUPPORT_SKIN: f32 = 0.01;
+
+#[derive(Debug)]
+struct MatrixStackStressReport {
+    final_state_hash: String,
+    first_bad_frame: Option<usize>,
+    first_bad_state_hash: Option<String>,
+    first_bad_markers: Vec<String>,
+    max_penetration_depth: f64,
+    max_penetration_sum: f64,
+    peak_churn: usize,
+    final_warm_start_hit_count: usize,
+    final_warm_start_miss_count: usize,
+    final_warm_start_drop_count: usize,
+    final_awake_dynamic_body_count: usize,
+    final_sleeping_dynamic_body_count: usize,
+    final_max_linear_speed: f32,
+    final_max_linear_body: Option<String>,
+    final_max_angular_speed: f32,
+    final_max_angular_body: Option<String>,
+    quiet_window_start_frame: usize,
+    quiet_window_max_linear_speed: f32,
+    quiet_window_max_linear_body: Option<String>,
+    quiet_window_max_linear_frame: Option<usize>,
+    late_linear_spike_trace: LateVelocityTrace,
+    quiet_window_max_angular_speed: f32,
+    quiet_window_max_angular_body: Option<String>,
+    quiet_window_max_angular_frame: Option<usize>,
+    late_angular_spike_trace: LateVelocityTrace,
+    early_pressure_trace: PressureWindowTrace,
+    feature_churn_trace: FeatureChurnTrace,
+    late_position_correction_max_translation: f32,
+    late_position_correction_total_translation: f32,
+    late_position_correction_body_count: usize,
+    late_warm_start_drop_count: usize,
+    late_contact_churn_peak: usize,
+    max_support_friction_impulse: f32,
+    max_support_friction_frame: Option<usize>,
+    support_friction_contact_count: usize,
+    first_floor_exit_frame: Option<usize>,
+    first_floor_exit_body: Option<String>,
+    first_floor_exit_x: Option<f32>,
+    final_outside_floor_body_count: usize,
+    ejection_pre_exit_frame: Option<usize>,
+    ejection_pre_exit_x: Option<f32>,
+    ejection_pre_exit_linear_speed: f32,
+    ejection_pre_exit_angular_speed: f32,
+    ejection_last_contact_frame: Option<usize>,
+    ejection_last_contact_count: usize,
+    ejection_last_contact_counterparts: Vec<String>,
+    ejection_last_contact_max_depth: f32,
+    ejection_last_contact_normal_impulse_sum: f32,
+    ejection_last_contact_tangent_impulse_sum: f32,
+    ejection_last_dynamic_contact_frame: Option<usize>,
+    ejection_last_dynamic_contact_count: usize,
+    ejection_last_dynamic_contact_counterparts: Vec<String>,
+    ejection_last_dynamic_contact_max_depth: f32,
+    ejection_last_dynamic_contact_normal_impulse_sum: f32,
+    ejection_last_dynamic_contact_tangent_impulse_sum: f32,
+    ejection_last_dynamic_contact_warm_start_normal_sum: f32,
+    ejection_last_dynamic_contact_warm_start_tangent_sum: f32,
+    ejection_last_dynamic_contact_warm_start_reasons: Vec<String>,
+    ejection_last_dynamic_contact_normal_speed_min: f32,
+    ejection_last_dynamic_contact_normal_speed_max: f32,
+    ejection_last_dynamic_contact_tangent_speed_abs_max: f32,
+    ejection_last_dynamic_impulse_frame: Option<usize>,
+    ejection_last_dynamic_impulse_counterparts: Vec<String>,
+    ejection_last_dynamic_impulse_normal_sum: f32,
+    ejection_last_dynamic_impulse_tangent_sum: f32,
+    ejection_last_dynamic_impulse_normal_speed_min: f32,
+    ejection_last_dynamic_impulse_normal_speed_max: f32,
+    ejection_last_dynamic_impulse_tangent_speed_abs_max: f32,
+    ejection_row_max_frame: Option<usize>,
+    ejection_row_max_linear_speed: f32,
+    ejection_row_max_angular_speed: f32,
+    ejection_last_dynamic_impulse_body_linear_speed: f32,
+    ejection_last_dynamic_impulse_body_angular_speed: f32,
+    ejection_last_dynamic_contact_body_linear_speed: f32,
+    ejection_last_dynamic_contact_body_angular_speed: f32,
+    ejection_support_gap_start_frame: Option<usize>,
+    ejection_support_gap_start_linear_speed: f32,
+    ejection_support_gap_start_angular_speed: f32,
+    ejection_support_gap_previous_frame: Option<usize>,
+    ejection_support_gap_previous_counterparts: Vec<String>,
+    ejection_support_gap_previous_max_depth: f32,
+    ejection_support_gap_previous_warm_start_normal_sum: f32,
+    ejection_support_gap_previous_warm_start_tangent_sum: f32,
+    ejection_support_gap_previous_normal_impulse_sum: f32,
+    ejection_support_gap_previous_tangent_impulse_sum: f32,
+    ejection_support_gap_previous_initial_normal_speed_min: f32,
+    ejection_support_gap_previous_initial_normal_speed_max: f32,
+    ejection_support_gap_previous_normal_speed_min: f32,
+    ejection_support_gap_previous_normal_speed_max: f32,
+    ejection_support_gap_previous_tangent_speed_abs_max: f32,
+    ejection_support_gap_previous_body_linear_speed: f32,
+    ejection_support_gap_previous_body_angular_speed: f32,
+    ejection_support_gap_previous_counterpart_linear_speed_max: f32,
+    ejection_support_gap_previous_counterpart_angular_speed_max: f32,
+    ejection_support_gap_previous_body_tangent_linear_component_max: f32,
+    ejection_support_gap_previous_body_tangent_angular_component_max: f32,
+    ejection_support_gap_previous_counterpart_tangent_linear_component_max: f32,
+    ejection_support_gap_previous_counterpart_tangent_angular_component_max: f32,
+    ejection_support_gap_previous_normal_anchor_drift_max: f32,
+    ejection_support_gap_previous_tangent_anchor_drift_max: f32,
+    ejection_support_gap_previous_position_bias_max: f32,
+    ejection_support_gap_previous_restitution_bias_max: f32,
+    ejection_support_gap_previous_position_correction_depth_sum: f32,
+    ejection_support_gap_previous_position_correction_translation_sum: f32,
+    ejection_support_gap_next_frame: Option<usize>,
+    ejection_support_gap_next_counterparts: Vec<String>,
+    ejection_support_gap_next_max_depth: f32,
+    ejection_support_gap_next_warm_start_normal_sum: f32,
+    ejection_support_gap_next_warm_start_tangent_sum: f32,
+    ejection_support_gap_next_normal_impulse_sum: f32,
+    ejection_support_gap_next_tangent_impulse_sum: f32,
+    ejection_support_gap_next_initial_normal_speed_min: f32,
+    ejection_support_gap_next_initial_normal_speed_max: f32,
+    ejection_support_gap_next_normal_speed_min: f32,
+    ejection_support_gap_next_normal_speed_max: f32,
+    ejection_support_gap_next_tangent_speed_abs_max: f32,
+    ejection_support_gap_next_body_linear_speed: f32,
+    ejection_support_gap_next_body_angular_speed: f32,
+    ejection_support_gap_next_counterpart_linear_speed_max: f32,
+    ejection_support_gap_next_counterpart_angular_speed_max: f32,
+    ejection_support_gap_next_body_tangent_linear_component_max: f32,
+    ejection_support_gap_next_body_tangent_angular_component_max: f32,
+    ejection_support_gap_next_counterpart_tangent_linear_component_max: f32,
+    ejection_support_gap_next_counterpart_tangent_angular_component_max: f32,
+    ejection_support_gap_next_normal_anchor_drift_max: f32,
+    ejection_support_gap_next_tangent_anchor_drift_max: f32,
+    ejection_support_gap_next_position_bias_max: f32,
+    ejection_support_gap_next_restitution_bias_max: f32,
+    ejection_support_gap_next_position_correction_depth_sum: f32,
+    ejection_support_gap_next_position_correction_translation_sum: f32,
+    ejection_support_gap_upstream_frame: Option<usize>,
+    ejection_support_gap_upstream_counterpart: Option<String>,
+    ejection_support_gap_upstream_source_bodies: Vec<String>,
+    ejection_support_gap_upstream_counterpart_linear_speed: f32,
+    ejection_support_gap_upstream_counterpart_angular_speed: f32,
+    ejection_support_gap_upstream_source_contact_count: usize,
+    ejection_support_gap_upstream_source_candidate_count: usize,
+    ejection_support_gap_upstream_source_warm_start_reasons: Vec<String>,
+    ejection_support_gap_upstream_source_same_pair_previous_count: usize,
+    ejection_support_gap_upstream_source_edge_swap_candidate_count: usize,
+    ejection_support_gap_upstream_source_point_drift_min: Option<f32>,
+    ejection_support_gap_upstream_source_normal_dot_max: Option<f32>,
+    ejection_support_gap_upstream_source_local_anchor_drift_min: Option<f32>,
+    ejection_support_gap_upstream_source_max_depth: f32,
+    ejection_support_gap_upstream_source_initial_normal_speed_min: f32,
+    ejection_support_gap_upstream_source_initial_normal_speed_max: f32,
+    ejection_support_gap_upstream_source_normal_speed_min: f32,
+    ejection_support_gap_upstream_source_normal_speed_max: f32,
+    ejection_support_gap_upstream_source_tangent_speed_abs_max: f32,
+    ejection_support_gap_upstream_source_position_bias_max: f32,
+    ejection_support_gap_upstream_source_support_friction_sum: f32,
+    ejection_support_gap_upstream_source_normal_impulse_sum: f32,
+    ejection_support_gap_upstream_source_tangent_impulse_sum: f32,
+    ejection_support_gap_upstream_source_correction_depth_sum: f32,
+    ejection_support_gap_upstream_source_correction_translation_sum: f32,
+    ejection_support_gap_upstream_source_dry_run_geometry_count: usize,
+    ejection_support_gap_upstream_source_dry_run_pressure_count: usize,
+    ejection_support_gap_upstream_source_dry_run_counterpart_reject_count: usize,
+    ejection_support_gap_upstream_source_dry_run_tangent_reject_count: usize,
+    ejection_support_gap_upstream_source_dry_run_eligible_count: usize,
+    ejection_support_gap_upstream_source_dry_run_decision: String,
+    ejection_support_gap_upstream_source_dry_run_pseudo_depth_min: Option<f32>,
+    ejection_support_gap_upstream_source_dry_run_pseudo_depth_max: Option<f32>,
+    ejection_support_gap_upstream_source_dry_run_pseudo_support_skin_count: usize,
+    ejection_support_gap_upstream_handoff_frame_delta: Option<usize>,
+    ejection_support_gap_upstream_handoff_linear_speed_delta: f32,
+    ejection_support_gap_upstream_handoff_angular_speed_delta: f32,
+    max_contact_row_count: usize,
+    max_contact_row_frame: Option<usize>,
+    missing_evidence: Vec<MissingEvidenceKind>,
+}
+
+impl MatrixStackStressReport {
+    fn to_markdown(&self, run: &RunResult) -> String {
+        let first_bad_frame = self
+            .first_bad_frame
+            .map(|frame| frame.to_string())
+            .unwrap_or_else(|| "none".to_owned());
+        let first_bad_state_hash = self
+            .first_bad_state_hash
+            .clone()
+            .unwrap_or_else(|| "none".to_owned());
+        let markers = if self.first_bad_markers.is_empty() {
+            "none".to_owned()
+        } else {
+            self.first_bad_markers.join(", ")
+        };
+        let missing = if self.missing_evidence.is_empty() {
+            "none".to_owned()
+        } else {
+            self.missing_evidence
+                .iter()
+                .map(|kind| format!("{kind:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let final_max_linear_body = self
+            .final_max_linear_body
+            .clone()
+            .unwrap_or_else(|| "none".to_owned());
+        let final_max_angular_body = self
+            .final_max_angular_body
+            .clone()
+            .unwrap_or_else(|| "none".to_owned());
+        let quiet_max_linear_body = self
+            .quiet_window_max_linear_body
+            .clone()
+            .unwrap_or_else(|| "none".to_owned());
+        let quiet_max_angular_body = self
+            .quiet_window_max_angular_body
+            .clone()
+            .unwrap_or_else(|| "none".to_owned());
+        let floor_exit = match (
+            self.first_floor_exit_frame,
+            self.first_floor_exit_body.as_deref(),
+            self.first_floor_exit_x,
+        ) {
+            (Some(frame), Some(body), Some(x)) => {
+                format!("first exit frame {frame} body {body} center_x {x:.6}")
+            }
+            _ => "none".to_owned(),
+        };
+        let ejection_trace = match (
+            self.ejection_pre_exit_frame,
+            self.ejection_pre_exit_x,
+            self.ejection_last_contact_frame,
+        ) {
+            (Some(pre_frame), Some(x), Some(last_contact_frame)) => format!(
+                "pre-exit frame {pre_frame} center_x {x:.6} speed {:.6} angular {:.6}; last contact frame {last_contact_frame} count {} counterparts [{}] max_depth {:.6} normal_impulse_sum {:.6} tangent_impulse_sum {:.6}",
+                self.ejection_pre_exit_linear_speed,
+                self.ejection_pre_exit_angular_speed,
+                self.ejection_last_contact_count,
+                self.ejection_last_contact_counterparts.join(", "),
+                self.ejection_last_contact_max_depth,
+                self.ejection_last_contact_normal_impulse_sum,
+                self.ejection_last_contact_tangent_impulse_sum,
+            ),
+            (Some(pre_frame), Some(x), None) => format!(
+                "pre-exit frame {pre_frame} center_x {x:.6} speed {:.6} angular {:.6}; last contact none",
+                self.ejection_pre_exit_linear_speed,
+                self.ejection_pre_exit_angular_speed,
+            ),
+            _ => "none".to_owned(),
+        };
+        let ejection_dynamic_trace = match self.ejection_last_dynamic_contact_frame {
+            Some(frame) => format!(
+                "last dynamic contact frame {frame} count {} counterparts [{}] max_depth {:.6} normal_impulse_sum {:.6} tangent_impulse_sum {:.6} warm_start_impulse {:.6}/{:.6} warm_start [{}] normal_speed {:.6}..{:.6} tangent_speed_abs_max {:.6}",
+                self.ejection_last_dynamic_contact_count,
+                self.ejection_last_dynamic_contact_counterparts.join(", "),
+                self.ejection_last_dynamic_contact_max_depth,
+                self.ejection_last_dynamic_contact_normal_impulse_sum,
+                self.ejection_last_dynamic_contact_tangent_impulse_sum,
+                self.ejection_last_dynamic_contact_warm_start_normal_sum,
+                self.ejection_last_dynamic_contact_warm_start_tangent_sum,
+                self.ejection_last_dynamic_contact_warm_start_reasons.join(", "),
+                self.ejection_last_dynamic_contact_normal_speed_min,
+                self.ejection_last_dynamic_contact_normal_speed_max,
+                self.ejection_last_dynamic_contact_tangent_speed_abs_max,
+            ),
+            None => "none".to_owned(),
+        };
+        let ejection_dynamic_impulse_trace = match self.ejection_last_dynamic_impulse_frame {
+            Some(frame) => format!(
+                "last dynamic impulse frame {frame} counterparts [{}] normal_impulse_sum {:.6} tangent_impulse_sum {:.6} normal_speed {:.6}..{:.6} tangent_speed_abs_max {:.6}",
+                self.ejection_last_dynamic_impulse_counterparts.join(", "),
+                self.ejection_last_dynamic_impulse_normal_sum,
+                self.ejection_last_dynamic_impulse_tangent_sum,
+                self.ejection_last_dynamic_impulse_normal_speed_min,
+                self.ejection_last_dynamic_impulse_normal_speed_max,
+                self.ejection_last_dynamic_impulse_tangent_speed_abs_max,
+            ),
+            None => "none".to_owned(),
+        };
+        let ejection_velocity_trace = match self.ejection_pre_exit_frame {
+            Some(pre_frame) => format!(
+                "row-max frame {} speed {:.6}/{:.6}; last impulse speed {:.6}/{:.6}; last dynamic contact speed {:.6}/{:.6}; pre-exit frame {pre_frame} speed {:.6}/{:.6}",
+                self.ejection_row_max_frame
+                    .map(|frame| frame.to_string())
+                    .unwrap_or_else(|| "none".to_owned()),
+                self.ejection_row_max_linear_speed,
+                self.ejection_row_max_angular_speed,
+                self.ejection_last_dynamic_impulse_body_linear_speed,
+                self.ejection_last_dynamic_impulse_body_angular_speed,
+                self.ejection_last_dynamic_contact_body_linear_speed,
+                self.ejection_last_dynamic_contact_body_angular_speed,
+                self.ejection_pre_exit_linear_speed,
+                self.ejection_pre_exit_angular_speed,
+            ),
+            None => "none".to_owned(),
+        };
+        let ejection_support_gap_trace = match self.ejection_support_gap_start_frame {
+            Some(gap_frame) => format!(
+                "gap start frame {gap_frame} speed {:.6}/{:.6}; previous frame {} counterparts [{}] max_depth {:.6} warm {:.6}/{:.6} impulse {:.6}/{:.6} initial_speed {:.6}..{:.6} post_speed {:.6}..{:.6}/{:.6} body_speed {:.6}/{:.6} counterpart_speed {:.6}/{:.6} tangent_components body {:.6}/{:.6} counterpart {:.6}/{:.6} drift {:.6}/{:.6} bias {:.6}/{:.6} correction {:.6}/{:.6}; next frame {} counterparts [{}] max_depth {:.6} warm {:.6}/{:.6} impulse {:.6}/{:.6} initial_speed {:.6}..{:.6} post_speed {:.6}..{:.6}/{:.6} body_speed {:.6}/{:.6} counterpart_speed {:.6}/{:.6} tangent_components body {:.6}/{:.6} counterpart {:.6}/{:.6} drift {:.6}/{:.6} bias {:.6}/{:.6} correction {:.6}/{:.6}",
+                self.ejection_support_gap_start_linear_speed,
+                self.ejection_support_gap_start_angular_speed,
+                self.ejection_support_gap_previous_frame
+                    .map(|frame| frame.to_string())
+                    .unwrap_or_else(|| "none".to_owned()),
+                self.ejection_support_gap_previous_counterparts.join(", "),
+                self.ejection_support_gap_previous_max_depth,
+                self.ejection_support_gap_previous_warm_start_normal_sum,
+                self.ejection_support_gap_previous_warm_start_tangent_sum,
+                self.ejection_support_gap_previous_normal_impulse_sum,
+                self.ejection_support_gap_previous_tangent_impulse_sum,
+                self.ejection_support_gap_previous_initial_normal_speed_min,
+                self.ejection_support_gap_previous_initial_normal_speed_max,
+                self.ejection_support_gap_previous_normal_speed_min,
+                self.ejection_support_gap_previous_normal_speed_max,
+                self.ejection_support_gap_previous_tangent_speed_abs_max,
+                self.ejection_support_gap_previous_body_linear_speed,
+                self.ejection_support_gap_previous_body_angular_speed,
+                self.ejection_support_gap_previous_counterpart_linear_speed_max,
+                self.ejection_support_gap_previous_counterpart_angular_speed_max,
+                self.ejection_support_gap_previous_body_tangent_linear_component_max,
+                self.ejection_support_gap_previous_body_tangent_angular_component_max,
+                self.ejection_support_gap_previous_counterpart_tangent_linear_component_max,
+                self.ejection_support_gap_previous_counterpart_tangent_angular_component_max,
+                self.ejection_support_gap_previous_normal_anchor_drift_max,
+                self.ejection_support_gap_previous_tangent_anchor_drift_max,
+                self.ejection_support_gap_previous_position_bias_max,
+                self.ejection_support_gap_previous_restitution_bias_max,
+                self.ejection_support_gap_previous_position_correction_depth_sum,
+                self.ejection_support_gap_previous_position_correction_translation_sum,
+                self.ejection_support_gap_next_frame
+                    .map(|frame| frame.to_string())
+                    .unwrap_or_else(|| "none".to_owned()),
+                self.ejection_support_gap_next_counterparts.join(", "),
+                self.ejection_support_gap_next_max_depth,
+                self.ejection_support_gap_next_warm_start_normal_sum,
+                self.ejection_support_gap_next_warm_start_tangent_sum,
+                self.ejection_support_gap_next_normal_impulse_sum,
+                self.ejection_support_gap_next_tangent_impulse_sum,
+                self.ejection_support_gap_next_initial_normal_speed_min,
+                self.ejection_support_gap_next_initial_normal_speed_max,
+                self.ejection_support_gap_next_normal_speed_min,
+                self.ejection_support_gap_next_normal_speed_max,
+                self.ejection_support_gap_next_tangent_speed_abs_max,
+                self.ejection_support_gap_next_body_linear_speed,
+                self.ejection_support_gap_next_body_angular_speed,
+                self.ejection_support_gap_next_counterpart_linear_speed_max,
+                self.ejection_support_gap_next_counterpart_angular_speed_max,
+                self.ejection_support_gap_next_body_tangent_linear_component_max,
+                self.ejection_support_gap_next_body_tangent_angular_component_max,
+                self.ejection_support_gap_next_counterpart_tangent_linear_component_max,
+                self.ejection_support_gap_next_counterpart_tangent_angular_component_max,
+                self.ejection_support_gap_next_normal_anchor_drift_max,
+                self.ejection_support_gap_next_tangent_anchor_drift_max,
+                self.ejection_support_gap_next_position_bias_max,
+                self.ejection_support_gap_next_restitution_bias_max,
+                self.ejection_support_gap_next_position_correction_depth_sum,
+                self.ejection_support_gap_next_position_correction_translation_sum,
+            ),
+            None => "none".to_owned(),
+        };
+        let ejection_support_gap_upstream_trace = match (
+            self.ejection_support_gap_upstream_frame,
+            self.ejection_support_gap_upstream_counterpart.as_deref(),
+        ) {
+            (Some(frame), Some(counterpart)) => format!(
+                "frame {frame} counterpart {counterpart} speed {:.6}/{:.6}; source_bodies [{}] source_contacts {} source_candidates {} warm_start [{}] continuity same_pair_previous {} edge_swap_candidate {} point_drift {} normal_dot {} local_anchor_drift {}; max_depth {:.6} initial_speed {:.6}..{:.6} post_speed {:.6}..{:.6}/{:.6} bias {:.6} support_friction {:.6} impulse {:.6}/{:.6} correction {:.6}/{:.6}; dry_run geometry {} pressure {} reject_counterpart {} reject_tangent {} eligible {} decision {} pseudo_depth {}..{} pseudo_skin {}; handoff frame_delta {} speed_delta {:.6}/{:.6}",
+                self.ejection_support_gap_upstream_counterpart_linear_speed,
+                self.ejection_support_gap_upstream_counterpart_angular_speed,
+                self.ejection_support_gap_upstream_source_bodies.join(", "),
+                self.ejection_support_gap_upstream_source_contact_count,
+                self.ejection_support_gap_upstream_source_candidate_count,
+                self.ejection_support_gap_upstream_source_warm_start_reasons
+                    .join(", "),
+                self.ejection_support_gap_upstream_source_same_pair_previous_count,
+                self.ejection_support_gap_upstream_source_edge_swap_candidate_count,
+                option_f32(self.ejection_support_gap_upstream_source_point_drift_min),
+                option_f32(self.ejection_support_gap_upstream_source_normal_dot_max),
+                option_f32(self.ejection_support_gap_upstream_source_local_anchor_drift_min),
+                self.ejection_support_gap_upstream_source_max_depth,
+                self.ejection_support_gap_upstream_source_initial_normal_speed_min,
+                self.ejection_support_gap_upstream_source_initial_normal_speed_max,
+                self.ejection_support_gap_upstream_source_normal_speed_min,
+                self.ejection_support_gap_upstream_source_normal_speed_max,
+                self.ejection_support_gap_upstream_source_tangent_speed_abs_max,
+                self.ejection_support_gap_upstream_source_position_bias_max,
+                self.ejection_support_gap_upstream_source_support_friction_sum,
+                self.ejection_support_gap_upstream_source_normal_impulse_sum,
+                self.ejection_support_gap_upstream_source_tangent_impulse_sum,
+                self.ejection_support_gap_upstream_source_correction_depth_sum,
+                self.ejection_support_gap_upstream_source_correction_translation_sum,
+                self.ejection_support_gap_upstream_source_dry_run_geometry_count,
+                self.ejection_support_gap_upstream_source_dry_run_pressure_count,
+                self.ejection_support_gap_upstream_source_dry_run_counterpart_reject_count,
+                self.ejection_support_gap_upstream_source_dry_run_tangent_reject_count,
+                self.ejection_support_gap_upstream_source_dry_run_eligible_count,
+                self.ejection_support_gap_upstream_source_dry_run_decision,
+                option_f32(self.ejection_support_gap_upstream_source_dry_run_pseudo_depth_min),
+                option_f32(self.ejection_support_gap_upstream_source_dry_run_pseudo_depth_max),
+                self.ejection_support_gap_upstream_source_dry_run_pseudo_support_skin_count,
+                option_frame(self.ejection_support_gap_upstream_handoff_frame_delta),
+                self.ejection_support_gap_upstream_handoff_linear_speed_delta,
+                self.ejection_support_gap_upstream_handoff_angular_speed_delta,
+            ),
+            _ => "none".to_owned(),
+        };
+        let late_linear_spike_trace = self.late_linear_spike_trace.to_report_line();
+        let late_angular_spike_trace = self.late_angular_spike_trace.to_report_line();
+        let early_pressure_trace = self.early_pressure_trace.to_report_line();
+        let feature_churn_trace = self.feature_churn_trace.to_report_line();
+
+        format!(
+            "## Matrix Stack Stability Report\n\n\
+- Scenario: {}\n\
+- Frame count: {}\n\
+- Run path: {}\n\
+- Final state hash: {}\n\
+- First bad frame: {} ({})\n\
+- Markers: {}\n\
+- Penetration max / sum: {:.6} / {:.6}\n\
+- Contact churn: peak entered+exited={}\n\
+- Warm-start hit / miss / drop: {} / {} / {}\n\
+- Sleep awake / sleeping: {} / {}\n\
+- Sleep blocker speeds: linear {:.6} at {}, angular {:.6} at {}\n\
+- Quiet window f>={}: max linear {:.6} at {} frame {}, max angular {:.6} at {} frame {}\n\
+- Late linear spike trace: {}\n\
+- Late angular spike trace: {}\n\
+- Early pressure trace f={}..{}: {}\n\
+- Feature churn trace: {}\n\
+- Late correction/churn f>={}: max correction translation {:.6}, max correction total {:.6}, max corrected bodies {}, warm-start drop peak {}, churn peak {}\n\
+- Dense support friction: max {:.6} at frame {}, contacts used {}\n\
+- Floor ejection: {}; final outside floor bodies={}\n\
+- Ejection trace: {}\n\
+- Ejection dynamic-support trace: {}\n\
+- Ejection dynamic-impulse trace: {}\n\
+- Ejection velocity trace: {}\n\
+- Ejection support-gap trace: {}\n\
+- Ejection support-gap upstream trace: {}\n\
+- Solver row max: {} at frame {}\n\
+- Missing evidence: {}\n\
+- Suspected next milestone: E4\n\
+- Verification commands: rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack\n",
+            run.manifest.scenario_id,
+            run.frames.len(),
+            run.path.display(),
+            self.final_state_hash,
+            first_bad_frame,
+            first_bad_state_hash,
+            markers,
+            self.max_penetration_depth,
+            self.max_penetration_sum,
+            self.peak_churn,
+            self.final_warm_start_hit_count,
+            self.final_warm_start_miss_count,
+            self.final_warm_start_drop_count,
+            self.final_awake_dynamic_body_count,
+            self.final_sleeping_dynamic_body_count,
+            self.final_max_linear_speed,
+            final_max_linear_body,
+            self.final_max_angular_speed,
+            final_max_angular_body,
+            self.quiet_window_start_frame,
+            self.quiet_window_max_linear_speed,
+            quiet_max_linear_body,
+            self.quiet_window_max_linear_frame
+                .map(|frame| frame.to_string())
+                .unwrap_or_else(|| "none".to_owned()),
+            self.quiet_window_max_angular_speed,
+            quiet_max_angular_body,
+            self.quiet_window_max_angular_frame
+                .map(|frame| frame.to_string())
+                .unwrap_or_else(|| "none".to_owned()),
+            late_linear_spike_trace,
+            late_angular_spike_trace,
+            self.early_pressure_trace.start_frame,
+            self.early_pressure_trace.end_frame,
+            early_pressure_trace,
+            feature_churn_trace,
+            self.quiet_window_start_frame,
+            self.late_position_correction_max_translation,
+            self.late_position_correction_total_translation,
+            self.late_position_correction_body_count,
+            self.late_warm_start_drop_count,
+            self.late_contact_churn_peak,
+            self.max_support_friction_impulse,
+            self.max_support_friction_frame
+                .map(|frame| frame.to_string())
+                .unwrap_or_else(|| "none".to_owned()),
+            self.support_friction_contact_count,
+            floor_exit,
+            self.final_outside_floor_body_count,
+            ejection_trace,
+            ejection_dynamic_trace,
+            ejection_dynamic_impulse_trace,
+            ejection_velocity_trace,
+            ejection_support_gap_trace,
+            ejection_support_gap_upstream_trace,
+            self.max_contact_row_count,
+            self.max_contact_row_frame
+                .map(|frame| frame.to_string())
+                .unwrap_or_else(|| "none".to_owned()),
+            missing,
+        )
+    }
+}
+
+fn matrix_stack_stress_report(run: &RunResult) -> MatrixStackStressReport {
+    let first_bad_frame = run.frames.iter().find(|frame| {
+        frame.diagnostics.markers.iter().any(|marker| {
+            matches!(
+                marker.severity,
+                DiagnosticSeverity::Warning | DiagnosticSeverity::Severe
+            )
+        })
+    });
+    let max_penetration_depth = run
+        .frames
+        .iter()
+        .map(|frame| frame.diagnostics.stability.penetration.max_depth)
+        .fold(0.0, f64::max);
+    let max_penetration_sum = run
+        .frames
+        .iter()
+        .map(|frame| frame.diagnostics.stability.penetration.total_depth)
+        .fold(0.0, f64::max);
+    // "churn" means contact pairs entering/exiting instead of persisting.
+    // Tracking the peak frame-level churn keeps the stress report comparable
+    // without inventing a second diagnostics pipeline.
+    let peak_churn = run
+        .frames
+        .iter()
+        .map(|frame| {
+            frame.diagnostics.stability.contact_churn.entered
+                + frame.diagnostics.stability.contact_churn.exited
+        })
+        .max()
+        .unwrap_or(0);
+    let final_frame = run
+        .frames
+        .last()
+        .expect("stress run should have a final frame");
+    let final_dynamic_bodies = final_frame
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+        .collect::<Vec<_>>();
+    let final_max_linear = final_dynamic_bodies
+        .iter()
+        .map(|body| (body.linear_velocity.length(), format!("{:?}", body.handle)))
+        .max_by(|(lhs, _), (rhs, _)| lhs.partial_cmp(rhs).unwrap());
+    let final_max_angular = final_dynamic_bodies
+        .iter()
+        .map(|body| (body.angular_velocity.abs(), format!("{:?}", body.handle)))
+        .max_by(|(lhs, _), (rhs, _)| lhs.partial_cmp(rhs).unwrap());
+    let quiet_window_frames = run
+        .frames
+        .iter()
+        .filter(|frame| frame.frame_index >= MATRIX_STACK_QUIET_WINDOW_START_FRAME)
+        .collect::<Vec<_>>();
+    let quiet_window_max_linear = quiet_window_frames
+        .iter()
+        .flat_map(|frame| {
+            frame
+                .snapshot
+                .bodies
+                .iter()
+                .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+                .map(|body| {
+                    (
+                        body.linear_velocity.length(),
+                        format!("{:?}", body.handle),
+                        frame.frame_index,
+                        body.handle,
+                    )
+                })
+        })
+        .max_by(|(lhs, _, _, _), (rhs, _, _, _)| lhs.partial_cmp(rhs).unwrap());
+    let quiet_window_max_angular = quiet_window_frames
+        .iter()
+        .flat_map(|frame| {
+            frame
+                .snapshot
+                .bodies
+                .iter()
+                .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+                .map(|body| {
+                    (
+                        body.angular_velocity.abs(),
+                        format!("{:?}", body.handle),
+                        frame.frame_index,
+                        body.handle,
+                    )
+                })
+        })
+        .max_by(|(lhs, _, _, _), (rhs, _, _, _)| lhs.partial_cmp(rhs).unwrap());
+    let late_linear_spike_trace = quiet_window_max_linear
+        .as_ref()
+        .map(|(_, _, frame, body)| late_velocity_trace(run, *frame, *body))
+        .unwrap_or_default();
+    let late_angular_spike_trace = quiet_window_max_angular
+        .as_ref()
+        .map(|(_, _, frame, body)| late_velocity_trace(run, *frame, *body))
+        .unwrap_or_default();
+    let early_pressure_trace = pressure_window_trace(
+        run,
+        MATRIX_STACK_PRESSURE_WINDOW_START_FRAME,
+        MATRIX_STACK_PRESSURE_WINDOW_END_FRAME,
+    );
+    let feature_churn_trace = feature_churn_trace(run);
+    let late_position_correction_max_translation = quiet_window_frames
+        .iter()
+        .map(|frame| frame.stats.position_correction_max_translation)
+        .fold(0.0, f32::max);
+    let late_position_correction_total_translation = quiet_window_frames
+        .iter()
+        .map(|frame| frame.stats.position_correction_total_translation)
+        .fold(0.0, f32::max);
+    let late_position_correction_body_count = quiet_window_frames
+        .iter()
+        .map(|frame| frame.stats.position_correction_body_count)
+        .max()
+        .unwrap_or(0);
+    let late_warm_start_drop_count = quiet_window_frames
+        .iter()
+        .map(|frame| frame.stats.warm_start_drop_count)
+        .max()
+        .unwrap_or(0);
+    let late_contact_churn_peak = quiet_window_frames
+        .iter()
+        .map(|frame| {
+            frame.diagnostics.stability.contact_churn.entered
+                + frame.diagnostics.stability.contact_churn.exited
+        })
+        .max()
+        .unwrap_or(0);
+    let max_support_friction = run
+        .frames
+        .iter()
+        .flat_map(|frame| {
+            frame
+                .snapshot
+                .contacts
+                .iter()
+                .map(|contact| (contact.solver_support_friction_impulse, frame.frame_index))
+        })
+        .max_by(|(lhs, _), (rhs, _)| lhs.partial_cmp(rhs).unwrap());
+    let support_friction_contact_count = run
+        .frames
+        .iter()
+        .flat_map(|frame| frame.snapshot.contacts.iter())
+        .filter(|contact| contact.solver_support_friction_impulse > f32::EPSILON)
+        .count();
+    let floor_bounds = matrix_stack_floor_x_bounds(run);
+    let first_floor_exit = floor_bounds.and_then(|bounds| {
+        run.frames.iter().find_map(|frame| {
+            frame
+                .snapshot
+                .bodies
+                .iter()
+                .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+                .find(|body| {
+                    let x = body.transform.translation.x();
+                    x < bounds.0 || x > bounds.1
+                })
+                .map(|body| {
+                    (
+                        frame.frame_index,
+                        body.handle,
+                        body.transform.translation.x(),
+                    )
+                })
+        })
+    });
+    let final_outside_floor_body_count = floor_bounds
+        .map(|bounds| {
+            final_dynamic_bodies
+                .iter()
+                .filter(|body| {
+                    let x = body.transform.translation.x();
+                    x < bounds.0 || x > bounds.1
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    let ejection_trace = matrix_stack_ejection_trace(run, first_floor_exit);
+    let max_contact_row_frame = run
+        .frames
+        .iter()
+        .max_by_key(|frame| frame.diagnostics.stability.island.contact_row_count);
+    let mut missing_evidence = Vec::new();
+    for frame in &run.frames {
+        for missing in &frame.diagnostics.missing_evidence {
+            if !missing_evidence.contains(&missing.kind) {
+                missing_evidence.push(missing.kind);
+            }
+        }
+    }
+
+    MatrixStackStressReport {
+        final_state_hash: run.manifest.final_state_hash.clone(),
+        first_bad_frame: first_bad_frame.map(|frame| frame.frame_index),
+        first_bad_state_hash: first_bad_frame.map(|frame| frame.state_hash.clone()),
+        first_bad_markers: first_bad_frame
+            .into_iter()
+            .flat_map(|frame| frame.diagnostics.markers.iter())
+            .map(|marker| format!("{:?}:{:?}", marker.kind, marker.severity))
+            .collect(),
+        max_penetration_depth,
+        max_penetration_sum,
+        peak_churn,
+        final_warm_start_hit_count: final_frame.diagnostics.stability.warm_start.hit_count,
+        final_warm_start_miss_count: final_frame.diagnostics.stability.warm_start.miss_count,
+        final_warm_start_drop_count: final_frame.diagnostics.stability.warm_start.drop_count,
+        final_awake_dynamic_body_count: final_frame
+            .diagnostics
+            .stability
+            .sleep
+            .awake_dynamic_body_count,
+        final_sleeping_dynamic_body_count: final_frame
+            .diagnostics
+            .stability
+            .sleep
+            .sleeping_dynamic_body_count,
+        final_max_linear_speed: final_max_linear
+            .as_ref()
+            .map(|(speed, _)| *speed)
+            .unwrap_or_default(),
+        final_max_linear_body: final_max_linear.map(|(_, body)| body),
+        final_max_angular_speed: final_max_angular
+            .as_ref()
+            .map(|(speed, _)| *speed)
+            .unwrap_or_default(),
+        final_max_angular_body: final_max_angular.map(|(_, body)| body),
+        quiet_window_start_frame: MATRIX_STACK_QUIET_WINDOW_START_FRAME,
+        quiet_window_max_linear_speed: quiet_window_max_linear
+            .as_ref()
+            .map(|(speed, _, _, _)| *speed)
+            .unwrap_or_default(),
+        quiet_window_max_linear_body: quiet_window_max_linear
+            .as_ref()
+            .map(|(_, body, _, _)| body.clone()),
+        quiet_window_max_linear_frame: quiet_window_max_linear.map(|(_, _, frame, _)| frame),
+        late_linear_spike_trace,
+        quiet_window_max_angular_speed: quiet_window_max_angular
+            .as_ref()
+            .map(|(speed, _, _, _)| *speed)
+            .unwrap_or_default(),
+        quiet_window_max_angular_body: quiet_window_max_angular
+            .as_ref()
+            .map(|(_, body, _, _)| body.clone()),
+        quiet_window_max_angular_frame: quiet_window_max_angular.map(|(_, _, frame, _)| frame),
+        late_angular_spike_trace,
+        early_pressure_trace,
+        feature_churn_trace,
+        late_position_correction_max_translation,
+        late_position_correction_total_translation,
+        late_position_correction_body_count,
+        late_warm_start_drop_count,
+        late_contact_churn_peak,
+        max_support_friction_impulse: max_support_friction
+            .map(|(impulse, _)| impulse)
+            .unwrap_or(0.0),
+        max_support_friction_frame: max_support_friction.map(|(_, frame)| frame),
+        support_friction_contact_count,
+        first_floor_exit_frame: first_floor_exit.as_ref().map(|(frame, _, _)| *frame),
+        first_floor_exit_body: first_floor_exit
+            .as_ref()
+            .map(|(_, body, _)| format!("{body:?}")),
+        first_floor_exit_x: first_floor_exit.map(|(_, _, x)| x),
+        final_outside_floor_body_count,
+        ejection_pre_exit_frame: ejection_trace.pre_exit_frame,
+        ejection_pre_exit_x: ejection_trace.pre_exit_x,
+        ejection_pre_exit_linear_speed: ejection_trace.pre_exit_linear_speed,
+        ejection_pre_exit_angular_speed: ejection_trace.pre_exit_angular_speed,
+        ejection_last_contact_frame: ejection_trace.last_contact_frame,
+        ejection_last_contact_count: ejection_trace.last_contact_count,
+        ejection_last_contact_counterparts: ejection_trace.last_contact_counterparts,
+        ejection_last_contact_max_depth: ejection_trace.last_contact_max_depth,
+        ejection_last_contact_normal_impulse_sum: ejection_trace.last_contact_normal_impulse_sum,
+        ejection_last_contact_tangent_impulse_sum: ejection_trace.last_contact_tangent_impulse_sum,
+        ejection_last_dynamic_contact_frame: ejection_trace.last_dynamic_contact_frame,
+        ejection_last_dynamic_contact_count: ejection_trace.last_dynamic_contact_count,
+        ejection_last_dynamic_contact_counterparts: ejection_trace
+            .last_dynamic_contact_counterparts,
+        ejection_last_dynamic_contact_max_depth: ejection_trace.last_dynamic_contact_max_depth,
+        ejection_last_dynamic_contact_normal_impulse_sum: ejection_trace
+            .last_dynamic_contact_normal_impulse_sum,
+        ejection_last_dynamic_contact_tangent_impulse_sum: ejection_trace
+            .last_dynamic_contact_tangent_impulse_sum,
+        ejection_last_dynamic_contact_warm_start_normal_sum: ejection_trace
+            .last_dynamic_contact_warm_start_normal_sum,
+        ejection_last_dynamic_contact_warm_start_tangent_sum: ejection_trace
+            .last_dynamic_contact_warm_start_tangent_sum,
+        ejection_last_dynamic_contact_warm_start_reasons: ejection_trace
+            .last_dynamic_contact_warm_start_reasons,
+        ejection_last_dynamic_contact_normal_speed_min: ejection_trace
+            .last_dynamic_contact_normal_speed_min,
+        ejection_last_dynamic_contact_normal_speed_max: ejection_trace
+            .last_dynamic_contact_normal_speed_max,
+        ejection_last_dynamic_contact_tangent_speed_abs_max: ejection_trace
+            .last_dynamic_contact_tangent_speed_abs_max,
+        ejection_last_dynamic_impulse_frame: ejection_trace.last_dynamic_impulse_frame,
+        ejection_last_dynamic_impulse_counterparts: ejection_trace
+            .last_dynamic_impulse_counterparts,
+        ejection_last_dynamic_impulse_normal_sum: ejection_trace.last_dynamic_impulse_normal_sum,
+        ejection_last_dynamic_impulse_tangent_sum: ejection_trace.last_dynamic_impulse_tangent_sum,
+        ejection_last_dynamic_impulse_normal_speed_min: ejection_trace
+            .last_dynamic_impulse_normal_speed_min,
+        ejection_last_dynamic_impulse_normal_speed_max: ejection_trace
+            .last_dynamic_impulse_normal_speed_max,
+        ejection_last_dynamic_impulse_tangent_speed_abs_max: ejection_trace
+            .last_dynamic_impulse_tangent_speed_abs_max,
+        ejection_row_max_frame: ejection_trace.row_max_frame,
+        ejection_row_max_linear_speed: ejection_trace.row_max_linear_speed,
+        ejection_row_max_angular_speed: ejection_trace.row_max_angular_speed,
+        ejection_last_dynamic_impulse_body_linear_speed: ejection_trace
+            .last_dynamic_impulse_body_linear_speed,
+        ejection_last_dynamic_impulse_body_angular_speed: ejection_trace
+            .last_dynamic_impulse_body_angular_speed,
+        ejection_last_dynamic_contact_body_linear_speed: ejection_trace
+            .last_dynamic_contact_body_linear_speed,
+        ejection_last_dynamic_contact_body_angular_speed: ejection_trace
+            .last_dynamic_contact_body_angular_speed,
+        ejection_support_gap_start_frame: ejection_trace.support_gap_start_frame,
+        ejection_support_gap_start_linear_speed: ejection_trace.support_gap_start_linear_speed,
+        ejection_support_gap_start_angular_speed: ejection_trace.support_gap_start_angular_speed,
+        ejection_support_gap_previous_frame: ejection_trace.support_gap_previous_frame,
+        ejection_support_gap_previous_counterparts: ejection_trace
+            .support_gap_previous_counterparts,
+        ejection_support_gap_previous_max_depth: ejection_trace.support_gap_previous_max_depth,
+        ejection_support_gap_previous_warm_start_normal_sum: ejection_trace
+            .support_gap_previous_warm_start_normal_sum,
+        ejection_support_gap_previous_warm_start_tangent_sum: ejection_trace
+            .support_gap_previous_warm_start_tangent_sum,
+        ejection_support_gap_previous_normal_impulse_sum: ejection_trace
+            .support_gap_previous_normal_impulse_sum,
+        ejection_support_gap_previous_tangent_impulse_sum: ejection_trace
+            .support_gap_previous_tangent_impulse_sum,
+        ejection_support_gap_previous_initial_normal_speed_min: ejection_trace
+            .support_gap_previous_initial_normal_speed_min,
+        ejection_support_gap_previous_initial_normal_speed_max: ejection_trace
+            .support_gap_previous_initial_normal_speed_max,
+        ejection_support_gap_previous_normal_speed_min: ejection_trace
+            .support_gap_previous_normal_speed_min,
+        ejection_support_gap_previous_normal_speed_max: ejection_trace
+            .support_gap_previous_normal_speed_max,
+        ejection_support_gap_previous_tangent_speed_abs_max: ejection_trace
+            .support_gap_previous_tangent_speed_abs_max,
+        ejection_support_gap_previous_body_linear_speed: ejection_trace
+            .support_gap_previous_body_linear_speed,
+        ejection_support_gap_previous_body_angular_speed: ejection_trace
+            .support_gap_previous_body_angular_speed,
+        ejection_support_gap_previous_counterpart_linear_speed_max: ejection_trace
+            .support_gap_previous_counterpart_linear_speed_max,
+        ejection_support_gap_previous_counterpart_angular_speed_max: ejection_trace
+            .support_gap_previous_counterpart_angular_speed_max,
+        ejection_support_gap_previous_body_tangent_linear_component_max: ejection_trace
+            .support_gap_previous_body_tangent_linear_component_max,
+        ejection_support_gap_previous_body_tangent_angular_component_max: ejection_trace
+            .support_gap_previous_body_tangent_angular_component_max,
+        ejection_support_gap_previous_counterpart_tangent_linear_component_max: ejection_trace
+            .support_gap_previous_counterpart_tangent_linear_component_max,
+        ejection_support_gap_previous_counterpart_tangent_angular_component_max: ejection_trace
+            .support_gap_previous_counterpart_tangent_angular_component_max,
+        ejection_support_gap_previous_normal_anchor_drift_max: ejection_trace
+            .support_gap_previous_normal_anchor_drift_max,
+        ejection_support_gap_previous_tangent_anchor_drift_max: ejection_trace
+            .support_gap_previous_tangent_anchor_drift_max,
+        ejection_support_gap_previous_position_bias_max: ejection_trace
+            .support_gap_previous_position_bias_max,
+        ejection_support_gap_previous_restitution_bias_max: ejection_trace
+            .support_gap_previous_restitution_bias_max,
+        ejection_support_gap_previous_position_correction_depth_sum: ejection_trace
+            .support_gap_previous_position_correction_depth_sum,
+        ejection_support_gap_previous_position_correction_translation_sum: ejection_trace
+            .support_gap_previous_position_correction_translation_sum,
+        ejection_support_gap_next_frame: ejection_trace.support_gap_next_frame,
+        ejection_support_gap_next_counterparts: ejection_trace.support_gap_next_counterparts,
+        ejection_support_gap_next_max_depth: ejection_trace.support_gap_next_max_depth,
+        ejection_support_gap_next_warm_start_normal_sum: ejection_trace
+            .support_gap_next_warm_start_normal_sum,
+        ejection_support_gap_next_warm_start_tangent_sum: ejection_trace
+            .support_gap_next_warm_start_tangent_sum,
+        ejection_support_gap_next_normal_impulse_sum: ejection_trace
+            .support_gap_next_normal_impulse_sum,
+        ejection_support_gap_next_tangent_impulse_sum: ejection_trace
+            .support_gap_next_tangent_impulse_sum,
+        ejection_support_gap_next_initial_normal_speed_min: ejection_trace
+            .support_gap_next_initial_normal_speed_min,
+        ejection_support_gap_next_initial_normal_speed_max: ejection_trace
+            .support_gap_next_initial_normal_speed_max,
+        ejection_support_gap_next_normal_speed_min: ejection_trace
+            .support_gap_next_normal_speed_min,
+        ejection_support_gap_next_normal_speed_max: ejection_trace
+            .support_gap_next_normal_speed_max,
+        ejection_support_gap_next_tangent_speed_abs_max: ejection_trace
+            .support_gap_next_tangent_speed_abs_max,
+        ejection_support_gap_next_body_linear_speed: ejection_trace
+            .support_gap_next_body_linear_speed,
+        ejection_support_gap_next_body_angular_speed: ejection_trace
+            .support_gap_next_body_angular_speed,
+        ejection_support_gap_next_counterpart_linear_speed_max: ejection_trace
+            .support_gap_next_counterpart_linear_speed_max,
+        ejection_support_gap_next_counterpart_angular_speed_max: ejection_trace
+            .support_gap_next_counterpart_angular_speed_max,
+        ejection_support_gap_next_body_tangent_linear_component_max: ejection_trace
+            .support_gap_next_body_tangent_linear_component_max,
+        ejection_support_gap_next_body_tangent_angular_component_max: ejection_trace
+            .support_gap_next_body_tangent_angular_component_max,
+        ejection_support_gap_next_counterpart_tangent_linear_component_max: ejection_trace
+            .support_gap_next_counterpart_tangent_linear_component_max,
+        ejection_support_gap_next_counterpart_tangent_angular_component_max: ejection_trace
+            .support_gap_next_counterpart_tangent_angular_component_max,
+        ejection_support_gap_next_normal_anchor_drift_max: ejection_trace
+            .support_gap_next_normal_anchor_drift_max,
+        ejection_support_gap_next_tangent_anchor_drift_max: ejection_trace
+            .support_gap_next_tangent_anchor_drift_max,
+        ejection_support_gap_next_position_bias_max: ejection_trace
+            .support_gap_next_position_bias_max,
+        ejection_support_gap_next_restitution_bias_max: ejection_trace
+            .support_gap_next_restitution_bias_max,
+        ejection_support_gap_next_position_correction_depth_sum: ejection_trace
+            .support_gap_next_position_correction_depth_sum,
+        ejection_support_gap_next_position_correction_translation_sum: ejection_trace
+            .support_gap_next_position_correction_translation_sum,
+        ejection_support_gap_upstream_frame: ejection_trace.support_gap_upstream_frame,
+        ejection_support_gap_upstream_counterpart: ejection_trace.support_gap_upstream_counterpart,
+        ejection_support_gap_upstream_source_bodies: ejection_trace
+            .support_gap_upstream_source_bodies,
+        ejection_support_gap_upstream_counterpart_linear_speed: ejection_trace
+            .support_gap_upstream_counterpart_linear_speed,
+        ejection_support_gap_upstream_counterpart_angular_speed: ejection_trace
+            .support_gap_upstream_counterpart_angular_speed,
+        ejection_support_gap_upstream_source_contact_count: ejection_trace
+            .support_gap_upstream_source_contact_count,
+        ejection_support_gap_upstream_source_candidate_count: ejection_trace
+            .support_gap_upstream_source_candidate_count,
+        ejection_support_gap_upstream_source_warm_start_reasons: ejection_trace
+            .support_gap_upstream_source_warm_start_reasons,
+        ejection_support_gap_upstream_source_same_pair_previous_count: ejection_trace
+            .support_gap_upstream_source_same_pair_previous_count,
+        ejection_support_gap_upstream_source_edge_swap_candidate_count: ejection_trace
+            .support_gap_upstream_source_edge_swap_candidate_count,
+        ejection_support_gap_upstream_source_point_drift_min: ejection_trace
+            .support_gap_upstream_source_point_drift_min,
+        ejection_support_gap_upstream_source_normal_dot_max: ejection_trace
+            .support_gap_upstream_source_normal_dot_max,
+        ejection_support_gap_upstream_source_local_anchor_drift_min: ejection_trace
+            .support_gap_upstream_source_local_anchor_drift_min,
+        ejection_support_gap_upstream_source_max_depth: ejection_trace
+            .support_gap_upstream_source_max_depth,
+        ejection_support_gap_upstream_source_initial_normal_speed_min: ejection_trace
+            .support_gap_upstream_source_initial_normal_speed_min,
+        ejection_support_gap_upstream_source_initial_normal_speed_max: ejection_trace
+            .support_gap_upstream_source_initial_normal_speed_max,
+        ejection_support_gap_upstream_source_normal_speed_min: ejection_trace
+            .support_gap_upstream_source_normal_speed_min,
+        ejection_support_gap_upstream_source_normal_speed_max: ejection_trace
+            .support_gap_upstream_source_normal_speed_max,
+        ejection_support_gap_upstream_source_tangent_speed_abs_max: ejection_trace
+            .support_gap_upstream_source_tangent_speed_abs_max,
+        ejection_support_gap_upstream_source_position_bias_max: ejection_trace
+            .support_gap_upstream_source_position_bias_max,
+        ejection_support_gap_upstream_source_support_friction_sum: ejection_trace
+            .support_gap_upstream_source_support_friction_sum,
+        ejection_support_gap_upstream_source_normal_impulse_sum: ejection_trace
+            .support_gap_upstream_source_normal_impulse_sum,
+        ejection_support_gap_upstream_source_tangent_impulse_sum: ejection_trace
+            .support_gap_upstream_source_tangent_impulse_sum,
+        ejection_support_gap_upstream_source_correction_depth_sum: ejection_trace
+            .support_gap_upstream_source_correction_depth_sum,
+        ejection_support_gap_upstream_source_correction_translation_sum: ejection_trace
+            .support_gap_upstream_source_correction_translation_sum,
+        ejection_support_gap_upstream_source_dry_run_geometry_count: ejection_trace
+            .support_gap_upstream_source_dry_run_geometry_count,
+        ejection_support_gap_upstream_source_dry_run_pressure_count: ejection_trace
+            .support_gap_upstream_source_dry_run_pressure_count,
+        ejection_support_gap_upstream_source_dry_run_counterpart_reject_count: ejection_trace
+            .support_gap_upstream_source_dry_run_counterpart_reject_count,
+        ejection_support_gap_upstream_source_dry_run_tangent_reject_count: ejection_trace
+            .support_gap_upstream_source_dry_run_tangent_reject_count,
+        ejection_support_gap_upstream_source_dry_run_eligible_count: ejection_trace
+            .support_gap_upstream_source_dry_run_eligible_count,
+        ejection_support_gap_upstream_source_dry_run_decision: ejection_trace
+            .support_gap_upstream_source_dry_run_decision,
+        ejection_support_gap_upstream_source_dry_run_pseudo_depth_min: ejection_trace
+            .support_gap_upstream_source_dry_run_pseudo_depth_min,
+        ejection_support_gap_upstream_source_dry_run_pseudo_depth_max: ejection_trace
+            .support_gap_upstream_source_dry_run_pseudo_depth_max,
+        ejection_support_gap_upstream_source_dry_run_pseudo_support_skin_count: ejection_trace
+            .support_gap_upstream_source_dry_run_pseudo_support_skin_count,
+        ejection_support_gap_upstream_handoff_frame_delta: ejection_trace
+            .support_gap_upstream_handoff_frame_delta,
+        ejection_support_gap_upstream_handoff_linear_speed_delta: ejection_trace
+            .support_gap_upstream_handoff_linear_speed_delta,
+        ejection_support_gap_upstream_handoff_angular_speed_delta: ejection_trace
+            .support_gap_upstream_handoff_angular_speed_delta,
+        max_contact_row_count: run
+            .frames
+            .iter()
+            .map(|frame| frame.diagnostics.stability.island.contact_row_count)
+            .max()
+            .unwrap_or(0),
+        max_contact_row_frame: max_contact_row_frame.map(|frame| frame.frame_index),
+        missing_evidence,
+    }
+}
+
+#[derive(Default)]
+struct EjectionTrace {
+    pre_exit_frame: Option<usize>,
+    pre_exit_x: Option<f32>,
+    pre_exit_linear_speed: f32,
+    pre_exit_angular_speed: f32,
+    last_contact_frame: Option<usize>,
+    last_contact_count: usize,
+    last_contact_counterparts: Vec<String>,
+    last_contact_max_depth: f32,
+    last_contact_normal_impulse_sum: f32,
+    last_contact_tangent_impulse_sum: f32,
+    last_dynamic_contact_frame: Option<usize>,
+    last_dynamic_contact_count: usize,
+    last_dynamic_contact_counterparts: Vec<String>,
+    last_dynamic_contact_max_depth: f32,
+    last_dynamic_contact_normal_impulse_sum: f32,
+    last_dynamic_contact_tangent_impulse_sum: f32,
+    last_dynamic_contact_warm_start_normal_sum: f32,
+    last_dynamic_contact_warm_start_tangent_sum: f32,
+    last_dynamic_contact_warm_start_reasons: Vec<String>,
+    last_dynamic_contact_normal_speed_min: f32,
+    last_dynamic_contact_normal_speed_max: f32,
+    last_dynamic_contact_tangent_speed_abs_max: f32,
+    last_dynamic_impulse_frame: Option<usize>,
+    last_dynamic_impulse_counterparts: Vec<String>,
+    last_dynamic_impulse_normal_sum: f32,
+    last_dynamic_impulse_tangent_sum: f32,
+    last_dynamic_impulse_normal_speed_min: f32,
+    last_dynamic_impulse_normal_speed_max: f32,
+    last_dynamic_impulse_tangent_speed_abs_max: f32,
+    row_max_frame: Option<usize>,
+    row_max_linear_speed: f32,
+    row_max_angular_speed: f32,
+    last_dynamic_impulse_body_linear_speed: f32,
+    last_dynamic_impulse_body_angular_speed: f32,
+    last_dynamic_contact_body_linear_speed: f32,
+    last_dynamic_contact_body_angular_speed: f32,
+    support_gap_start_frame: Option<usize>,
+    support_gap_start_linear_speed: f32,
+    support_gap_start_angular_speed: f32,
+    support_gap_previous_frame: Option<usize>,
+    support_gap_previous_counterparts: Vec<String>,
+    support_gap_previous_max_depth: f32,
+    support_gap_previous_warm_start_normal_sum: f32,
+    support_gap_previous_warm_start_tangent_sum: f32,
+    support_gap_previous_normal_impulse_sum: f32,
+    support_gap_previous_tangent_impulse_sum: f32,
+    support_gap_previous_initial_normal_speed_min: f32,
+    support_gap_previous_initial_normal_speed_max: f32,
+    support_gap_previous_normal_speed_min: f32,
+    support_gap_previous_normal_speed_max: f32,
+    support_gap_previous_tangent_speed_abs_max: f32,
+    support_gap_previous_body_linear_speed: f32,
+    support_gap_previous_body_angular_speed: f32,
+    support_gap_previous_counterpart_linear_speed_max: f32,
+    support_gap_previous_counterpart_angular_speed_max: f32,
+    support_gap_previous_body_tangent_linear_component_max: f32,
+    support_gap_previous_body_tangent_angular_component_max: f32,
+    support_gap_previous_counterpart_tangent_linear_component_max: f32,
+    support_gap_previous_counterpart_tangent_angular_component_max: f32,
+    support_gap_previous_normal_anchor_drift_max: f32,
+    support_gap_previous_tangent_anchor_drift_max: f32,
+    support_gap_previous_position_bias_max: f32,
+    support_gap_previous_restitution_bias_max: f32,
+    support_gap_previous_position_correction_depth_sum: f32,
+    support_gap_previous_position_correction_translation_sum: f32,
+    support_gap_next_frame: Option<usize>,
+    support_gap_next_counterparts: Vec<String>,
+    support_gap_next_max_depth: f32,
+    support_gap_next_warm_start_normal_sum: f32,
+    support_gap_next_warm_start_tangent_sum: f32,
+    support_gap_next_normal_impulse_sum: f32,
+    support_gap_next_tangent_impulse_sum: f32,
+    support_gap_next_initial_normal_speed_min: f32,
+    support_gap_next_initial_normal_speed_max: f32,
+    support_gap_next_normal_speed_min: f32,
+    support_gap_next_normal_speed_max: f32,
+    support_gap_next_tangent_speed_abs_max: f32,
+    support_gap_next_body_linear_speed: f32,
+    support_gap_next_body_angular_speed: f32,
+    support_gap_next_counterpart_linear_speed_max: f32,
+    support_gap_next_counterpart_angular_speed_max: f32,
+    support_gap_next_body_tangent_linear_component_max: f32,
+    support_gap_next_body_tangent_angular_component_max: f32,
+    support_gap_next_counterpart_tangent_linear_component_max: f32,
+    support_gap_next_counterpart_tangent_angular_component_max: f32,
+    support_gap_next_normal_anchor_drift_max: f32,
+    support_gap_next_tangent_anchor_drift_max: f32,
+    support_gap_next_position_bias_max: f32,
+    support_gap_next_restitution_bias_max: f32,
+    support_gap_next_position_correction_depth_sum: f32,
+    support_gap_next_position_correction_translation_sum: f32,
+    support_gap_upstream_frame: Option<usize>,
+    support_gap_upstream_counterpart: Option<String>,
+    support_gap_upstream_source_bodies: Vec<String>,
+    support_gap_upstream_counterpart_linear_speed: f32,
+    support_gap_upstream_counterpart_angular_speed: f32,
+    support_gap_upstream_source_contact_count: usize,
+    support_gap_upstream_source_candidate_count: usize,
+    support_gap_upstream_source_warm_start_reasons: Vec<String>,
+    support_gap_upstream_source_same_pair_previous_count: usize,
+    support_gap_upstream_source_edge_swap_candidate_count: usize,
+    support_gap_upstream_source_point_drift_min: Option<f32>,
+    support_gap_upstream_source_normal_dot_max: Option<f32>,
+    support_gap_upstream_source_local_anchor_drift_min: Option<f32>,
+    support_gap_upstream_source_max_depth: f32,
+    support_gap_upstream_source_initial_normal_speed_min: f32,
+    support_gap_upstream_source_initial_normal_speed_max: f32,
+    support_gap_upstream_source_normal_speed_min: f32,
+    support_gap_upstream_source_normal_speed_max: f32,
+    support_gap_upstream_source_tangent_speed_abs_max: f32,
+    support_gap_upstream_source_position_bias_max: f32,
+    support_gap_upstream_source_support_friction_sum: f32,
+    support_gap_upstream_source_normal_impulse_sum: f32,
+    support_gap_upstream_source_tangent_impulse_sum: f32,
+    support_gap_upstream_source_correction_depth_sum: f32,
+    support_gap_upstream_source_correction_translation_sum: f32,
+    support_gap_upstream_source_dry_run_geometry_count: usize,
+    support_gap_upstream_source_dry_run_pressure_count: usize,
+    support_gap_upstream_source_dry_run_counterpart_reject_count: usize,
+    support_gap_upstream_source_dry_run_tangent_reject_count: usize,
+    support_gap_upstream_source_dry_run_eligible_count: usize,
+    support_gap_upstream_source_dry_run_decision: String,
+    support_gap_upstream_source_dry_run_pseudo_depth_min: Option<f32>,
+    support_gap_upstream_source_dry_run_pseudo_depth_max: Option<f32>,
+    support_gap_upstream_source_dry_run_pseudo_support_skin_count: usize,
+    support_gap_upstream_handoff_frame_delta: Option<usize>,
+    support_gap_upstream_handoff_linear_speed_delta: f32,
+    support_gap_upstream_handoff_angular_speed_delta: f32,
+}
+
+#[derive(Default, Debug)]
+struct PressureWindowTrace {
+    start_frame: usize,
+    end_frame: usize,
+    max_tangent_frame: Option<usize>,
+    max_tangent_body_pair: Option<[BodyHandle; 2]>,
+    max_tangent_bodies: Vec<String>,
+    max_tangent_speed_abs: f32,
+    max_tangent_depth: f32,
+    max_tangent_initial_normal_speed: f32,
+    max_tangent_final_normal_speed: f32,
+    max_tangent_normal_impulse: f32,
+    max_tangent_tangent_impulse: f32,
+    max_tangent_support_friction: f32,
+    max_tangent_position_bias: f32,
+    max_tangent_warm_start_reason: String,
+    max_tangent_feature_id: String,
+    max_angular_frame: Option<usize>,
+    max_angular_body: Option<String>,
+    max_angular_linear_speed: f32,
+    max_angular_speed: f32,
+    max_correction_frame: Option<usize>,
+    max_correction_translation: f32,
+    max_correction_total: f32,
+    max_correction_body_count: usize,
+    max_correction_row_frame: Option<usize>,
+    max_correction_row_body_pair: Option<[BodyHandle; 2]>,
+    max_correction_row_bodies: Vec<String>,
+    max_correction_row_depth: f32,
+    max_correction_row_consumed_depth: f32,
+    max_correction_row_body_a_translation: f32,
+    max_correction_row_body_b_translation: f32,
+    max_correction_row_final_normal_speed: f32,
+    max_correction_row_final_tangent_speed: f32,
+    max_churn_frame: Option<usize>,
+    max_churn: usize,
+    max_warm_start_drop_frame: Option<usize>,
+    max_warm_start_drop: usize,
+    max_contact_row_frame: Option<usize>,
+    max_contact_row_count: usize,
+    max_support_friction_frame: Option<usize>,
+    max_support_friction: f32,
+    max_anchor_drift_frame: Option<usize>,
+    max_anchor_drift_body_pair: Option<[BodyHandle; 2]>,
+    max_anchor_drift_bodies: Vec<String>,
+    max_anchor_drift: f32,
+    max_normal_anchor_drift: f32,
+    max_tangent_anchor_drift: f32,
+    row_coupling_summary: String,
+    warm_start_reason_counts: Vec<String>,
+}
+
+impl PressureWindowTrace {
+    fn to_report_line(&self) -> String {
+        format!(
+            "window {}..{}; tangent frame {} bodies [{}] speed {:.6} depth {:.6} normal_speed {:.6}->{:.6} impulse {:.6}/{:.6} support_friction {:.6} bias {:.6} warm_start {} feature {}; angular frame {} body {} speed {:.6}/{:.6}; correction frame {} max/total/bodies {:.6}/{:.6}/{}; correction_row frame {} bodies [{}] depth {:.6} consumed {:.6} translation {:.6}/{:.6} final_speed {:.6}/{:.6}; churn peak {} at frame {}; drops peak {} at frame {}; rows peak {} at frame {}; support_friction max {:.6} at frame {}; anchor_drift max {:.6} bodies [{}] normal {:.6} tangent {:.6} at frame {}; row_coupling {}; warm_start reasons [{}]",
+            self.start_frame,
+            self.end_frame,
+            option_frame(self.max_tangent_frame),
+            self.max_tangent_bodies.join(", "),
+            self.max_tangent_speed_abs,
+            self.max_tangent_depth,
+            self.max_tangent_initial_normal_speed,
+            self.max_tangent_final_normal_speed,
+            self.max_tangent_normal_impulse,
+            self.max_tangent_tangent_impulse,
+            self.max_tangent_support_friction,
+            self.max_tangent_position_bias,
+            if self.max_tangent_warm_start_reason.is_empty() {
+                "none"
+            } else {
+                self.max_tangent_warm_start_reason.as_str()
+            },
+            if self.max_tangent_feature_id.is_empty() {
+                "none"
+            } else {
+                self.max_tangent_feature_id.as_str()
+            },
+            option_frame(self.max_angular_frame),
+            self.max_angular_body.as_deref().unwrap_or("none"),
+            self.max_angular_linear_speed,
+            self.max_angular_speed,
+            option_frame(self.max_correction_frame),
+            self.max_correction_translation,
+            self.max_correction_total,
+            self.max_correction_body_count,
+            option_frame(self.max_correction_row_frame),
+            self.max_correction_row_bodies.join(", "),
+            self.max_correction_row_depth,
+            self.max_correction_row_consumed_depth,
+            self.max_correction_row_body_a_translation,
+            self.max_correction_row_body_b_translation,
+            self.max_correction_row_final_normal_speed,
+            self.max_correction_row_final_tangent_speed,
+            self.max_churn,
+            option_frame(self.max_churn_frame),
+            self.max_warm_start_drop,
+            option_frame(self.max_warm_start_drop_frame),
+            self.max_contact_row_count,
+            option_frame(self.max_contact_row_frame),
+            self.max_support_friction,
+            option_frame(self.max_support_friction_frame),
+            self.max_anchor_drift,
+            self.max_anchor_drift_bodies.join(", "),
+            self.max_normal_anchor_drift,
+            self.max_tangent_anchor_drift,
+            option_frame(self.max_anchor_drift_frame),
+            if self.row_coupling_summary.is_empty() {
+                "none"
+            } else {
+                self.row_coupling_summary.as_str()
+            },
+            self.warm_start_reason_counts.join(", "),
+        )
+    }
+}
+
+#[derive(Default, Debug)]
+struct FeatureChurnTrace {
+    miss_feature_id_count: usize,
+    same_pair_previous_count: usize,
+    same_reduction_reason_count: usize,
+    same_feature_index_count: usize,
+    close_world_point_count: usize,
+    same_shape_signature_count: usize,
+    close_local_anchor_count: usize,
+    edge_swap_transition_count: usize,
+    edge_swap_candidate_count: usize,
+    point_slot_fallback_eligible_count: usize,
+    best_frame: Option<usize>,
+    best_pair: Vec<String>,
+    best_current_feature_id: String,
+    best_previous_feature_id: String,
+    best_point_drift: f32,
+    best_normal_dot: f32,
+    best_local_anchor_drift: f32,
+    edge_swap_best_frame: Option<usize>,
+    edge_swap_best_pair: Vec<String>,
+    edge_swap_best_current_feature_id: String,
+    edge_swap_best_previous_feature_id: String,
+    edge_swap_best_point_drift: f32,
+    edge_swap_best_normal_dot: f32,
+    edge_swap_best_local_anchor_drift: f32,
+    top_feature_index_transition: String,
+    top_feature_index_transition_count: usize,
+    top_transition_best_frame: Option<usize>,
+    top_transition_best_pair: Vec<String>,
+    top_transition_best_current_feature_id: String,
+    top_transition_best_previous_feature_id: String,
+    top_transition_best_point_drift: f32,
+    top_transition_best_normal_dot: f32,
+    top_transition_best_local_anchor_drift: f32,
+    late_same_pair_previous_count: usize,
+}
+
+impl FeatureChurnTrace {
+    fn to_report_line(&self) -> String {
+        format!(
+            "miss_feature_id {} same_pair_previous {} same_reduction_reason {} same_feature_index {} close_world_point {} same_shape_signature {} close_local_anchor {} edge_swap_transition {} edge_swap_candidate {} point_slot_fallback_eligible {} late_same_pair_previous {}; edge_swap_best frame {} pair [{}] feature {}<-{} point_drift {:.6} normal_dot {:.6} local_anchor_drift {:.6}; top_feature_index_transition {} x{}; top_transition_best frame {} pair [{}] feature {}<-{} point_drift {:.6} normal_dot {:.6} local_anchor_drift {:.6}; best frame {} pair [{}] feature {}<-{} point_drift {:.6} normal_dot {:.6} local_anchor_drift {:.6}",
+            self.miss_feature_id_count,
+            self.same_pair_previous_count,
+            self.same_reduction_reason_count,
+            self.same_feature_index_count,
+            self.close_world_point_count,
+            self.same_shape_signature_count,
+            self.close_local_anchor_count,
+            self.edge_swap_transition_count,
+            self.edge_swap_candidate_count,
+            self.point_slot_fallback_eligible_count,
+            self.late_same_pair_previous_count,
+            option_frame(self.edge_swap_best_frame),
+            self.edge_swap_best_pair.join(", "),
+            if self.edge_swap_best_current_feature_id.is_empty() {
+                "none"
+            } else {
+                self.edge_swap_best_current_feature_id.as_str()
+            },
+            if self.edge_swap_best_previous_feature_id.is_empty() {
+                "none"
+            } else {
+                self.edge_swap_best_previous_feature_id.as_str()
+            },
+            self.edge_swap_best_point_drift,
+            self.edge_swap_best_normal_dot,
+            self.edge_swap_best_local_anchor_drift,
+            if self.top_feature_index_transition.is_empty() {
+                "none"
+            } else {
+                self.top_feature_index_transition.as_str()
+            },
+            self.top_feature_index_transition_count,
+            option_frame(self.top_transition_best_frame),
+            self.top_transition_best_pair.join(", "),
+            if self.top_transition_best_current_feature_id.is_empty() {
+                "none"
+            } else {
+                self.top_transition_best_current_feature_id.as_str()
+            },
+            if self.top_transition_best_previous_feature_id.is_empty() {
+                "none"
+            } else {
+                self.top_transition_best_previous_feature_id.as_str()
+            },
+            self.top_transition_best_point_drift,
+            self.top_transition_best_normal_dot,
+            self.top_transition_best_local_anchor_drift,
+            option_frame(self.best_frame),
+            self.best_pair.join(", "),
+            if self.best_current_feature_id.is_empty() {
+                "none"
+            } else {
+                self.best_current_feature_id.as_str()
+            },
+            if self.best_previous_feature_id.is_empty() {
+                "none"
+            } else {
+                self.best_previous_feature_id.as_str()
+            },
+            self.best_point_drift,
+            self.best_normal_dot,
+            self.best_local_anchor_drift,
+        )
+    }
+}
+
+#[derive(Default)]
+struct FeatureTransitionTrace {
+    count: usize,
+    best_frame: Option<usize>,
+    best_pair: Vec<String>,
+    best_current_feature_id: String,
+    best_previous_feature_id: String,
+    best_point_drift: f32,
+    best_normal_dot: f32,
+    best_local_anchor_drift: f32,
+}
+
+#[derive(Default, Debug)]
+struct LateVelocityTrace {
+    frame: Option<usize>,
+    body: Option<String>,
+    linear_speed: f32,
+    angular_speed: f32,
+    contact_count: usize,
+    counterparts: Vec<String>,
+    max_depth: f32,
+    warm_start_normal_sum: f32,
+    warm_start_tangent_sum: f32,
+    normal_impulse_sum: f32,
+    tangent_impulse_sum: f32,
+    initial_normal_speed_min: f32,
+    initial_normal_speed_max: f32,
+    normal_speed_min: f32,
+    normal_speed_max: f32,
+    tangent_speed_abs_max: f32,
+    support_friction_impulse_max: f32,
+    support_friction_impulse_sum: f32,
+    position_bias_max: f32,
+    restitution_bias_max: f32,
+    position_correction_max_translation: f32,
+    position_correction_total_translation: f32,
+    position_correction_body_count: usize,
+    warm_start_drop_count: usize,
+    contact_churn: usize,
+    last_contact_frame: Option<usize>,
+    last_contact_count: usize,
+    last_contact_counterparts: Vec<String>,
+    last_contact_max_depth: f32,
+    last_contact_warm_start_normal_sum: f32,
+    last_contact_warm_start_tangent_sum: f32,
+    last_contact_normal_impulse_sum: f32,
+    last_contact_tangent_impulse_sum: f32,
+    last_contact_initial_normal_speed_min: f32,
+    last_contact_initial_normal_speed_max: f32,
+    last_contact_normal_speed_min: f32,
+    last_contact_normal_speed_max: f32,
+    last_contact_tangent_speed_abs_max: f32,
+    last_contact_support_friction_impulse_max: f32,
+    last_contact_support_friction_impulse_sum: f32,
+    support_gap_start_frame: Option<usize>,
+    support_gap_duration: usize,
+    support_gap_previous_normal_impulse_sum: f32,
+    support_gap_previous_normal_speed_min: f32,
+    support_gap_previous_body_linear_speed: f32,
+    support_gap_previous_body_angular_speed: f32,
+    support_gap_previous_counterpart_linear_speed_max: f32,
+    support_gap_previous_counterpart_angular_speed_max: f32,
+    support_gap_previous_body_tangent_linear_component_max: f32,
+    support_gap_previous_body_tangent_angular_component_max: f32,
+    support_gap_previous_counterpart_tangent_linear_component_max: f32,
+    support_gap_previous_counterpart_tangent_angular_component_max: f32,
+    support_gap_energy_onset_frame: Option<usize>,
+    support_gap_energy_onset_body_tangent_linear_component_max: f32,
+    support_gap_energy_onset_body_tangent_angular_component_max: f32,
+    support_gap_energy_onset_counterpart_tangent_linear_component_max: f32,
+    support_gap_energy_onset_counterpart_tangent_angular_component_max: f32,
+    support_gap_energy_onset_normal_impulse_sum: f32,
+    support_gap_energy_onset_normal_speed_min: f32,
+    support_gap_energy_onset_max_depth: f32,
+    support_gap_lifecycle: Vec<SupportGapLifecycleFrame>,
+    support_gap_previous_position_correction_depth_sum: f32,
+    support_gap_previous_position_correction_translation_sum: f32,
+    support_gap_summary: String,
+}
+
+impl LateVelocityTrace {
+    fn to_report_line(&self) -> String {
+        let Some(frame) = self.frame else {
+            return "none".to_owned();
+        };
+        let body = self.body.as_deref().unwrap_or("none");
+        format!(
+            "frame {frame} body {body} speed {:.6}/{:.6}; contacts {} counterparts [{}] max_depth {:.6} warm {:.6}/{:.6} impulse {:.6}/{:.6} initial_speed {:.6}..{:.6} post_speed {:.6}..{:.6}/{:.6} support_friction {:.6}/{:.6} bias {:.6}/{:.6} correction {:.6}/{:.6}/{} churn {} drops {}; last_contact frame {} count {} counterparts [{}] max_depth {:.6} warm {:.6}/{:.6} impulse {:.6}/{:.6} initial_speed {:.6}..{:.6} post_speed {:.6}..{:.6}/{:.6} support_friction {:.6}/{:.6}; late_support_gap {}",
+            self.linear_speed,
+            self.angular_speed,
+            self.contact_count,
+            self.counterparts.join(", "),
+            self.max_depth,
+            self.warm_start_normal_sum,
+            self.warm_start_tangent_sum,
+            self.normal_impulse_sum,
+            self.tangent_impulse_sum,
+            self.initial_normal_speed_min,
+            self.initial_normal_speed_max,
+            self.normal_speed_min,
+            self.normal_speed_max,
+            self.tangent_speed_abs_max,
+            self.support_friction_impulse_max,
+            self.support_friction_impulse_sum,
+            self.position_bias_max,
+            self.restitution_bias_max,
+            self.position_correction_max_translation,
+            self.position_correction_total_translation,
+            self.position_correction_body_count,
+            self.contact_churn,
+            self.warm_start_drop_count,
+            self.last_contact_frame
+                .map(|frame| frame.to_string())
+                .unwrap_or_else(|| "none".to_owned()),
+            self.last_contact_count,
+            self.last_contact_counterparts.join(", "),
+            self.last_contact_max_depth,
+            self.last_contact_warm_start_normal_sum,
+            self.last_contact_warm_start_tangent_sum,
+            self.last_contact_normal_impulse_sum,
+            self.last_contact_tangent_impulse_sum,
+            self.last_contact_initial_normal_speed_min,
+            self.last_contact_initial_normal_speed_max,
+            self.last_contact_normal_speed_min,
+            self.last_contact_normal_speed_max,
+            self.last_contact_tangent_speed_abs_max,
+            self.last_contact_support_friction_impulse_max,
+            self.last_contact_support_friction_impulse_sum,
+            if self.support_gap_summary.is_empty() {
+                "none"
+            } else {
+                self.support_gap_summary.as_str()
+            },
+        )
+    }
+}
+
+fn pressure_window_trace(
+    run: &RunResult,
+    start_frame: usize,
+    end_frame: usize,
+) -> PressureWindowTrace {
+    let mut trace = PressureWindowTrace {
+        start_frame,
+        end_frame,
+        ..PressureWindowTrace::default()
+    };
+    let mut warm_start_reason_counts = BTreeMap::<String, usize>::new();
+
+    for frame in run
+        .frames
+        .iter()
+        .filter(|frame| frame.frame_index >= start_frame && frame.frame_index <= end_frame)
+    {
+        for contact in &frame.snapshot.contacts {
+            *warm_start_reason_counts
+                .entry(format!("{:?}", contact.warm_start_reason))
+                .or_default() += 1;
+            let tangent_speed_abs = contact.solver_final_tangent_speed.abs();
+            if tangent_speed_abs > trace.max_tangent_speed_abs {
+                trace.max_tangent_frame = Some(frame.frame_index);
+                trace.max_tangent_body_pair = Some(contact.bodies);
+                trace.max_tangent_bodies = contact_body_labels(contact.bodies);
+                trace.max_tangent_speed_abs = tangent_speed_abs;
+                trace.max_tangent_depth = contact.depth;
+                trace.max_tangent_initial_normal_speed = contact.solver_initial_normal_speed;
+                trace.max_tangent_final_normal_speed = contact.solver_final_normal_speed;
+                trace.max_tangent_normal_impulse = contact.solver_normal_impulse;
+                trace.max_tangent_tangent_impulse = contact.solver_tangent_impulse.abs();
+                trace.max_tangent_support_friction = contact.solver_support_friction_impulse;
+                trace.max_tangent_position_bias = contact.solver_position_bias;
+                trace.max_tangent_warm_start_reason = format!("{:?}", contact.warm_start_reason);
+                trace.max_tangent_feature_id = format!("{:?}", contact.feature_id);
+            }
+            if contact.solver_support_friction_impulse > trace.max_support_friction {
+                trace.max_support_friction = contact.solver_support_friction_impulse;
+                trace.max_support_friction_frame = Some(frame.frame_index);
+            }
+            if contact.warm_start_anchor_drift > trace.max_anchor_drift {
+                trace.max_anchor_drift = contact.warm_start_anchor_drift;
+                trace.max_anchor_drift_body_pair = Some(contact.bodies);
+                trace.max_anchor_drift_bodies = contact_body_labels(contact.bodies);
+                trace.max_normal_anchor_drift = contact.warm_start_normal_anchor_drift;
+                trace.max_tangent_anchor_drift = contact.warm_start_tangent_anchor_drift;
+                trace.max_anchor_drift_frame = Some(frame.frame_index);
+            }
+            if contact.solver_position_correction_depth > trace.max_correction_row_consumed_depth {
+                trace.max_correction_row_frame = Some(frame.frame_index);
+                trace.max_correction_row_body_pair = Some(contact.bodies);
+                trace.max_correction_row_bodies = contact_body_labels(contact.bodies);
+                trace.max_correction_row_depth = contact.depth;
+                trace.max_correction_row_consumed_depth = contact.solver_position_correction_depth;
+                trace.max_correction_row_body_a_translation =
+                    contact.solver_position_correction_body_a_translation;
+                trace.max_correction_row_body_b_translation =
+                    contact.solver_position_correction_body_b_translation;
+                trace.max_correction_row_final_normal_speed = contact.solver_final_normal_speed;
+                trace.max_correction_row_final_tangent_speed = contact.solver_final_tangent_speed;
+            }
+        }
+
+        for body in frame
+            .snapshot
+            .bodies
+            .iter()
+            .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+        {
+            let angular_speed = body.angular_velocity.abs();
+            if angular_speed > trace.max_angular_speed {
+                trace.max_angular_frame = Some(frame.frame_index);
+                trace.max_angular_body = Some(format!("{:?}", body.handle));
+                trace.max_angular_linear_speed = body.linear_velocity.length();
+                trace.max_angular_speed = angular_speed;
+            }
+        }
+
+        if frame.stats.position_correction_total_translation > trace.max_correction_total {
+            trace.max_correction_frame = Some(frame.frame_index);
+            trace.max_correction_translation = frame.stats.position_correction_max_translation;
+            trace.max_correction_total = frame.stats.position_correction_total_translation;
+            trace.max_correction_body_count = frame.stats.position_correction_body_count;
+        }
+
+        let churn = frame.diagnostics.stability.contact_churn.entered
+            + frame.diagnostics.stability.contact_churn.exited;
+        if churn > trace.max_churn {
+            trace.max_churn = churn;
+            trace.max_churn_frame = Some(frame.frame_index);
+        }
+
+        if frame.stats.warm_start_drop_count > trace.max_warm_start_drop {
+            trace.max_warm_start_drop = frame.stats.warm_start_drop_count;
+            trace.max_warm_start_drop_frame = Some(frame.frame_index);
+        }
+
+        let contact_row_count = frame.diagnostics.stability.island.contact_row_count;
+        if contact_row_count > trace.max_contact_row_count {
+            trace.max_contact_row_count = contact_row_count;
+            trace.max_contact_row_frame = Some(frame.frame_index);
+        }
+    }
+
+    trace.warm_start_reason_counts = warm_start_reason_counts
+        .into_iter()
+        .map(|(reason, count)| format!("{reason}={count}"))
+        .collect();
+    trace.row_coupling_summary = pressure_row_coupling_summary(run, &trace);
+    trace
+}
+
+fn feature_churn_trace(run: &RunResult) -> FeatureChurnTrace {
+    let mut trace = FeatureChurnTrace::default();
+    let mut feature_index_transitions = BTreeMap::<String, FeatureTransitionTrace>::new();
+
+    for frame_index in 1..run.frames.len() {
+        let previous = &run.frames[frame_index - 1];
+        let current = &run.frames[frame_index];
+        for contact in current
+            .snapshot
+            .contacts
+            .iter()
+            .filter(|contact| contact.warm_start_reason == WarmStartCacheReason::MissFeatureId)
+        {
+            trace.miss_feature_id_count += 1;
+            let previous_pair_contacts = previous
+                .snapshot
+                .contacts
+                .iter()
+                .filter(|candidate| candidate.colliders == contact.colliders)
+                .collect::<Vec<_>>();
+            if previous_pair_contacts.is_empty() {
+                continue;
+            }
+
+            trace.same_pair_previous_count += 1;
+            if current.frame_index >= MATRIX_STACK_QUIET_WINDOW_START_FRAME {
+                trace.late_same_pair_previous_count += 1;
+            }
+
+            if previous_pair_contacts.iter().any(|previous_contact| {
+                previous_contact.reduction_reason == contact.reduction_reason
+            }) {
+                trace.same_reduction_reason_count += 1;
+            }
+            if previous_pair_contacts
+                .iter()
+                .any(|previous_contact| same_feature_index(previous_contact, contact))
+            {
+                trace.same_feature_index_count += 1;
+            }
+
+            let Some((previous_contact, point_drift, normal_dot)) = previous_pair_contacts
+                .iter()
+                .filter_map(|previous_contact| {
+                    let point_drift = (contact.point - previous_contact.point).length();
+                    let normal_dot = contact
+                        .normal
+                        .normalized_or_zero()
+                        .dot(previous_contact.normal.normalized_or_zero());
+                    point_drift
+                        .is_finite()
+                        .then_some((*previous_contact, point_drift, normal_dot))
+                })
+                .min_by(|(_, lhs, _), (_, rhs, _)| lhs.partial_cmp(rhs).unwrap())
+            else {
+                continue;
+            };
+
+            if point_drift <= 0.05 && normal_dot >= 0.98 {
+                trace.close_world_point_count += 1;
+            }
+            let has_same_shape_signature =
+                same_shape_signature(previous, current, previous_contact, contact);
+            if has_same_shape_signature {
+                trace.same_shape_signature_count += 1;
+            }
+            let local_anchor_drift =
+                max_local_anchor_drift(previous, current, previous_contact, contact);
+            let has_close_local_anchor = local_anchor_drift
+                .is_some_and(|drift| drift <= FEATURE_CHURN_LOCAL_ANCHOR_DRIFT_THRESHOLD);
+            if local_anchor_drift
+                .is_some_and(|drift| drift <= FEATURE_CHURN_LOCAL_ANCHOR_DRIFT_THRESHOLD)
+            {
+                trace.close_local_anchor_count += 1;
+            }
+            let is_edge_swap = feature_index_edge_swap(previous_contact, contact);
+            if is_edge_swap {
+                trace.edge_swap_transition_count += 1;
+                if trace.edge_swap_best_frame.is_none()
+                    || point_drift < trace.edge_swap_best_point_drift
+                {
+                    trace.edge_swap_best_frame = Some(current.frame_index);
+                    trace.edge_swap_best_pair = contact_collider_labels(contact.colliders);
+                    trace.edge_swap_best_current_feature_id = format!("{:?}", contact.feature_id);
+                    trace.edge_swap_best_previous_feature_id =
+                        format!("{:?}", previous_contact.feature_id);
+                    trace.edge_swap_best_point_drift = point_drift;
+                    trace.edge_swap_best_normal_dot = normal_dot;
+                    trace.edge_swap_best_local_anchor_drift = local_anchor_drift.unwrap_or(0.0);
+                }
+            }
+            if is_edge_swap
+                && previous_contact.reduction_reason == contact.reduction_reason
+                && point_drift <= 0.05
+                && normal_dot >= 0.98
+                && has_same_shape_signature
+                && has_close_local_anchor
+            {
+                trace.edge_swap_candidate_count += 1;
+            }
+            if let Some(transition) = feature_index_transition(previous_contact, contact) {
+                let transition_trace = feature_index_transitions.entry(transition).or_default();
+                transition_trace.count += 1;
+                if transition_trace.best_frame.is_none()
+                    || point_drift < transition_trace.best_point_drift
+                {
+                    transition_trace.best_frame = Some(current.frame_index);
+                    transition_trace.best_pair = contact_collider_labels(contact.colliders);
+                    transition_trace.best_current_feature_id = format!("{:?}", contact.feature_id);
+                    transition_trace.best_previous_feature_id =
+                        format!("{:?}", previous_contact.feature_id);
+                    transition_trace.best_point_drift = point_drift;
+                    transition_trace.best_normal_dot = normal_dot;
+                    transition_trace.best_local_anchor_drift = local_anchor_drift.unwrap_or(0.0);
+                }
+            }
+            if previous_pair_contacts.iter().any(|previous_contact| {
+                let candidate_point_drift = (contact.point - previous_contact.point).length();
+                let candidate_normal_dot = contact
+                    .normal
+                    .normalized_or_zero()
+                    .dot(previous_contact.normal.normalized_or_zero());
+                previous_contact.reduction_reason == contact.reduction_reason
+                    && same_feature_index(previous_contact, contact)
+                    && candidate_point_drift <= 0.05
+                    && candidate_normal_dot >= 0.98
+                    && max_local_anchor_drift(previous, current, previous_contact, contact)
+                        .is_some_and(|drift| drift <= FEATURE_CHURN_LOCAL_ANCHOR_DRIFT_THRESHOLD)
+            }) {
+                trace.point_slot_fallback_eligible_count += 1;
+            }
+            if trace.best_frame.is_none() || point_drift < trace.best_point_drift {
+                trace.best_frame = Some(current.frame_index);
+                trace.best_pair = contact_collider_labels(contact.colliders);
+                trace.best_current_feature_id = format!("{:?}", contact.feature_id);
+                trace.best_previous_feature_id = format!("{:?}", previous_contact.feature_id);
+                trace.best_point_drift = point_drift;
+                trace.best_normal_dot = normal_dot;
+                trace.best_local_anchor_drift = local_anchor_drift.unwrap_or(0.0);
+            }
+        }
+    }
+
+    if let Some((transition, transition_trace)) = feature_index_transitions.into_iter().max_by(
+        |(lhs_transition, lhs_trace), (rhs_transition, rhs_trace)| {
+            lhs_trace
+                .count
+                .cmp(&rhs_trace.count)
+                .then_with(|| rhs_transition.cmp(lhs_transition))
+        },
+    ) {
+        trace.top_feature_index_transition = transition;
+        trace.top_feature_index_transition_count = transition_trace.count;
+        trace.top_transition_best_frame = transition_trace.best_frame;
+        trace.top_transition_best_pair = transition_trace.best_pair;
+        trace.top_transition_best_current_feature_id = transition_trace.best_current_feature_id;
+        trace.top_transition_best_previous_feature_id = transition_trace.best_previous_feature_id;
+        trace.top_transition_best_point_drift = transition_trace.best_point_drift;
+        trace.top_transition_best_normal_dot = transition_trace.best_normal_dot;
+        trace.top_transition_best_local_anchor_drift = transition_trace.best_local_anchor_drift;
+    }
+
+    trace
+}
+
+fn same_feature_index(previous_contact: &DebugContact, current_contact: &DebugContact) -> bool {
+    contact_feature_index(previous_contact) == contact_feature_index(current_contact)
+}
+
+fn contact_feature_index(contact: &DebugContact) -> Option<u64> {
+    contact_feature_raw(contact).map(|raw| raw & u32::MAX as u64)
+}
+
+fn contact_feature_raw(contact: &DebugContact) -> Option<u64> {
+    let debug = format!("{:?}", contact.feature_id);
+    debug
+        .strip_prefix("ContactFeatureId(")?
+        .strip_suffix(')')?
+        .parse::<u64>()
+        .ok()
+}
+
+fn feature_index_transition(
+    previous_contact: &DebugContact,
+    current_contact: &DebugContact,
+) -> Option<String> {
+    let previous = contact_feature_index(previous_contact)?;
+    let current = contact_feature_index(current_contact)?;
+    Some(format!(
+        "{}<-{}",
+        decoded_feature_index(current),
+        decoded_feature_index(previous)
+    ))
+}
+
+fn feature_index_edge_swap(
+    previous_contact: &DebugContact,
+    current_contact: &DebugContact,
+) -> bool {
+    let Some(previous) = decoded_contact_feature(previous_contact) else {
+        return false;
+    };
+    let Some(current) = decoded_contact_feature(current_contact) else {
+        return false;
+    };
+    previous.kind == current.kind
+        && previous.reference_edge == current.incident_edge
+        && previous.incident_edge == current.reference_edge
+        && previous.reference_edge != previous.incident_edge
+}
+
+fn decoded_feature_index(index: u64) -> String {
+    let decoded = decode_feature_index(index);
+    format!(
+        "k{}:r{}:i{}",
+        decoded.kind, decoded.reference_edge, decoded.incident_edge
+    )
+}
+
+#[derive(Clone, Copy)]
+struct DecodedFeatureIndex {
+    kind: u64,
+    reference_edge: u64,
+    incident_edge: u64,
+}
+
+fn decoded_contact_feature(contact: &DebugContact) -> Option<DecodedFeatureIndex> {
+    contact_feature_index(contact).map(decode_feature_index)
+}
+
+fn decode_feature_index(index: u64) -> DecodedFeatureIndex {
+    DecodedFeatureIndex {
+        kind: (index >> 24) & 0xff,
+        reference_edge: (index >> 12) & 0xfff,
+        incident_edge: index & 0xfff,
+    }
+}
+
+fn same_shape_signature(
+    previous_frame: &FrameRecord,
+    current_frame: &FrameRecord,
+    previous_contact: &DebugContact,
+    current_contact: &DebugContact,
+) -> bool {
+    previous_contact
+        .colliders
+        .iter()
+        .zip(current_contact.colliders)
+        .all(|(previous_handle, current_handle)| {
+            let Some(previous_collider) = collider_by_handle(previous_frame, *previous_handle)
+            else {
+                return false;
+            };
+            let Some(current_collider) = collider_by_handle(current_frame, current_handle) else {
+                return false;
+            };
+            shape_signature(previous_collider) == shape_signature(current_collider)
+        })
+}
+
+fn max_local_anchor_drift(
+    previous_frame: &FrameRecord,
+    current_frame: &FrameRecord,
+    previous_contact: &DebugContact,
+    current_contact: &DebugContact,
+) -> Option<f32> {
+    previous_contact
+        .colliders
+        .iter()
+        .zip(current_contact.colliders)
+        .map(|(previous_handle, current_handle)| {
+            let previous_collider = collider_by_handle(previous_frame, *previous_handle)?;
+            let current_collider = collider_by_handle(current_frame, current_handle)?;
+            let previous_anchor = local_contact_anchor(previous_collider, previous_contact);
+            let current_anchor = local_contact_anchor(current_collider, current_contact);
+            Some((current_anchor - previous_anchor).length())
+        })
+        .try_fold(0.0_f32, |max_drift, drift| {
+            drift.map(|drift| max_drift.max(drift))
+        })
+}
+
+fn local_contact_anchor(
+    collider: &DebugCollider,
+    contact: &DebugContact,
+) -> picea::math::vector::Vector {
+    let world_offset = contact.point - collider.world_transform.translation;
+    picea::math::vector::Vector::from(world_offset).rotated(-collider.world_transform.rotation)
+}
+
+fn collider_by_handle(frame: &FrameRecord, handle: ColliderHandle) -> Option<&DebugCollider> {
+    frame
+        .snapshot
+        .colliders
+        .iter()
+        .find(|collider| collider.handle == handle)
+}
+
+fn shape_signature(collider: &DebugCollider) -> String {
+    match &collider.shape {
+        DebugShape::Circle { radius, .. } => {
+            format!("circle:r{}", quantized_signature_part(*radius))
+        }
+        DebugShape::Polygon { vertices } => {
+            let mut edge_lengths = vertices
+                .iter()
+                .zip(vertices.iter().cycle().skip(1))
+                .take(vertices.len())
+                .map(|(start, end)| quantized_signature_part((*end - *start).length()))
+                .collect::<Vec<_>>();
+            edge_lengths.sort_unstable();
+            format!("polygon:{}:{edge_lengths:?}", vertices.len())
+        }
+        DebugShape::Segment { start, end, radius } => {
+            let length = (*end - *start).length();
+            format!(
+                "segment:l{}:r{}",
+                quantized_signature_part(length),
+                quantized_signature_part(*radius)
+            )
+        }
+    }
+}
+
+fn quantized_signature_part(value: f32) -> i32 {
+    (value * 1000.0).round() as i32
+}
+
+fn pressure_row_coupling_summary(run: &RunResult, trace: &PressureWindowTrace) -> String {
+    [
+        row_coupling_part(
+            "correction_tangent",
+            run,
+            trace.max_correction_row_frame,
+            trace.max_correction_row_body_pair,
+            trace.max_tangent_frame,
+            trace.max_tangent_body_pair,
+        ),
+        row_coupling_part(
+            "correction_anchor",
+            run,
+            trace.max_correction_row_frame,
+            trace.max_correction_row_body_pair,
+            trace.max_anchor_drift_frame,
+            trace.max_anchor_drift_body_pair,
+        ),
+        row_coupling_part(
+            "tangent_anchor",
+            run,
+            trace.max_tangent_frame,
+            trace.max_tangent_body_pair,
+            trace.max_anchor_drift_frame,
+            trace.max_anchor_drift_body_pair,
+        ),
+    ]
+    .join("; ")
+}
+
+fn row_coupling_part(
+    label: &str,
+    run: &RunResult,
+    frame_a: Option<usize>,
+    pair_a: Option<[BodyHandle; 2]>,
+    frame_b: Option<usize>,
+    pair_b: Option<[BodyHandle; 2]>,
+) -> String {
+    let frame_delta = frame_a.zip(frame_b).map(|(a, b)| a.abs_diff(b));
+    let comparison_frame = frame_a.zip(frame_b).map(|(a, b)| a.max(b));
+    let graph_distance = contact_graph_distance_at_frame(run, comparison_frame, pair_a, pair_b);
+    let shared_bodies = pair_a
+        .zip(pair_b)
+        .map(|(a, b)| shared_body_count(a, b))
+        .unwrap_or_default();
+    format!(
+        "{label} frame_delta {} graph_distance {}@f{} shared_bodies {}",
+        option_usize(frame_delta),
+        option_usize(graph_distance),
+        option_frame(comparison_frame),
+        shared_bodies
+    )
+}
+
+fn contact_graph_distance_at_frame(
+    run: &RunResult,
+    frame_index: Option<usize>,
+    from: Option<[BodyHandle; 2]>,
+    to: Option<[BodyHandle; 2]>,
+) -> Option<usize> {
+    let frame = run
+        .frames
+        .iter()
+        .find(|frame| Some(frame.frame_index) == frame_index)?;
+    let from = from?;
+    let to = to?;
+    if shared_body_count(from, to) > 0 {
+        return Some(0);
+    }
+    contact_pair_graph_distance(frame, from, to)
+}
+
+fn contact_pair_graph_distance(
+    frame: &FrameRecord,
+    from: [BodyHandle; 2],
+    to: [BodyHandle; 2],
+) -> Option<usize> {
+    let mut graph = BTreeMap::<BodyHandle, Vec<BodyHandle>>::new();
+    for contact in &frame.snapshot.contacts {
+        let [a, b] = contact.bodies;
+        graph.entry(a).or_default().push(b);
+        graph.entry(b).or_default().push(a);
+    }
+
+    let mut queue = VecDeque::<(BodyHandle, usize)>::new();
+    let mut visited = Vec::<BodyHandle>::new();
+    for body in from {
+        queue.push_back((body, 0));
+        visited.push(body);
+    }
+
+    while let Some((body, distance)) = queue.pop_front() {
+        if to.contains(&body) {
+            return Some(distance);
+        }
+        for next in graph.get(&body).into_iter().flatten().copied() {
+            if visited.contains(&next) {
+                continue;
+            }
+            visited.push(next);
+            queue.push_back((next, distance + 1));
+        }
+    }
+    None
+}
+
+fn shared_body_count(a: [BodyHandle; 2], b: [BodyHandle; 2]) -> usize {
+    a.into_iter().filter(|body| b.contains(body)).count()
+}
+
+fn late_velocity_trace(run: &RunResult, frame_index: usize, body: BodyHandle) -> LateVelocityTrace {
+    let Some(frame) = run
+        .frames
+        .iter()
+        .find(|candidate| candidate.frame_index == frame_index)
+    else {
+        return LateVelocityTrace::default();
+    };
+    let facts = contact_summary(frame, body);
+    let (linear_speed, angular_speed) = body_speeds(frame, body).unwrap_or_default();
+    let support_gap = late_support_gap(run, body, frame_index);
+    let last_contact = run
+        .frames
+        .iter()
+        .rev()
+        .find(|candidate| {
+            candidate.frame_index <= frame_index
+                && frame_contacts_body(candidate, body).next().is_some()
+        })
+        .map(|contact_frame| {
+            (
+                contact_frame.frame_index,
+                contact_summary(contact_frame, body),
+            )
+        });
+    LateVelocityTrace {
+        frame: Some(frame.frame_index),
+        body: Some(format!("{body:?}")),
+        linear_speed,
+        angular_speed,
+        contact_count: facts.contact_count,
+        counterparts: facts.counterparts,
+        max_depth: facts.max_depth,
+        warm_start_normal_sum: facts.warm_start_normal_sum,
+        warm_start_tangent_sum: facts.warm_start_tangent_sum,
+        normal_impulse_sum: facts.normal_impulse_sum,
+        tangent_impulse_sum: facts.tangent_impulse_sum,
+        initial_normal_speed_min: facts.initial_normal_speed_min,
+        initial_normal_speed_max: facts.initial_normal_speed_max,
+        normal_speed_min: facts.normal_speed_min,
+        normal_speed_max: facts.normal_speed_max,
+        tangent_speed_abs_max: facts.tangent_speed_abs_max,
+        support_friction_impulse_max: facts.support_friction_impulse_max,
+        support_friction_impulse_sum: facts.support_friction_impulse_sum,
+        position_bias_max: facts.position_bias_max,
+        restitution_bias_max: facts.restitution_bias_max,
+        position_correction_max_translation: frame.stats.position_correction_max_translation,
+        position_correction_total_translation: frame.stats.position_correction_total_translation,
+        position_correction_body_count: frame.stats.position_correction_body_count,
+        warm_start_drop_count: frame.stats.warm_start_drop_count,
+        contact_churn: frame.diagnostics.stability.contact_churn.entered
+            + frame.diagnostics.stability.contact_churn.exited,
+        last_contact_frame: last_contact.as_ref().map(|(frame, _)| *frame),
+        last_contact_count: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.contact_count)
+            .unwrap_or(0),
+        last_contact_counterparts: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.counterparts.clone())
+            .unwrap_or_default(),
+        last_contact_max_depth: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.max_depth)
+            .unwrap_or(0.0),
+        last_contact_warm_start_normal_sum: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.warm_start_normal_sum)
+            .unwrap_or(0.0),
+        last_contact_warm_start_tangent_sum: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.warm_start_tangent_sum)
+            .unwrap_or(0.0),
+        last_contact_normal_impulse_sum: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.normal_impulse_sum)
+            .unwrap_or(0.0),
+        last_contact_tangent_impulse_sum: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.tangent_impulse_sum)
+            .unwrap_or(0.0),
+        last_contact_initial_normal_speed_min: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.initial_normal_speed_min)
+            .unwrap_or(0.0),
+        last_contact_initial_normal_speed_max: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.initial_normal_speed_max)
+            .unwrap_or(0.0),
+        last_contact_normal_speed_min: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.normal_speed_min)
+            .unwrap_or(0.0),
+        last_contact_normal_speed_max: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.normal_speed_max)
+            .unwrap_or(0.0),
+        last_contact_tangent_speed_abs_max: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.tangent_speed_abs_max)
+            .unwrap_or(0.0),
+        last_contact_support_friction_impulse_max: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.support_friction_impulse_max)
+            .unwrap_or(0.0),
+        last_contact_support_friction_impulse_sum: last_contact
+            .as_ref()
+            .map(|(_, facts)| facts.support_friction_impulse_sum)
+            .unwrap_or(0.0),
+        support_gap_start_frame: support_gap.start_frame,
+        support_gap_duration: support_gap.duration,
+        support_gap_previous_normal_impulse_sum: support_gap.previous_normal_impulse_sum,
+        support_gap_previous_normal_speed_min: support_gap.previous_normal_speed_min,
+        support_gap_previous_body_linear_speed: support_gap.previous_body_linear_speed,
+        support_gap_previous_body_angular_speed: support_gap.previous_body_angular_speed,
+        support_gap_previous_counterpart_linear_speed_max: support_gap
+            .previous_counterpart_linear_speed_max,
+        support_gap_previous_counterpart_angular_speed_max: support_gap
+            .previous_counterpart_angular_speed_max,
+        support_gap_previous_body_tangent_linear_component_max: support_gap
+            .previous_body_tangent_linear_component_max,
+        support_gap_previous_body_tangent_angular_component_max: support_gap
+            .previous_body_tangent_angular_component_max,
+        support_gap_previous_counterpart_tangent_linear_component_max: support_gap
+            .previous_counterpart_tangent_linear_component_max,
+        support_gap_previous_counterpart_tangent_angular_component_max: support_gap
+            .previous_counterpart_tangent_angular_component_max,
+        support_gap_energy_onset_frame: support_gap.energy_onset_frame,
+        support_gap_energy_onset_body_tangent_linear_component_max: support_gap
+            .energy_onset_body_tangent_linear_component_max,
+        support_gap_energy_onset_body_tangent_angular_component_max: support_gap
+            .energy_onset_body_tangent_angular_component_max,
+        support_gap_energy_onset_counterpart_tangent_linear_component_max: support_gap
+            .energy_onset_counterpart_tangent_linear_component_max,
+        support_gap_energy_onset_counterpart_tangent_angular_component_max: support_gap
+            .energy_onset_counterpart_tangent_angular_component_max,
+        support_gap_energy_onset_normal_impulse_sum: support_gap.energy_onset_normal_impulse_sum,
+        support_gap_energy_onset_normal_speed_min: support_gap.energy_onset_normal_speed_min,
+        support_gap_energy_onset_max_depth: support_gap.energy_onset_max_depth,
+        support_gap_lifecycle: support_gap.lifecycle,
+        support_gap_previous_position_correction_depth_sum: support_gap
+            .previous_position_correction_depth_sum,
+        support_gap_previous_position_correction_translation_sum: support_gap
+            .previous_position_correction_translation_sum,
+        support_gap_summary: support_gap.summary,
+    }
+}
+
+#[derive(Default)]
+struct LateSupportGapTrace {
+    start_frame: Option<usize>,
+    duration: usize,
+    previous_normal_impulse_sum: f32,
+    previous_normal_speed_min: f32,
+    previous_body_linear_speed: f32,
+    previous_body_angular_speed: f32,
+    previous_counterpart_linear_speed_max: f32,
+    previous_counterpart_angular_speed_max: f32,
+    previous_body_tangent_linear_component_max: f32,
+    previous_body_tangent_angular_component_max: f32,
+    previous_counterpart_tangent_linear_component_max: f32,
+    previous_counterpart_tangent_angular_component_max: f32,
+    energy_onset_frame: Option<usize>,
+    energy_onset_body_tangent_linear_component_max: f32,
+    energy_onset_body_tangent_angular_component_max: f32,
+    energy_onset_counterpart_tangent_linear_component_max: f32,
+    energy_onset_counterpart_tangent_angular_component_max: f32,
+    energy_onset_normal_impulse_sum: f32,
+    energy_onset_normal_speed_min: f32,
+    energy_onset_max_depth: f32,
+    lifecycle: Vec<SupportGapLifecycleFrame>,
+    previous_position_correction_depth_sum: f32,
+    previous_position_correction_translation_sum: f32,
+    summary: String,
+}
+
+fn late_support_gap(run: &RunResult, body: BodyHandle, frame_index: usize) -> LateSupportGapTrace {
+    let Some(spike_frame) = run
+        .frames
+        .iter()
+        .find(|frame| frame.frame_index == frame_index)
+    else {
+        return LateSupportGapTrace::default();
+    };
+    if frame_contacts_body(spike_frame, body).next().is_some() {
+        return LateSupportGapTrace::default();
+    }
+
+    let Some(previous_contact_frame) = run.frames.iter().rev().find(|frame| {
+        frame.frame_index < frame_index && frame_contacts_body(frame, body).next().is_some()
+    }) else {
+        return LateSupportGapTrace::default();
+    };
+    let gap_start_frame = previous_contact_frame.frame_index + 1;
+    let previous_facts = contact_summary(previous_contact_frame, body);
+    let energy_onset =
+        support_gap_energy_onset(run, body, previous_contact_frame.frame_index).unwrap_or_default();
+    let (previous_body_linear, previous_body_angular) =
+        body_speeds(previous_contact_frame, body).unwrap_or_default();
+    let (gap_start_linear, gap_start_angular) = run
+        .frames
+        .iter()
+        .find(|frame| frame.frame_index == gap_start_frame)
+        .and_then(|frame| body_speeds(frame, body))
+        .unwrap_or_default();
+    let (spike_linear, spike_angular) = body_speeds(spike_frame, body).unwrap_or_default();
+    let duration = frame_index.saturating_sub(gap_start_frame) + 1;
+    let lifecycle = energy_onset
+        .frame
+        .map(|start_frame| {
+            support_gap_lifecycle(run, body, start_frame, previous_contact_frame.frame_index)
+        })
+        .unwrap_or_default();
+    let lifecycle_summary = support_gap_lifecycle_summary(&lifecycle);
+    let summary = format!(
+        "start frame {} duration {} speed {:.6}/{:.6}->{:.6}/{:.6}; previous frame {} previous_speed {:.6}/{:.6} counterpart_speed {:.6}/{:.6} tangent_components body {:.6}/{:.6} counterpart {:.6}/{:.6}; energy_onset frame {} tangent_components body {:.6}/{:.6} counterpart {:.6}/{:.6} impulse {:.6} normal_speed_min {:.6} max_depth {:.6}; lifecycle [{}]; counterparts [{}] max_depth {:.6} warm {:.6}/{:.6} impulse {:.6}/{:.6} initial_speed {:.6}..{:.6} post_speed {:.6}..{:.6}/{:.6} bias {:.6}/{:.6} correction_depth {:.6} correction_translation {:.6}",
+        gap_start_frame,
+        duration,
+        gap_start_linear,
+        gap_start_angular,
+        spike_linear,
+        spike_angular,
+        previous_contact_frame.frame_index,
+        previous_body_linear,
+        previous_body_angular,
+        previous_facts.counterpart_linear_speed_max,
+        previous_facts.counterpart_angular_speed_max,
+        previous_facts.body_tangent_linear_component_max,
+        previous_facts.body_tangent_angular_component_max,
+        previous_facts.counterpart_tangent_linear_component_max,
+        previous_facts.counterpart_tangent_angular_component_max,
+        option_frame(energy_onset.frame),
+        energy_onset.body_tangent_linear_component_max,
+        energy_onset.body_tangent_angular_component_max,
+        energy_onset.counterpart_tangent_linear_component_max,
+        energy_onset.counterpart_tangent_angular_component_max,
+        energy_onset.normal_impulse_sum,
+        energy_onset.normal_speed_min,
+        energy_onset.max_depth,
+        lifecycle_summary,
+        previous_facts.counterparts.join(", "),
+        previous_facts.max_depth,
+        previous_facts.warm_start_normal_sum,
+        previous_facts.warm_start_tangent_sum,
+        previous_facts.normal_impulse_sum,
+        previous_facts.tangent_impulse_sum,
+        previous_facts.initial_normal_speed_min,
+        previous_facts.initial_normal_speed_max,
+        previous_facts.normal_speed_min,
+        previous_facts.normal_speed_max,
+        previous_facts.tangent_speed_abs_max,
+        previous_facts.position_bias_max,
+        previous_facts.restitution_bias_max,
+        previous_facts.position_correction_depth_sum,
+        previous_facts.position_correction_translation_sum,
+    );
+    LateSupportGapTrace {
+        start_frame: Some(gap_start_frame),
+        duration,
+        previous_normal_impulse_sum: previous_facts.normal_impulse_sum,
+        previous_normal_speed_min: previous_facts.normal_speed_min,
+        previous_body_linear_speed: previous_body_linear,
+        previous_body_angular_speed: previous_body_angular,
+        previous_counterpart_linear_speed_max: previous_facts.counterpart_linear_speed_max,
+        previous_counterpart_angular_speed_max: previous_facts.counterpart_angular_speed_max,
+        previous_body_tangent_linear_component_max: previous_facts
+            .body_tangent_linear_component_max,
+        previous_body_tangent_angular_component_max: previous_facts
+            .body_tangent_angular_component_max,
+        previous_counterpart_tangent_linear_component_max: previous_facts
+            .counterpart_tangent_linear_component_max,
+        previous_counterpart_tangent_angular_component_max: previous_facts
+            .counterpart_tangent_angular_component_max,
+        energy_onset_frame: energy_onset.frame,
+        energy_onset_body_tangent_linear_component_max: energy_onset
+            .body_tangent_linear_component_max,
+        energy_onset_body_tangent_angular_component_max: energy_onset
+            .body_tangent_angular_component_max,
+        energy_onset_counterpart_tangent_linear_component_max: energy_onset
+            .counterpart_tangent_linear_component_max,
+        energy_onset_counterpart_tangent_angular_component_max: energy_onset
+            .counterpart_tangent_angular_component_max,
+        energy_onset_normal_impulse_sum: energy_onset.normal_impulse_sum,
+        energy_onset_normal_speed_min: energy_onset.normal_speed_min,
+        energy_onset_max_depth: energy_onset.max_depth,
+        lifecycle,
+        previous_position_correction_depth_sum: previous_facts.position_correction_depth_sum,
+        previous_position_correction_translation_sum: previous_facts
+            .position_correction_translation_sum,
+        summary,
+    }
+}
+
+#[derive(Default)]
+struct SupportGapEnergyOnset {
+    frame: Option<usize>,
+    body_tangent_linear_component_max: f32,
+    body_tangent_angular_component_max: f32,
+    counterpart_tangent_linear_component_max: f32,
+    counterpart_tangent_angular_component_max: f32,
+    normal_impulse_sum: f32,
+    normal_speed_min: f32,
+    max_depth: f32,
+}
+
+#[derive(Clone, Debug)]
+struct SupportGapLifecycleFrame {
+    frame: usize,
+    contact_count: usize,
+    max_depth: f32,
+    normal_impulse_sum: f32,
+    normal_speed_min: f32,
+    normal_speed_max: f32,
+    tangent_speed_abs_max: f32,
+    body_tangent_linear_component_max: f32,
+    body_tangent_angular_component_max: f32,
+    normal_anchor_drift_max: f32,
+    tangent_anchor_drift_max: f32,
+    position_correction_depth_sum: f32,
+    position_correction_translation_sum: f32,
+    eligibility_decision: String,
+}
+
+fn support_gap_energy_onset(
+    run: &RunResult,
+    body: BodyHandle,
+    last_contact_frame_index: usize,
+) -> Option<SupportGapEnergyOnset> {
+    run.frames
+        .iter()
+        .filter(|frame| frame.frame_index <= last_contact_frame_index)
+        .filter_map(|frame| {
+            let facts = contact_summary(frame, body);
+            let has_linear_onset = facts.body_tangent_linear_component_max
+                > SUPPORT_GAP_TANGENT_LINEAR_ONSET_THRESHOLD;
+            let has_angular_onset = facts.body_tangent_angular_component_max
+                > SUPPORT_GAP_TANGENT_ANGULAR_ONSET_THRESHOLD;
+            if !has_linear_onset || !has_angular_onset {
+                return None;
+            }
+            Some(SupportGapEnergyOnset {
+                frame: Some(frame.frame_index),
+                body_tangent_linear_component_max: facts.body_tangent_linear_component_max,
+                body_tangent_angular_component_max: facts.body_tangent_angular_component_max,
+                counterpart_tangent_linear_component_max: facts
+                    .counterpart_tangent_linear_component_max,
+                counterpart_tangent_angular_component_max: facts
+                    .counterpart_tangent_angular_component_max,
+                normal_impulse_sum: facts.normal_impulse_sum,
+                normal_speed_min: facts.normal_speed_min,
+                max_depth: facts.max_depth,
+            })
+        })
+        .next()
+}
+
+fn support_gap_lifecycle(
+    run: &RunResult,
+    body: BodyHandle,
+    start_frame_index: usize,
+    end_frame_index: usize,
+) -> Vec<SupportGapLifecycleFrame> {
+    run.frames
+        .iter()
+        .filter(|frame| {
+            frame.frame_index >= start_frame_index && frame.frame_index <= end_frame_index
+        })
+        .filter_map(|frame| {
+            let facts = contact_summary(frame, body);
+            if facts.contact_count == 0 {
+                return None;
+            }
+            Some(SupportGapLifecycleFrame {
+                frame: frame.frame_index,
+                contact_count: facts.contact_count,
+                max_depth: facts.max_depth,
+                normal_impulse_sum: facts.normal_impulse_sum,
+                normal_speed_min: facts.normal_speed_min,
+                normal_speed_max: facts.normal_speed_max,
+                tangent_speed_abs_max: facts.tangent_speed_abs_max,
+                body_tangent_linear_component_max: facts.body_tangent_linear_component_max,
+                body_tangent_angular_component_max: facts.body_tangent_angular_component_max,
+                normal_anchor_drift_max: facts.normal_anchor_drift_max,
+                tangent_anchor_drift_max: facts.tangent_anchor_drift_max,
+                position_correction_depth_sum: facts.position_correction_depth_sum,
+                position_correction_translation_sum: facts.position_correction_translation_sum,
+                eligibility_decision: support_eligibility_decision(&facts),
+            })
+        })
+        .collect()
+}
+
+fn support_gap_lifecycle_summary(frames: &[SupportGapLifecycleFrame]) -> String {
+    if frames.is_empty() {
+        return "none".to_owned();
+    }
+    frames
+        .iter()
+        .map(|frame| {
+            format!(
+                "f{} c{} depth {:.6} impulse {:.6} normal {:.6}..{:.6} tangent {:.6} body_tangent {:.6}/{:.6} drift {:.6}/{:.6} correction {:.6}/{:.6} eligibility {}",
+                frame.frame,
+                frame.contact_count,
+                frame.max_depth,
+                frame.normal_impulse_sum,
+                frame.normal_speed_min,
+                frame.normal_speed_max,
+                frame.tangent_speed_abs_max,
+                frame.body_tangent_linear_component_max,
+                frame.body_tangent_angular_component_max,
+                frame.normal_anchor_drift_max,
+                frame.tangent_anchor_drift_max,
+                frame.position_correction_depth_sum,
+                frame.position_correction_translation_sum,
+                frame.eligibility_decision,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn support_eligibility_decision(facts: &ContactSummary) -> String {
+    if facts.normal_impulse_sum > f32::EPSILON {
+        return "observe_normal_impulse_present".to_owned();
+    }
+    if facts.normal_speed_min <= 0.0 {
+        return "observe_not_separating".to_owned();
+    }
+    if facts.counterpart_tangent_linear_component_max
+        > SUPPORT_ELIGIBILITY_COUNTERPART_TANGENT_THRESHOLD
+        || facts.counterpart_tangent_angular_component_max
+            > SUPPORT_ELIGIBILITY_COUNTERPART_TANGENT_THRESHOLD
+    {
+        return "reject_counterpart_motion".to_owned();
+    }
+    if facts.body_tangent_linear_component_max <= SUPPORT_GAP_TANGENT_LINEAR_ONSET_THRESHOLD
+        || facts.body_tangent_angular_component_max <= SUPPORT_GAP_TANGENT_ANGULAR_ONSET_THRESHOLD
+    {
+        return "observe_tangent_risk_low".to_owned();
+    }
+    if facts.normal_anchor_drift_max > SUPPORT_ELIGIBILITY_NORMAL_ANCHOR_DRIFT_THRESHOLD {
+        return "reject_normal_anchor_drift".to_owned();
+    }
+    if facts.tangent_anchor_drift_max > SUPPORT_ELIGIBILITY_TANGENT_ANCHOR_DRIFT_THRESHOLD {
+        return "reject_tangent_anchor_drift".to_owned();
+    }
+    if facts.position_correction_depth_sum > 0.0 {
+        "retain_candidate_correction_active".to_owned()
+    } else {
+        "retain_candidate_needs_position_re_evaluation".to_owned()
+    }
+}
+
+fn matrix_stack_ejection_trace(
+    run: &RunResult,
+    first_floor_exit: Option<(usize, BodyHandle, f32)>,
+) -> EjectionTrace {
+    let Some((exit_frame, exit_body, _)) = first_floor_exit else {
+        return EjectionTrace::default();
+    };
+    let pre_exit_frame = exit_frame.saturating_sub(1);
+    let mut trace = EjectionTrace {
+        pre_exit_frame: Some(pre_exit_frame),
+        ..EjectionTrace::default()
+    };
+    if let Some(frame) = run
+        .frames
+        .iter()
+        .find(|frame| frame.frame_index == pre_exit_frame)
+    {
+        if let Some(body) = frame
+            .snapshot
+            .bodies
+            .iter()
+            .find(|body| body.handle == exit_body)
+        {
+            trace.pre_exit_x = Some(body.transform.translation.x());
+            trace.pre_exit_linear_speed = body.linear_velocity.length();
+            trace.pre_exit_angular_speed = body.angular_velocity.abs();
+        }
+    }
+    if let Some(frame) = run
+        .frames
+        .iter()
+        .filter(|frame| frame.frame_index <= pre_exit_frame)
+        .max_by_key(|frame| frame.diagnostics.stability.island.contact_row_count)
+    {
+        trace.row_max_frame = Some(frame.frame_index);
+        if let Some((linear, angular)) = body_speeds(frame, exit_body) {
+            trace.row_max_linear_speed = linear;
+            trace.row_max_angular_speed = angular;
+        }
+    }
+
+    if let Some(frame) = run.frames.iter().rev().find(|frame| {
+        frame.frame_index <= pre_exit_frame
+            && frame
+                .snapshot
+                .contacts
+                .iter()
+                .any(|contact| contact.bodies.contains(&exit_body))
+    }) {
+        trace.last_contact_frame = Some(frame.frame_index);
+        let contacts = frame
+            .snapshot
+            .contacts
+            .iter()
+            .filter(|contact| contact.bodies.contains(&exit_body))
+            .collect::<Vec<_>>();
+        trace.last_contact_count = contacts.len();
+        trace.last_contact_counterparts = contacts
+            .iter()
+            .filter_map(|contact| {
+                contact
+                    .bodies
+                    .iter()
+                    .copied()
+                    .find(|body| *body != exit_body)
+            })
+            .map(|body| format!("{body:?}"))
+            .collect();
+        trace.last_contact_counterparts.sort();
+        trace.last_contact_counterparts.dedup();
+        trace.last_contact_max_depth = contacts
+            .iter()
+            .map(|contact| contact.depth)
+            .fold(0.0, f32::max);
+        trace.last_contact_normal_impulse_sum = contacts
+            .iter()
+            .map(|contact| contact.solver_normal_impulse)
+            .sum();
+        trace.last_contact_tangent_impulse_sum = contacts
+            .iter()
+            .map(|contact| contact.solver_tangent_impulse.abs())
+            .sum();
+    }
+    if let Some(frame) =
+        run.frames.iter().rev().find(|frame| {
+            frame.frame_index <= pre_exit_frame
+                && frame.snapshot.contacts.iter().any(|contact| {
+                    contact_has_dynamic_counterpart(frame, contact.bodies, exit_body)
+                })
+        })
+    {
+        trace.last_dynamic_contact_frame = Some(frame.frame_index);
+        let contacts = frame
+            .snapshot
+            .contacts
+            .iter()
+            .filter(|contact| contact_has_dynamic_counterpart(frame, contact.bodies, exit_body))
+            .collect::<Vec<_>>();
+        trace.last_dynamic_contact_count = contacts.len();
+        trace.last_dynamic_contact_counterparts = contacts
+            .iter()
+            .filter_map(|contact| {
+                contact
+                    .bodies
+                    .iter()
+                    .copied()
+                    .find(|body| *body != exit_body)
+            })
+            .map(|body| format!("{body:?}"))
+            .collect();
+        trace.last_dynamic_contact_counterparts.sort();
+        trace.last_dynamic_contact_counterparts.dedup();
+        trace.last_dynamic_contact_max_depth = contacts
+            .iter()
+            .map(|contact| contact.depth)
+            .fold(0.0, f32::max);
+        trace.last_dynamic_contact_normal_impulse_sum = contacts
+            .iter()
+            .map(|contact| contact.solver_normal_impulse)
+            .sum();
+        trace.last_dynamic_contact_tangent_impulse_sum = contacts
+            .iter()
+            .map(|contact| contact.solver_tangent_impulse.abs())
+            .sum();
+        trace.last_dynamic_contact_warm_start_normal_sum =
+            contacts.iter().map(|contact| contact.normal_impulse).sum();
+        trace.last_dynamic_contact_warm_start_tangent_sum = contacts
+            .iter()
+            .map(|contact| contact.tangent_impulse.abs())
+            .sum();
+        trace.last_dynamic_contact_warm_start_reasons = contacts
+            .iter()
+            .map(|contact| format!("{:?}", contact.warm_start_reason))
+            .collect();
+        trace.last_dynamic_contact_warm_start_reasons.sort();
+        trace.last_dynamic_contact_warm_start_reasons.dedup();
+        let relative_speeds = contacts
+            .iter()
+            .map(|contact| contact_solver_final_speeds(contact))
+            .collect::<Vec<_>>();
+        trace.last_dynamic_contact_normal_speed_min = relative_speeds
+            .iter()
+            .map(|(normal_speed, _)| *normal_speed)
+            .reduce(f32::min)
+            .unwrap_or(0.0);
+        trace.last_dynamic_contact_normal_speed_max = relative_speeds
+            .iter()
+            .map(|(normal_speed, _)| *normal_speed)
+            .reduce(f32::max)
+            .unwrap_or(0.0);
+        trace.last_dynamic_contact_tangent_speed_abs_max = relative_speeds
+            .iter()
+            .map(|(_, tangent_speed)| tangent_speed.abs())
+            .reduce(f32::max)
+            .unwrap_or(0.0);
+        if let Some((linear, angular)) = body_speeds(frame, exit_body) {
+            trace.last_dynamic_contact_body_linear_speed = linear;
+            trace.last_dynamic_contact_body_angular_speed = angular;
+        }
+    }
+    if let Some(frame) = run.frames.iter().rev().find(|frame| {
+        frame.frame_index <= pre_exit_frame
+            && frame.snapshot.contacts.iter().any(|contact| {
+                contact_has_dynamic_counterpart(frame, contact.bodies, exit_body)
+                    && contact.solver_normal_impulse > f32::EPSILON
+            })
+    }) {
+        trace.last_dynamic_impulse_frame = Some(frame.frame_index);
+        let contacts = frame
+            .snapshot
+            .contacts
+            .iter()
+            .filter(|contact| {
+                contact_has_dynamic_counterpart(frame, contact.bodies, exit_body)
+                    && contact.solver_normal_impulse > f32::EPSILON
+            })
+            .collect::<Vec<_>>();
+        trace.last_dynamic_impulse_counterparts = contacts
+            .iter()
+            .filter_map(|contact| {
+                contact
+                    .bodies
+                    .iter()
+                    .copied()
+                    .find(|body| *body != exit_body)
+            })
+            .map(|body| format!("{body:?}"))
+            .collect();
+        trace.last_dynamic_impulse_counterparts.sort();
+        trace.last_dynamic_impulse_counterparts.dedup();
+        trace.last_dynamic_impulse_normal_sum = contacts
+            .iter()
+            .map(|contact| contact.solver_normal_impulse)
+            .sum();
+        trace.last_dynamic_impulse_tangent_sum = contacts
+            .iter()
+            .map(|contact| contact.solver_tangent_impulse.abs())
+            .sum();
+        let relative_speeds = contacts
+            .iter()
+            .map(|contact| contact_solver_final_speeds(contact))
+            .collect::<Vec<_>>();
+        trace.last_dynamic_impulse_normal_speed_min = relative_speeds
+            .iter()
+            .map(|(normal_speed, _)| *normal_speed)
+            .reduce(f32::min)
+            .unwrap_or(0.0);
+        trace.last_dynamic_impulse_normal_speed_max = relative_speeds
+            .iter()
+            .map(|(normal_speed, _)| *normal_speed)
+            .reduce(f32::max)
+            .unwrap_or(0.0);
+        trace.last_dynamic_impulse_tangent_speed_abs_max = relative_speeds
+            .iter()
+            .map(|(_, tangent_speed)| tangent_speed.abs())
+            .reduce(f32::max)
+            .unwrap_or(0.0);
+        if let Some((linear, angular)) = body_speeds(frame, exit_body) {
+            trace.last_dynamic_impulse_body_linear_speed = linear;
+            trace.last_dynamic_impulse_body_angular_speed = angular;
+        }
+    }
+    populate_support_gap_trace(run, exit_body, pre_exit_frame, &mut trace);
+    populate_support_gap_upstream_trace(run, exit_body, &mut trace);
+
+    trace
+}
+
+fn populate_support_gap_trace(
+    run: &RunResult,
+    exit_body: BodyHandle,
+    pre_exit_frame: usize,
+    trace: &mut EjectionTrace,
+) {
+    let Some(first_contact_frame) = run.frames.iter().find(|frame| {
+        frame.frame_index <= pre_exit_frame && frame_contacts_body(frame, exit_body).count() > 0
+    }) else {
+        return;
+    };
+    let mut previous_contact_frame = Some(first_contact_frame.frame_index);
+    for frame in run
+        .frames
+        .iter()
+        .filter(|frame| frame.frame_index > first_contact_frame.frame_index)
+        .filter(|frame| frame.frame_index <= pre_exit_frame)
+    {
+        let has_contact = frame_contacts_body(frame, exit_body).next().is_some();
+        if has_contact {
+            previous_contact_frame = Some(frame.frame_index);
+            continue;
+        }
+        trace.support_gap_start_frame = Some(frame.frame_index);
+        if let Some((linear, angular)) = body_speeds(frame, exit_body) {
+            trace.support_gap_start_linear_speed = linear;
+            trace.support_gap_start_angular_speed = angular;
+        }
+        if let Some(previous) = previous_contact_frame.and_then(|frame_index| {
+            run.frames
+                .iter()
+                .find(|frame| frame.frame_index == frame_index)
+        }) {
+            trace.support_gap_previous_frame = Some(previous.frame_index);
+            let facts = contact_summary(previous, exit_body);
+            trace.support_gap_previous_counterparts = facts.counterparts;
+            trace.support_gap_previous_max_depth = facts.max_depth;
+            trace.support_gap_previous_warm_start_normal_sum = facts.warm_start_normal_sum;
+            trace.support_gap_previous_warm_start_tangent_sum = facts.warm_start_tangent_sum;
+            trace.support_gap_previous_normal_impulse_sum = facts.normal_impulse_sum;
+            trace.support_gap_previous_tangent_impulse_sum = facts.tangent_impulse_sum;
+            trace.support_gap_previous_initial_normal_speed_min = facts.initial_normal_speed_min;
+            trace.support_gap_previous_initial_normal_speed_max = facts.initial_normal_speed_max;
+            trace.support_gap_previous_normal_speed_min = facts.normal_speed_min;
+            trace.support_gap_previous_normal_speed_max = facts.normal_speed_max;
+            trace.support_gap_previous_tangent_speed_abs_max = facts.tangent_speed_abs_max;
+            if let Some((linear, angular)) = body_speeds(previous, exit_body) {
+                trace.support_gap_previous_body_linear_speed = linear;
+                trace.support_gap_previous_body_angular_speed = angular;
+            }
+            trace.support_gap_previous_counterpart_linear_speed_max =
+                facts.counterpart_linear_speed_max;
+            trace.support_gap_previous_counterpart_angular_speed_max =
+                facts.counterpart_angular_speed_max;
+            trace.support_gap_previous_body_tangent_linear_component_max =
+                facts.body_tangent_linear_component_max;
+            trace.support_gap_previous_body_tangent_angular_component_max =
+                facts.body_tangent_angular_component_max;
+            trace.support_gap_previous_counterpart_tangent_linear_component_max =
+                facts.counterpart_tangent_linear_component_max;
+            trace.support_gap_previous_counterpart_tangent_angular_component_max =
+                facts.counterpart_tangent_angular_component_max;
+            trace.support_gap_previous_normal_anchor_drift_max = facts.normal_anchor_drift_max;
+            trace.support_gap_previous_tangent_anchor_drift_max = facts.tangent_anchor_drift_max;
+            trace.support_gap_previous_position_bias_max = facts.position_bias_max;
+            trace.support_gap_previous_restitution_bias_max = facts.restitution_bias_max;
+            trace.support_gap_previous_position_correction_depth_sum =
+                facts.position_correction_depth_sum;
+            trace.support_gap_previous_position_correction_translation_sum =
+                facts.position_correction_translation_sum;
+        }
+        if let Some(next) = run
+            .frames
+            .iter()
+            .filter(|candidate| candidate.frame_index > frame.frame_index)
+            .filter(|candidate| candidate.frame_index <= pre_exit_frame)
+            .find(|candidate| frame_contacts_body(candidate, exit_body).next().is_some())
+        {
+            trace.support_gap_next_frame = Some(next.frame_index);
+            let facts = contact_summary(next, exit_body);
+            trace.support_gap_next_counterparts = facts.counterparts;
+            trace.support_gap_next_max_depth = facts.max_depth;
+            trace.support_gap_next_warm_start_normal_sum = facts.warm_start_normal_sum;
+            trace.support_gap_next_warm_start_tangent_sum = facts.warm_start_tangent_sum;
+            trace.support_gap_next_normal_impulse_sum = facts.normal_impulse_sum;
+            trace.support_gap_next_tangent_impulse_sum = facts.tangent_impulse_sum;
+            trace.support_gap_next_initial_normal_speed_min = facts.initial_normal_speed_min;
+            trace.support_gap_next_initial_normal_speed_max = facts.initial_normal_speed_max;
+            trace.support_gap_next_normal_speed_min = facts.normal_speed_min;
+            trace.support_gap_next_normal_speed_max = facts.normal_speed_max;
+            trace.support_gap_next_tangent_speed_abs_max = facts.tangent_speed_abs_max;
+            if let Some((linear, angular)) = body_speeds(next, exit_body) {
+                trace.support_gap_next_body_linear_speed = linear;
+                trace.support_gap_next_body_angular_speed = angular;
+            }
+            trace.support_gap_next_counterpart_linear_speed_max =
+                facts.counterpart_linear_speed_max;
+            trace.support_gap_next_counterpart_angular_speed_max =
+                facts.counterpart_angular_speed_max;
+            trace.support_gap_next_body_tangent_linear_component_max =
+                facts.body_tangent_linear_component_max;
+            trace.support_gap_next_body_tangent_angular_component_max =
+                facts.body_tangent_angular_component_max;
+            trace.support_gap_next_counterpart_tangent_linear_component_max =
+                facts.counterpart_tangent_linear_component_max;
+            trace.support_gap_next_counterpart_tangent_angular_component_max =
+                facts.counterpart_tangent_angular_component_max;
+            trace.support_gap_next_normal_anchor_drift_max = facts.normal_anchor_drift_max;
+            trace.support_gap_next_tangent_anchor_drift_max = facts.tangent_anchor_drift_max;
+            trace.support_gap_next_position_bias_max = facts.position_bias_max;
+            trace.support_gap_next_restitution_bias_max = facts.restitution_bias_max;
+            trace.support_gap_next_position_correction_depth_sum =
+                facts.position_correction_depth_sum;
+            trace.support_gap_next_position_correction_translation_sum =
+                facts.position_correction_translation_sum;
+        }
+        return;
+    }
+}
+
+fn populate_support_gap_upstream_trace(
+    run: &RunResult,
+    exit_body: BodyHandle,
+    trace: &mut EjectionTrace,
+) {
+    let Some(previous_frame_index) = trace.support_gap_previous_frame else {
+        return;
+    };
+    let Some(previous_frame) = run
+        .frames
+        .iter()
+        .find(|frame| frame.frame_index == previous_frame_index)
+    else {
+        return;
+    };
+    let mut counterparts = frame_contacts_body(previous_frame, exit_body)
+        .filter_map(|contact| {
+            contact
+                .bodies
+                .iter()
+                .copied()
+                .find(|body| *body != exit_body)
+        })
+        .collect::<Vec<_>>();
+    counterparts.sort_by_key(|body| format!("{body:?}"));
+    counterparts.dedup();
+    if counterparts.is_empty() {
+        return;
+    }
+
+    let window_start = previous_frame_index
+        .saturating_sub(60)
+        .max(MATRIX_STACK_QUIET_WINDOW_START_FRAME);
+    let mut best = None::<SupportGapUpstreamCandidate>;
+    for counterpart in counterparts {
+        for frame in run.frames.iter().filter(|frame| {
+            frame.frame_index >= window_start && frame.frame_index <= previous_frame_index
+        }) {
+            let Some((linear_speed, angular_speed)) = body_speeds(frame, counterpart) else {
+                continue;
+            };
+            let source_contacts = frame
+                .snapshot
+                .contacts
+                .iter()
+                .filter(|contact| {
+                    contact.bodies.contains(&counterpart) && !contact.bodies.contains(&exit_body)
+                })
+                .collect::<Vec<_>>();
+            let source_contact_count = source_contacts.len();
+            let source_candidate_count = source_contacts
+                .iter()
+                .filter(|contact| contact.source_row_continuity_candidate)
+                .count();
+            let mut source_warm_start_reasons = source_contacts
+                .iter()
+                .map(|contact| format!("{:?}", contact.warm_start_reason))
+                .collect::<Vec<_>>();
+            source_warm_start_reasons.sort();
+            source_warm_start_reasons.dedup();
+            let source_continuity = source_continuity_facts(run, frame, &source_contacts);
+            let source_max_depth = source_contacts
+                .iter()
+                .map(|contact| contact.depth)
+                .fold(0.0, f32::max);
+            let source_initial_normal_speeds = source_contacts
+                .iter()
+                .map(|contact| contact.solver_initial_normal_speed)
+                .collect::<Vec<_>>();
+            let source_final_speeds = source_contacts
+                .iter()
+                .map(|contact| contact_solver_final_speeds(contact))
+                .collect::<Vec<_>>();
+            let source_position_bias_max = source_contacts
+                .iter()
+                .map(|contact| contact.solver_position_bias)
+                .reduce(f32::max)
+                .unwrap_or(0.0);
+            let source_support_friction_sum = source_contacts
+                .iter()
+                .map(|contact| contact.solver_support_friction_impulse)
+                .sum();
+            let source_normal_impulse_sum = source_contacts
+                .iter()
+                .map(|contact| contact.solver_normal_impulse)
+                .sum();
+            let source_tangent_impulse_sum = source_contacts
+                .iter()
+                .map(|contact| contact.solver_tangent_impulse.abs())
+                .sum();
+            let source_correction_depth_sum = source_contacts
+                .iter()
+                .map(|contact| contact.solver_position_correction_depth)
+                .sum();
+            let source_correction_translation_sum = source_contacts
+                .iter()
+                .map(|contact| {
+                    contact.solver_position_correction_body_a_translation
+                        + contact.solver_position_correction_body_b_translation
+                })
+                .sum();
+            let source_dry_run = source_row_dry_run_facts(
+                frame,
+                &source_contacts,
+                &source_continuity,
+                linear_speed,
+                angular_speed,
+            );
+            let (previous_linear_speed, previous_angular_speed) =
+                body_speeds(previous_frame, counterpart).unwrap_or((linear_speed, angular_speed));
+            let mut source_bodies = source_contacts
+                .iter()
+                .flat_map(|contact| contact.bodies)
+                .filter(|body| *body != counterpart && *body != exit_body)
+                .map(|body| format!("{body:?}"))
+                .collect::<Vec<_>>();
+            source_bodies.sort();
+            source_bodies.dedup();
+
+            let candidate = SupportGapUpstreamCandidate {
+                frame: frame.frame_index,
+                counterpart,
+                source_bodies,
+                counterpart_linear_speed: linear_speed,
+                counterpart_angular_speed: angular_speed,
+                source_contact_count,
+                source_candidate_count,
+                source_warm_start_reasons,
+                source_same_pair_previous_count: source_continuity.same_pair_previous_count,
+                source_edge_swap_candidate_count: source_continuity.edge_swap_candidate_count,
+                source_point_drift_min: source_continuity.point_drift_min,
+                source_normal_dot_max: source_continuity.normal_dot_max,
+                source_local_anchor_drift_min: source_continuity.local_anchor_drift_min,
+                source_max_depth,
+                source_initial_normal_speed_min: source_initial_normal_speeds
+                    .iter()
+                    .copied()
+                    .reduce(f32::min)
+                    .unwrap_or(0.0),
+                source_initial_normal_speed_max: source_initial_normal_speeds
+                    .iter()
+                    .copied()
+                    .reduce(f32::max)
+                    .unwrap_or(0.0),
+                source_normal_speed_min: source_final_speeds
+                    .iter()
+                    .map(|(normal_speed, _)| *normal_speed)
+                    .reduce(f32::min)
+                    .unwrap_or(0.0),
+                source_normal_speed_max: source_final_speeds
+                    .iter()
+                    .map(|(normal_speed, _)| *normal_speed)
+                    .reduce(f32::max)
+                    .unwrap_or(0.0),
+                source_tangent_speed_abs_max: source_final_speeds
+                    .iter()
+                    .map(|(_, tangent_speed)| tangent_speed.abs())
+                    .reduce(f32::max)
+                    .unwrap_or(0.0),
+                source_position_bias_max,
+                source_support_friction_sum,
+                source_normal_impulse_sum,
+                source_tangent_impulse_sum,
+                source_correction_depth_sum,
+                source_correction_translation_sum,
+                source_dry_run_geometry_count: source_dry_run.geometry_count,
+                source_dry_run_pressure_count: source_dry_run.pressure_count,
+                source_dry_run_counterpart_reject_count: source_dry_run.counterpart_reject_count,
+                source_dry_run_tangent_reject_count: source_dry_run.tangent_reject_count,
+                source_dry_run_eligible_count: source_dry_run.eligible_count,
+                source_dry_run_decision: source_dry_run.decision,
+                source_dry_run_pseudo_depth_min: source_dry_run.pseudo_depth_min,
+                source_dry_run_pseudo_depth_max: source_dry_run.pseudo_depth_max,
+                source_dry_run_pseudo_support_skin_count: source_dry_run.pseudo_support_skin_count,
+                handoff_frame_delta: previous_frame_index.checked_sub(frame.frame_index),
+                handoff_linear_speed_delta: previous_linear_speed - linear_speed,
+                handoff_angular_speed_delta: previous_angular_speed - angular_speed,
+            };
+            if best.as_ref().is_none_or(|best| {
+                candidate.counterpart_angular_speed > best.counterpart_angular_speed
+            }) {
+                best = Some(candidate);
+            }
+        }
+    }
+
+    let Some(best) = best else {
+        return;
+    };
+    trace.support_gap_upstream_frame = Some(best.frame);
+    trace.support_gap_upstream_counterpart = Some(format!("{:?}", best.counterpart));
+    trace.support_gap_upstream_source_bodies = best.source_bodies;
+    trace.support_gap_upstream_counterpart_linear_speed = best.counterpart_linear_speed;
+    trace.support_gap_upstream_counterpart_angular_speed = best.counterpart_angular_speed;
+    trace.support_gap_upstream_source_contact_count = best.source_contact_count;
+    trace.support_gap_upstream_source_candidate_count = best.source_candidate_count;
+    trace.support_gap_upstream_source_warm_start_reasons = best.source_warm_start_reasons;
+    trace.support_gap_upstream_source_same_pair_previous_count =
+        best.source_same_pair_previous_count;
+    trace.support_gap_upstream_source_edge_swap_candidate_count =
+        best.source_edge_swap_candidate_count;
+    trace.support_gap_upstream_source_point_drift_min = best.source_point_drift_min;
+    trace.support_gap_upstream_source_normal_dot_max = best.source_normal_dot_max;
+    trace.support_gap_upstream_source_local_anchor_drift_min = best.source_local_anchor_drift_min;
+    trace.support_gap_upstream_source_max_depth = best.source_max_depth;
+    trace.support_gap_upstream_source_initial_normal_speed_min =
+        best.source_initial_normal_speed_min;
+    trace.support_gap_upstream_source_initial_normal_speed_max =
+        best.source_initial_normal_speed_max;
+    trace.support_gap_upstream_source_normal_speed_min = best.source_normal_speed_min;
+    trace.support_gap_upstream_source_normal_speed_max = best.source_normal_speed_max;
+    trace.support_gap_upstream_source_tangent_speed_abs_max = best.source_tangent_speed_abs_max;
+    trace.support_gap_upstream_source_position_bias_max = best.source_position_bias_max;
+    trace.support_gap_upstream_source_support_friction_sum = best.source_support_friction_sum;
+    trace.support_gap_upstream_source_normal_impulse_sum = best.source_normal_impulse_sum;
+    trace.support_gap_upstream_source_tangent_impulse_sum = best.source_tangent_impulse_sum;
+    trace.support_gap_upstream_source_correction_depth_sum = best.source_correction_depth_sum;
+    trace.support_gap_upstream_source_correction_translation_sum =
+        best.source_correction_translation_sum;
+    trace.support_gap_upstream_source_dry_run_geometry_count = best.source_dry_run_geometry_count;
+    trace.support_gap_upstream_source_dry_run_pressure_count = best.source_dry_run_pressure_count;
+    trace.support_gap_upstream_source_dry_run_counterpart_reject_count =
+        best.source_dry_run_counterpart_reject_count;
+    trace.support_gap_upstream_source_dry_run_tangent_reject_count =
+        best.source_dry_run_tangent_reject_count;
+    trace.support_gap_upstream_source_dry_run_eligible_count = best.source_dry_run_eligible_count;
+    trace.support_gap_upstream_source_dry_run_decision = best.source_dry_run_decision;
+    trace.support_gap_upstream_source_dry_run_pseudo_depth_min =
+        best.source_dry_run_pseudo_depth_min;
+    trace.support_gap_upstream_source_dry_run_pseudo_depth_max =
+        best.source_dry_run_pseudo_depth_max;
+    trace.support_gap_upstream_source_dry_run_pseudo_support_skin_count =
+        best.source_dry_run_pseudo_support_skin_count;
+    trace.support_gap_upstream_handoff_frame_delta = best.handoff_frame_delta;
+    trace.support_gap_upstream_handoff_linear_speed_delta = best.handoff_linear_speed_delta;
+    trace.support_gap_upstream_handoff_angular_speed_delta = best.handoff_angular_speed_delta;
+}
+
+struct SupportGapUpstreamCandidate {
+    frame: usize,
+    counterpart: BodyHandle,
+    source_bodies: Vec<String>,
+    counterpart_linear_speed: f32,
+    counterpart_angular_speed: f32,
+    source_contact_count: usize,
+    source_candidate_count: usize,
+    source_warm_start_reasons: Vec<String>,
+    source_same_pair_previous_count: usize,
+    source_edge_swap_candidate_count: usize,
+    source_point_drift_min: Option<f32>,
+    source_normal_dot_max: Option<f32>,
+    source_local_anchor_drift_min: Option<f32>,
+    source_max_depth: f32,
+    source_initial_normal_speed_min: f32,
+    source_initial_normal_speed_max: f32,
+    source_normal_speed_min: f32,
+    source_normal_speed_max: f32,
+    source_tangent_speed_abs_max: f32,
+    source_position_bias_max: f32,
+    source_support_friction_sum: f32,
+    source_normal_impulse_sum: f32,
+    source_tangent_impulse_sum: f32,
+    source_correction_depth_sum: f32,
+    source_correction_translation_sum: f32,
+    source_dry_run_geometry_count: usize,
+    source_dry_run_pressure_count: usize,
+    source_dry_run_counterpart_reject_count: usize,
+    source_dry_run_tangent_reject_count: usize,
+    source_dry_run_eligible_count: usize,
+    source_dry_run_decision: String,
+    source_dry_run_pseudo_depth_min: Option<f32>,
+    source_dry_run_pseudo_depth_max: Option<f32>,
+    source_dry_run_pseudo_support_skin_count: usize,
+    handoff_frame_delta: Option<usize>,
+    handoff_linear_speed_delta: f32,
+    handoff_angular_speed_delta: f32,
+}
+
+#[derive(Default)]
+struct SourceRowDryRunFacts {
+    geometry_count: usize,
+    pressure_count: usize,
+    counterpart_reject_count: usize,
+    tangent_reject_count: usize,
+    eligible_count: usize,
+    decision: String,
+    pseudo_depth_min: Option<f32>,
+    pseudo_depth_max: Option<f32>,
+    pseudo_support_skin_count: usize,
+}
+
+#[derive(Default)]
+struct SourceContinuityFacts {
+    same_pair_previous_count: usize,
+    edge_swap_candidate_count: usize,
+    point_drift_min: Option<f32>,
+    normal_dot_max: Option<f32>,
+    local_anchor_drift_min: Option<f32>,
+}
+
+fn source_continuity_facts(
+    run: &RunResult,
+    current_frame: &FrameRecord,
+    source_contacts: &[&DebugContact],
+) -> SourceContinuityFacts {
+    let Some(previous_frame_index) = current_frame.frame_index.checked_sub(1) else {
+        return SourceContinuityFacts::default();
+    };
+    let Some(previous_frame) = run
+        .frames
+        .iter()
+        .find(|frame| frame.frame_index == previous_frame_index)
+    else {
+        return SourceContinuityFacts::default();
+    };
+
+    let mut facts = SourceContinuityFacts::default();
+    for contact in source_contacts {
+        let previous_pair_contacts = previous_frame
+            .snapshot
+            .contacts
+            .iter()
+            .filter(|candidate| candidate.colliders == contact.colliders)
+            .collect::<Vec<_>>();
+        if previous_pair_contacts.is_empty() {
+            continue;
+        }
+        facts.same_pair_previous_count += 1;
+
+        let Some((previous_contact, point_drift, normal_dot)) = previous_pair_contacts
+            .iter()
+            .filter_map(|previous_contact| {
+                let point_drift = (contact.point - previous_contact.point).length();
+                let normal_dot = contact
+                    .normal
+                    .normalized_or_zero()
+                    .dot(previous_contact.normal.normalized_or_zero());
+                point_drift
+                    .is_finite()
+                    .then_some((*previous_contact, point_drift, normal_dot))
+            })
+            .min_by(|(_, lhs, _), (_, rhs, _)| lhs.partial_cmp(rhs).unwrap())
+        else {
+            continue;
+        };
+
+        facts.point_drift_min = min_option_f32(facts.point_drift_min, point_drift);
+        facts.normal_dot_max = max_option_f32(facts.normal_dot_max, normal_dot);
+        let local_anchor_drift =
+            max_local_anchor_drift(previous_frame, current_frame, previous_contact, contact);
+        if let Some(local_anchor_drift) = local_anchor_drift {
+            facts.local_anchor_drift_min =
+                min_option_f32(facts.local_anchor_drift_min, local_anchor_drift);
+        }
+
+        let edge_swap_candidate = feature_index_edge_swap(previous_contact, contact)
+            && previous_contact.reduction_reason == contact.reduction_reason
+            && point_drift <= 0.05
+            && normal_dot >= 0.98
+            && same_shape_signature(previous_frame, current_frame, previous_contact, contact)
+            && local_anchor_drift
+                .is_some_and(|drift| drift <= FEATURE_CHURN_LOCAL_ANCHOR_DRIFT_THRESHOLD);
+        if edge_swap_candidate {
+            facts.edge_swap_candidate_count += 1;
+        }
+    }
+
+    facts
+}
+
+fn source_row_dry_run_facts(
+    frame: &FrameRecord,
+    source_contacts: &[&DebugContact],
+    source_continuity: &SourceContinuityFacts,
+    counterpart_linear_speed: f32,
+    counterpart_angular_speed: f32,
+) -> SourceRowDryRunFacts {
+    let mut facts = SourceRowDryRunFacts::default();
+    let pseudo_facts = source_row_pseudo_position_facts(frame, source_contacts);
+    facts.pseudo_depth_min = pseudo_facts.depth_min;
+    facts.pseudo_depth_max = pseudo_facts.depth_max;
+    facts.pseudo_support_skin_count = pseudo_facts.support_skin_count;
+
+    for contact in source_contacts
+        .iter()
+        .copied()
+        .filter(|contact| contact.source_row_continuity_candidate)
+    {
+        let geometry_valid = contact.depth > 0.0
+            && source_continuity
+                .normal_dot_max
+                .is_some_and(|normal_dot| normal_dot >= SOURCE_ROW_NORMAL_DOT_DRY_RUN_THRESHOLD)
+            && source_continuity
+                .local_anchor_drift_min
+                .is_some_and(|drift| drift <= FEATURE_CHURN_LOCAL_ANCHOR_DRIFT_THRESHOLD);
+        if !geometry_valid {
+            continue;
+        }
+        facts.geometry_count += 1;
+
+        let correction_pressure_source = contact.solver_position_bias <= f32::EPSILON
+            && contact.solver_support_friction_impulse.abs() <= f32::EPSILON
+            && contact.solver_position_correction_depth > contact.solver_normal_impulse;
+        if !correction_pressure_source {
+            continue;
+        }
+        facts.pressure_count += 1;
+
+        let reject_counterpart_motion = counterpart_linear_speed
+            > SUPPORT_ELIGIBILITY_COUNTERPART_TANGENT_THRESHOLD
+            || counterpart_angular_speed > SUPPORT_ELIGIBILITY_COUNTERPART_TANGENT_THRESHOLD;
+        if reject_counterpart_motion {
+            facts.counterpart_reject_count += 1;
+        }
+
+        let (_, tangent_speed) = contact_solver_final_speeds(contact);
+        let reject_tangent_energy =
+            tangent_speed.abs() > SUPPORT_ELIGIBILITY_COUNTERPART_TANGENT_THRESHOLD;
+        if reject_tangent_energy {
+            facts.tangent_reject_count += 1;
+        }
+
+        if !reject_counterpart_motion && !reject_tangent_energy {
+            facts.eligible_count += 1;
+        }
+    }
+
+    facts.decision = if facts.geometry_count == 0 {
+        "reject_geometry".to_owned()
+    } else if facts.pressure_count == 0 {
+        "observe_not_pressure_source".to_owned()
+    } else if facts.counterpart_reject_count > 0 {
+        "reject_counterpart_motion".to_owned()
+    } else if facts.tangent_reject_count > 0 {
+        "reject_tangent_energy".to_owned()
+    } else if facts.eligible_count > 0 {
+        "candidate_needs_position_re_evaluation".to_owned()
+    } else {
+        "observe_no_source_candidate".to_owned()
+    };
+    facts
+}
+
+#[derive(Default)]
+struct SourceRowPseudoPositionFacts {
+    depth_min: Option<f32>,
+    depth_max: Option<f32>,
+    support_skin_count: usize,
+}
+
+fn source_row_pseudo_position_facts(
+    frame: &FrameRecord,
+    source_contacts: &[&DebugContact],
+) -> SourceRowPseudoPositionFacts {
+    let source_contact_ids = source_contacts
+        .iter()
+        .filter(|contact| contact.source_row_continuity_candidate)
+        .map(|contact| contact.id)
+        .collect::<Vec<_>>();
+    if source_contact_ids.is_empty() || frame.stats.position_iterations == 0 {
+        return SourceRowPseudoPositionFacts::default();
+    }
+
+    let eligible_contact_count = frame
+        .snapshot
+        .contacts
+        .iter()
+        .filter(|contact| residual_position_depth(contact.depth) > 0.0)
+        .count();
+    let dense_correction_mode = eligible_contact_count >= 16;
+    let mut body_translation_vectors = BTreeMap::<BodyHandle, picea::prelude::Vector>::new();
+    let mut queued_translations = BTreeMap::<BodyHandle, picea::prelude::Vector>::new();
+    let mut facts = SourceRowPseudoPositionFacts::default();
+
+    for _ in 0..frame.stats.position_iterations {
+        for contact in &frame.snapshot.contacts {
+            let normal = contact.normal.normalized_or_zero();
+            let frame_start_depth = residual_position_depth(contact.depth);
+            if normal.length() <= f32::EPSILON || frame_start_depth <= f32::EPSILON {
+                continue;
+            }
+            let inverse_mass_a = debug_body_inverse_mass(frame, contact.bodies[0]);
+            let inverse_mass_b = debug_body_inverse_mass(frame, contact.bodies[1]);
+            let inverse_mass_sum = inverse_mass_a + inverse_mass_b;
+            if inverse_mass_sum <= f32::EPSILON {
+                continue;
+            }
+
+            let depth = if dense_correction_mode {
+                let translation_a = body_translation_vectors
+                    .get(&contact.bodies[0])
+                    .copied()
+                    .unwrap_or_default();
+                let translation_b = body_translation_vectors
+                    .get(&contact.bodies[1])
+                    .copied()
+                    .unwrap_or_default();
+                residual_position_depth(
+                    (contact.depth - (translation_a - translation_b).dot(normal)).max(0.0),
+                )
+            } else {
+                frame_start_depth
+            };
+            if depth <= f32::EPSILON {
+                continue;
+            }
+
+            if source_contact_ids.contains(&contact.id) {
+                facts.depth_min = min_option_f32(facts.depth_min, depth);
+                facts.depth_max = max_option_f32(facts.depth_max, depth);
+                if depth <= SOURCE_ROW_PSEUDO_SUPPORT_SKIN {
+                    facts.support_skin_count += 1;
+                }
+            }
+
+            let correction = depth * 0.8 / f32::from(frame.stats.position_iterations);
+            let correction_a = normal * (correction * inverse_mass_a / inverse_mass_sum);
+            let correction_b = -normal * (correction * inverse_mass_b / inverse_mass_sum);
+            if queue_pseudo_position_translation(
+                frame,
+                &mut queued_translations,
+                contact.bodies[0],
+                correction_a,
+                contact.bodies[1],
+            ) {
+                *body_translation_vectors
+                    .entry(contact.bodies[0])
+                    .or_default() += correction_a;
+            }
+            if queue_pseudo_position_translation(
+                frame,
+                &mut queued_translations,
+                contact.bodies[1],
+                correction_b,
+                contact.bodies[0],
+            ) {
+                *body_translation_vectors
+                    .entry(contact.bodies[1])
+                    .or_default() += correction_b;
+            }
+        }
+    }
+
+    facts
+}
+
+fn residual_position_depth(depth: f32) -> f32 {
+    (depth - 0.005).max(0.0)
+}
+
+fn debug_body_inverse_mass(frame: &FrameRecord, body: BodyHandle) -> f32 {
+    frame
+        .snapshot
+        .bodies
+        .iter()
+        .find(|debug_body| debug_body.handle == body)
+        .map(|debug_body| debug_body.mass_properties.inverse_mass)
+        .unwrap_or(0.0)
+}
+
+fn queue_pseudo_position_translation(
+    frame: &FrameRecord,
+    queued_translations: &mut BTreeMap<BodyHandle, picea::prelude::Vector>,
+    body: BodyHandle,
+    translation: picea::prelude::Vector,
+    counterpart: BodyHandle,
+) -> bool {
+    if translation.length() <= f32::EPSILON {
+        return false;
+    }
+    let Some(record) = frame
+        .snapshot
+        .bodies
+        .iter()
+        .find(|debug_body| debug_body.handle == body)
+    else {
+        return false;
+    };
+    if record.body_type != picea::prelude::BodyType::Dynamic {
+        return false;
+    }
+    let already_queued = queued_translations.contains_key(&body);
+    let wake_sleeping_body = queued_translations.contains_key(&counterpart)
+        || frame
+            .snapshot
+            .bodies
+            .iter()
+            .find(|debug_body| debug_body.handle == counterpart)
+            .is_some_and(|debug_body| {
+                debug_body.body_type != picea::prelude::BodyType::Static && !debug_body.sleeping
+            });
+    if record.sleeping && !wake_sleeping_body && !already_queued {
+        return false;
+    }
+    *queued_translations.entry(body).or_default() += translation;
+    true
+}
+
+fn option_frame(frame: Option<usize>) -> String {
+    frame
+        .map(|frame| frame.to_string())
+        .unwrap_or_else(|| "none".to_owned())
+}
+
+fn option_f32(value: Option<f32>) -> String {
+    value
+        .map(|value| format!("{value:.6}"))
+        .unwrap_or_else(|| "none".to_owned())
+}
+
+fn min_option_f32(current: Option<f32>, candidate: f32) -> Option<f32> {
+    current
+        .map(|current| current.min(candidate))
+        .or(Some(candidate))
+}
+
+fn max_option_f32(current: Option<f32>, candidate: f32) -> Option<f32> {
+    current
+        .map(|current| current.max(candidate))
+        .or(Some(candidate))
+}
+
+fn option_usize(value: Option<usize>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "none".to_owned())
+}
+
+fn contact_body_labels(bodies: [BodyHandle; 2]) -> Vec<String> {
+    let mut labels = bodies
+        .iter()
+        .map(|body| format!("{body:?}"))
+        .collect::<Vec<_>>();
+    labels.sort();
+    labels
+}
+
+fn contact_collider_labels(colliders: [ColliderHandle; 2]) -> Vec<String> {
+    let mut labels = colliders
+        .iter()
+        .map(|collider| format!("{collider:?}"))
+        .collect::<Vec<_>>();
+    labels.sort();
+    labels
+}
+
+#[derive(Default)]
+struct ContactSummary {
+    contact_count: usize,
+    counterparts: Vec<String>,
+    counterpart_linear_speed_max: f32,
+    counterpart_angular_speed_max: f32,
+    body_tangent_linear_component_max: f32,
+    body_tangent_angular_component_max: f32,
+    counterpart_tangent_linear_component_max: f32,
+    counterpart_tangent_angular_component_max: f32,
+    max_depth: f32,
+    warm_start_normal_sum: f32,
+    warm_start_tangent_sum: f32,
+    normal_impulse_sum: f32,
+    tangent_impulse_sum: f32,
+    initial_normal_speed_min: f32,
+    initial_normal_speed_max: f32,
+    normal_speed_min: f32,
+    normal_speed_max: f32,
+    tangent_speed_abs_max: f32,
+    support_friction_impulse_max: f32,
+    support_friction_impulse_sum: f32,
+    normal_anchor_drift_max: f32,
+    tangent_anchor_drift_max: f32,
+    position_bias_max: f32,
+    restitution_bias_max: f32,
+    position_correction_depth_sum: f32,
+    position_correction_translation_sum: f32,
+}
+
+fn contact_summary(frame: &FrameRecord, body: BodyHandle) -> ContactSummary {
+    let contacts = frame_contacts_body(frame, body).collect::<Vec<_>>();
+    let mut counterpart_handles = contacts
+        .iter()
+        .filter_map(|contact| {
+            contact
+                .bodies
+                .iter()
+                .copied()
+                .find(|candidate| *candidate != body)
+        })
+        .collect::<Vec<_>>();
+    counterpart_handles.sort_by_key(|body| format!("{body:?}"));
+    counterpart_handles.dedup();
+    let counterparts = counterpart_handles
+        .iter()
+        .map(|body| format!("{body:?}"))
+        .collect::<Vec<_>>();
+    let counterpart_speeds = counterpart_handles
+        .iter()
+        .filter_map(|body| body_speeds(frame, *body))
+        .collect::<Vec<_>>();
+    let relative_speeds = contacts
+        .iter()
+        .map(|contact| contact_solver_final_speeds(contact))
+        .collect::<Vec<_>>();
+    let initial_normal_speeds = contacts
+        .iter()
+        .map(|contact| contact.solver_initial_normal_speed)
+        .collect::<Vec<_>>();
+    ContactSummary {
+        contact_count: contacts.len(),
+        counterparts,
+        counterpart_linear_speed_max: counterpart_speeds
+            .iter()
+            .map(|(linear, _)| *linear)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        counterpart_angular_speed_max: counterpart_speeds
+            .iter()
+            .map(|(_, angular)| *angular)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        body_tangent_linear_component_max: contacts
+            .iter()
+            .filter_map(|contact| contact_tangent_components(frame, contact, body))
+            .map(|components| components.body_linear)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        body_tangent_angular_component_max: contacts
+            .iter()
+            .filter_map(|contact| contact_tangent_components(frame, contact, body))
+            .map(|components| components.body_angular)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        counterpart_tangent_linear_component_max: contacts
+            .iter()
+            .filter_map(|contact| contact_tangent_components(frame, contact, body))
+            .map(|components| components.counterpart_linear)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        counterpart_tangent_angular_component_max: contacts
+            .iter()
+            .filter_map(|contact| contact_tangent_components(frame, contact, body))
+            .map(|components| components.counterpart_angular)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        max_depth: contacts
+            .iter()
+            .map(|contact| contact.depth)
+            .fold(0.0, f32::max),
+        warm_start_normal_sum: contacts.iter().map(|contact| contact.normal_impulse).sum(),
+        warm_start_tangent_sum: contacts
+            .iter()
+            .map(|contact| contact.tangent_impulse.abs())
+            .sum(),
+        normal_impulse_sum: contacts
+            .iter()
+            .map(|contact| contact.solver_normal_impulse)
+            .sum(),
+        tangent_impulse_sum: contacts
+            .iter()
+            .map(|contact| contact.solver_tangent_impulse.abs())
+            .sum(),
+        initial_normal_speed_min: initial_normal_speeds
+            .iter()
+            .copied()
+            .reduce(f32::min)
+            .unwrap_or(0.0),
+        initial_normal_speed_max: initial_normal_speeds
+            .iter()
+            .copied()
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        normal_speed_min: relative_speeds
+            .iter()
+            .map(|(normal_speed, _)| *normal_speed)
+            .reduce(f32::min)
+            .unwrap_or(0.0),
+        normal_speed_max: relative_speeds
+            .iter()
+            .map(|(normal_speed, _)| *normal_speed)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        tangent_speed_abs_max: relative_speeds
+            .iter()
+            .map(|(_, tangent_speed)| tangent_speed.abs())
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        support_friction_impulse_max: contacts
+            .iter()
+            .map(|contact| contact.solver_support_friction_impulse)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        support_friction_impulse_sum: contacts
+            .iter()
+            .map(|contact| contact.solver_support_friction_impulse)
+            .sum(),
+        normal_anchor_drift_max: contacts
+            .iter()
+            .map(|contact| contact.warm_start_normal_anchor_drift)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        tangent_anchor_drift_max: contacts
+            .iter()
+            .map(|contact| contact.warm_start_tangent_anchor_drift)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        position_bias_max: contacts
+            .iter()
+            .map(|contact| contact.solver_position_bias)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        restitution_bias_max: contacts
+            .iter()
+            .map(|contact| contact.solver_restitution_bias)
+            .reduce(f32::max)
+            .unwrap_or(0.0),
+        position_correction_depth_sum: contacts
+            .iter()
+            .map(|contact| contact.solver_position_correction_depth)
+            .sum(),
+        position_correction_translation_sum: contacts
+            .iter()
+            .map(|contact| {
+                contact.solver_position_correction_body_a_translation
+                    + contact.solver_position_correction_body_b_translation
+            })
+            .sum(),
+    }
+}
+
+fn frame_contacts_body(
+    frame: &FrameRecord,
+    body: BodyHandle,
+) -> impl Iterator<Item = &DebugContact> {
+    frame
+        .snapshot
+        .contacts
+        .iter()
+        .filter(move |contact| contact.bodies.contains(&body))
+}
+
+fn body_speeds(frame: &FrameRecord, body: BodyHandle) -> Option<(f32, f32)> {
+    frame
+        .snapshot
+        .bodies
+        .iter()
+        .find(|debug_body| debug_body.handle == body)
+        .map(|debug_body| {
+            (
+                debug_body.linear_velocity.length(),
+                debug_body.angular_velocity.abs(),
+            )
+        })
+}
+
+#[derive(Clone, Copy, Default)]
+struct TangentComponents {
+    body_linear: f32,
+    body_angular: f32,
+    counterpart_linear: f32,
+    counterpart_angular: f32,
+}
+
+fn contact_tangent_components(
+    frame: &FrameRecord,
+    contact: &DebugContact,
+    body: BodyHandle,
+) -> Option<TangentComponents> {
+    let body_debug = frame
+        .snapshot
+        .bodies
+        .iter()
+        .find(|debug_body| debug_body.handle == body)?;
+    let counterpart = contact
+        .bodies
+        .iter()
+        .copied()
+        .find(|candidate| *candidate != body)?;
+    let counterpart_debug = frame
+        .snapshot
+        .bodies
+        .iter()
+        .find(|debug_body| debug_body.handle == counterpart)?;
+    let tangent = contact.normal.perp().normalized_or_zero();
+    if tangent.length() <= f32::EPSILON {
+        return None;
+    }
+    let body_anchor = contact.point - body_debug.transform.translation;
+    let counterpart_anchor = contact.point - counterpart_debug.transform.translation;
+    let body_angular_velocity =
+        angular_point_velocity(body_debug.angular_velocity, body_anchor.into());
+    let counterpart_angular_velocity = angular_point_velocity(
+        counterpart_debug.angular_velocity,
+        counterpart_anchor.into(),
+    );
+    Some(TangentComponents {
+        body_linear: body_debug.linear_velocity.dot(tangent).abs(),
+        body_angular: body_angular_velocity.dot(tangent).abs(),
+        counterpart_linear: counterpart_debug.linear_velocity.dot(tangent).abs(),
+        counterpart_angular: counterpart_angular_velocity.dot(tangent).abs(),
+    })
+}
+
+fn angular_point_velocity(
+    angular_velocity: f32,
+    anchor: picea::prelude::Vector,
+) -> picea::prelude::Vector {
+    picea::prelude::Vector::new(
+        angular_velocity * anchor.y(),
+        -angular_velocity * anchor.x(),
+    )
+}
+
+fn contact_solver_final_speeds(contact: &DebugContact) -> (f32, f32) {
+    (
+        contact.solver_final_normal_speed,
+        contact.solver_final_tangent_speed,
+    )
+}
+
+fn contact_has_dynamic_counterpart(
+    frame: &FrameRecord,
+    bodies: [BodyHandle; 2],
+    target: BodyHandle,
+) -> bool {
+    bodies.contains(&target)
+        && bodies
+            .iter()
+            .copied()
+            .filter(|body| *body != target)
+            .any(|body| {
+                frame
+                    .snapshot
+                    .bodies
+                    .iter()
+                    .find(|debug_body| debug_body.handle == body)
+                    .map(|debug_body| debug_body.body_type == picea::prelude::BodyType::Dynamic)
+                    .unwrap_or(false)
+            })
+}
+
+fn matrix_stack_floor_x_bounds(run: &RunResult) -> Option<(f32, f32)> {
+    let first = run.frames.first()?;
+    first
+        .snapshot
+        .colliders
+        .iter()
+        .filter(|collider| {
+            first.snapshot.bodies.iter().any(|body| {
+                body.handle == collider.body && body.body_type == picea::prelude::BodyType::Static
+            })
+        })
+        .filter_map(|collider| collider.aabb)
+        .fold(None, |bounds, aabb| {
+            let next = (aabb.min.x(), aabb.max.x());
+            Some(match bounds {
+                Some((min_x, max_x)) => (min_x.min(next.0), max_x.max(next.1)),
+                None => next,
+            })
+        })
+}
 
 #[test]
 fn default_artifact_store_uses_workspace_target() {
@@ -347,6 +4176,775 @@ fn matrix_stack_artifacts_capture_nxm_grid_stack_facts() {
             .any(|frame| !frame.diagnostics.markers.is_empty()),
         "matrix stack should produce diagnostics markers for acceptance triage"
     );
+
+    let static_bodies = first
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Static)
+        .count();
+    assert_eq!(
+        static_bodies, 1,
+        "default matrix stack should keep the single static floor visible"
+    );
+
+    for frame in run.frames.iter().skip(1) {
+        assert_eq!(
+            frame.diagnostics.stability.penetration.source,
+            DiagnosticSource::LabDerived,
+            "stress report needs lab-derived penetration summaries on every comparable frame"
+        );
+        assert_eq!(
+            frame.diagnostics.stability.contact_churn.source,
+            DiagnosticSource::LabDerived,
+            "stress report needs churn summaries after the first frame"
+        );
+        assert_eq!(
+            frame.diagnostics.stability.warm_start.counts_source,
+            DiagnosticSource::RustAuthoritative,
+            "warm-start counts should keep using core-owned counters"
+        );
+        assert_eq!(
+            frame.diagnostics.stability.sleep.body_counts_source,
+            DiagnosticSource::LabDerived,
+            "sleep body counts are a lab summary over exported debug bodies"
+        );
+        assert_eq!(
+            frame.diagnostics.stability.island.source,
+            DiagnosticSource::RustAuthoritative,
+            "island/solver row facts should stay on the existing FrameDiagnostics contract"
+        );
+    }
+
+    let report = matrix_stack_stress_report(&run);
+    let markdown = report.to_markdown(&run);
+    println!("{markdown}");
+    assert!(markdown.contains("## Matrix Stack Stability Report"));
+    assert!(markdown.contains("- First bad frame:"));
+    assert!(markdown.contains("- Penetration max / sum:"));
+    assert!(markdown.contains("- Warm-start hit / miss / drop:"));
+    assert!(markdown.contains("- Sleep awake / sleeping:"));
+    assert!(markdown.contains("- Sleep blocker speeds:"));
+    assert!(markdown.contains("- Quiet window f>=120:"));
+    assert!(markdown.contains("- Late linear spike trace:"));
+    assert!(markdown.contains("- Late angular spike trace:"));
+    assert!(markdown.contains("late_support_gap start frame"));
+    assert!(markdown.contains("previous_speed"));
+    assert!(markdown.contains("tangent_components"));
+    assert!(markdown.contains("energy_onset frame"));
+    assert!(markdown.contains("lifecycle ["));
+    assert!(markdown.contains("eligibility "));
+    assert!(markdown.contains("correction_depth"));
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_start_frame
+            .is_some_and(|frame| frame >= 165),
+        "E4 position-row work should not make the late support gap start earlier than the retained baseline; report={report:?}"
+    );
+    assert!(
+        report.late_linear_spike_trace.support_gap_duration <= 10,
+        "E4 position-row work should not lengthen the retained support gap baseline; report={report:?}"
+    );
+    assert!(
+        report.max_penetration_depth <= 0.041646,
+        "E4 position-row work should not regress the retained 8x6 penetration baseline; report={report:?}"
+    );
+    assert!(
+        report.quiet_window_max_linear_speed <= 3.430820,
+        "E4 position-row work should not regress the retained 8x6 late linear spike baseline; report={report:?}"
+    );
+    assert!(
+        report.quiet_window_max_angular_speed <= 5.230875,
+        "E4 position-row work should not regress the retained 8x6 late angular spike baseline; report={report:?}"
+    );
+    assert!(
+        report.late_position_correction_total_translation <= 0.739580,
+        "E4 position-row work should not increase late correction pressure; report={report:?}"
+    );
+    assert_eq!(
+        report.first_floor_exit_frame, None,
+        "E4 position-row work must keep the 8x6 stress run free of floor ejection; report={report:?}"
+    );
+    assert_eq!(
+        report.final_outside_floor_body_count, 0,
+        "E4 position-row work must keep all 8x6 bodies inside the floor support at the final frame; report={report:?}"
+    );
+    assert_eq!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_normal_impulse_sum,
+        0.0
+    );
+    assert_eq!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_position_correction_depth_sum,
+        0.0
+    );
+    assert_eq!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_position_correction_translation_sum,
+        0.0
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_normal_speed_min
+            > 0.0,
+        "late linear support gap should preserve the separating normal speed of the last support contact; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_body_linear_speed
+            > 1.0,
+        "late support gap should expose that the blocker already has substantial linear speed before contact loss; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_body_angular_speed
+            > 4.0,
+        "late support gap should expose that the blocker is already rotating quickly before contact loss; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_counterpart_linear_speed_max
+            < 0.1,
+        "late support gap should expose that the support counterpart contributes little linear speed; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_counterpart_angular_speed_max
+            < 0.05,
+        "late support gap should expose that the support counterpart is not the angular-energy source; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_body_tangent_linear_component_max
+            > 1.0,
+        "late support gap should expose blocker-side tangent linear energy before contact loss; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_body_tangent_angular_component_max
+            > 0.5,
+        "late support gap should expose blocker-side tangent angular energy before contact loss; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_counterpart_tangent_linear_component_max
+            < 0.05,
+        "late support gap should expose the counterpart contributes little tangent linear energy; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_previous_counterpart_tangent_angular_component_max
+            < 0.05,
+        "late support gap should expose the counterpart contributes little tangent angular energy; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_energy_onset_frame
+            .is_some_and(|frame| frame < report
+                .late_linear_spike_trace
+                .support_gap_start_frame
+                .unwrap()),
+        "late support gap should expose when blocker-side tangent energy first crosses the onset threshold before contact loss; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_energy_onset_body_tangent_linear_component_max
+            > SUPPORT_GAP_TANGENT_LINEAR_ONSET_THRESHOLD,
+        "energy onset should preserve the first blocker-side tangent linear crossing; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_energy_onset_body_tangent_angular_component_max
+            > SUPPORT_GAP_TANGENT_ANGULAR_ONSET_THRESHOLD,
+        "energy onset should preserve the first blocker-side tangent angular crossing; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_energy_onset_counterpart_tangent_linear_component_max
+            < 0.05,
+        "energy onset should show the support counterpart is still not the tangent linear source; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_energy_onset_counterpart_tangent_angular_component_max
+            < 0.05,
+        "energy onset should show the support counterpart is still not the tangent angular source; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_energy_onset_normal_impulse_sum
+            > 0.0,
+        "energy onset should preserve that the contact still has a normal impulse before the later zero-impulse support gap; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_energy_onset_normal_speed_min
+            < 0.0,
+        "energy onset should preserve that the contact is still slightly closing before it later becomes separating; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_energy_onset_max_depth
+            > 0.0,
+        "energy onset should keep contact depth so the next solver design can distinguish shallow contact loss from deeper row coupling; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .len()
+            >= 2,
+        "late support gap should expose the contact lifecycle from energy onset to last support contact; report={report:?}"
+    );
+    assert_eq!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .first()
+            .map(|frame| frame.frame),
+        report
+            .late_linear_spike_trace
+            .support_gap_energy_onset_frame
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .first()
+            .is_some_and(|frame| frame.normal_impulse_sum > 0.0
+                && frame.position_correction_depth_sum > 0.0),
+        "energy onset should preserve the last frame where normal impulse and position correction are still active; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .skip(1)
+            .any(|frame| frame.normal_impulse_sum == 0.0
+                && frame.position_correction_depth_sum > 0.0),
+        "support lifecycle should expose the intermediate window where position correction still runs after normal impulse is lost; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .any(|frame| frame.normal_impulse_sum == 0.0
+                && frame.position_correction_depth_sum == 0.0
+                && frame.normal_speed_min > 0.0),
+        "support lifecycle should expose the shallow separating window where both normal impulse and correction have dropped before contact loss; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .any(|frame| frame.eligibility_decision == "retain_candidate_correction_active"),
+        "eligibility oracle should show frames where retained support still has active correction; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .any(|frame| frame.eligibility_decision
+                == "retain_candidate_needs_position_re_evaluation"),
+        "eligibility oracle should show the exact shallow support frames that need position-level re-evaluation; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .any(|frame| frame.eligibility_decision == "reject_counterpart_motion"),
+        "deferred position-row writeback should preserve the shifted lifecycle evidence where counterpart motion becomes the rejection gate; report={report:?}"
+    );
+    assert!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .all(|frame| !frame.eligibility_decision.starts_with("reject_anchor")),
+        "current lifecycle should not be rejected by anchor drift gates; report={report:?}"
+    );
+    assert_eq!(
+        report
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .last()
+            .map(|frame| frame.frame),
+        report.late_linear_spike_trace.last_contact_frame
+    );
+    assert!(markdown.contains("- Early pressure trace f=12..46:"));
+    assert!(markdown.contains("anchor_drift max"));
+    assert!(markdown.contains("correction_row frame"));
+    assert!(markdown.contains("row_coupling correction_tangent"));
+    assert!(markdown.contains("warm_start reasons ["));
+    assert!(markdown.contains("- Feature churn trace:"));
+    assert!(
+        markdown.contains("same_shape_signature"),
+        "E4b lifecycle diagnostics should report whether feature-id churn stays within the same shape signature; markdown={markdown}"
+    );
+    assert!(
+        markdown.contains("close_local_anchor"),
+        "E4b lifecycle diagnostics should report collider-local anchor continuity for feature-id churn; markdown={markdown}"
+    );
+    assert!(
+        markdown.contains("edge_swap_transition"),
+        "E4b lifecycle diagnostics should report reference/incident edge-swap churn separately; markdown={markdown}"
+    );
+    assert!(
+        markdown.contains("edge_swap_candidate"),
+        "E4b lifecycle diagnostics should report how many edge-swap churn cases satisfy the conservative persistence candidate inputs; markdown={markdown}"
+    );
+    assert!(
+        markdown.contains("point_slot_fallback_eligible"),
+        "E4b lifecycle diagnostics should report how often the retained point-slot fallback is applicable; markdown={markdown}"
+    );
+    assert!(
+        markdown.contains("top_feature_index_transition"),
+        "E4b lifecycle diagnostics should decode the dominant feature-index transition; markdown={markdown}"
+    );
+    assert!(
+        markdown.contains("top_transition_best frame"),
+        "E4b lifecycle diagnostics should report a concrete best sample for the dominant feature-index transition; markdown={markdown}"
+    );
+    assert!(
+        report.feature_churn_trace.miss_feature_id_count > 0,
+        "E4b lifecycle diagnostics should preserve feature-id churn in the current 8x6 stress case; report={report:?}"
+    );
+    assert!(
+        report.feature_churn_trace.same_pair_previous_count > 0,
+        "E4b lifecycle diagnostics should identify feature churn on collider pairs that existed in the previous frame; report={report:?}"
+    );
+    assert!(
+        report.feature_churn_trace.same_shape_signature_count > 0,
+        "E4b lifecycle diagnostics should identify churn where collider shape signatures stayed compatible; report={report:?}"
+    );
+    assert!(
+        report.feature_churn_trace.close_local_anchor_count > 0,
+        "E4b lifecycle diagnostics should identify churn where collider-local anchors stayed close; report={report:?}"
+    );
+    assert!(
+        report.feature_churn_trace.edge_swap_transition_count > 0,
+        "E4b lifecycle diagnostics should identify feature churn that swaps reference/incident edges; report={report:?}"
+    );
+    assert!(
+        report.feature_churn_trace.edge_swap_candidate_count > 0,
+        "E4b lifecycle diagnostics should identify edge-swap churn with compatible reduction, shape, normal, point, and local anchors; report={report:?}"
+    );
+    assert!(
+        report
+            .feature_churn_trace
+            .top_transition_best_frame
+            .is_some(),
+        "E4b lifecycle diagnostics should locate the dominant transition on a concrete frame; report={report:?}"
+    );
+    assert!(markdown.contains("- Late correction/churn f>=120:"));
+    assert!(markdown.contains("- Floor ejection:"));
+    assert!(markdown.contains("- Ejection trace:"));
+    assert!(markdown.contains("- Ejection dynamic-support trace:"));
+    assert!(markdown.contains("- Ejection dynamic-impulse trace:"));
+    assert!(markdown.contains("- Ejection velocity trace:"));
+    assert!(markdown.contains("- Ejection support-gap trace:"));
+    assert!(markdown.contains("- Ejection support-gap upstream trace:"));
+    assert!(markdown.contains("- Solver row max:"));
+    assert_eq!(report.final_state_hash, run.manifest.final_state_hash);
+    assert!(
+        report.max_contact_row_count >= 12,
+        "stress report should capture the dense contact-row pressure visible in StepStats"
+    );
+    assert!(
+        report.early_pressure_trace.max_contact_row_count >= 12,
+        "early pressure trace should capture row pressure before the late velocity spike; report={report:?}"
+    );
+    assert!(
+        report.max_penetration_depth <= 0.1,
+        "E3 dense matrix correction should keep stress penetration below the interim target; report={report:?}"
+    );
+    assert!(
+        report.first_bad_frame.is_none() || !report.first_bad_markers.is_empty(),
+        "when a first bad frame exists, the report should preserve its marker story"
+    );
+}
+
+#[test]
+fn aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::MatrixStackAligned,
+            frame_count: 180,
+            run_id: Some("matrix-stack-aligned-behavior-lock".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("aligned matrix stack run should write artifacts");
+
+    assert_eq!(run.manifest.scenario_id, ScenarioId::MatrixStackAligned);
+
+    let first = run
+        .frames
+        .first()
+        .expect("aligned matrix stack should write frames");
+    let dynamic_bodies = first
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+        .count();
+    assert_eq!(
+        dynamic_bodies, 12,
+        "aligned matrix lock should be a 4x3 dynamic-body grid"
+    );
+
+    let report = matrix_stack_stress_report(&run);
+    println!("{}", report.to_markdown(&run));
+    assert!(report.quiet_window_max_linear_speed > 0.0);
+    assert!(report.quiet_window_max_angular_speed > 0.0);
+    assert!(
+        report.late_position_correction_max_translation > 0.0,
+        "aligned matrix lock should report late correction work until E4/E5 settles it; report={report:?}"
+    );
+    assert!(
+        report.max_penetration_depth <= 0.04,
+        "aligned matrix lock should keep small NxM penetration under the D2 behavior target; report={report:?}"
+    );
+    assert_eq!(
+        report.first_floor_exit_frame, None,
+        "aligned matrix lock should not eject any body from the floor support; report={report:?}"
+    );
+    assert_eq!(
+        report.final_outside_floor_body_count, 0,
+        "aligned matrix lock should finish with every body inside floor support; report={report:?}"
+    );
+    assert!(
+        report.final_max_linear_speed <= 0.2,
+        "aligned matrix lock should keep final linear speed bounded before E5 sleep convergence; report={report:?}"
+    );
+    assert!(
+        report.final_max_angular_speed <= 0.6,
+        "aligned matrix lock should keep final angular speed bounded before E5 sleep convergence; report={report:?}"
+    );
+}
+
+#[test]
+#[ignore = "diagnostic baseline for the current matrix-stack instability story"]
+fn matrix_stack_stress_report_repeats_the_current_first_bad_frame_story() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::MatrixStack,
+            frame_count: 180,
+            run_id: Some("matrix-stack-diagnostic-baseline".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("matrix stack diagnostic run should write artifacts");
+
+    let report = matrix_stack_stress_report(&run);
+    println!("{}", report.to_markdown(&run));
+    assert!(
+        report.first_bad_frame.is_some(),
+        "the current dense stack issue should surface a comparable first-bad-frame marker"
+    );
+    assert!(
+        report.max_penetration_depth > 0.04,
+        "the current baseline should still reproduce a penetration depth above the clean-gate target"
+    );
+    assert!(
+        report.final_awake_dynamic_body_count > 0,
+        "the current baseline should still expose the unresolved sleep convergence story"
+    );
+}
+
+#[test]
+#[ignore = "long-settle observation for the deferred writeback matrix-stack stability risk"]
+fn matrix_stack_long_settle_observation_reports_residual_e4_risk() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::MatrixStack,
+            frame_count: 600,
+            run_id: Some("matrix-stack-long-settle-observation".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("matrix stack long-settle diagnostic run should write artifacts");
+
+    let report = matrix_stack_stress_report(&run);
+    println!("{}", report.to_markdown(&run));
+    assert_eq!(run.frames.len(), 600);
+    assert!(
+        report.first_bad_frame.is_some(),
+        "long-settle observation should preserve that current 8x6 is not yet a stable hard gate; report={report:?}"
+    );
+    assert!(
+        report.final_awake_dynamic_body_count > 0 || report.final_outside_floor_body_count > 0,
+        "long-settle observation should expose either sleep non-convergence or floor-support failure until E4/E5 is complete; report={report:?}"
+    );
+    assert_eq!(
+        report.first_floor_exit_frame,
+        Some(214),
+        "long-settle observation should keep the current first ejection frame explicit until E4 removes it; report={report:?}"
+    );
+    assert_eq!(
+        report.first_floor_exit_body.as_deref(),
+        Some("BodyHandle(41)"),
+        "long-settle observation should identify the current ejected body until E4 removes the failure; report={report:?}"
+    );
+    assert_eq!(
+        report.ejection_support_gap_start_frame,
+        Some(180),
+        "long-settle observation should preserve the pre-ejection dynamic support gap; report={report:?}"
+    );
+    assert_eq!(
+        report
+            .late_linear_spike_trace
+            .support_gap_start_frame,
+        Some(229),
+        "long-settle observation should preserve the post-ejection long support gap story; report={report:?}"
+    );
+    assert!(
+        report.quiet_window_max_linear_speed > 60.0,
+        "long-settle observation should keep the current runaway-speed risk visible; report={report:?}"
+    );
+}
+
+#[test]
+#[ignore = "future E4c support-gap behavior lock; position re-evaluation must remove the current frame-214 ejection"]
+fn matrix_stack_support_gap_re_evaluation_prevents_current_ejection_window() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::MatrixStack,
+            frame_count: 240,
+            run_id: Some("matrix-stack-e4c-support-gap-lock".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("matrix stack E4c support-gap run should write artifacts");
+
+    let report = matrix_stack_stress_report(&run);
+    println!("{}", report.to_markdown(&run));
+    assert_eq!(run.frames.len(), 240);
+    if report.ejection_support_gap_start_frame.is_some() {
+        assert!(
+            report.ejection_support_gap_previous_max_depth > 0.0,
+            "E4c blocker should preserve that the last pre-gap dynamic support was still geometrically overlapping; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_previous_normal_speed_min > 0.0,
+            "E4c blocker should preserve that the last pre-gap support was separating before contact loss; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_previous_counterpart_angular_speed_max > 1.0,
+            "E4c blocker should expose when the previous support counterpart is not a static/quiet support candidate; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_previous_counterpart_tangent_angular_component_max
+                > SUPPORT_ELIGIBILITY_COUNTERPART_TANGENT_THRESHOLD,
+            "E4c blocker should expose that naive support retention would violate the counterpart-motion rejection gate; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_previous_position_correction_depth_sum <= f32::EPSILON,
+            "E4c blocker should preserve that the pre-gap shallow support no longer had position correction; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_previous_normal_anchor_drift_max <= f32::EPSILON,
+            "E4c blocker should preserve local-anchor continuity separately from the counterpart-motion rejection; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_frame.is_some(),
+            "E4c blocker should expose where the high-motion counterpart came from before retaining or rejecting support; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_counterpart_angular_speed > 1.0,
+            "E4c upstream trace should preserve the high-angular counterpart source window; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_source_contact_count > 0,
+            "E4c upstream trace should show whether the high-motion counterpart is still coupled to other stack contacts; report={report:?}"
+        );
+        assert!(
+            !report
+                .ejection_support_gap_upstream_source_warm_start_reasons
+                .is_empty(),
+            "E4c upstream trace should expose whether the source contact was warm-started or re-solved cold; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_source_position_bias_max <= f32::EPSILON,
+            "E4c upstream trace should preserve whether velocity-level position bias participated in the source contact; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_source_correction_depth_sum
+                > report.ejection_support_gap_upstream_source_normal_impulse_sum,
+            "E4c upstream trace should expose source contacts dominated by residual position correction rather than normal impulse; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_source_same_pair_previous_count > 0,
+            "E4c upstream trace should expose whether the source row had a previous same-pair contact; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_source_candidate_count > 0,
+            "E4c upstream trace should expose source-row continuity candidates before wiring position-row gating; report={report:?}"
+        );
+        assert!(
+            report
+                .ejection_support_gap_upstream_source_local_anchor_drift_min
+                .is_some_and(|drift| drift <= FEATURE_CHURN_LOCAL_ANCHOR_DRIFT_THRESHOLD),
+            "E4c upstream trace should expose local-anchor continuity before changing residual correction eligibility; report={report:?}"
+        );
+        assert_eq!(
+            report.ejection_support_gap_upstream_source_edge_swap_candidate_count, 0,
+            "E4c upstream trace should distinguish this source row from the E4b edge-swap persistence path; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_source_dry_run_geometry_count > 0,
+            "E4c source-row dry-run should prove the candidate still has local geometry continuity before any correction gating; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_source_dry_run_pressure_count > 0,
+            "E4c source-row dry-run should prove the candidate is a residual position-correction pressure source; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_source_dry_run_counterpart_reject_count > 0,
+            "E4c source-row dry-run should reject the current candidate on counterpart motion before retaining or suppressing its correction; report={report:?}"
+        );
+        assert_eq!(
+            report
+                .ejection_support_gap_upstream_source_dry_run_decision
+                .as_str(),
+            "reject_counterpart_motion",
+            "E4c source-row dry-run should keep the next implementation from treating this row as an eligible quiet support; report={report:?}"
+        );
+        assert!(
+            report
+                .ejection_support_gap_upstream_source_dry_run_pseudo_depth_min
+                .is_some_and(|depth| depth > 0.0),
+            "E4c source-row pseudo-state dry-run should preserve positive residual depth for the upstream pressure source; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_source_dry_run_pseudo_support_skin_count > 0,
+            "E4c source-row pseudo-state dry-run should expose whether repeated position iterations keep the row inside the support skin; report={report:?}"
+        );
+        assert!(
+            report
+                .ejection_support_gap_upstream_handoff_frame_delta
+                .is_some_and(|delta| delta <= 3),
+            "E4c handoff trace should prove the upstream pressure source is temporally adjacent to the support-gap counterpart; report={report:?}"
+        );
+        assert!(
+            report.ejection_support_gap_upstream_handoff_linear_speed_delta > 0.0,
+            "E4c handoff trace should expose that the same counterpart gains speed before the support-gap frame; report={report:?}"
+        );
+    }
+    assert_eq!(
+        report.ejection_support_gap_start_frame,
+        None,
+        "E4c must remove the current pre-ejection support-gap onset before it can eject a body; report={report:?}"
+    );
+    assert_eq!(
+        report.late_linear_spike_trace.support_gap_start_frame,
+        None,
+        "E4c must remove the current post-ejection long support gap in the first support-gap window; report={report:?}"
+    );
+    assert_eq!(
+        report.first_floor_exit_frame, None,
+        "E4c must keep the current support-gap failure from ejecting a body in the first 240 frames; report={report:?}"
+    );
+    assert_eq!(
+        report.final_outside_floor_body_count, 0,
+        "E4c must keep every body inside floor support after the support-gap window; report={report:?}"
+    );
+    assert!(
+        report.quiet_window_max_linear_speed <= 4.0,
+        "E4c must bound runaway linear speed in the first support-gap window before E5 sleep tuning; report={report:?}"
+    );
+}
+
+#[test]
+#[ignore = "future E4/E5 acceptance gate; set PICEA_MATRIX_STACK_E4_ACCEPTANCE=1 to enforce it"]
+fn matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed() {
+    if env::var_os("PICEA_MATRIX_STACK_E4_ACCEPTANCE").is_none() {
+        eprintln!(
+            "skipping future matrix-stack acceptance gate; set PICEA_MATRIX_STACK_E4_ACCEPTANCE=1"
+        );
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::MatrixStack,
+            frame_count: 600,
+            run_id: Some("matrix-stack-long-settle-acceptance".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("matrix stack long-settle acceptance run should write artifacts");
+
+    let report = matrix_stack_stress_report(&run);
+    println!("{}", report.to_markdown(&run));
+    assert_eq!(run.frames.len(), 600);
+    assert_eq!(
+        report.first_floor_exit_frame, None,
+        "stable 8x6 matrix stack must not eject bodies over the long settle window; report={report:?}"
+    );
+    assert_eq!(
+        report.final_outside_floor_body_count, 0,
+        "stable 8x6 matrix stack must finish with every body inside floor support; report={report:?}"
+    );
+    assert!(
+        report.max_penetration_depth <= 0.05,
+        "stable 8x6 matrix stack should keep long-window penetration bounded before E5 sleep tuning; report={report:?}"
+    );
+    assert!(
+        report.quiet_window_max_linear_speed <= 4.0,
+        "stable 8x6 matrix stack must remove the long-window runaway linear speed before E5 sleep tuning; report={report:?}"
+    );
+    assert!(
+        report.quiet_window_max_angular_speed <= 6.0,
+        "stable 8x6 matrix stack must remove the long-window runaway angular speed before E5 sleep tuning; report={report:?}"
+    );
 }
 
 #[test]
@@ -680,6 +5278,15 @@ fn stack_artifacts_capture_solver_impulse_facts() {
     for field in [
         "solver_normal_impulse",
         "solver_tangent_impulse",
+        "solver_initial_normal_speed",
+        "solver_initial_tangent_speed",
+        "solver_final_normal_speed",
+        "solver_final_tangent_speed",
+        "solver_position_bias",
+        "solver_restitution_bias",
+        "solver_support_friction_impulse",
+        "solver_normal_impulse_delta",
+        "solver_tangent_impulse_delta",
         "normal_impulse_clamped",
         "tangent_impulse_clamped",
         "restitution_velocity_threshold",
@@ -1185,6 +5792,12 @@ fn artifact_schema_keeps_final_observability_fact_set() {
         "ccd_hit_count",
         "ccd_miss_count",
         "ccd_clamp_count",
+        "position_correction_input_contact_count",
+        "position_correction_input_max_depth",
+        "position_correction_input_total_depth",
+        "position_correction_body_count",
+        "position_correction_max_translation",
+        "position_correction_total_translation",
     ] {
         assert!(
             final_stats.contains_key(field),
@@ -1239,6 +5852,12 @@ fn artifact_schema_keeps_final_observability_fact_set() {
         "ccd_hit_count",
         "ccd_miss_count",
         "ccd_clamp_count",
+        "position_correction_input_contact_count",
+        "position_correction_input_max_depth",
+        "position_correction_input_total_depth",
+        "position_correction_body_count",
+        "position_correction_max_translation",
+        "position_correction_total_translation",
         "islands",
     ] {
         assert!(
@@ -1341,6 +5960,12 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
         ccd_hit_count: 2,
         ccd_miss_count: 1,
         ccd_clamp_count: 2,
+        position_correction_input_contact_count: 1,
+        position_correction_input_max_depth: 0.2,
+        position_correction_input_total_depth: 0.3,
+        position_correction_body_count: 1,
+        position_correction_max_translation: 0.1,
+        position_correction_total_translation: 0.1,
         world_bounds: None,
         bodies: Vec::new(),
         colliders: Vec::new(),
@@ -1372,6 +5997,12 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     object.remove("ccd_hit_count");
     object.remove("ccd_miss_count");
     object.remove("ccd_clamp_count");
+    object.remove("position_correction_input_contact_count");
+    object.remove("position_correction_input_max_depth");
+    object.remove("position_correction_input_total_depth");
+    object.remove("position_correction_body_count");
+    object.remove("position_correction_max_translation");
+    object.remove("position_correction_total_translation");
     object.remove("joints");
     object.remove("broadphase_tree");
     object.remove("islands");
@@ -1396,6 +6027,12 @@ fn warm_start_debug_render_frame_fields_default_when_deserializing_older_json() 
     assert_eq!(decoded.ccd_hit_count, 0);
     assert_eq!(decoded.ccd_miss_count, 0);
     assert_eq!(decoded.ccd_clamp_count, 0);
+    assert_eq!(decoded.position_correction_input_contact_count, 0);
+    assert_eq!(decoded.position_correction_input_max_depth, 0.0);
+    assert_eq!(decoded.position_correction_input_total_depth, 0.0);
+    assert_eq!(decoded.position_correction_body_count, 0);
+    assert_eq!(decoded.position_correction_max_translation, 0.0);
+    assert_eq!(decoded.position_correction_total_translation, 0.0);
     assert!(decoded.joints.is_empty());
     assert!(decoded.broadphase_tree.nodes.is_empty());
     assert!(decoded.islands.is_empty());

@@ -165,6 +165,7 @@ export type DebugContact = {
     | "dropped_invalid_impulse";
   normal_impulse: number;
   tangent_impulse: number;
+  source_row_continuity_candidate?: boolean;
   solver_normal_impulse?: number;
   solver_tangent_impulse?: number;
   normal_impulse_clamped?: boolean;
@@ -283,6 +284,12 @@ export type DebugSnapshot = {
     ccd_hit_count?: number;
     ccd_miss_count?: number;
     ccd_clamp_count?: number;
+    position_correction_input_contact_count?: number;
+    position_correction_input_max_depth?: number;
+    position_correction_input_total_depth?: number;
+    position_correction_body_count?: number;
+    position_correction_max_translation?: number;
+    position_correction_total_translation?: number;
   };
 };
 
@@ -420,7 +427,20 @@ export type FrameDiagnostics = {
   missing_evidence?: MissingEvidence[];
 };
 
+export type SessionStatus = "created" | "running" | "paused" | "completed" | "failed";
+
+export type LiveFrameAuthority = {
+  session_id: string;
+  session_epoch: number;
+  world_revision: number | null;
+  status: SessionStatus;
+  buffered_frame_count: number;
+  frame_count: number;
+  not_hydrated: boolean;
+};
+
 export type FrameRecord = {
+  kind?: "full" | "summary";
   frame_index: number;
   simulated_time: number;
   state_hash: string;
@@ -431,6 +451,43 @@ export type FrameRecord = {
   compound_provenance?: CompoundProvenance[];
   perturbation_provenance?: LivePerturbationProvenance[];
   diagnostics?: FrameDiagnostics;
+  live_authority?: LiveFrameAuthority;
+};
+
+export type LiveFrameSummary = {
+  kind: "summary";
+  frame_index: number;
+  simulated_time: number;
+  state_hash: string;
+  session_id: string;
+  session_epoch: number;
+  world_revision: number | null;
+  status: SessionStatus;
+  buffered_frame_count: number;
+  frame_count: number;
+  snapshot: Pick<
+    DebugSnapshot,
+    "meta" | "bodies" | "colliders" | "joints" | "primitives" | "stats"
+  > & {
+    contacts: null;
+    manifolds: null;
+    islands: null;
+    broadphase_tree: null;
+  };
+  stats: DebugSnapshot["stats"];
+  report: null;
+  events: null;
+  diagnostics: null;
+  compound_provenance: null;
+  perturbation_provenance: null;
+};
+
+export type LiveFrameHydration = {
+  session_id: string;
+  session_epoch: number;
+  frame_index: number;
+  world_revision: number | null;
+  frame: FrameRecord;
 };
 
 export type StepReportRecord = {
@@ -479,7 +536,7 @@ export type SessionRecord = {
   id: string;
   scenario_id: string;
   mode: SessionMode;
-  status: "created" | "running" | "paused" | "completed" | "failed";
+  status: SessionStatus;
   session_epoch: number;
   run_id: string | null;
   frame_count: number;
@@ -494,6 +551,11 @@ export type SessionRecord = {
   final_snapshot_artifact?: string | null;
   latest_frame?: FrameRecord | null;
   last_error: string | null;
+};
+
+export type SessionControlResponse = {
+  session: SessionRecord;
+  live_frame_summary?: LiveFrameSummary | null;
 };
 
 // Server-side paused edit gate rejection reasons. These are domain responses

@@ -136,6 +136,24 @@ pub struct StepStats {
     /// Number of dynamic bodies clamped by CCD before contact generation.
     #[serde(default)]
     pub ccd_clamp_count: usize,
+    /// Number of contact points that fed residual position correction.
+    #[serde(default)]
+    pub position_correction_input_contact_count: usize,
+    /// Maximum pre-correction contact depth seen by residual position correction.
+    #[serde(default)]
+    pub position_correction_input_max_depth: FloatNum,
+    /// Sum of pre-correction contact depths seen by residual position correction.
+    #[serde(default)]
+    pub position_correction_input_total_depth: FloatNum,
+    /// Number of dynamic bodies translated by residual position correction.
+    #[serde(default)]
+    pub position_correction_body_count: usize,
+    /// Maximum accumulated translation applied to one dynamic body by residual correction.
+    #[serde(default)]
+    pub position_correction_max_translation: FloatNum,
+    /// Sum of accumulated dynamic-body translations applied by residual correction.
+    #[serde(default)]
+    pub position_correction_total_translation: FloatNum,
     /// Number of velocity iterations used for the step.
     pub velocity_iterations: u16,
     /// Number of position iterations used for the step.
@@ -337,10 +355,26 @@ mod tests {
             depth: 0.25,
             reduction_reason: crate::events::ContactReductionReason::SinglePoint,
             warm_start_reason: WarmStartCacheReason::Hit,
+            warm_start_anchor_drift: 0.03,
+            warm_start_normal_anchor_drift: 0.01,
+            warm_start_tangent_anchor_drift: 0.02,
             warm_start_normal_impulse: 1.0,
             warm_start_tangent_impulse: 0.25,
+            source_row_continuity_candidate: true,
             solver_normal_impulse: 1.25,
             solver_tangent_impulse: 0.125,
+            solver_initial_normal_speed: -0.5,
+            solver_initial_tangent_speed: 0.25,
+            solver_final_normal_speed: 0.0,
+            solver_final_tangent_speed: 0.05,
+            solver_position_bias: 0.2,
+            solver_restitution_bias: 0.0,
+            solver_support_friction_impulse: 0.0,
+            solver_position_correction_depth: 0.0,
+            solver_position_correction_body_a_translation: 0.0,
+            solver_position_correction_body_b_translation: 0.0,
+            solver_normal_impulse_delta: 0.25,
+            solver_tangent_impulse_delta: -0.125,
             normal_impulse_clamped: false,
             tangent_impulse_clamped: true,
             restitution_velocity_threshold: 2.0,

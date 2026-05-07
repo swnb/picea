@@ -20,7 +20,7 @@ pub(crate) struct IslandSolveBatch {
     pub(crate) joint_rows: Vec<JointSolvePlanRow>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct SolverStepStats {
     pub(crate) island_count: usize,
     pub(crate) active_island_count: usize,
@@ -28,6 +28,12 @@ pub(crate) struct SolverStepStats {
     pub(crate) body_slot_count: usize,
     pub(crate) contact_row_count: usize,
     pub(crate) joint_row_count: usize,
+    pub(crate) position_correction_input_contact_count: usize,
+    pub(crate) position_correction_input_max_depth: f32,
+    pub(crate) position_correction_input_total_depth: f32,
+    pub(crate) position_correction_body_count: usize,
+    pub(crate) position_correction_max_translation: f32,
+    pub(crate) position_correction_total_translation: f32,
 }
 
 impl SolverStepStats {
@@ -38,6 +44,17 @@ impl SolverStepStats {
         self.body_slot_count += other.body_slot_count;
         self.contact_row_count += other.contact_row_count;
         self.joint_row_count += other.joint_row_count;
+        self.position_correction_input_contact_count +=
+            other.position_correction_input_contact_count;
+        self.position_correction_input_max_depth = self
+            .position_correction_input_max_depth
+            .max(other.position_correction_input_max_depth);
+        self.position_correction_input_total_depth += other.position_correction_input_total_depth;
+        self.position_correction_body_count += other.position_correction_body_count;
+        self.position_correction_max_translation = self
+            .position_correction_max_translation
+            .max(other.position_correction_max_translation);
+        self.position_correction_total_translation += other.position_correction_total_translation;
     }
 }
 

@@ -132,6 +132,113 @@ fn active_contact_events(report: &StepReport) -> Vec<ContactEvent> {
         .collect()
 }
 
+#[derive(Debug)]
+struct StackBehaviorFrame {
+    report: StepReport,
+    state_hash: String,
+    penetration_max: f32,
+    penetration_sum: f32,
+    max_linear_speed: f32,
+    max_angular_speed: f32,
+    contact_enter_count: usize,
+    contact_exit_count: usize,
+}
+
+fn build_stack_4_world() -> World {
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::new(0.0, 9.8),
+        enable_sleep: true,
+    });
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 2.5, Vector::default());
+    attach_shape(
+        &mut world,
+        floor,
+        SharedShape::rect(10.0, 0.5),
+        Material::default(),
+    );
+    for index in 0..4 {
+        let body = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            0.0,
+            1.7 - index as f32,
+            Vector::default(),
+        );
+        attach_shape(
+            &mut world,
+            body,
+            SharedShape::rect(0.9, 0.9),
+            Material::default(),
+        );
+    }
+    world
+}
+
+fn collect_stack_4_frames(frames: usize) -> Vec<StackBehaviorFrame> {
+    let mut world = build_stack_4_world();
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    let mut captured = Vec::with_capacity(frames);
+
+    for _ in 0..frames {
+        let report = pipeline.step(&mut world);
+        let snapshot = DebugSnapshot::from_world_with_step_report(
+            &world,
+            &report,
+            &DebugSnapshotOptions::default(),
+        );
+        let (penetration_max, penetration_sum) = snapshot.manifolds.iter().fold(
+            (0.0_f32, 0.0_f32),
+            |(max_depth, total_depth), manifold| {
+                let depth = manifold.depth.max(0.0);
+                (max_depth.max(depth), total_depth + depth)
+            },
+        );
+        let (max_linear_speed, max_angular_speed) = snapshot
+            .bodies
+            .iter()
+            .filter(|body| body.body_type == BodyType::Dynamic)
+            .fold((0.0_f32, 0.0_f32), |(max_linear, max_angular), body| {
+                (
+                    max_linear.max(body.linear_velocity.length()),
+                    max_angular.max(body.angular_velocity.abs()),
+                )
+            });
+        let contact_enter_count = report
+            .events
+            .iter()
+            .filter(|event| matches!(event, WorldEvent::ContactStarted(_)))
+            .count();
+        let contact_exit_count = report
+            .events
+            .iter()
+            .filter(|event| matches!(event, WorldEvent::ContactEnded(_)))
+            .count();
+
+        captured.push(StackBehaviorFrame {
+            state_hash: stable_snapshot_hash(&snapshot),
+            report,
+            penetration_max,
+            penetration_sum,
+            max_linear_speed,
+            max_angular_speed,
+            contact_enter_count,
+            contact_exit_count,
+        });
+    }
+
+    captured
+}
+
+fn stable_snapshot_hash(snapshot: &DebugSnapshot) -> String {
+    let bytes = serde_json::to_vec(snapshot).expect("debug snapshot should serialize for hashing");
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
 #[test]
 fn generic_convex_segment_rectangle_contact_reports_gjk_epa_trace() {
     let mut world = no_gravity_world();
@@ -171,6 +278,100 @@ fn generic_convex_segment_rectangle_contact_reports_gjk_epa_trace() {
     assert_eq!(trace.epa_termination, EpaTerminationReason::Converged);
     assert!(trace.gjk_iterations > 0);
     assert!(trace.simplex_len > 0);
+}
+
+#[test]
+fn stack_4_behavior_lock_stays_deterministic_and_quiet_after_settling() {
+    let first_run = collect_stack_4_frames(300);
+    let second_run = collect_stack_4_frames(300);
+    let final_first = first_run
+        .last()
+        .expect("first stack run should have a final frame");
+    let final_second = second_run
+        .last()
+        .expect("second stack run should have a final frame");
+
+    assert_eq!(
+        final_first.state_hash, final_second.state_hash,
+        "stack_4 should keep a deterministic final state hash for behavior-lock comparisons"
+    );
+    assert!(
+        first_run
+            .iter()
+            .all(|frame| frame.report.stats.numeric_warnings == 0),
+        "stack_4 behavior lock must stay numerically safe across the whole settling window"
+    );
+
+    let settled_penetration_max = first_run
+        .iter()
+        .skip(120)
+        .map(|frame| frame.penetration_max)
+        .fold(0.0_f32, f32::max);
+    let settled_penetration_sum = first_run
+        .iter()
+        .skip(120)
+        .map(|frame| frame.penetration_sum)
+        .fold(0.0_f32, f32::max);
+    assert!(
+        settled_penetration_max <= 0.04,
+        "stack_4 should keep settled penetration within the D2 max-depth target; got {settled_penetration_max}"
+    );
+    assert!(
+        settled_penetration_sum <= 0.16,
+        "stack_4 should keep settled penetration sum within the D2 target; got {settled_penetration_sum}"
+    );
+
+    // D2's quiet window accepts a low-motion settled stack even before the
+    // island sleep heuristic decides to flip the sleeping bit.
+    let quiet_windows_after_frame_240 = first_run[240..].windows(24);
+    let (quiet_max_linear_speed, quiet_max_angular_speed) = quiet_windows_after_frame_240.fold(
+        (0.0_f32, 0.0_f32),
+        |(max_linear, max_angular), window| {
+            let window_max_linear = window
+                .iter()
+                .map(|frame| frame.max_linear_speed)
+                .fold(0.0_f32, f32::max);
+            let window_max_angular = window
+                .iter()
+                .map(|frame| frame.max_angular_speed)
+                .fold(0.0_f32, f32::max);
+            (
+                max_linear.max(window_max_linear),
+                max_angular.max(window_max_angular),
+            )
+        },
+    );
+    assert!(
+        quiet_max_linear_speed <= 0.04,
+        "all stack_4 rolling windows after frame 240 should stay within the D2 quiet linear-velocity target; got {quiet_max_linear_speed}"
+    );
+    assert!(
+        quiet_max_angular_speed <= 0.08,
+        "all stack_4 rolling windows after frame 240 should stay within the D2 quiet angular-velocity target; got {quiet_max_angular_speed}"
+    );
+
+    assert!(
+        first_run
+            .iter()
+            .skip(180)
+            .all(|frame| frame.report.stats.warm_start_drop_count == 0),
+        "continuing stack contacts should stop dropping trusted warm-start cache entries after settling"
+    );
+    assert!(
+        first_run
+            .iter()
+            .skip(180)
+            .collect::<Vec<_>>()
+            .windows(24)
+            .all(|window| {
+                window
+                    .iter()
+                    .map(|frame| frame.contact_enter_count + frame.contact_exit_count)
+                    .sum::<usize>()
+                    <= 2
+            }),
+        "late stack_4 windows should not keep churning contact identity after settling"
+    );
 }
 
 #[test]
@@ -361,7 +562,11 @@ fn warm_start_cache_transfers_cached_impulse_after_trustworthy_match() {
         first_contact.warm_start_reason,
         WarmStartCacheReason::MissNoPrevious
     );
-    assert_eq!(second_contact.warm_start_reason, WarmStartCacheReason::Hit);
+    assert_eq!(
+        second_contact.warm_start_reason,
+        WarmStartCacheReason::Hit,
+        "trustworthy same-feature contact should transfer cached normal impulse: {second_contact:?}"
+    );
     assert!(
         second_contact.warm_start_normal_impulse > 0.0,
         "the second step should transfer the first step's cached normal impulse: {second_contact:?}"
@@ -421,7 +626,11 @@ fn solver_impulse_facts_zero_when_warm_start_hit_has_no_solvable_row() {
         .next()
         .expect("second step should still report the static contact");
 
-    assert_eq!(second_contact.warm_start_reason, WarmStartCacheReason::Hit);
+    assert_eq!(
+        second_contact.warm_start_reason,
+        WarmStartCacheReason::Hit,
+        "static contact should still expose a warm-start cache hit even when it has no solver row: {second_contact:?}"
+    );
     assert!(
         second_contact.warm_start_normal_impulse > 0.0,
         "warm-start facts should still describe the transferred cache: {second_contact:?}"
@@ -614,6 +823,93 @@ fn warm_start_cache_reports_feature_id_miss_when_pair_persists_on_different_feat
 }
 
 #[test]
+fn sat_edge_swap_candidate_persists_lifecycle_without_auto_warm_start_impulse() {
+    let mut world = no_gravity_world();
+    let lower = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let upper = create_body(&mut world, BodyType::Static, -0.25, 1.8, Vector::default());
+    attach_shape(
+        &mut world,
+        lower,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        upper,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let lower_pose = Pose::from_xy_angle(0.0, 0.0, -0.12);
+    let first_upper_pose = Pose::from_xy_angle(-0.25, 1.8, -0.17);
+    let second_upper_pose = Pose::from_xy_angle(-0.25, 1.8, -0.15);
+    world
+        .apply_body_patch(
+            lower,
+            BodyPatch {
+                pose: Some(lower_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("lower rectangle pose should be patched");
+    world
+        .apply_body_patch(
+            upper,
+            BodyPatch {
+                pose: Some(first_upper_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("upper rectangle pose should be patched");
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    world
+        .apply_body_patch(
+            upper,
+            BodyPatch {
+                pose: Some(second_upper_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("upper rectangle should nudge across the SAT reference/incident edge swap");
+    let second = pipeline.step(&mut world);
+    let first_contacts = active_contact_events(&first);
+    let second_contacts = active_contact_events(&second);
+
+    assert_eq!(first_contacts.len(), 2);
+    assert_eq!(second_contacts.len(), 2);
+    assert!(
+        first_contacts.iter().any(|first| {
+            second_contacts.iter().any(|second| {
+                let first_anchor_a = lower_pose.inverse_transform_point(first.point);
+                let first_anchor_b = first_upper_pose.inverse_transform_point(first.point);
+                let second_anchor_a = lower_pose.inverse_transform_point(second.point);
+                let second_anchor_b = second_upper_pose.inverse_transform_point(second.point);
+                let local_anchor_drift = (first_anchor_a - second_anchor_a)
+                    .length()
+                    .max((first_anchor_b - second_anchor_b).length());
+                first.contact_id == second.contact_id
+                    && first.manifold_id == second.manifold_id
+                    && first.normal.dot(second.normal) > 0.999
+                    && local_anchor_drift < 0.25
+            })
+        }),
+        "E4b identity-only candidate should preserve lifecycle ids across SAT edge-role swaps with local-anchor continuity and without relying on raw feature-id equality; first={first_contacts:?}, second={second_contacts:?}"
+    );
+    assert!(
+        second_contacts.iter().all(|contact| {
+            contact.warm_start_reason != WarmStartCacheReason::Hit
+                && contact.warm_start_normal_impulse == 0.0
+                && contact.warm_start_tangent_impulse == 0.0
+        }),
+        "first-stage persistent manifold identity must not automatically migrate solver impulse; second={second_contacts:?}"
+    );
+}
+
+#[test]
 fn warm_start_cache_drops_when_pair_anchor_relative_contact_point_drifts() {
     let mut world = no_gravity_world();
     let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
@@ -654,6 +950,195 @@ fn warm_start_cache_drops_when_pair_anchor_relative_contact_point_drifts() {
         WarmStartCacheReason::DroppedPointDrift
     );
     assert_eq!(second.stats.warm_start_drop_count, 1);
+}
+
+#[test]
+fn warm_start_cache_survives_small_tangential_slip_on_same_face() {
+    let mut world = no_gravity_world();
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    world
+        .apply_body_patch(
+            right,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(1.5, 0.08, 0.0)),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("body should slide a small amount along the same contact face");
+    let second = pipeline.step(&mut world);
+    let second_contacts = active_contact_events(&second);
+
+    assert_eq!(first.stats.contact_count, 2);
+    assert_eq!(second.stats.contact_count, 2);
+    assert!(
+        second_contacts
+            .iter()
+            .all(|contact| contact.warm_start_reason == WarmStartCacheReason::Hit),
+        "small same-face tangential slip should not drop trusted warm-start points: {second_contacts:?}"
+    );
+    assert_eq!(second.stats.warm_start_hit_count, second_contacts.len());
+    assert_eq!(second.stats.warm_start_drop_count, 0);
+}
+
+#[test]
+fn warm_start_cache_transfers_tangent_impulse_across_small_tangential_slip() {
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: false,
+    });
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let slider = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        -0.45,
+        Vector::new(12.0, 3.0),
+    );
+    let material = Material {
+        friction: 0.25,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+    attach_shape(&mut world, slider, SharedShape::circle(0.5), material);
+    let mut pipeline = SimulationPipeline::new(StepConfig {
+        velocity_iterations: 10,
+        position_iterations: 0,
+        ..fixed_step_config()
+    });
+
+    let first = pipeline.step(&mut world);
+    let first_contact = active_contact_events(&first)
+        .into_iter()
+        .max_by(|a, b| {
+            a.solver_tangent_impulse
+                .abs()
+                .partial_cmp(&b.solver_tangent_impulse.abs())
+                .unwrap()
+        })
+        .expect("first step should solve a sliding contact");
+    assert!(
+        first_contact.solver_tangent_impulse.abs() > 1.0e-4,
+        "first step should cache a real friction impulse: {first_contact:?}"
+    );
+
+    let slider_position = body_position(&world, slider);
+    world
+        .apply_body_patch(
+            slider,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(
+                    slider_position.x() + 0.08,
+                    slider_position.y(),
+                    0.0,
+                )),
+                linear_velocity: Some(Vector::default()),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("slider should move a small tangential amount along the same face");
+    let second = pipeline.step(&mut world);
+    let second_contact = active_contact_events(&second)
+        .into_iter()
+        .max_by(|a, b| {
+            a.warm_start_tangent_impulse
+                .abs()
+                .partial_cmp(&b.warm_start_tangent_impulse.abs())
+                .unwrap()
+        })
+        .expect("second step should keep the sliding contact");
+
+    assert_eq!(second_contact.warm_start_reason, WarmStartCacheReason::Hit);
+    assert!(
+        second_contact.warm_start_tangent_impulse.abs() > 1.0e-4,
+        "sub-threshold tangential slip should transfer the cached tangent impulse: {second_contact:?}"
+    );
+    assert_eq!(second.stats.warm_start_drop_count, 0);
+}
+
+#[test]
+fn warm_start_cache_drops_tangent_impulse_after_large_tangential_slip() {
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: false,
+    });
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let slider = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        -0.45,
+        Vector::new(12.0, 3.0),
+    );
+    let material = Material {
+        friction: 0.25,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+    attach_shape(&mut world, slider, SharedShape::circle(0.5), material);
+    let mut pipeline = SimulationPipeline::new(StepConfig {
+        velocity_iterations: 10,
+        position_iterations: 0,
+        ..fixed_step_config()
+    });
+
+    let first = pipeline.step(&mut world);
+    assert!(
+        active_contact_events(&first)
+            .iter()
+            .any(|contact| contact.solver_tangent_impulse.abs() > 1.0e-4),
+        "first step should cache a real friction impulse"
+    );
+
+    let slider_position = body_position(&world, slider);
+    world
+        .apply_body_patch(
+            slider,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(
+                    slider_position.x() + 0.20,
+                    slider_position.y(),
+                    0.0,
+                )),
+                linear_velocity: Some(Vector::default()),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("slider should move beyond the trusted tangential drift window");
+    let second = pipeline.step(&mut world);
+    let second_contacts = active_contact_events(&second);
+
+    assert!(
+        second_contacts
+            .iter()
+            .any(|contact| contact.warm_start_reason == WarmStartCacheReason::DroppedPointDrift),
+        "over-threshold curved tangential slip should drop cached impulses: {second_contacts:?}"
+    );
+    assert!(
+        second_contacts
+            .iter()
+            .all(|contact| contact.warm_start_tangent_impulse == 0.0),
+        "dropped drift should not expose stale tangent impulses: {second_contacts:?}"
+    );
+    assert!(second.stats.warm_start_drop_count > 0);
 }
 
 #[test]
@@ -1062,7 +1547,6 @@ fn sequential_impulse_solves_all_manifold_rows_for_stacked_contact() {
         1,
     );
     let contacts = active_contact_events(&report);
-
     assert!(
         contacts.len() >= 2,
         "face contact should expose multiple manifold rows: {contacts:?}"
@@ -1140,6 +1624,59 @@ fn tangent_impulse_is_clamped_by_coulomb_friction_budget() {
     assert!(
         contact.tangent_impulse_clamped,
         "large tangential speed should hit the Coulomb clamp: {contact:?}"
+    );
+}
+
+#[test]
+fn two_point_sliding_face_contact_keeps_friction_torque_balanced() {
+    // A centered box sliding across a flat face should get friction without a
+    // large artificial spin. This locks the manifold-level behavior that dense
+    // stacks need before E4 can safely retain shallow dynamic support rows.
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: false,
+    });
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let box_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, -0.45, 0.006),
+            linear_velocity: Vector::new(6.0, 3.0),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("box should be created");
+    let material = Material {
+        friction: 1.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+    attach_shape(&mut world, box_body, SharedShape::rect(1.0, 1.0), material);
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 10,
+            position_iterations: 4,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let contacts = active_contact_events(&report);
+
+    assert!(
+        contacts.len() >= 2,
+        "centered face contact should expose a two-point manifold: {contacts:?}"
+    );
+    assert!(
+        body_velocity(&world, box_body).x().abs() < 6.0,
+        "friction should still reduce tangential sliding speed; velocity={:?}",
+        body_velocity(&world, box_body)
+    );
+    assert!(
+        body_angular_velocity(&world, box_body).abs() <= 0.02,
+        "two-point face friction should not inject large artificial spin; angular_velocity={}, contacts={contacts:?}",
+        body_angular_velocity(&world, box_body)
     );
 }
 
@@ -1400,6 +1937,114 @@ fn contact_position_correction_preserves_spin_after_velocity_solve() {
 }
 
 #[test]
+fn contact_position_correction_does_not_double_apply_face_manifold_points() {
+    // A face manifold usually exports two contact points. Residual position
+    // correction should treat those points as one geometric overlap for pair
+    // separation; applying the full correction once per point injects extra
+    // motion into stacks and churns the next frame's contact identity.
+    let mut world = no_gravity_world();
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let box_body = create_body(&mut world, BodyType::Dynamic, 0.0, -0.45, Vector::default());
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+    attach_shape(&mut world, box_body, SharedShape::rect(1.0, 1.0), material);
+    let start_y = body_position(&world, box_body).y();
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 0,
+            position_iterations: 1,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let contacts = active_contact_events(&report);
+    let end_y = body_position(&world, box_body).y();
+    let correction_distance = (end_y - start_y).abs();
+
+    assert!(
+        contacts.len() >= 2,
+        "fixture should expose a two-point face manifold: {contacts:?}"
+    );
+    assert!(
+        correction_distance <= 0.09,
+        "one frame should not apply an obviously unbounded correction per manifold point; moved {correction_distance}, contacts={contacts:?}"
+    );
+    assert!(
+        report.stats.position_correction_max_translation <= 0.09,
+        "position correction stats should report the bounded dynamic-body translation; stats={:?}",
+        report.stats
+    );
+}
+
+#[test]
+fn contact_position_correction_reports_input_depth_and_applied_translation() {
+    // E3 observability lock: the contact manifold depth is gathered before
+    // residual position correction mutates poses. Solver tuning needs both the
+    // pre-correction overlap and the actual pose translation to avoid mistaking
+    // stale manifold facts for post-correction geometry.
+    let mut world = no_gravity_world();
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let box_body = create_body(&mut world, BodyType::Dynamic, 0.0, -0.45, Vector::default());
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+    attach_shape(&mut world, box_body, SharedShape::rect(1.0, 1.0), material);
+    let start_y = body_position(&world, box_body).y();
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 0,
+            position_iterations: 1,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let correction_contacts = active_contact_events(&report);
+    let end_y = body_position(&world, box_body).y();
+    let correction_distance = (end_y - start_y).abs();
+
+    assert!(
+        report.stats.position_correction_input_max_depth > 0.04,
+        "position correction should report the pre-correction overlap that drove the solve"
+    );
+    assert_eq!(
+        report.stats.position_correction_body_count, 1,
+        "fixture has only one dynamic body eligible for residual position correction"
+    );
+    assert!(
+        (report.stats.position_correction_max_translation - correction_distance).abs() < 1.0e-5,
+        "reported correction translation should match the actual body pose delta"
+    );
+    assert!(
+        report.stats.position_correction_total_translation + 1.0e-5 >= correction_distance,
+        "total correction should include the applied dynamic body translation; reported={}, actual={}",
+        report.stats.position_correction_total_translation,
+        correction_distance
+    );
+    assert!(
+        correction_contacts
+            .iter()
+            .any(|contact| contact.solver_position_correction_depth > 0.0),
+        "contact events should expose row-level residual correction depth: {correction_contacts:?}"
+    );
+    assert!(
+        correction_contacts.iter().any(|contact| {
+            contact.solver_position_correction_body_a_translation > 0.0
+                || contact.solver_position_correction_body_b_translation > 0.0
+        }),
+        "contact events should expose per-body correction translation: {correction_contacts:?}"
+    );
+}
+
+#[test]
 fn sleep_requires_a_stability_window_before_a_body_sleeps() {
     // Physical behavior: sleeping should require sustained low motion over a stability window,
     // so bodies do not sleep after one quiet frame and miss near-future wake interactions.
@@ -1427,6 +2072,90 @@ fn sleep_requires_a_stability_window_before_a_body_sleeps() {
     assert!(
         world.try_body(body).expect("body should exist").sleeping(),
         "a body should sleep after remaining quiet for the stability window"
+    );
+}
+
+#[test]
+fn sleep_accepts_the_d2_quiet_window_but_rejects_faster_motion() {
+    let mut quiet_world = no_gravity_world();
+    let quiet_body = quiet_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            linear_velocity: Vector::new(0.02, 0.0),
+            angular_velocity: 0.04,
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("quiet body should be created");
+
+    step_world(&mut quiet_world, 31);
+
+    assert!(
+        quiet_world
+            .try_body(quiet_body)
+            .expect("quiet body should exist")
+            .sleeping(),
+        "D2 quiet-window motion should be eligible for sleep after the stability window"
+    );
+
+    let mut moving_world = no_gravity_world();
+    let moving_body = moving_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            linear_velocity: Vector::new(0.08, 0.0),
+            angular_velocity: 0.12,
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("moving body should be created");
+
+    step_world(&mut moving_world, 31);
+
+    assert!(
+        !moving_world
+            .try_body(moving_body)
+            .expect("moving body should exist")
+            .sleeping(),
+        "motion above the D2 quiet window should not be force-slept"
+    );
+}
+
+#[test]
+fn resting_static_contact_can_accumulate_sleep_window() {
+    // E5 behavior lock: a genuinely low-motion resting contact should be able
+    // to accumulate the island sleep window. Position correction may keep tiny
+    // overlaps bounded, but it must not behave like a perpetual external wake.
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::new(0.0, 9.8),
+        enable_sleep: true,
+    });
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, -0.5, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("resting body should be created");
+    attach_shape(
+        &mut world,
+        floor,
+        SharedShape::rect(10.0, 1.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        body,
+        SharedShape::rect(1.0, 1.0),
+        Material::default(),
+    );
+
+    step_world(&mut world, 90);
+
+    assert!(
+        world.try_body(body).expect("body should exist").sleeping(),
+        "resting static contact should sleep once the stability window has elapsed"
     );
 }
 

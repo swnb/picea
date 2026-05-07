@@ -22,6 +22,11 @@ export const demoScenarios: ScenarioDescriptor[] = [
     description: "Offline matrix stack preview for dense resting-contact diagnostics.",
   },
   {
+    id: "matrix_stack_aligned",
+    name: "Aligned matrix stack 4x3",
+    description: "Offline aligned matrix stack preview for stable matrix-form behavior locks.",
+  },
+  {
     id: "joint_anchor",
     name: "World anchor joint",
     description: "Offline joint anchor preview with a constraint line.",
@@ -67,7 +72,7 @@ export function makeDemoFrames(scenarioId = "falling_box_contact", frameCount = 
   if (scenarioId === "stack_stability_tower") {
     return makeStackStabilityFrames(frameCount);
   }
-  if (scenarioId === "matrix_stack") {
+  if (scenarioId === "matrix_stack" || scenarioId === "matrix_stack_aligned") {
     return makeStackStabilityFrames(frameCount);
   }
   if (scenarioId === "compound_provenance") {

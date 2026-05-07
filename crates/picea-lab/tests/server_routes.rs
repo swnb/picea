@@ -40,6 +40,7 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "stack_4",
             "stack_stability_tower",
             "matrix_stack",
+            "matrix_stack_aligned",
             "joint_anchor",
             "lattice_grid",
             "broadphase_sparse",
@@ -156,7 +157,9 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
                 .method(Method::POST)
                 .uri(format!("/api/sessions/{session_id}/control"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "action": "step" }).to_string()))
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -330,7 +333,9 @@ async fn live_session_step_advances_backend_world_and_reset_clears_buffer() {
                 .method(Method::POST)
                 .uri(format!("/api/sessions/{session_id}/control"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "action": "step" }).to_string()))
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -341,6 +346,10 @@ async fn live_session_step_advances_backend_world_and_reset_clears_buffer() {
     assert_eq!(first_step_body["session"]["buffered_frame_count"], 1);
     assert_eq!(first_step_body["session"]["current_frame_index"], 0);
     assert_eq!(first_step_body["session"]["latest_frame"]["frame_index"], 0);
+    assert_live_frame_uses_current_full_payload(
+        &first_step_body["session"]["latest_frame"],
+        "live step should keep the existing full-frame payload until LP-E2 changes the transport detail",
+    );
     assert_eq!(
         first_step_body["session"]["latest_frame"]["snapshot"]["stats"]["step_index"],
         1
@@ -357,7 +366,9 @@ async fn live_session_step_advances_backend_world_and_reset_clears_buffer() {
                 .method(Method::POST)
                 .uri(format!("/api/sessions/{session_id}/control"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "action": "step" }).to_string()))
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -407,7 +418,9 @@ async fn live_session_step_advances_backend_world_and_reset_clears_buffer() {
                 .method(Method::POST)
                 .uri(format!("/api/sessions/{session_id}/control"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "action": "step" }).to_string()))
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -426,6 +439,136 @@ async fn live_session_step_advances_backend_world_and_reset_clears_buffer() {
         step_after_reset_body["session"]["latest_frame"]["state_hash"], first_hash,
         "reset should rebuild the world and restart the live frame buffer deterministically"
     );
+}
+
+#[tokio::test]
+async fn live_session_step_defaults_to_summary_and_omits_full_only_payload() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "falling_box_contact", 3).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+
+    let default_step = control_session_without_detail(&app, &session_id, "step").await;
+    assert_eq!(
+        default_step["session"]["latest_frame"],
+        Value::Null,
+        "default live step should stop shipping the full latest_frame payload on the hot path",
+    );
+    let latest_summary = &default_step["live_frame_summary"];
+    assert_eq!(
+        latest_summary["kind"], "summary",
+        "summary payload should identify itself so the web can avoid treating missing diagnostics as zero issues",
+    );
+    for field in [
+        "frame_index",
+        "simulated_time",
+        "state_hash",
+        "session_id",
+        "session_epoch",
+        "world_revision",
+        "status",
+        "buffered_frame_count",
+        "frame_count",
+        "snapshot",
+        "stats",
+    ] {
+        assert!(
+            latest_summary.get(field).is_some(),
+            "summary payload should include {field}"
+        );
+    }
+    assert_eq!(latest_summary["session_id"], session_id);
+    assert_eq!(latest_summary["frame_index"], 0);
+    assert_eq!(latest_summary["session_epoch"], 0);
+    assert_eq!(latest_summary["buffered_frame_count"], 1);
+    assert_eq!(latest_summary["frame_count"], 3);
+    assert_eq!(latest_summary["status"], "paused");
+    assert_eq!(
+        latest_summary["snapshot"]["contacts"],
+        Value::Null,
+        "summary payload should omit full contact facts from the hot response",
+    );
+    assert_eq!(
+        latest_summary["snapshot"]["broadphase_tree"],
+        Value::Null,
+        "summary payload should omit broadphase tree details from the hot response",
+    );
+    assert_eq!(
+        latest_summary["snapshot"]["islands"],
+        Value::Null,
+        "summary payload should omit island details from the hot response",
+    );
+    assert_eq!(
+        latest_summary["diagnostics"],
+        Value::Null,
+        "summary payload should make missing diagnostics explicit instead of pretending there are no issues",
+    );
+    assert_eq!(latest_summary["events"], Value::Null);
+    assert_eq!(latest_summary["report"], Value::Null);
+    assert_eq!(latest_summary["compound_provenance"], Value::Null);
+    assert_eq!(latest_summary["perturbation_provenance"], Value::Null);
+}
+
+#[tokio::test]
+async fn live_session_step_detail_full_keeps_existing_latest_frame_payload() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "falling_box_contact", 3).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    let detailed_step = control_session(&app, &session_id, "step").await;
+    let latest_frame = &detailed_step["session"]["latest_frame"];
+
+    assert_live_frame_uses_current_full_payload(
+        latest_frame,
+        "detail=full should keep the old full FrameRecord contract for manual/compat callers",
+    );
+    assert_eq!(
+        detailed_step["live_frame_summary"]["kind"],
+        "summary",
+        "detail=full should still surface the additive live summary metadata for the web hot path",
+    );
+}
+
+#[tokio::test]
+async fn live_session_frame_lookup_returns_full_frame_without_mutating_session() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "falling_box_contact", 3).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    let stepped = control_session_without_detail(&app, &session_id, "step").await;
+    let session_before_lookup = fetch_session(&app, &session_id).await;
+    let world_revision = stepped["live_frame_summary"]["world_revision"].clone();
+
+    let fetched_frame = fetch_live_frame(&app, &session_id, 0).await;
+    assert_eq!(fetched_frame["frame"]["frame_index"], 0);
+    assert_eq!(
+        fetched_frame["frame"]["snapshot"]["meta"]["revision"],
+        world_revision,
+    );
+    assert_live_frame_uses_current_full_payload(
+        &fetched_frame["frame"],
+        "live frame lookup should hydrate the authoritative full FrameRecord",
+    );
+    let session_after_lookup = fetch_session(&app, &session_id).await;
+    for field in [
+        "status",
+        "session_epoch",
+        "latest_frame",
+        "buffered_frame_count",
+        "current_frame_index",
+        "run_id",
+    ] {
+        assert_eq!(
+            session_after_lookup[field], session_before_lookup[field],
+            "missing future frame lookup route must not mutate session field {field}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -560,7 +703,9 @@ async fn live_session_play_is_status_only_until_backend_step() {
                 .method(Method::POST)
                 .uri(format!("/api/sessions/{session_id}/control"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "action": "step" }).to_string()))
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -573,6 +718,19 @@ async fn live_session_play_is_status_only_until_backend_step() {
     assert_eq!(
         step_body["session"]["latest_frame"]["snapshot"]["stats"]["step_index"],
         1
+    );
+
+    let pause_after_step = control_session_with_detail(&app, &session_id, "pause", None).await;
+    assert_eq!(pause_after_step["session"]["status"], "paused");
+    assert_eq!(
+        pause_after_step["session"]["latest_frame"],
+        Value::Null,
+        "default live control responses should not leak full latest_frame after the summary transport split",
+    );
+    assert_eq!(
+        pause_after_step["live_frame_summary"]["kind"],
+        "summary",
+        "default live control responses should still expose lightweight latest-frame metadata",
     );
 }
 
@@ -669,7 +827,9 @@ async fn live_session_overrides_patch_is_rejected_without_mutating_live_runtime(
                 .method(Method::POST)
                 .uri(format!("/api/sessions/{session_id}/control"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "action": "step" }).to_string()))
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -1390,6 +1550,23 @@ async fn create_live_session(app: &axum::Router, scenario_id: &str, frame_count:
 }
 
 async fn control_session(app: &axum::Router, session_id: &str, action: &str) -> Value {
+    control_session_with_detail(app, session_id, action, Some("full")).await
+}
+
+async fn control_session_without_detail(
+    app: &axum::Router,
+    session_id: &str,
+    action: &str,
+) -> Value {
+    control_session_with_detail(app, session_id, action, None).await
+}
+
+async fn control_session_with_detail(
+    app: &axum::Router,
+    session_id: &str,
+    action: &str,
+    detail: Option<&str>,
+) -> Value {
     let response = app
         .clone()
         .oneshot(
@@ -1397,7 +1574,29 @@ async fn control_session(app: &axum::Router, session_id: &str, action: &str) -> 
                 .method(Method::POST)
                 .uri(format!("/api/sessions/{session_id}/control"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "action": action }).to_string()))
+                .body(Body::from(
+                    match detail {
+                        Some(detail) => json!({ "action": action, "detail": detail }),
+                        None => json!({ "action": action }),
+                    }
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await
+}
+
+async fn fetch_live_frame(app: &axum::Router, session_id: &str, frame_index: usize) -> Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/sessions/{session_id}/frames/{frame_index}"))
+                .body(Body::empty())
                 .unwrap(),
         )
         .await
@@ -1643,6 +1842,15 @@ fn assert_close(actual: f64, expected: f64) {
         (actual - expected).abs() < 1.0e-5,
         "expected {actual} to be close to {expected}"
     );
+}
+
+fn assert_live_frame_uses_current_full_payload(frame: &Value, context: &str) {
+    for field in ["snapshot", "report", "events", "diagnostics"] {
+        assert!(
+            frame.get(field).is_some(),
+            "{context}: expected current live frame payload to include {field}"
+        );
+    }
 }
 
 async fn json_body(response: axum::response::Response) -> Value {

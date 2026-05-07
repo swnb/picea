@@ -7,6 +7,7 @@
     "dev": "vite",
     "test:dev-server": "node scripts/dev-server-contract.mjs",
     "test:i18n": "node scripts/i18n-contract.mjs",
+    "test:profile": "node scripts/profile-contract.mjs",
     "test:ui-contract": "node scripts/ui-contract.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview"

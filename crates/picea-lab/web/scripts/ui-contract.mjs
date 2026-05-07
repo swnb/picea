@@ -373,13 +373,13 @@ assert.match(
 );
 assert.match(
   appSource,
-  /stackStability:\s*stackSummary/,
-  "Copy debug context should include the derived stack stability summary.",
+  /stackStability: hasUnhydratedLiveFrames \? null : stackSummary/,
+  "Copy debug context should include the derived stack stability summary only after live summary frame history is hydrated.",
 );
 assert.match(
   appSource,
-  /diagnostics:\s*\{\s*frame:\s*currentFrame\.diagnostics/,
-  "Copy debug context should include the current frame's exported diagnostics.",
+  /frame: currentFrameNotHydrated \? null : currentFrame\.diagnostics/,
+  "Copy debug context should include exported diagnostics only after live summary frames are hydrated.",
 );
 assert.match(
   appSource,
@@ -398,8 +398,8 @@ assert.match(
 );
 assert.match(
   appSource,
-  /latticeProxy:\s*\{\s*enabled:\s*latticeSummary\.enabled/,
-  "Copy debug context should include an explicit lattice proxy summary instead of implying true soft-body support.",
+  /latticeProxy:\s*\{[\s\S]*enabled: !hasUnhydratedLiveFrames && latticeSummary\.enabled/,
+  "Copy debug context should include an explicit lattice proxy summary only after live summary frames are hydrated.",
 );
 assert.match(
   appSource,
@@ -713,12 +713,12 @@ assert.match(
 );
 assert.match(
   liveControlSource,
-  /async function handleLiveControl[\s\S]*const session = await controlSession\(activeSessionId, action\)[\s\S]*if \(action === "play"\) \{\s*setStatus\("playing"\)/,
+  /async function handleLiveControl[\s\S]*const result = await controlSession\(activeSessionId, action\)[\s\S]*const session = result\.session[\s\S]*if \(action === "play"\) \{\s*setStatus\("playing"\)/,
   "Live play should enter playing only after the Rust control endpoint acknowledges play.",
 );
 assert.doesNotMatch(
   liveControlSource,
-  /async function handleLiveControl[\s\S]*if \(action === "play"\) \{\s*setStatus\("playing"\)[\s\S]*const session = await controlSession\(activeSessionId, action\)/,
+  /async function handleLiveControl[\s\S]*if \(action === "play"\) \{\s*setStatus\("playing"\)[\s\S]*const result = await controlSession\(activeSessionId, action\)/,
   "Live play should not start the frame interval before the Rust play acknowledgement returns.",
 );
 assert.match(
@@ -761,10 +761,90 @@ assert.match(
   /if \(shouldLogLiveFrameBuffer\(nextFrame\.frame_index\)\) \{\s*pushLogs\(/,
   "Live frame buffering logs should be sampled so the hidden log tab is not updated every frame.",
 );
+assert.match(
+  advanceLiveFrameSource,
+  /detail = "summary"/,
+  "Automatic live playback should default to summary detail instead of shipping full frame payloads every step.",
+);
+assert.match(
+  appSource,
+  /await advanceLiveFrame\(\{ logAccepted: true, detail: "full" \}\)/,
+  "Explicit manual live step should request a full frame so paused inspection keeps authoritative detail.",
+);
+assert.match(
+  appSource,
+  /function frameFromLiveSummary\(/,
+  "App should materialize live summary payloads into a renderable frame shape without pretending they are fully hydrated artifacts.",
+);
+assert.match(
+  timelineSource,
+  /function isLiveSummaryFrame\(/,
+  "Timeline should recognize live summary frames before running derived evidence helpers.",
+);
+assert.match(
+  timelineSource,
+  /hasUnhydratedFrames[\s\S]*skipped: "live-summary-not-hydrated"/,
+  "Timeline derived evidence should skip stack/trajectory/lattice derivation while live summary frames are not hydrated.",
+);
+assert.match(
+  appSource,
+  /hasUnhydratedLiveFrames \? null : trajectorySummary/,
+  "Copy debug context should not export trajectory summaries derived from unhydrated live summary frame history.",
+);
+assert.match(
+  appSource,
+  /stackStability: hasUnhydratedLiveFrames \? null : stackSummary/,
+  "Copy debug context should not export stack stability summaries derived from unhydrated live summary frame history.",
+);
+assert.match(
+  appSource,
+  /missing_evidence:\s*\["live_summary_not_hydrated"\]/,
+  "Copy debug context diagnostics should report unhydrated live summaries as missing evidence.",
+);
+assert.match(
+  appSource,
+  /contactCount: hasUnhydratedLiveFrames \? null : latticeSummary\.contactCount/,
+  "Copy debug context should not export lattice/contact counts derived from unhydrated live summary frame history.",
+);
+assert.match(
+  appSource,
+  /current\.frame_index !== result\.frame_index[\s\S]*current\.state_hash !== result\.frame\.state_hash[\s\S]*current\.live_authority\.session_id !== result\.session_id[\s\S]*current\.live_authority\.session_epoch !== result\.session_epoch[\s\S]*current\.live_authority\.world_revision !== result\.world_revision/,
+  "Full-frame hydration should keep frame index, state hash, session id, epoch, and world revision freshness guards together.",
+);
+assert.match(
+  appSource,
+  /async function hydrateLiveFrameIfNeeded\(/,
+  "Paused live inspection should have an on-demand full frame hydration path.",
+);
+assert.match(
+  appSource,
+  /await fetchLiveFrame\(sessionId, frame\.frame_index\)/,
+  "On-demand hydration should fetch the authoritative full frame from the live buffer.",
+);
 assert.doesNotMatch(
   advanceLiveFrameSource,
   /setLiveControlBusy\(/,
   "Automatic live frame advancement should not toggle header controls every frame.",
+);
+assert.doesNotMatch(
+  appSource,
+  /window\.setInterval\(\(\) => \{\s*void advanceLiveFrame\(\)/,
+  "Live playback should not use a fixed interval that can keep firing while a backend step is still in flight.",
+);
+assert.match(
+  appSource,
+  /async function tick\(\)[\s\S]*await advanceLiveFrame\(\)[\s\S]*window\.setTimeout\(tick, nextDelayMs\)/,
+  "Live playback should schedule the next step only after the previous backend response has completed.",
+);
+assert.match(
+  appSource,
+  /profileMeasure\("live\.cadence"[\s\S]*actualFps[\s\S]*nextDelayMs[\s\S]*degraded/,
+  "Adaptive live cadence should be visible in profile output with actual fps and degraded realtime state.",
+);
+assert.match(
+  timelineSource,
+  /function LiveCadenceBadge\(/,
+  "Timeline chrome should expose actual live cadence so degraded realtime is visible to users.",
 );
 assert.match(
   appSource,
@@ -1068,11 +1148,11 @@ assert.match(
 assert.match(
   applyLiveSessionFrameSource,
   /const next = prev\.slice\(0, nextFrame\.frame_index\)[\s\S]*next\.push\(nextFrame\)/,
-  "Accepted live responses should rebuild the authoritative frame buffer from the server refreshed latest_frame and truncate any future history.",
+  "Accepted live responses should rebuild the authoritative frame buffer from the server summary/full payload and truncate any future history.",
 );
 assert.match(
   appSource,
-  /async function handleVelocityPerturbationCommit\(\)[\s\S]*await commitVelocityPerturbation[\s\S]*applyLiveSessionFrame\(result\.session, liveGuard\)/,
+  /async function handleVelocityPerturbationCommit\(\)[\s\S]*await commitVelocityPerturbation[\s\S]*applyLiveSessionFrame\(\{ session: result\.session \}, liveGuard\)/,
   "Accepted perturbation commits should refresh the local latest frame from the server session payload rather than mutating the preview locally.",
 );
 assert.match(
@@ -1082,8 +1162,13 @@ assert.match(
 );
 assert.match(
   perturbationCommitSource,
-  /if \(shouldIgnorePerturbationCommitResponse\(perturbationGuard, result\)\) \{\s*return\s*\}[\s\S]*applyLiveSessionFrame\(result\.session, liveGuard\)/,
+  /if \(shouldIgnorePerturbationCommitResponse\(perturbationGuard, result\)\) \{\s*return\s*\}[\s\S]*applyLiveSessionFrame\(\{ session: result\.session \}, liveGuard\)/,
   "Perturbation commit should reject stale success payloads before they can refresh the live frame buffer.",
+);
+assert.match(
+  timelineSource,
+  /frame\?\.kind === "summary" \|\| frame\?\.live_authority\?\.not_hydrated/,
+  "Diagnostics panel should explicitly treat live summary frames as not hydrated instead of implying clean diagnostics.",
 );
 assert.match(
   perturbationCommitSource,
