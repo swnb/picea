@@ -174,6 +174,34 @@ fn build_stack_4_world() -> World {
     world
 }
 
+fn build_dense_position_correction_stack_world(dynamic_layers: usize) -> (World, Vec<BodyHandle>) {
+    let mut world = no_gravity_world();
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 0.5, Vector::default());
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(10.0, 1.0), material);
+
+    let mut bodies = Vec::with_capacity(dynamic_layers);
+    for index in 0..dynamic_layers {
+        // Reuse the same face-manifold geometry as the smaller correction tests,
+        // but stack enough slightly overlapping pairs to cross the dense
+        // position-correction threshold in a real solver step.
+        let body = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            0.0,
+            -0.45 - index as f32 * 0.95,
+            Vector::default(),
+        );
+        attach_shape(&mut world, body, SharedShape::rect(1.0, 1.0), material);
+        bodies.push(body);
+    }
+
+    (world, bodies)
+}
+
 fn collect_stack_4_frames(frames: usize) -> Vec<StackBehaviorFrame> {
     let mut world = build_stack_4_world();
     let mut pipeline = SimulationPipeline::new(fixed_step_config());
@@ -2041,6 +2069,104 @@ fn contact_position_correction_reports_input_depth_and_applied_translation() {
                 || contact.solver_position_correction_body_b_translation > 0.0
         }),
         "contact events should expose per-body correction translation: {correction_contacts:?}"
+    );
+}
+
+#[test]
+fn contact_position_correction_dense_stack_re_evaluates_row_depth_on_step_surface() {
+    // E3 dense behavior lock: a real step must cross the dense correction
+    // threshold, and the row-level correction facts should show that later
+    // rows consumed less pseudo-depth than an unre-evaluated stale pass would.
+    let (mut world, bodies) = build_dense_position_correction_stack_world(8);
+    let start_positions = bodies
+        .iter()
+        .map(|&body| body_position(&world, body))
+        .collect::<Vec<_>>();
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 0,
+            position_iterations: 4,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let correction_contacts = active_contact_events(&report)
+        .into_iter()
+        .filter(|contact| contact.solver_position_correction_depth > 0.0)
+        .collect::<Vec<_>>();
+    let moved_distances = bodies
+        .iter()
+        .zip(start_positions.iter())
+        .map(|(&body, &start)| (body_position(&world, body) - start).length())
+        .collect::<Vec<_>>();
+    let min_input_depth = correction_contacts
+        .iter()
+        .map(|contact| contact.depth)
+        .fold(f32::INFINITY, f32::min);
+    let max_input_depth = correction_contacts
+        .iter()
+        .map(|contact| contact.depth)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let min_consumed_depth = correction_contacts
+        .iter()
+        .map(|contact| contact.solver_position_correction_depth)
+        .fold(f32::INFINITY, f32::min);
+    let max_consumed_depth = correction_contacts
+        .iter()
+        .map(|contact| contact.solver_position_correction_depth)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let moved_body_count = moved_distances
+        .iter()
+        .filter(|distance| **distance > 1.0e-4)
+        .count();
+    let max_linear_speed = bodies
+        .iter()
+        .map(|&body| body_velocity(&world, body).length())
+        .fold(0.0_f32, f32::max);
+
+    assert!(
+        report.stats.position_correction_input_contact_count >= 16,
+        "fixture should cross the dense threshold on the real step surface; stats={:?}",
+        report.stats
+    );
+    assert!(
+        correction_contacts.len() >= 16,
+        "dense stack should keep at least sixteen correcting contact rows in StepReport events: {correction_contacts:?}"
+    );
+    assert!(
+        report.stats.contact_count >= correction_contacts.len(),
+        "StepReport contact count should cover the correcting rows; stats={:?}, contacts={correction_contacts:?}",
+        report.stats
+    );
+    assert!(
+        max_input_depth - min_input_depth <= 0.02,
+        "fixture should start from a near-uniform overlap so row-depth spread comes from the solve, not uneven setup; min={min_input_depth}, max={max_input_depth}, contacts={correction_contacts:?}"
+    );
+    assert!(
+        max_consumed_depth > min_consumed_depth + 0.02,
+        "dense pseudo-depth re-evaluation should make later rows consume materially less correction depth than earlier rows; min={min_consumed_depth}, max={max_consumed_depth}, contacts={correction_contacts:?}"
+    );
+    assert!(
+        report.stats.position_correction_total_translation
+            < report.stats.position_correction_input_total_depth * 0.78,
+        "dense correction should stay below a stale raw-depth over-correction budget; stats={:?}",
+        report.stats
+    );
+    assert!(
+        moved_body_count >= 6,
+        "dense position correction should move most dynamic layers through queued pose updates; moved={moved_distances:?}"
+    );
+    assert!(
+        max_linear_speed <= 1.0e-5,
+        "position-only dense correction should not inject linear velocity when velocity iterations are disabled; max_speed={max_linear_speed}"
+    );
+    assert!(
+        report.stats.position_correction_total_translation
+            > moved_distances.iter().sum::<f32>() * 3.0,
+        "dense row correction work should materially exceed the final net pose drift because the same bodies participate in multiple stack rows; stats={:?}, moved={moved_distances:?}",
+        report.stats
     );
 }
 

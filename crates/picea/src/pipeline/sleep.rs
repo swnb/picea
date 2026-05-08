@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     body::BodyType,
@@ -14,11 +14,36 @@ const SLEEP_STABILITY_SECONDS: FloatNum = 0.5;
 // island remains visibly quiet, not merely after exact-zero velocity.
 const SLEEP_LINEAR_THRESHOLD: FloatNum = 0.04;
 const SLEEP_ANGULAR_THRESHOLD: FloatNum = 0.08;
+// Dense stack sleep is deliberately narrower than the general sleep rule:
+// only a supported island with many active contacts can use this relaxed gate.
+// It turns long-lived numerical creep into a resting island instead of letting
+// the stack slowly walk out of support over hundreds of frames.
+const RESTING_STACK_BODY_THRESHOLD: usize = 24;
+const RESTING_STACK_CONTACT_THRESHOLD: usize = 32;
+const RESTING_STACK_LINEAR_THRESHOLD: FloatNum = 0.8;
+const RESTING_STACK_ANGULAR_THRESHOLD: FloatNum = 1.5;
 
 #[derive(Clone, Debug)]
 struct Island {
     id: u32,
     bodies: Vec<BodyHandle>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct IslandSleepProfile {
+    active_contact_count: usize,
+    supported_bodies: BTreeSet<BodyHandle>,
+}
+
+impl IslandSleepProfile {
+    fn allows_resting_stack_sleep(&self, island: &Island) -> bool {
+        island.bodies.len() >= RESTING_STACK_BODY_THRESHOLD
+            && self.active_contact_count >= RESTING_STACK_CONTACT_THRESHOLD
+            && island
+                .bodies
+                .iter()
+                .all(|body| self.supported_bodies.contains(body))
+    }
 }
 
 /// Internal solve batch identity for M12 active islands.
@@ -94,6 +119,7 @@ impl World {
     ) -> (Vec<WorldEvent>, usize, usize) {
         let islands = build_islands(self, step_events);
         let island_wake_reasons = expand_wake_reasons(&islands, wake_reasons);
+        let island_sleep_profiles = build_island_sleep_profiles(self, &islands, step_events);
         let enable_sleep = self.desc().enable_sleep;
         let mut events = Vec::new();
         let mut transitions = 0usize;
@@ -143,11 +169,15 @@ impl World {
                 continue;
             }
 
+            let resting_stack_sleep = island_sleep_profiles
+                .get(&island.id)
+                .map(|profile| profile.allows_resting_stack_sleep(&island))
+                .unwrap_or(false);
             let should_sleep = island.bodies.iter().all(|body| {
                 self.body_record(*body)
                     .map(|record| {
                         record.body_type.is_dynamic()
-                            && is_low_motion(record)
+                            && is_low_motion_for_sleep(record, resting_stack_sleep)
                             && (previous_sleep_states.get(body).copied().unwrap_or(false)
                                 || record.sleep_idle_time + config.dt >= SLEEP_STABILITY_SECONDS)
                     })
@@ -163,8 +193,11 @@ impl World {
                 if should_sleep {
                     record.sleep_idle_time = SLEEP_STABILITY_SECONDS;
                     record.sleeping = true;
+                    record.linear_velocity = crate::math::vector::Vector::default();
+                    record.angular_velocity = 0.0;
                 } else {
-                    record.sleep_idle_time = if is_low_motion(record) {
+                    record.sleep_idle_time = if is_low_motion_for_sleep(record, resting_stack_sleep)
+                    {
                         (record.sleep_idle_time + config.dt).min(SLEEP_STABILITY_SECONDS)
                     } else {
                         0.0
@@ -243,6 +276,72 @@ impl World {
 
 fn build_islands(world: &World, step_events: &[WorldEvent]) -> Vec<Island> {
     build_islands_from_pairs(world, step_events.iter().filter_map(active_contact_bodies))
+}
+
+fn build_island_sleep_profiles(
+    world: &World,
+    islands: &[Island],
+    step_events: &[WorldEvent],
+) -> BTreeMap<u32, IslandSleepProfile> {
+    let mut body_to_island = BTreeMap::new();
+    for island in islands {
+        for body in &island.bodies {
+            body_to_island.insert(*body, island.id);
+        }
+    }
+
+    let mut profiles = BTreeMap::<u32, IslandSleepProfile>::new();
+    for contact in step_events.iter().filter_map(active_contact_event) {
+        if contact.depth <= 0.0 {
+            continue;
+        }
+
+        let island_a = body_to_island.get(&contact.body_a).copied();
+        let island_b = body_to_island.get(&contact.body_b).copied();
+        match (island_a, island_b) {
+            (Some(id_a), Some(id_b)) if id_a == id_b => {
+                let profile = profiles.entry(id_a).or_default();
+                profile.active_contact_count += 1;
+                profile.supported_bodies.insert(contact.body_a);
+                profile.supported_bodies.insert(contact.body_b);
+            }
+            (Some(id), None) => record_static_or_kinematic_support(
+                world,
+                &mut profiles,
+                id,
+                contact.body_a,
+                contact.body_b,
+            ),
+            (None, Some(id)) => record_static_or_kinematic_support(
+                world,
+                &mut profiles,
+                id,
+                contact.body_b,
+                contact.body_a,
+            ),
+            _ => {}
+        }
+    }
+    profiles
+}
+
+fn record_static_or_kinematic_support(
+    world: &World,
+    profiles: &mut BTreeMap<u32, IslandSleepProfile>,
+    island_id: u32,
+    dynamic_body: BodyHandle,
+    other_body: BodyHandle,
+) {
+    let other_is_static_or_kinematic = world
+        .body_record(other_body)
+        .map(|record| !record.body_type.is_dynamic())
+        .unwrap_or(false);
+    if !other_is_static_or_kinematic {
+        return;
+    }
+    let profile = profiles.entry(island_id).or_default();
+    profile.active_contact_count += 1;
+    profile.supported_bodies.insert(dynamic_body);
 }
 
 fn build_islands_from_pairs<I>(world: &World, contact_pairs: I) -> Vec<Island>
@@ -345,9 +444,19 @@ fn expand_wake_reasons(
     island_reasons
 }
 
-fn is_low_motion(record: &crate::body::BodyRecord) -> bool {
-    record.linear_velocity.length() < SLEEP_LINEAR_THRESHOLD
-        && record.angular_velocity.abs() < SLEEP_ANGULAR_THRESHOLD
+fn is_low_motion_for_sleep(record: &crate::body::BodyRecord, resting_stack_sleep: bool) -> bool {
+    let linear_threshold = if resting_stack_sleep {
+        RESTING_STACK_LINEAR_THRESHOLD
+    } else {
+        SLEEP_LINEAR_THRESHOLD
+    };
+    let angular_threshold = if resting_stack_sleep {
+        RESTING_STACK_ANGULAR_THRESHOLD
+    } else {
+        SLEEP_ANGULAR_THRESHOLD
+    };
+    record.linear_velocity.length() < linear_threshold
+        && record.angular_velocity.abs() < angular_threshold
 }
 
 fn wake_reason_priority(reason: SleepTransitionReason) -> u8 {
@@ -481,5 +590,153 @@ mod tests {
         record_wake_reason(&mut reasons, body, SleepTransitionReason::Impact);
 
         assert_eq!(reasons[&body], SleepTransitionReason::Impact);
+    }
+
+    #[test]
+    fn dense_supported_island_can_sleep_after_relaxed_resting_window() {
+        let mut world = World::new(WorldDesc {
+            gravity: Vector::default(),
+            enable_sleep: true,
+        });
+        let static_body = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Static,
+                ..BodyDesc::default()
+            })
+            .expect("static support");
+        let bodies = (0..RESTING_STACK_BODY_THRESHOLD)
+            .map(|index| {
+                world
+                    .create_body(BodyDesc {
+                        pose: Pose::from_xy_angle(index as FloatNum, 0.0, 0.0),
+                        linear_velocity: Vector::new(0.5, 0.0),
+                        angular_velocity: 1.0,
+                        can_sleep: true,
+                        ..BodyDesc::default()
+                    })
+                    .expect("dynamic body")
+            })
+            .collect::<Vec<_>>();
+        let mut events = vec![WorldEvent::ContactPersisted(crate::events::ContactEvent {
+            body_a: static_body,
+            body_b: bodies[0],
+            depth: 0.01,
+            ..crate::events::ContactEvent::default()
+        })];
+        events.extend(bodies.windows(2).map(|pair| {
+            WorldEvent::ContactPersisted(crate::events::ContactEvent {
+                body_a: pair[0],
+                body_b: pair[1],
+                depth: 0.01,
+                ..crate::events::ContactEvent::default()
+            })
+        }));
+        events.extend(bodies.iter().take(8).map(|body| {
+            WorldEvent::ContactPersisted(crate::events::ContactEvent {
+                body_a: static_body,
+                body_b: *body,
+                depth: 0.01,
+                ..crate::events::ContactEvent::default()
+            })
+        }));
+
+        let config = StepConfig::default();
+        for _ in 0..31 {
+            let previous_sleep_states = world
+                .bodies()
+                .map(|body| {
+                    (
+                        body,
+                        world
+                            .body_record(body)
+                            .map(|record| record.sleeping)
+                            .unwrap_or(false),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            let wake_reasons = BTreeMap::new();
+            world.refresh_sleep_states(&config, &previous_sleep_states, &wake_reasons, &events);
+        }
+
+        for body in bodies {
+            let record = world.body_record(body).expect("dynamic body");
+            assert!(record.sleeping);
+            assert_eq!(record.linear_velocity, Vector::default());
+            assert_eq!(record.angular_velocity, 0.0);
+        }
+    }
+
+    #[test]
+    fn small_dense_island_keeps_strict_sleep_threshold() {
+        let mut world = World::new(WorldDesc {
+            gravity: Vector::default(),
+            enable_sleep: true,
+        });
+        let static_body = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Static,
+                ..BodyDesc::default()
+            })
+            .expect("static support");
+        let bodies = (0..12)
+            .map(|index| {
+                world
+                    .create_body(BodyDesc {
+                        pose: Pose::from_xy_angle(index as FloatNum, 0.0, 0.0),
+                        linear_velocity: Vector::new(0.5, 0.0),
+                        angular_velocity: 1.0,
+                        can_sleep: true,
+                        ..BodyDesc::default()
+                    })
+                    .expect("dynamic body")
+            })
+            .collect::<Vec<_>>();
+        let mut events = vec![WorldEvent::ContactPersisted(crate::events::ContactEvent {
+            body_a: static_body,
+            body_b: bodies[0],
+            depth: 0.01,
+            ..crate::events::ContactEvent::default()
+        })];
+        events.extend(bodies.windows(2).map(|pair| {
+            WorldEvent::ContactPersisted(crate::events::ContactEvent {
+                body_a: pair[0],
+                body_b: pair[1],
+                depth: 0.01,
+                ..crate::events::ContactEvent::default()
+            })
+        }));
+        // Add duplicate support/contact rows to mirror a small box stack with
+        // multiple manifold rows: dense enough for 4x3, still not a large-stack
+        // island that should use the relaxed sleep thresholds.
+        events.extend(bodies.iter().take(6).map(|body| {
+            WorldEvent::ContactPersisted(crate::events::ContactEvent {
+                body_a: static_body,
+                body_b: *body,
+                depth: 0.01,
+                ..crate::events::ContactEvent::default()
+            })
+        }));
+
+        let config = StepConfig::default();
+        for _ in 0..31 {
+            let previous_sleep_states = world
+                .bodies()
+                .map(|body| {
+                    (
+                        body,
+                        world
+                            .body_record(body)
+                            .map(|record| record.sleeping)
+                            .unwrap_or(false),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            let wake_reasons = BTreeMap::new();
+            world.refresh_sleep_states(&config, &previous_sleep_states, &wake_reasons, &events);
+        }
+
+        for body in bodies {
+            assert!(!world.body_record(body).expect("dynamic body").sleeping);
+        }
     }
 }

@@ -76,6 +76,7 @@ struct LiveSessionState {
     pipeline: SimulationPipeline,
     query: QueryPipeline,
     frames: Vec<FrameRecord>,
+    retained_frame_start: usize,
     compound_provenance: Vec<CompoundProvenance>,
     perturbation_provenance: Vec<LivePerturbationProvenance>,
     velocity_preview_cache: BTreeMap<String, CachedVelocityPerturbationPreview>,
@@ -93,8 +94,13 @@ pub struct SessionRecord {
     pub session_epoch: u64,
     pub run_id: Option<String>,
     pub frame_count: usize,
+    pub produced_frame_count: usize,
     pub buffered_frame_count: usize,
     pub current_frame_index: usize,
+    pub retained_frame_start: usize,
+    pub retained_frame_end_exclusive: usize,
+    pub live_buffer_capacity: usize,
+    pub live_unbounded: bool,
     pub overrides: ScenarioOverrides,
     pub final_state_hash: Option<String>,
     pub manifest_artifact: Option<String>,
@@ -139,6 +145,10 @@ struct CreateSessionRequest {
     scenario_id: ScenarioId,
     #[serde(default = "default_session_frame_count")]
     frame_count: usize,
+    #[serde(default = "default_live_buffer_capacity")]
+    live_buffer_capacity: usize,
+    #[serde(default)]
+    live_unbounded: bool,
     #[serde(default)]
     overrides: ScenarioOverrides,
     #[serde(default)]
@@ -150,6 +160,13 @@ struct ControlRequest {
     action: String,
     #[serde(default)]
     detail: LiveFrameDetail,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct LiveGravityPatchRequest {
+    gravity: serde_json::Value,
+    #[serde(default)]
+    session_epoch: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -241,6 +258,7 @@ pub fn app(state: LabServerState) -> Router {
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/:id", get(get_session))
         .route("/api/sessions/:id/control", post(control_session))
+        .route("/api/sessions/:id/gravity", post(apply_live_gravity))
         .route("/api/sessions/:id/frames/:index", get(get_live_frame))
         .route(
             "/api/sessions/:id/velocity-perturbations/preview",
@@ -260,6 +278,10 @@ pub fn app(state: LabServerState) -> Router {
 
 fn default_session_frame_count() -> usize {
     120
+}
+
+fn default_live_buffer_capacity() -> usize {
+    600
 }
 
 async fn get_scenarios() -> Json<serde_json::Value> {
@@ -289,8 +311,13 @@ async fn create_session(
             session_epoch: 0,
             run_id: None,
             frame_count: request.frame_count.max(1),
+            produced_frame_count: 0,
             buffered_frame_count: 0,
             current_frame_index: 0,
+            retained_frame_start: 0,
+            retained_frame_end_exclusive: 0,
+            live_buffer_capacity: request.live_buffer_capacity.max(1),
+            live_unbounded: request.live_unbounded,
             overrides: request.overrides,
             final_state_hash: None,
             manifest_artifact: None,
@@ -389,6 +416,37 @@ async fn control_session(
     )))
 }
 
+async fn apply_live_gravity(
+    State(state): State<LabServerState>,
+    Path(id): Path<String>,
+    Json(request): Json<LiveGravityPatchRequest>,
+) -> Result<Json<serde_json::Value>, LabHttpError> {
+    let gravity = parse_gravity_vector(&request.gravity).ok_or_else(|| {
+        LabHttpError::bad_request("gravity patch requires a finite [x, y] vector")
+    })?;
+    let session = get_session_handle(&state, &id)?;
+    let mut session = session.lock().expect("session mutex should not poison");
+    if !matches!(session.record.mode, SessionMode::LiveSession) {
+        return Err(LabHttpError::bad_request(
+            "gravity patch is only available for live_session",
+        ));
+    }
+    if let Some(epoch) = request.session_epoch {
+        if epoch != session.record.session_epoch {
+            return Err(LabHttpError::bad_request(format!(
+                "stale session epoch: expected {}, got {}",
+                session.record.session_epoch, epoch
+            )));
+        }
+    }
+    apply_live_gravity_patch(&mut session, gravity)?;
+    Ok(Json(build_control_response(
+        &session,
+        "gravity",
+        LiveFrameDetail::Full,
+    )))
+}
+
 async fn get_live_frame(
     State(state): State<LabServerState>,
     Path((id, index)): Path<(String, usize)>,
@@ -400,7 +458,18 @@ async fn get_live_frame(
             "live frame lookup is only available for live_session",
         ));
     };
-    let Some(frame) = runtime.frames.get(index) else {
+    if index < runtime.retained_frame_start {
+        return Err(LabHttpError::gone_json(
+            format!("live frame {index} was evicted from session {id}"),
+            json!({
+                "error_kind": "live_frame_evicted",
+                "frame_index": index,
+                "retained_frame_start": runtime.retained_frame_start,
+                "retained_frame_end_exclusive": live_retained_frame_end(runtime),
+            }),
+        ));
+    }
+    let Some(frame) = live_frame_by_absolute_index(runtime, index) else {
         return Err(LabHttpError::not_found(format!(
             "live frame {index} not found for session {id}"
         )));
@@ -501,7 +570,9 @@ fn control_artifact_session(
 fn control_live_session(session: &mut SessionState, action: &str) -> Result<(), LabHttpError> {
     match action {
         "play" | "run" => {
-            if session.record.buffered_frame_count >= session.record.frame_count {
+            if !session.record.live_unbounded
+                && session.record.produced_frame_count >= session.record.frame_count
+            {
                 session.record.status = SessionStatus::Completed;
             } else {
                 session.record.status = SessionStatus::Running;
@@ -515,8 +586,11 @@ fn control_live_session(session: &mut SessionState, action: &str) -> Result<(), 
             session.record.status = SessionStatus::Created;
             session.record.session_epoch = session.record.session_epoch.saturating_add(1);
             session.record.run_id = None;
+            session.record.produced_frame_count = 0;
             session.record.buffered_frame_count = 0;
             session.record.current_frame_index = 0;
+            session.record.retained_frame_start = 0;
+            session.record.retained_frame_end_exclusive = 0;
             session.record.final_state_hash = None;
             session.record.manifest_artifact = None;
             session.record.final_snapshot_artifact = None;
@@ -534,11 +608,7 @@ fn control_live_session(session: &mut SessionState, action: &str) -> Result<(), 
     Ok(())
 }
 
-fn build_control_response(
-    session: &SessionState,
-    _action: &str,
-    detail: LiveFrameDetail,
-) -> Value {
+fn build_control_response(session: &SessionState, _action: &str, detail: LiveFrameDetail) -> Value {
     let mut response_session = session.record.clone();
     let live_frame_summary = match session.record.mode {
         SessionMode::LiveSession => session
@@ -572,6 +642,11 @@ fn build_live_frame_summary(session: &SessionRecord, frame: &FrameRecord) -> Val
         "world_revision": frame.report.revision,
         "status": session.status,
         "buffered_frame_count": session.buffered_frame_count,
+        "produced_frame_count": session.produced_frame_count,
+        "retained_frame_start": session.retained_frame_start,
+        "retained_frame_end_exclusive": session.retained_frame_end_exclusive,
+        "live_buffer_capacity": session.live_buffer_capacity,
+        "live_unbounded": session.live_unbounded,
         "frame_count": session.frame_count,
         "snapshot": {
             "meta": &frame.snapshot.meta,
@@ -949,13 +1024,17 @@ fn commit_live_velocity_perturbation(
             &runtime.compound_provenance,
             &runtime.perturbation_provenance,
         )?;
-        runtime.frames.truncate(request.frame_index);
-        runtime.frames.push(frame.clone());
+        let Some(retained_index) = live_retained_index(runtime, request.frame_index) else {
+            reject(&mut response, "stale_frame");
+            return Ok(response);
+        };
+        runtime.frames.truncate(retained_index + 1);
+        runtime.frames[retained_index] = frame.clone();
         runtime.velocity_preview_cache.remove(&request.action_id);
         runtime
             .used_velocity_preview_actions
             .insert(request.action_id.clone());
-        session.record.buffered_frame_count = runtime.frames.len();
+        refresh_live_record_window(&mut session.record, runtime);
         session.record.current_frame_index = request.frame_index;
         session.record.latest_frame = Some(frame.clone());
         session.record.final_state_hash = Some(frame.state_hash.clone());
@@ -1029,16 +1108,96 @@ fn vectors_match(left: Vector, right: Vector) -> bool {
     (left.x() - right.x()).abs() <= 1.0e-5 && (left.y() - right.y()).abs() <= 1.0e-5
 }
 
+fn parse_gravity_vector(value: &serde_json::Value) -> Option<Vector> {
+    let (x, y) = if let Some(values) = value.as_array() {
+        let [x, y] = values.as_slice() else {
+            return None;
+        };
+        (x.as_f64()?, y.as_f64()?)
+    } else {
+        let object = value.as_object()?;
+        (object.get("x")?.as_f64()?, object.get("y")?.as_f64()?)
+    };
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    let gravity = Vector::new(x as f32, y as f32);
+    if !gravity.x().is_finite() || !gravity.y().is_finite() {
+        return None;
+    }
+    Some(gravity)
+}
+
+fn apply_live_gravity_patch(
+    session: &mut SessionState,
+    gravity: Vector,
+) -> Result<(), LabHttpError> {
+    let SessionRuntime::Live(runtime) = &mut session.runtime else {
+        return Err(LabHttpError::bad_request(
+            "gravity patch is only available for live_session",
+        ));
+    };
+    runtime
+        .world
+        .set_gravity(gravity)
+        .map_err(|error| LabHttpError::bad_request(error.to_string()))?;
+    runtime.query.sync(&runtime.world);
+    runtime.velocity_preview_cache.clear();
+
+    session.record.session_epoch = session.record.session_epoch.saturating_add(1);
+    session.record.overrides.gravity = Some([gravity.x(), gravity.y()]);
+    session.record.last_error = None;
+
+    let Some(base_frame) = session.record.latest_frame.clone() else {
+        return Ok(());
+    };
+    let frame = refreshed_frame_record_from_world(
+        &runtime.world,
+        &base_frame,
+        &runtime.compound_provenance,
+        &runtime.perturbation_provenance,
+    )?;
+    let Some(retained_index) = live_retained_index(runtime, base_frame.frame_index) else {
+        return Err(LabHttpError::gone_json(
+            format!(
+                "live frame {} was evicted before gravity patch refresh",
+                base_frame.frame_index
+            ),
+            json!({
+                "error_kind": "live_frame_evicted",
+                "frame_index": base_frame.frame_index,
+                "retained_frame_start": runtime.retained_frame_start,
+                "retained_frame_end_exclusive": live_retained_frame_end(runtime),
+            }),
+        ));
+    };
+    runtime.frames.truncate(retained_index + 1);
+    runtime.frames[retained_index] = frame.clone();
+    refresh_live_record_window(&mut session.record, runtime);
+    session.record.produced_frame_count = frame.frame_index.saturating_add(1);
+    session.record.current_frame_index = frame.frame_index;
+    session.record.latest_frame = Some(frame.clone());
+    session.record.final_state_hash = Some(frame.state_hash.clone());
+    refresh_queued_frame_events_for_edit(
+        &mut session.record.events,
+        frame.frame_index,
+        &frame.state_hash,
+    );
+    Ok(())
+}
+
 fn step_live_session(session: &mut SessionState) -> Result<(), LabHttpError> {
     let SessionRuntime::Live(runtime) = &mut session.runtime else {
         return Err(LabError::InvalidControlAction("step".to_owned()).into());
     };
-    if runtime.frames.len() >= session.record.frame_count {
+    if !session.record.live_unbounded
+        && session.record.produced_frame_count >= session.record.frame_count
+    {
         session.record.status = SessionStatus::Completed;
         return Ok(());
     }
 
-    let frame_index = runtime.frames.len();
+    let frame_index = session.record.produced_frame_count;
     let report = runtime.pipeline.step(&mut runtime.world);
     runtime.query.sync(&runtime.world);
     let frame = frame_record_from_step_with_provenance(
@@ -1050,16 +1209,21 @@ fn step_live_session(session: &mut SessionState) -> Result<(), LabHttpError> {
     )?;
     let state_hash = frame.state_hash.clone();
     session.record.final_state_hash = Some(state_hash.clone());
-    session.record.buffered_frame_count = frame_index + 1;
+    session.record.produced_frame_count = frame_index.saturating_add(1);
     session.record.current_frame_index = frame_index;
     session.record.last_error = None;
     runtime.frames.push(frame.clone());
+    evict_live_frames_outside_capacity(runtime, session.record.live_buffer_capacity);
+    purge_stale_live_previews(runtime, session.record.current_frame_index);
+    refresh_live_record_window(&mut session.record, runtime);
     session.record.latest_frame = Some(frame);
     session.record.events.push(SessionEvent::Frame {
         frame_index,
         state_hash,
     });
-    session.record.status = if session.record.buffered_frame_count >= session.record.frame_count {
+    session.record.status = if !session.record.live_unbounded
+        && session.record.produced_frame_count >= session.record.frame_count
+    {
         SessionStatus::Completed
     } else if matches!(session.record.status, SessionStatus::Running) {
         SessionStatus::Running
@@ -1081,11 +1245,59 @@ fn build_live_runtime(
         pipeline: SimulationPipeline::new(StepConfig::default()),
         query,
         frames: Vec::new(),
+        retained_frame_start: 0,
         compound_provenance: scenario.compound_provenance,
         perturbation_provenance: Vec::new(),
         velocity_preview_cache: BTreeMap::new(),
         used_velocity_preview_actions: BTreeSet::new(),
     })
+}
+
+fn live_retained_frame_end(runtime: &LiveSessionState) -> usize {
+    runtime
+        .retained_frame_start
+        .saturating_add(runtime.frames.len())
+}
+
+fn live_retained_index(runtime: &LiveSessionState, frame_index: usize) -> Option<usize> {
+    if frame_index < runtime.retained_frame_start {
+        return None;
+    }
+    let index = frame_index - runtime.retained_frame_start;
+    (index < runtime.frames.len()).then_some(index)
+}
+
+fn live_frame_by_absolute_index(
+    runtime: &LiveSessionState,
+    frame_index: usize,
+) -> Option<&FrameRecord> {
+    let retained_index = live_retained_index(runtime, frame_index)?;
+    runtime.frames.get(retained_index)
+}
+
+fn evict_live_frames_outside_capacity(runtime: &mut LiveSessionState, capacity: usize) {
+    let capacity = capacity.max(1);
+    let overflow = runtime.frames.len().saturating_sub(capacity);
+    if overflow > 0 {
+        runtime.frames.drain(0..overflow);
+        runtime.retained_frame_start = runtime.retained_frame_start.saturating_add(overflow);
+    }
+}
+
+fn purge_stale_live_previews(runtime: &mut LiveSessionState, current_frame_index: usize) {
+    let retained_start = runtime.retained_frame_start;
+    let retained_end = live_retained_frame_end(runtime);
+    runtime.velocity_preview_cache.retain(|_, preview| {
+        preview.frame_index == current_frame_index
+            && preview.frame_index >= retained_start
+            && preview.frame_index < retained_end
+    });
+}
+
+fn refresh_live_record_window(record: &mut SessionRecord, runtime: &LiveSessionState) {
+    record.buffered_frame_count = runtime.frames.len();
+    record.retained_frame_start = runtime.retained_frame_start;
+    record.retained_frame_end_exclusive = live_retained_frame_end(runtime);
 }
 
 fn format_session_events(events: Vec<SessionEvent>) -> String {
@@ -1159,7 +1371,10 @@ fn get_session_handle(
 fn run_artifact_session(store: &ArtifactStore, session: &mut SessionRecord) {
     session.status = SessionStatus::Running;
     session.events.clear();
+    session.produced_frame_count = 0;
     session.buffered_frame_count = 0;
+    session.retained_frame_start = 0;
+    session.retained_frame_end_exclusive = 0;
     session.latest_frame = None;
     let mut overrides = session.overrides.clone();
     overrides.frame_count = Some(session.frame_count);
@@ -1176,8 +1391,11 @@ fn run_artifact_session(store: &ArtifactStore, session: &mut SessionRecord) {
             session.status = SessionStatus::Completed;
             session.run_id = Some(result.manifest.run_id);
             session.frame_count = result.manifest.frame_count;
+            session.produced_frame_count = result.manifest.frame_count;
             session.buffered_frame_count = result.manifest.frame_count;
             session.current_frame_index = 0;
+            session.retained_frame_start = 0;
+            session.retained_frame_end_exclusive = result.manifest.frame_count;
             session.final_state_hash = Some(result.manifest.final_state_hash);
             session.manifest_artifact = Some(ArtifactFile::Manifest.file_name().to_owned());
             session.final_snapshot_artifact =
@@ -1196,8 +1414,11 @@ fn run_artifact_session(store: &ArtifactStore, session: &mut SessionRecord) {
             let message = error.to_string();
             session.status = SessionStatus::Failed;
             session.run_id = None;
+            session.produced_frame_count = 0;
             session.buffered_frame_count = 0;
             session.current_frame_index = 0;
+            session.retained_frame_start = 0;
+            session.retained_frame_end_exclusive = 0;
             session.final_state_hash = None;
             session.manifest_artifact = None;
             session.final_snapshot_artifact = None;
@@ -1222,6 +1443,7 @@ fn read_frame_hash(store: &ArtifactStore, run_id: &str, frame_index: usize) -> O
 struct LabHttpError {
     status: StatusCode,
     message: String,
+    payload: Option<Value>,
 }
 
 impl From<LabError> for LabHttpError {
@@ -1237,13 +1459,22 @@ impl From<LabError> for LabHttpError {
         Self {
             status,
             message: value.to_string(),
+            payload: None,
         }
     }
 }
 
 impl IntoResponse for LabHttpError {
     fn into_response(self) -> Response {
-        (self.status, Json(json!({ "error": self.message }))).into_response()
+        let mut payload = self
+            .payload
+            .unwrap_or_else(|| json!({ "error": self.message }));
+        if let Some(object) = payload.as_object_mut() {
+            object
+                .entry("error")
+                .or_insert_with(|| Value::String(self.message));
+        }
+        (self.status, Json(payload)).into_response()
     }
 }
 
@@ -1252,6 +1483,7 @@ impl LabHttpError {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
+            payload: None,
         }
     }
 
@@ -1259,6 +1491,15 @@ impl LabHttpError {
         Self {
             status: StatusCode::NOT_FOUND,
             message: message.into(),
+            payload: None,
+        }
+    }
+
+    fn gone_json(message: impl Into<String>, payload: Value) -> Self {
+        Self {
+            status: StatusCode::GONE,
+            message: message.into(),
+            payload: Some(payload),
         }
     }
 }
@@ -1321,8 +1562,13 @@ mod tests {
                 session_epoch: 0,
                 run_id: None,
                 frame_count: 1,
+                produced_frame_count: 1,
                 buffered_frame_count: 1,
                 current_frame_index: 0,
+                retained_frame_start: 0,
+                retained_frame_end_exclusive: 1,
+                live_buffer_capacity: super::default_live_buffer_capacity(),
+                live_unbounded: false,
                 overrides: ScenarioOverrides::default(),
                 final_state_hash: Some("kinematic-preview-source".to_owned()),
                 manifest_artifact: None,
@@ -1336,6 +1582,7 @@ mod tests {
                 pipeline: SimulationPipeline::new(StepConfig::default()),
                 query: QueryPipeline::new(),
                 frames: Vec::new(),
+                retained_frame_start: 0,
                 compound_provenance: Vec::new(),
                 perturbation_provenance: Vec::new(),
                 velocity_preview_cache: std::collections::BTreeMap::new(),

@@ -2,13 +2,13 @@ use picea::debug::{DebugShape, DebugStats, DebugTransform};
 use picea::math::{point::Point, vector::Vector};
 use picea::prelude::{
     BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderDesc, ColliderHandle, ColliderPatch,
-    CollisionFilter, ContactEvent, ContactFeatureId, ContactId, ContactReductionReason, DebugBody,
-    DebugCollider, DebugContact, DebugIsland, DebugManifold, DebugManifoldPoint, DebugSnapshot,
-    DebugSnapshotOptions, EpaTerminationReason, GenericConvexFallbackReason, GenericConvexTrace,
-    GjkTerminationReason, ManifoldId, Material, Pose, QueryFilter, QueryPipeline, QueryShape,
-    QueryShapeError, QueryStats, SharedShape, SimulationPipeline, SleepEvent,
-    SleepTransitionReason, StepConfig, StepReport, StepStats, WarmStartCacheReason, World,
-    WorldDesc, WorldEvent,
+    CollisionFilter, ContactEvent, ContactFeatureId, ContactId, ContactLifecycleReason,
+    ContactReductionReason, DebugBody, DebugCollider, DebugContact, DebugIsland, DebugManifold,
+    DebugManifoldPoint, DebugSnapshot, DebugSnapshotOptions, EpaTerminationReason,
+    GenericConvexFallbackReason, GenericConvexTrace, GjkTerminationReason, ManifoldId, Material,
+    Pose, QueryFilter, QueryPipeline, QueryShape, QueryShapeError, QueryStats, SharedShape,
+    SimulationPipeline, SleepEvent, SleepTransitionReason, SourceRowContinuityReason, StepConfig,
+    StepReport, StepStats, WarmStartCacheReason, World, WorldDesc, WorldEvent,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{
@@ -485,6 +485,8 @@ fn debug_snapshot_with_step_report_preserves_step_facts_and_collider_semantics()
             warm_start_normal_impulse: 1.25,
             warm_start_tangent_impulse: -0.5,
             source_row_continuity_candidate: true,
+            source_row_continuity_reason: SourceRowContinuityReason::Candidate,
+            lifecycle_reason: ContactLifecycleReason::PersistentEdgeSwap,
             solver_normal_impulse: 1.5,
             solver_tangent_impulse: -0.25,
             solver_initial_normal_speed: -0.6,
@@ -692,6 +694,8 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "warm_start_normal_impulse",
             "warm_start_tangent_impulse",
             "source_row_continuity_candidate",
+            "source_row_continuity_reason",
+            "lifecycle_reason",
             "solver_normal_impulse",
             "solver_tangent_impulse",
             "solver_initial_normal_speed",
@@ -726,6 +730,11 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(contact.warm_start_normal_impulse, 0.0);
     assert_eq!(contact.warm_start_tangent_impulse, 0.0);
     assert!(!contact.source_row_continuity_candidate);
+    assert_eq!(
+        contact.source_row_continuity_reason,
+        SourceRowContinuityReason::Unknown
+    );
+    assert_eq!(contact.lifecycle_reason, ContactLifecycleReason::Unknown);
     assert_eq!(contact.solver_normal_impulse, 0.0);
     assert_eq!(contact.solver_tangent_impulse, 0.0);
     assert_eq!(contact.solver_initial_normal_speed, 0.0);
@@ -843,6 +852,8 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
         normal_impulse: 1.0,
         tangent_impulse: -1.0,
         source_row_continuity_candidate: true,
+        source_row_continuity_reason: SourceRowContinuityReason::Candidate,
+        lifecycle_reason: ContactLifecycleReason::PersistentEdgeSwap,
         solver_normal_impulse: 1.5,
         solver_tangent_impulse: -0.25,
         solver_initial_normal_speed: -0.6,
@@ -883,6 +894,8 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
             "normal_impulse",
             "tangent_impulse",
             "source_row_continuity_candidate",
+            "source_row_continuity_reason",
+            "lifecycle_reason",
             "solver_normal_impulse",
             "solver_tangent_impulse",
             "solver_initial_normal_speed",
@@ -917,6 +930,14 @@ fn warm_start_new_picea_payload_fields_default_when_deserializing_older_json() {
     assert_eq!(decoded_debug_contact.normal_impulse, 0.0);
     assert_eq!(decoded_debug_contact.tangent_impulse, 0.0);
     assert!(!decoded_debug_contact.source_row_continuity_candidate);
+    assert_eq!(
+        decoded_debug_contact.source_row_continuity_reason,
+        SourceRowContinuityReason::Unknown
+    );
+    assert_eq!(
+        decoded_debug_contact.lifecycle_reason,
+        ContactLifecycleReason::Unknown
+    );
     assert_eq!(decoded_debug_contact.solver_normal_impulse, 0.0);
     assert_eq!(decoded_debug_contact.solver_tangent_impulse, 0.0);
     assert_eq!(decoded_debug_contact.solver_initial_normal_speed, 0.0);

@@ -527,8 +527,7 @@ async fn live_session_step_detail_full_keeps_existing_latest_frame_payload() {
         "detail=full should keep the old full FrameRecord contract for manual/compat callers",
     );
     assert_eq!(
-        detailed_step["live_frame_summary"]["kind"],
-        "summary",
+        detailed_step["live_frame_summary"]["kind"], "summary",
         "detail=full should still surface the additive live summary metadata for the web hot path",
     );
 }
@@ -569,6 +568,125 @@ async fn live_session_frame_lookup_returns_full_frame_without_mutating_session()
             "missing future frame lookup route must not mutate session field {field}"
         );
     }
+}
+
+#[tokio::test]
+async fn live_unbounded_session_steps_past_frame_count_with_retained_ring_window() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body =
+        create_live_session_with_options(&app, "falling_box_contact", 2, true, 3).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(created_body["session"]["live_unbounded"], true);
+    assert_eq!(created_body["session"]["live_buffer_capacity"], 3);
+    assert_eq!(created_body["session"]["produced_frame_count"], 0);
+    assert_eq!(created_body["session"]["retained_frame_start"], 0);
+    assert_eq!(created_body["session"]["retained_frame_end_exclusive"], 0);
+
+    let mut step_body = Value::Null;
+    for _ in 0..5 {
+        step_body = control_session(&app, &session_id, "step").await;
+    }
+
+    let session = &step_body["session"];
+    assert_eq!(session["status"], "paused");
+    assert_eq!(session["latest_frame"]["frame_index"], 4);
+    assert_eq!(session["current_frame_index"], 4);
+    assert_eq!(session["produced_frame_count"], 5);
+    assert_eq!(session["buffered_frame_count"], 3);
+    assert_eq!(session["retained_frame_start"], 2);
+    assert_eq!(session["retained_frame_end_exclusive"], 5);
+    assert_eq!(session["live_buffer_capacity"], 3);
+    assert_eq!(session["live_unbounded"], true);
+
+    let retained_frame = fetch_live_frame(&app, &session_id, 2).await;
+    assert_eq!(retained_frame["frame_index"], 2);
+    assert_eq!(retained_frame["frame"]["frame_index"], 2);
+
+    let evicted = fetch_live_frame_response(&app, &session_id, 1).await;
+    assert_eq!(evicted.status(), StatusCode::GONE);
+    let evicted_body = json_body(evicted).await;
+    assert_eq!(evicted_body["error_kind"], "live_frame_evicted");
+    assert_eq!(evicted_body["frame_index"], 1);
+    assert_eq!(evicted_body["retained_frame_start"], 2);
+    assert_eq!(evicted_body["retained_frame_end_exclusive"], 5);
+
+    let future = fetch_live_frame_response(&app, &session_id, 5).await;
+    assert_eq!(future.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn live_unbounded_ring_window_rejects_preview_commit_from_evicted_frame() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body =
+        create_live_session_with_options(&app, "falling_box_contact", 2, true, 1).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    let first_step = control_session(&app, &session_id, "step").await;
+    let first_session = &first_step["session"];
+    let world_revision = first_session["latest_frame"]["snapshot"]["meta"]["revision"]
+        .as_u64()
+        .expect("world revision should be numeric");
+    let frame_index = first_session["current_frame_index"]
+        .as_u64()
+        .expect("frame index should be numeric");
+    let dynamic_handle = first_body_with_type(first_session, "dynamic")["handle"].clone();
+
+    let preview_body = post_preview(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "evicted-preview",
+            "world_revision": world_revision,
+            "session_epoch": 0,
+            "body_handle": dynamic_handle,
+            "frame_index": frame_index,
+            "requested_delta": [0.25, 0.0],
+            "wake_intent": true
+        }),
+    )
+    .await;
+    let preview = preview_body["preview"].clone();
+    assert_eq!(preview["rejection_reason"], Value::Null);
+
+    let second_step = control_session(&app, &session_id, "step").await;
+    assert_eq!(second_step["session"]["current_frame_index"], 1);
+    assert_eq!(second_step["session"]["retained_frame_start"], 1);
+    assert_eq!(second_step["session"]["retained_frame_end_exclusive"], 2);
+
+    let stale_preview = post_preview(
+        &app,
+        &session_id,
+        json!({
+            "action_id": "evicted-preview-again",
+            "world_revision": world_revision,
+            "session_epoch": 0,
+            "body_handle": dynamic_handle,
+            "frame_index": frame_index,
+            "requested_delta": [0.25, 0.0],
+            "wake_intent": true
+        }),
+    )
+    .await;
+    assert_eq!(
+        stale_preview["preview"]["rejection_reason"],
+        "stale_world_revision"
+    );
+
+    let stale_commit = post_commit(&app, &session_id, commit_request_from_preview(&preview)).await;
+    assert_eq!(stale_commit["commit"]["accepted"], false);
+    assert_eq!(
+        stale_commit["commit"]["rejection_reason"],
+        "stale_world_revision"
+    );
+    let after_stale = fetch_session(&app, &session_id).await;
+    assert_eq!(after_stale["current_frame_index"], 1);
+    assert_eq!(after_stale["retained_frame_start"], 1);
+    assert_eq!(after_stale["retained_frame_end_exclusive"], 2);
 }
 
 #[tokio::test]
@@ -728,8 +846,7 @@ async fn live_session_play_is_status_only_until_backend_step() {
         "default live control responses should not leak full latest_frame after the summary transport split",
     );
     assert_eq!(
-        pause_after_step["live_frame_summary"]["kind"],
-        "summary",
+        pause_after_step["live_frame_summary"]["kind"], "summary",
         "default live control responses should still expose lightweight latest-frame metadata",
     );
 }
@@ -847,6 +964,57 @@ async fn live_session_overrides_patch_is_rejected_without_mutating_live_runtime(
     assert!(
         (stepped_gravity_y - 9.8).abs() < 1.0e-3,
         "live runtime should keep the original gravity after a rejected patch"
+    );
+}
+
+#[tokio::test]
+async fn live_gravity_patch_updates_runtime_snapshot_and_reset_gravity() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created_body = create_live_session(&app, "falling_box_contact", 4).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+
+    let first_step = control_session(&app, &session_id, "step").await;
+    assert_eq!(first_step["session"]["session_epoch"], 0);
+    let first_revision = first_step["session"]["latest_frame"]["snapshot"]["meta"]["revision"]
+        .as_u64()
+        .expect("first revision should be numeric");
+
+    let patched = patch_live_gravity(&app, &session_id, 0, json!([1.5, -2.0])).await;
+    assert_eq!(patched["session"]["session_epoch"], 1);
+    assert_eq!(patched["session"]["current_frame_index"], 0);
+    assert_eq!(patched["session"]["latest_frame"]["frame_index"], 0);
+    assert_eq!(
+        patched["session"]["overrides"]["gravity"],
+        json!([1.5, -2.0])
+    );
+    assert_eq!(
+        patched["session"]["latest_frame"]["snapshot"]["meta"]["gravity"],
+        json!({ "x": 1.5, "y": -2.0 })
+    );
+    let patched_revision = patched["session"]["latest_frame"]["snapshot"]["meta"]["revision"]
+        .as_u64()
+        .expect("patched revision should be numeric");
+    assert!(
+        patched_revision > first_revision,
+        "live gravity patch should bump world revision"
+    );
+
+    let next_step = control_session(&app, &session_id, "step").await;
+    assert_eq!(
+        next_step["session"]["latest_frame"]["snapshot"]["meta"]["gravity"],
+        json!({ "x": 1.5, "y": -2.0 })
+    );
+
+    let reset = control_session(&app, &session_id, "reset").await;
+    assert_eq!(reset["session"]["session_epoch"], 2);
+    let step_after_reset = control_session(&app, &session_id, "step").await;
+    assert_eq!(
+        step_after_reset["session"]["latest_frame"]["snapshot"]["meta"]["gravity"],
+        json!({ "x": 1.5, "y": -2.0 }),
+        "live reset should rebuild the world with the last applied gravity override"
     );
 }
 
@@ -1526,6 +1694,16 @@ async fn live_session_epoch_starts_at_zero_and_reset_increments_without_preview_
 }
 
 async fn create_live_session(app: &axum::Router, scenario_id: &str, frame_count: usize) -> Value {
+    create_live_session_with_options(app, scenario_id, frame_count, false, 600).await
+}
+
+async fn create_live_session_with_options(
+    app: &axum::Router,
+    scenario_id: &str,
+    frame_count: usize,
+    live_unbounded: bool,
+    live_buffer_capacity: usize,
+) -> Value {
     let response = app
         .clone()
         .oneshot(
@@ -1537,7 +1715,9 @@ async fn create_live_session(app: &axum::Router, scenario_id: &str, frame_count:
                     json!({
                         "scenario_id": scenario_id,
                         "frame_count": frame_count,
-                        "mode": "live_session"
+                        "mode": "live_session",
+                        "live_unbounded": live_unbounded,
+                        "live_buffer_capacity": live_buffer_capacity
                     })
                     .to_string(),
                 ))
@@ -1589,7 +1769,45 @@ async fn control_session_with_detail(
     json_body(response).await
 }
 
+async fn patch_live_gravity(
+    app: &axum::Router,
+    session_id: &str,
+    session_epoch: u64,
+    gravity: Value,
+) -> Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/gravity"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "session_epoch": session_epoch,
+                        "gravity": gravity
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await
+}
+
 async fn fetch_live_frame(app: &axum::Router, session_id: &str, frame_index: usize) -> Value {
+    let response = fetch_live_frame_response(app, session_id, frame_index).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await
+}
+
+async fn fetch_live_frame_response(
+    app: &axum::Router,
+    session_id: &str,
+    frame_index: usize,
+) -> axum::response::Response {
     let response = app
         .clone()
         .oneshot(
@@ -1601,8 +1819,7 @@ async fn fetch_live_frame(app: &axum::Router, session_id: &str, frame_index: usi
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    json_body(response).await
+    response
 }
 
 async fn assert_preview_rejection(

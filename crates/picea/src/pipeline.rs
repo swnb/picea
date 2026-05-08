@@ -361,6 +361,8 @@ mod tests {
             warm_start_normal_impulse: 1.0,
             warm_start_tangent_impulse: 0.25,
             source_row_continuity_candidate: true,
+            source_row_continuity_reason: crate::events::SourceRowContinuityReason::Candidate,
+            lifecycle_reason: crate::events::ContactLifecycleReason::ExactFeature,
             solver_normal_impulse: 1.25,
             solver_tangent_impulse: 0.125,
             solver_initial_normal_speed: -0.5,

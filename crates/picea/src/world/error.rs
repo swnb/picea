@@ -7,6 +7,7 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValidationError {
+    WorldDesc { field: &'static str },
     BodyDesc { field: &'static str },
     BodyPatch { field: &'static str },
     ColliderDesc { field: &'static str },
@@ -57,6 +58,7 @@ pub enum WorldError {
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (scope, field) = match self {
+            Self::WorldDesc { field } => ("world descriptor", field),
             Self::BodyDesc { field } => ("body descriptor", field),
             Self::BodyPatch { field } => ("body patch", field),
             Self::ColliderDesc { field } => ("collider descriptor", field),

@@ -1127,6 +1127,7 @@ fn validation_path(base: &str, error: &WorldError) -> String {
 fn validation_field(error: &WorldError) -> Option<&'static str> {
     match error {
         WorldError::Validation(ValidationError::BodyDesc { field })
+        | WorldError::Validation(ValidationError::WorldDesc { field })
         | WorldError::Validation(ValidationError::BodyPatch { field })
         | WorldError::Validation(ValidationError::ColliderDesc { field })
         | WorldError::Validation(ValidationError::ColliderPatch { field })

@@ -4,8 +4,8 @@ use crate::{
     body::Pose,
     collider::{CollisionFilter, Material, ShapeAabb, SharedShape},
     events::{
-        CcdTrace, ContactEvent, ContactReductionReason, GenericConvexTrace, SleepTransitionReason,
-        WarmStartCacheReason, WorldEvent,
+        CcdTrace, ContactEvent, ContactLifecycleReason, ContactReductionReason, GenericConvexTrace,
+        SleepTransitionReason, SourceRowContinuityReason, WarmStartCacheReason, WorldEvent,
     },
     handles::{BodyHandle, ColliderHandle},
     math::{point::Point, vector::Vector, FloatNum},
@@ -52,6 +52,7 @@ pub(crate) struct ContactObservation {
     pub(crate) warm_start_normal_impulse: FloatNum,
     pub(crate) warm_start_tangent_impulse: FloatNum,
     pub(crate) source_row_continuity_candidate: bool,
+    pub(crate) source_row_continuity_reason: SourceRowContinuityReason,
     pub(crate) solver_initial_normal_speed: FloatNum,
     pub(crate) solver_initial_tangent_speed: FloatNum,
     pub(crate) solver_final_normal_speed: FloatNum,
@@ -199,50 +200,24 @@ impl World {
 
             for point in contact.points {
                 let pair_key = ContactPairKey::new(ordered_a, ordered_b);
-                observations.push(ContactObservation {
-                    key: ContactKey::new(ordered_a, ordered_b, point.feature_id),
+                observations.push(contact_observation_from_point(
+                    ordered_a,
+                    ordered_b,
+                    ordered_body_a,
+                    ordered_body_b,
+                    ordered_pose_a,
+                    ordered_pose_b,
+                    point.point,
+                    ordered_normal,
+                    point.depth,
+                    point.feature_id,
+                    contact.reduction_reason,
+                    collider_a.is_sensor || collider_b.is_sensor,
+                    combine_materials(collider_a.material, collider_b.material),
+                    contact.generic_convex_trace,
+                    ccd_traces.get(&(ordered_a, ordered_b)).copied(),
                     pair_key,
-                    body_a: ordered_body_a,
-                    body_b: ordered_body_b,
-                    collider_a: ordered_a,
-                    collider_b: ordered_b,
-                    anchor_a: point.point - ordered_pose_a.point(),
-                    anchor_b: point.point - ordered_pose_b.point(),
-                    point: point.point,
-                    normal: ordered_normal,
-                    depth: point.depth,
-                    feature_id: point.feature_id,
-                    reduction_reason: contact.reduction_reason,
-                    is_sensor: collider_a.is_sensor || collider_b.is_sensor,
-                    material: combine_materials(collider_a.material, collider_b.material),
-                    normal_impulse: 0.0,
-                    tangent_impulse: 0.0,
-                    warm_start_reason: WarmStartCacheReason::MissNoPrevious,
-                    warm_start_anchor_drift: 0.0,
-                    warm_start_normal_anchor_drift: 0.0,
-                    warm_start_tangent_anchor_drift: 0.0,
-                    warm_start_normal_impulse: 0.0,
-                    warm_start_tangent_impulse: 0.0,
-                    source_row_continuity_candidate: false,
-                    solver_initial_normal_speed: 0.0,
-                    solver_initial_tangent_speed: 0.0,
-                    solver_final_normal_speed: 0.0,
-                    solver_final_tangent_speed: 0.0,
-                    solver_position_bias: 0.0,
-                    solver_restitution_bias: 0.0,
-                    solver_support_friction_impulse: 0.0,
-                    solver_position_correction_depth: 0.0,
-                    solver_position_correction_body_a_translation: 0.0,
-                    solver_position_correction_body_b_translation: 0.0,
-                    solver_normal_impulse_delta: 0.0,
-                    solver_tangent_impulse_delta: 0.0,
-                    normal_impulse_clamped: false,
-                    tangent_impulse_clamped: false,
-                    restitution_velocity_threshold: 0.0,
-                    restitution_applied: false,
-                    generic_convex_trace: contact.generic_convex_trace,
-                    ccd_trace: ccd_traces.get(&(ordered_a, ordered_b)).copied(),
-                });
+                ));
             }
         }
 
@@ -268,8 +243,16 @@ impl World {
                 .is_none()
                 .then(|| same_feature_index_warm_start_candidate(previous_contacts, contact))
                 .flatten();
+            let persistent_previous = exact_previous
+                .is_none()
+                .then(|| persistent_manifold_warm_start_candidate(previous_contacts, contact))
+                .flatten();
             let warm_start = if let Some(previous) = exact_previous.or(fallback_previous) {
                 warm_start_transfer(Some(previous), contact, true)
+            } else if let Some(previous) = persistent_previous {
+                let mut warm_start = warm_start_transfer(Some(previous), contact, true);
+                warm_start.tangent_impulse = 0.0;
+                warm_start
             } else {
                 warm_start_transfer(None, contact, previous_pairs.contains(&contact.pair_key))
             };
@@ -279,11 +262,15 @@ impl World {
             contact.warm_start_tangent_anchor_drift = warm_start.tangent_anchor_drift;
             contact.warm_start_normal_impulse = warm_start.normal_impulse;
             contact.warm_start_tangent_impulse = warm_start.tangent_impulse;
-            contact.source_row_continuity_candidate =
-                matches!(
-                    contact.warm_start_reason,
-                    WarmStartCacheReason::MissFeatureId
-                ) && source_row_continuity_candidate(&previous_contacts, contact);
+            contact.source_row_continuity_reason =
+                source_row_continuity_reason(previous_contacts, contact);
+            contact.source_row_continuity_candidate = matches!(
+                contact.warm_start_reason,
+                WarmStartCacheReason::MissFeatureId
+            ) && matches!(
+                contact.source_row_continuity_reason,
+                SourceRowContinuityReason::Candidate
+            );
             contact.normal_impulse = warm_start.normal_impulse.max(0.0);
             contact.tangent_impulse = warm_start.tangent_impulse;
         }
@@ -308,13 +295,17 @@ impl World {
         let mut warm_start_stats = WarmStartStats::default();
 
         for contact in contacts {
-            let existing = previous.remove(&contact.key).or_else(|| {
-                persistent_manifold_lifecycle_candidate_key(&previous, &contact)
-                    .and_then(|key| previous.remove(&key))
-            });
+            let existing = previous
+                .remove(&contact.key)
+                .map(|record| (record, ContactLifecycleReason::ExactFeature))
+                .or_else(|| {
+                    persistent_manifold_lifecycle_candidate_key(&previous, &contact)
+                        .and_then(|key| previous.remove(&key))
+                        .map(|record| (record, ContactLifecycleReason::PersistentEdgeSwap))
+                });
             let is_persisted = existing.is_some();
             warm_start_stats.record(contact.warm_start_reason);
-            let event = if let Some(existing) = existing {
+            let event = if let Some((existing, lifecycle_reason)) = existing {
                 ContactEvent {
                     contact_id: existing.contact.contact_id,
                     manifold_id: existing.contact.manifold_id,
@@ -334,6 +325,8 @@ impl World {
                     warm_start_normal_impulse: contact.warm_start_normal_impulse,
                     warm_start_tangent_impulse: contact.warm_start_tangent_impulse,
                     source_row_continuity_candidate: contact.source_row_continuity_candidate,
+                    source_row_continuity_reason: contact.source_row_continuity_reason,
+                    lifecycle_reason,
                     solver_normal_impulse: contact.normal_impulse,
                     solver_tangent_impulse: contact.tangent_impulse,
                     solver_initial_normal_speed: contact.solver_initial_normal_speed,
@@ -380,6 +373,8 @@ impl World {
                     warm_start_normal_impulse: contact.warm_start_normal_impulse,
                     warm_start_tangent_impulse: contact.warm_start_tangent_impulse,
                     source_row_continuity_candidate: contact.source_row_continuity_candidate,
+                    source_row_continuity_reason: contact.source_row_continuity_reason,
+                    lifecycle_reason: ContactLifecycleReason::Started,
                     solver_normal_impulse: contact.normal_impulse,
                     solver_tangent_impulse: contact.tangent_impulse,
                     solver_initial_normal_speed: contact.solver_initial_normal_speed,
@@ -459,6 +454,72 @@ impl World {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn contact_observation_from_point(
+    ordered_a: ColliderHandle,
+    ordered_b: ColliderHandle,
+    ordered_body_a: BodyHandle,
+    ordered_body_b: BodyHandle,
+    ordered_pose_a: Pose,
+    ordered_pose_b: Pose,
+    point: Point,
+    normal: Vector,
+    depth: FloatNum,
+    feature_id: crate::handles::ContactFeatureId,
+    reduction_reason: ContactReductionReason,
+    is_sensor: bool,
+    material: Material,
+    generic_convex_trace: Option<GenericConvexTrace>,
+    ccd_trace: Option<CcdTrace>,
+    pair_key: ContactPairKey,
+) -> ContactObservation {
+    ContactObservation {
+        key: ContactKey::new(ordered_a, ordered_b, feature_id),
+        pair_key,
+        body_a: ordered_body_a,
+        body_b: ordered_body_b,
+        collider_a: ordered_a,
+        collider_b: ordered_b,
+        anchor_a: point - ordered_pose_a.point(),
+        anchor_b: point - ordered_pose_b.point(),
+        point,
+        normal,
+        depth,
+        feature_id,
+        reduction_reason,
+        is_sensor,
+        material,
+        normal_impulse: 0.0,
+        tangent_impulse: 0.0,
+        warm_start_reason: WarmStartCacheReason::MissNoPrevious,
+        warm_start_anchor_drift: 0.0,
+        warm_start_normal_anchor_drift: 0.0,
+        warm_start_tangent_anchor_drift: 0.0,
+        warm_start_normal_impulse: 0.0,
+        warm_start_tangent_impulse: 0.0,
+        source_row_continuity_candidate: false,
+        source_row_continuity_reason: SourceRowContinuityReason::Unknown,
+        solver_initial_normal_speed: 0.0,
+        solver_initial_tangent_speed: 0.0,
+        solver_final_normal_speed: 0.0,
+        solver_final_tangent_speed: 0.0,
+        solver_position_bias: 0.0,
+        solver_restitution_bias: 0.0,
+        solver_support_friction_impulse: 0.0,
+        solver_position_correction_depth: 0.0,
+        solver_position_correction_body_a_translation: 0.0,
+        solver_position_correction_body_b_translation: 0.0,
+        solver_normal_impulse_delta: 0.0,
+        solver_tangent_impulse_delta: 0.0,
+        normal_impulse_clamped: false,
+        tangent_impulse_clamped: false,
+        restitution_velocity_threshold: 0.0,
+        restitution_applied: false,
+        generic_convex_trace,
+        ccd_trace,
+    }
+}
+
 fn same_feature_index_warm_start_candidate<'a>(
     previous_contacts: &'a BTreeMap<ContactKey, ContactRecord>,
     contact: &ContactObservation,
@@ -496,6 +557,25 @@ fn persistent_manifold_lifecycle_candidate_key(
         .map(|(key, _)| *key)
 }
 
+fn persistent_manifold_warm_start_candidate<'a>(
+    previous_contacts: &'a BTreeMap<ContactKey, ContactRecord>,
+    contact: &ContactObservation,
+) -> Option<&'a ContactRecord> {
+    previous_contacts
+        .values()
+        .filter(|record| {
+            persistent_manifold_lifecycle_candidate(record, contact)
+                && warm_start_transfer(Some(record), contact, true)
+                    .reason
+                    .is_hit()
+        })
+        .min_by(|lhs, rhs| {
+            let lhs_drift = contact_anchor_drift(lhs, contact);
+            let rhs_drift = contact_anchor_drift(rhs, contact);
+            lhs_drift.total_cmp(&rhs_drift)
+        })
+}
+
 fn persistent_manifold_lifecycle_candidate(
     previous: &ContactRecord,
     contact: &ContactObservation,
@@ -527,28 +607,40 @@ fn persistent_manifold_lifecycle_candidate(
         && local_anchor_drift <= PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD
 }
 
-fn source_row_continuity_candidate(
+fn source_row_continuity_reason(
     previous_contacts: &BTreeMap<ContactKey, ContactRecord>,
     contact: &ContactObservation,
-) -> bool {
+) -> SourceRowContinuityReason {
     if contact.is_sensor {
-        return false;
+        return SourceRowContinuityReason::Sensor;
     }
 
-    previous_contacts
-        .values()
-        .any(|record| source_row_continuity_candidate_record(record, contact))
+    let mut rejection = None;
+    for record in previous_contacts.values() {
+        let reason = source_row_continuity_record_reason(record, contact);
+        if matches!(reason, SourceRowContinuityReason::Candidate) {
+            return reason;
+        }
+        rejection = source_row_continuity_rejection(rejection, reason);
+    }
+
+    rejection.unwrap_or(SourceRowContinuityReason::NoPreviousPair)
 }
 
-fn source_row_continuity_candidate_record(
+fn source_row_continuity_record_reason(
     previous: &ContactRecord,
     contact: &ContactObservation,
-) -> bool {
+) -> SourceRowContinuityReason {
     if previous.contact.collider_a != contact.collider_a
         || previous.contact.collider_b != contact.collider_b
-        || feature_id_edge_swap(previous.contact.feature_id, contact.feature_id)
     {
-        return false;
+        return SourceRowContinuityReason::PairMismatch;
+    }
+
+    // Edge-swapped clipped manifolds may still represent one geometric pair,
+    // but they are a separate lifecycle path from source-row continuity.
+    if feature_id_edge_swap(previous.contact.feature_id, contact.feature_id) {
+        return SourceRowContinuityReason::EdgeSwap;
     }
 
     let previous_normal = previous.contact.normal.normalized_or_zero();
@@ -557,12 +649,52 @@ fn source_row_continuity_candidate_record(
         || current_normal.length() <= FloatNum::EPSILON
         || previous_normal.dot(current_normal) < WARM_START_NORMAL_DOT_THRESHOLD
     {
-        return false;
+        return SourceRowContinuityReason::NormalMismatch;
     }
 
     let local_anchor_drift = contact_anchor_drift(previous, contact);
-    local_anchor_drift.is_finite()
-        && local_anchor_drift <= PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD
+    if !local_anchor_drift.is_finite()
+        || local_anchor_drift > PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD
+    {
+        return SourceRowContinuityReason::AnchorDrift;
+    }
+
+    SourceRowContinuityReason::Candidate
+}
+
+fn source_row_continuity_rejection(
+    current: Option<SourceRowContinuityReason>,
+    next: SourceRowContinuityReason,
+) -> Option<SourceRowContinuityReason> {
+    if matches!(
+        next,
+        SourceRowContinuityReason::Candidate | SourceRowContinuityReason::NoPreviousPair
+    ) {
+        return current;
+    }
+
+    let Some(current) = current else {
+        return Some(next);
+    };
+
+    if source_row_continuity_rejection_rank(next) < source_row_continuity_rejection_rank(current) {
+        Some(next)
+    } else {
+        Some(current)
+    }
+}
+
+fn source_row_continuity_rejection_rank(classification: SourceRowContinuityReason) -> usize {
+    match classification {
+        SourceRowContinuityReason::EdgeSwap => 0,
+        SourceRowContinuityReason::NormalMismatch => 1,
+        SourceRowContinuityReason::AnchorDrift => 2,
+        SourceRowContinuityReason::Sensor => 3,
+        SourceRowContinuityReason::Unknown
+        | SourceRowContinuityReason::NoPreviousPair
+        | SourceRowContinuityReason::PairMismatch
+        | SourceRowContinuityReason::Candidate => 4,
+    }
 }
 
 fn contact_anchor_drift(previous: &ContactRecord, contact: &ContactObservation) -> FloatNum {
@@ -742,6 +874,7 @@ fn ordered_pair(a: ColliderHandle, b: ColliderHandle) -> (ColliderHandle, Collid
 mod tests {
     use super::*;
     use crate::{
+        events::{ContactLifecycleReason, SourceRowContinuityReason},
         handles::{ContactFeatureId, ContactId, ManifoldId},
         world::WorldDesc,
     };
@@ -778,6 +911,8 @@ mod tests {
             warm_start_normal_impulse: 0.25,
             warm_start_tangent_impulse: 0.05,
             source_row_continuity_candidate: false,
+            source_row_continuity_reason: SourceRowContinuityReason::Unknown,
+            lifecycle_reason: ContactLifecycleReason::Unknown,
             solver_normal_impulse: 0.25,
             solver_tangent_impulse: 0.05,
             solver_initial_normal_speed: 0.0,
@@ -829,6 +964,7 @@ mod tests {
             warm_start_normal_impulse: 0.0,
             warm_start_tangent_impulse: 0.0,
             source_row_continuity_candidate: false,
+            source_row_continuity_reason: SourceRowContinuityReason::Unknown,
             solver_initial_normal_speed: 0.0,
             solver_initial_tangent_speed: 0.0,
             solver_final_normal_speed: 0.0,
@@ -896,6 +1032,11 @@ mod tests {
         let mut contacts = vec![test_contact_observation(current_feature)];
         let world = World::new(WorldDesc::default());
 
+        assert_eq!(
+            source_row_continuity_reason(&previous_contacts, &contacts[0]),
+            SourceRowContinuityReason::Candidate
+        );
+
         world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
 
         assert_eq!(
@@ -903,10 +1044,18 @@ mod tests {
             WarmStartCacheReason::MissFeatureId
         );
         assert!(contacts[0].source_row_continuity_candidate);
+        assert_eq!(
+            contacts[0].source_row_continuity_reason,
+            SourceRowContinuityReason::Candidate
+        );
+        assert_eq!(contacts[0].warm_start_normal_impulse, 0.0);
+        assert_eq!(contacts[0].warm_start_tangent_impulse, 0.0);
+        assert_eq!(contacts[0].normal_impulse, 0.0);
+        assert_eq!(contacts[0].tangent_impulse, 0.0);
     }
 
     #[test]
-    fn source_row_continuity_candidate_excludes_edge_swap_lifecycle_path() {
+    fn edge_swap_manifold_can_warm_start_without_source_row_continuity() {
         let previous_feature = test_feature(0x0100_1003, 0);
         let current_feature = test_feature(0x0100_3001, 0);
         let previous_record = ContactRecord {
@@ -924,6 +1073,95 @@ mod tests {
         let mut contacts = vec![test_contact_observation(current_feature)];
         let world = World::new(WorldDesc::default());
 
+        assert_eq!(
+            source_row_continuity_reason(&previous_contacts, &contacts[0]),
+            SourceRowContinuityReason::EdgeSwap
+        );
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(contacts[0].warm_start_reason, WarmStartCacheReason::Hit);
+        assert!(!contacts[0].source_row_continuity_candidate);
+        assert_eq!(
+            contacts[0].source_row_continuity_reason,
+            SourceRowContinuityReason::EdgeSwap
+        );
+        assert_eq!(contacts[0].warm_start_normal_impulse, 0.25);
+        assert_eq!(contacts[0].warm_start_tangent_impulse, 0.0);
+        assert_eq!(contacts[0].normal_impulse, 0.25);
+        assert_eq!(contacts[0].tangent_impulse, 0.0);
+    }
+
+    #[test]
+    fn refresh_contact_events_reports_edge_swap_lifecycle_without_warm_start_transfer() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_3001, 0);
+        let previous_event = test_contact_event(previous_feature);
+        let previous_contact_id = previous_event.contact_id;
+        let previous_manifold_id = previous_event.manifold_id;
+        let previous_record = ContactRecord {
+            contact: previous_event,
+            anchor_a: Vector::new(0.25, 0.0),
+            anchor_b: Vector::new(-0.25, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut current_contact = test_contact_observation(current_feature);
+        current_contact.warm_start_reason = WarmStartCacheReason::MissFeatureId;
+        let mut world = World::new(WorldDesc::default());
+
+        let (events, contact_count, manifold_count, warm_start_stats) =
+            world.refresh_contact_events(vec![current_contact], previous_contacts);
+
+        assert_eq!(contact_count, 1);
+        assert_eq!(manifold_count, 1);
+        assert_eq!(warm_start_stats.hit_count, 0);
+        assert_eq!(warm_start_stats.miss_count, 1);
+        let WorldEvent::ContactPersisted(event) = &events[0] else {
+            panic!("edge-swap lifecycle should keep contact persisted");
+        };
+        assert_eq!(event.contact_id, previous_contact_id);
+        assert_eq!(event.manifold_id, previous_manifold_id);
+        assert_eq!(
+            event.lifecycle_reason,
+            ContactLifecycleReason::PersistentEdgeSwap
+        );
+        assert_eq!(event.warm_start_reason, WarmStartCacheReason::MissFeatureId);
+        assert_eq!(event.warm_start_normal_impulse, 0.0);
+        assert_eq!(event.warm_start_tangent_impulse, 0.0);
+    }
+
+    #[test]
+    fn source_row_continuity_candidate_excludes_anchor_drift() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_1004, 0);
+        let previous_record = ContactRecord {
+            contact: test_contact_event(previous_feature),
+            anchor_a: Vector::new(0.25, 0.0),
+            anchor_b: Vector::new(-0.25, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut contact = test_contact_observation(current_feature);
+        contact.anchor_a = Vector::new(0.75, 0.0);
+        let mut contacts = vec![contact];
+        let world = World::new(WorldDesc::default());
+
+        assert_eq!(
+            source_row_continuity_reason(&previous_contacts, &contacts[0]),
+            SourceRowContinuityReason::AnchorDrift
+        );
+
         world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
 
         assert_eq!(
@@ -931,5 +1169,59 @@ mod tests {
             WarmStartCacheReason::MissFeatureId
         );
         assert!(!contacts[0].source_row_continuity_candidate);
+        assert_eq!(
+            contacts[0].source_row_continuity_reason,
+            SourceRowContinuityReason::AnchorDrift
+        );
+        assert_eq!(contacts[0].warm_start_normal_impulse, 0.0);
+        assert_eq!(contacts[0].warm_start_tangent_impulse, 0.0);
+    }
+
+    #[test]
+    fn source_row_continuity_reason_distinguishes_pair_mismatch() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_1004, 0);
+        let mut previous_event = test_contact_event(previous_feature);
+        previous_event.collider_a = test_collider(3);
+        previous_event.collider_b = test_collider(4);
+        let previous_record = ContactRecord {
+            contact: previous_event,
+            anchor_a: Vector::new(0.25, 0.0),
+            anchor_b: Vector::new(-0.25, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(3), test_collider(4), previous_feature),
+            previous_record,
+        );
+        let contact = test_contact_observation(current_feature);
+        let mut contacts = vec![test_contact_observation(current_feature)];
+        let mut no_previous_contacts = vec![test_contact_observation(current_feature)];
+        let world = World::new(WorldDesc::default());
+
+        assert_eq!(
+            source_row_continuity_reason(&previous_contacts, &contact),
+            SourceRowContinuityReason::PairMismatch
+        );
+        assert_eq!(
+            source_row_continuity_reason(&BTreeMap::new(), &contact),
+            SourceRowContinuityReason::NoPreviousPair
+        );
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+        assert_eq!(
+            contacts[0].source_row_continuity_reason,
+            SourceRowContinuityReason::PairMismatch
+        );
+        assert!(!contacts[0].source_row_continuity_candidate);
+
+        world.prepare_contact_warm_start(&mut no_previous_contacts, &BTreeMap::new());
+        assert_eq!(
+            no_previous_contacts[0].source_row_continuity_reason,
+            SourceRowContinuityReason::NoPreviousPair
+        );
+        assert!(!no_previous_contacts[0].source_row_continuity_candidate);
     }
 }

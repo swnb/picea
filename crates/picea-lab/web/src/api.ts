@@ -43,6 +43,10 @@ export async function createSession(
   frameCount: number,
   mode: SessionMode,
   gravity?: [number, number] | null,
+  liveOptions?: {
+    liveUnbounded: boolean;
+    liveBufferCapacity: number;
+  },
 ): Promise<SessionRecord> {
   const data = await requestJson<{ session: SessionRecord }>("/api/sessions", {
     method: "POST",
@@ -50,6 +54,10 @@ export async function createSession(
       scenario_id: scenarioId,
       frame_count: frameCount,
       mode,
+      live_unbounded:
+        mode === "live_session" ? liveOptions?.liveUnbounded : undefined,
+      live_buffer_capacity:
+        mode === "live_session" ? liveOptions?.liveBufferCapacity : undefined,
       overrides: {
         frame_count: frameCount,
         gravity: gravity ?? undefined,
@@ -70,6 +78,19 @@ export async function controlSession(
       action,
       detail,
     }),
+  });
+}
+
+export async function applyLiveGravity(
+  sessionId: string,
+  request: {
+    gravity: [number, number] | Vec2;
+    session_epoch?: number;
+  },
+): Promise<SessionControlResponse> {
+  return requestJson<SessionControlResponse>(`/api/sessions/${sessionId}/gravity`, {
+    method: "POST",
+    body: JSON.stringify(request),
   });
 }
 

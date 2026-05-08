@@ -13,8 +13,10 @@ world editor yet.
 - `reset-time override`: input applied before a world is built, such as gravity
   or frame count. It is deterministic because the world is recreated from a
   known scenario boundary.
-- `running-world patch`: mutation of an already built world. This includes body,
-  collider, or joint patch/destroy commands after live stepping has started.
+- `running-world patch`: mutation of an already built world. The current narrow
+  exception is live gravity apply, which only replaces `WorldDesc.gravity` and
+  refreshes the current frame. Body, collider, or joint patch/destroy commands
+  after live stepping has started remain outside the shipped live debugger.
 - `transaction`: a batch of mutations that either all validates and commits, or
   leaves the authoritative world unchanged.
 - `handle invalidation`: the rule that destroyed body/collider/joint handles
@@ -30,14 +32,48 @@ M25-B is a semantics and red-line milestone. The shipped server behavior remains
   `PATCH /api/sessions/:id/overrides`, then `reset` reruns the artifact.
 - `live_session` rejects `PATCH /api/sessions/:id/overrides` with an explicit
   `400` error and does not mutate the authoritative live runtime.
+- `live_session` accepts the narrow `POST /api/sessions/:id/gravity` runtime
+  patch. It validates the supplied session epoch, updates world gravity, bumps
+  world revision and session epoch, resyncs query state, clears velocity preview
+  cache, refreshes the current authoritative frame, and truncates any future
+  buffered frames invalidated by the edit.
 - `play` / `run` on a live session only changes the session status. Physics moves
   forward only through backend `step` requests.
 - `reset` on a live session rebuilds the world from scenario plus reset-time
-  overrides and clears the live frame buffer.
+  overrides and clears the live frame buffer. A successfully applied live
+  gravity patch updates those gravity overrides so reset continues with the last
+  applied gravity.
 
 This is the conservative product choice. It keeps web debugging honest: the page
 can drive backend physics, but it cannot yet edit a world in ways that imply
 unsettled handle, contact-cache, sleep, and query-cache guarantees.
+
+## Runtime Controls V1
+
+The 2026-05-07 lab-web runtime controls keep session creation separate from
+playback:
+
+- The header run button creates a new session for the selected scenario and
+  mode. If a session already exists, it is a restart/rerun command, not a
+  play/resume toggle.
+- The timeline play button is the only pause/resume toggle for the current
+  session. Pausing then resuming continues that session instead of creating a
+  new one.
+- Live sessions may be unbounded at creation time. They continue stepping past
+  the requested display frame count while retaining only a bounded frame window.
+  The V1 default retains 600 frames; older evicted live frames are not
+  authoritative replay facts and are reported as evicted instead of being
+  silently reconstructed by the web client.
+- Artifact replay remains finite-frame replay. It does not inherit live
+  unbounded stepping or live retained-window behavior.
+- The gravity dial has two modes. In artifact replay it remains a reset-time
+  override for the next header rerun. In live session it edits a draft `[x, y]`
+  vector; clicking Apply sends the narrow live gravity patch immediately.
+  Reset restores the draft to default gravity, and Undo either discards an
+  unapplied draft edit or applies the previous live gravity value.
+- Live gravity apply is deliberately not a general editor. It does not create,
+  destroy, or patch bodies, colliders, joints, contacts, sleep state, material,
+  collision filters, or solver settings.
 
 ## Live Frame Detail Contract
 

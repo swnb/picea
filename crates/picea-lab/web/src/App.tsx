@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import {
+  applyLiveGravity,
   commitVelocityPerturbation,
   controlSession,
   createSession,
@@ -13,6 +14,10 @@ import {
   previewVelocityPerturbation,
 } from "./api"
 import { WorkbenchLayout } from "./components/workbench/WorkbenchLayout"
+import {
+  DEFAULT_GRAVITY,
+  type GravityVector,
+} from "./components/workbench/GravityDial"
 import { log, messageOf } from "./components/workbench/format"
 import { resolveSelection } from "./components/workbench/selection"
 import {
@@ -107,6 +112,8 @@ const EMPTY_FRAME: FrameRecord = {
 
 const LIVE_TARGET_FPS = 30
 const LIVE_TARGET_FRAME_MS = 1000 / LIVE_TARGET_FPS
+const LIVE_BUFFER_CAPACITY = 600
+const GRAVITY_EPSILON = 1.0e-3
 
 function idleLiveCadenceStatus(): LiveCadenceStatus {
   return {
@@ -119,6 +126,18 @@ function idleLiveCadenceStatus(): LiveCadenceStatus {
   }
 }
 
+function gravityVectorsMatch(left: GravityVector, right: GravityVector): boolean {
+  return (
+    Math.abs(left.x - right.x) <= GRAVITY_EPSILON &&
+    Math.abs(left.y - right.y) <= GRAVITY_EPSILON
+  )
+}
+
+function frameGravityVector(frame: FrameRecord | null | undefined): GravityVector {
+  const gravity = frame?.snapshot.meta.gravity
+  return gravity ? { x: gravity.x, y: gravity.y } : DEFAULT_GRAVITY
+}
+
 function liveAuthorityFromSummary(summary: LiveFrameSummary): LiveFrameAuthority {
   return {
     session_id: summary.session_id,
@@ -126,6 +145,11 @@ function liveAuthorityFromSummary(summary: LiveFrameSummary): LiveFrameAuthority
     world_revision: summary.world_revision,
     status: summary.status,
     buffered_frame_count: summary.buffered_frame_count,
+    produced_frame_count: summary.produced_frame_count,
+    retained_frame_start: summary.retained_frame_start,
+    retained_frame_end_exclusive: summary.retained_frame_end_exclusive,
+    live_buffer_capacity: summary.live_buffer_capacity,
+    live_unbounded: summary.live_unbounded,
     frame_count: summary.frame_count,
     not_hydrated: true,
   }
@@ -182,6 +206,11 @@ function liveFrameFromControlResponse(
         null,
       status: response.session.status,
       buffered_frame_count: response.session.buffered_frame_count,
+      produced_frame_count: response.session.produced_frame_count,
+      retained_frame_start: response.session.retained_frame_start,
+      retained_frame_end_exclusive: response.session.retained_frame_end_exclusive,
+      live_buffer_capacity: response.session.live_buffer_capacity,
+      live_unbounded: response.session.live_unbounded,
       frame_count: response.session.frame_count,
     })
   }
@@ -193,6 +222,23 @@ function liveFrameFromControlResponse(
 
 function isSummaryFrame(frame: FrameRecord | null | undefined): boolean {
   return frame?.kind === "summary" || frame?.live_authority?.not_hydrated === true
+}
+
+function frameArrayIndexForAbsolute(
+  frames: FrameRecord[],
+  absoluteFrameIndex: number,
+): number {
+  const retainedFrameStart = frames[0]?.frame_index ?? 0
+  const index = absoluteFrameIndex - retainedFrameStart
+  return index >= 0 && index < frames.length ? index : -1
+}
+
+function frameAtAbsoluteIndex(
+  frames: FrameRecord[],
+  absoluteFrameIndex: number,
+): FrameRecord | undefined {
+  const index = frameArrayIndexForAbsolute(frames, absoluteFrameIndex)
+  return index >= 0 ? frames[index] : undefined
 }
 
 type LiveResponseGuard = {
@@ -236,6 +282,8 @@ type DebugContextPayload = {
     runId: string | null
     frameIndex: number
     bufferedFrameCount: number
+    retainedFrameStart: number
+    retainedFrameEndExclusive: number
     stateHash: string
     worldRevision: number | null
     liveAuthority: {
@@ -582,7 +630,14 @@ export function App() {
   )
   const [canvasView, setCanvasView] = useState<CanvasDebugView | null>(null)
   const [useCustomGravity, setUseCustomGravity] = useState(false)
-  const [gravityY, setGravityY] = useState(9.8)
+  const [gravityVector, setGravityVector] =
+    useState<GravityVector>(DEFAULT_GRAVITY)
+  const [appliedGravityVector, setAppliedGravityVector] =
+    useState<GravityVector>(DEFAULT_GRAVITY)
+  const [gravityUndoVector, setGravityUndoVector] =
+    useState<GravityVector | null>(null)
+  const [gravityPatchBusy, setGravityPatchBusy] = useState(false)
+  const [gravityPatchError, setGravityPatchError] = useState<string | null>(null)
   const [liveControlBusy, setLiveControlBusy] = useState(false)
   const [liveCadence, setLiveCadence] = useState<LiveCadenceStatus>(() =>
     idleLiveCadenceStatus(),
@@ -606,8 +661,23 @@ export function App() {
   const liveLoopGenerationRef = useRef(0)
   const perturbationRequestTokenRef = useRef(0)
 
-  const currentFrame =
-    frames[Math.min(frameIndex, Math.max(0, frames.length - 1))] ?? EMPTY_FRAME
+  const retainedFrameStart = frames[0]?.frame_index ?? 0
+  const retainedFrameEndExclusive = retainedFrameStart + frames.length
+  const latestBufferedFrameIndex = frames[frames.length - 1]?.frame_index ?? 0
+  const currentFrameBufferIndex = frameArrayIndexForAbsolute(frames, frameIndex)
+  const currentFrame = frameAtAbsoluteIndex(frames, frameIndex) ?? EMPTY_FRAME
+  const gravityDraftChanged = !gravityVectorsMatch(
+    gravityVector,
+    appliedGravityVector,
+  )
+  const canApplyGravityLive =
+    source === "live" &&
+    sessionId != null &&
+    useCustomGravity &&
+    gravityDraftChanged &&
+    !gravityPatchBusy
+  const canUndoGravity =
+    gravityDraftChanged || (source === "live" && gravityUndoVector != null)
   // Live velocity edits are only authoritative on the newest server-backed frame.
   const latestAuthoritativeLiveFrame =
     source === "live" ? (frames[frames.length - 1] ?? null) : null
@@ -759,17 +829,17 @@ export function App() {
           break
         case "ArrowRight":
           event.preventDefault()
-          if (source === "live" && frameIndex >= frames.length - 1) {
+          if (source === "live" && frameIndex >= latestBufferedFrameIndex) {
             void handleControl("step")
           } else {
             setStatus("paused")
-            setFrameIndex((i) => Math.min(Math.max(0, frames.length - 1), i + 1))
+            setFrameIndex((i) => Math.min(latestBufferedFrameIndex, i + 1))
           }
           break
         case "ArrowLeft":
           event.preventDefault()
           setStatus("paused")
-          setFrameIndex((i) => Math.max(0, i - 1))
+          setFrameIndex((i) => Math.max(retainedFrameStart, i - 1))
           break
         case "Escape":
           event.preventDefault()
@@ -779,7 +849,14 @@ export function App() {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [status, frameIndex, frames.length, source]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    status,
+    frameIndex,
+    frames.length,
+    latestBufferedFrameIndex,
+    retainedFrameStart,
+    source,
+  ]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (source !== "live" || status !== "paused" || !sessionId) {
@@ -804,28 +881,28 @@ export function App() {
     [currentFrame, selectedEntity],
   )
   const stackSummary = useMemo(
-    () => buildStackStabilitySummary(frames, frameIndex),
-    [frameIndex, frames],
+    () => buildStackStabilitySummary(frames, Math.max(0, currentFrameBufferIndex)),
+    [currentFrameBufferIndex, frames],
   )
   const trajectoryOverlay = useMemo(
     () =>
       buildTrajectoryOverlay(
         frames,
-        frameIndex,
+        Math.max(0, currentFrameBufferIndex),
         selectedEntity,
         trajectorySettings,
       ),
-    [frameIndex, frames, selectedEntity, trajectorySettings],
+    [currentFrameBufferIndex, frames, selectedEntity, trajectorySettings],
   )
   const trajectorySummary = useMemo(
     () =>
       buildTrajectorySummary(
         frames,
-        frameIndex,
+        Math.max(0, currentFrameBufferIndex),
         selectedEntity,
         trajectorySettings,
       ),
-    [frameIndex, frames, selectedEntity, trajectorySettings],
+    [currentFrameBufferIndex, frames, selectedEntity, trajectorySettings],
   )
   const trajectoryMarkers = useMemo(() => buildTrajectoryMarkers(frames), [frames])
   const latticeSummary = useMemo(
@@ -882,8 +959,10 @@ export function App() {
     setFrameIndex(0)
     setSelectedEntity(null)
     invalidateLiveResponses()
+    setGravityPatchError(null)
+    setGravityUndoVector(null)
     const gravity = useCustomGravity
-      ? ([0, gravityY] as [number, number])
+      ? ([gravityVector.x, gravityVector.y] as [number, number])
       : null
 
     try {
@@ -892,8 +971,15 @@ export function App() {
         frameCount,
         runMode,
         gravity,
+        {
+          liveUnbounded: true,
+          liveBufferCapacity: LIVE_BUFFER_CAPACITY,
+        },
       )
       setSessionEpoch(session.session_epoch)
+      setAppliedGravityVector(
+        useCustomGravity ? gravityVector : DEFAULT_GRAVITY,
+      )
       subscribeToEvents(session.id)
 
       if (session.mode === "live_session") {
@@ -930,6 +1016,7 @@ export function App() {
       if (nextFrames.length === 0) {
         throw new Error(t(locale, "error.emptyFrames"))
       }
+      setAppliedGravityVector(frameGravityVector(nextFrames[0]))
       const nextFinalSnapshot = await fetchFinalSnapshot(completedRunId)
       setRunId(completedRunId)
       setManifestArtifact(session.manifest_artifact ?? "manifest.json")
@@ -1057,15 +1144,29 @@ export function App() {
       }
       setSessionEpoch(session.session_epoch)
       if (nextFrame) {
+        setAppliedGravityVector(frameGravityVector(nextFrame))
         setFrames((prev) => {
-          if (
-            prev[nextFrame.frame_index]?.state_hash === nextFrame.state_hash &&
-            prev[nextFrame.frame_index]?.kind === nextFrame.kind
-          ) {
-            return prev
+          const retainedStart = session.retained_frame_start ?? 0
+          const retainedEnd =
+            session.retained_frame_end_exclusive ??
+            Math.max(session.buffered_frame_count, nextFrame.frame_index + 1)
+          const byFrameIndex = new Map<number, FrameRecord>()
+          for (const frame of prev) {
+            if (
+              frame.frame_index >= retainedStart &&
+              frame.frame_index < retainedEnd
+            ) {
+              byFrameIndex.set(frame.frame_index, frame)
+            }
           }
-          const next = prev.slice(0, nextFrame.frame_index)
-          next.push(nextFrame)
+          byFrameIndex.set(nextFrame.frame_index, nextFrame)
+          const next: FrameRecord[] = []
+          for (let index = retainedStart; index < retainedEnd; index += 1) {
+            const frame = byFrameIndex.get(index)
+            if (frame) {
+              next.push(frame)
+            }
+          }
           return next
         })
         setFrameIndex(nextFrame.frame_index)
@@ -1098,7 +1199,7 @@ export function App() {
     if (source !== "live" || !sessionId) {
       return
     }
-    const frame = frames[targetFrameIndex]
+    const frame = frameAtAbsoluteIndex(frames, targetFrameIndex)
     if (!frame || !isSummaryFrame(frame) || !frame.live_authority) {
       return
     }
@@ -1116,7 +1217,8 @@ export function App() {
     try {
       const result = await fetchLiveFrame(sessionId, frame.frame_index)
       setFrames((prev) => {
-        const current = prev[targetFrameIndex]
+        const currentIndex = frameArrayIndexForAbsolute(prev, targetFrameIndex)
+        const current = currentIndex >= 0 ? prev[currentIndex] : undefined
         if (
           !current ||
           !isSummaryFrame(current) ||
@@ -1130,12 +1232,18 @@ export function App() {
           return prev
         }
         const next = prev.slice()
-        next[targetFrameIndex] = annotateFullLiveFrame(result.frame, {
+        next[currentIndex] = annotateFullLiveFrame(result.frame, {
           session_id: result.session_id,
           session_epoch: result.session_epoch,
           world_revision: result.world_revision,
           status: current.live_authority.status,
           buffered_frame_count: current.live_authority.buffered_frame_count,
+          produced_frame_count: current.live_authority.produced_frame_count,
+          retained_frame_start: current.live_authority.retained_frame_start,
+          retained_frame_end_exclusive:
+            current.live_authority.retained_frame_end_exclusive,
+          live_buffer_capacity: current.live_authority.live_buffer_capacity,
+          live_unbounded: current.live_authority.live_unbounded,
           frame_count: current.live_authority.frame_count,
         })
         return next
@@ -1333,6 +1441,9 @@ export function App() {
     setFrameIndex(0)
     setSelectedEntity(null)
     clearRunState()
+    setAppliedGravityVector(DEFAULT_GRAVITY)
+    setGravityUndoVector(null)
+    setGravityPatchError(null)
     setSource("demo")
   }
 
@@ -1355,12 +1466,21 @@ export function App() {
       setStatus("paused")
     } else if (action === "play") {
       setStatus("playing")
+      setFrameIndex((value) => {
+        const lastFrameIndex = frames[frames.length - 1]?.frame_index ?? 0
+        if (value >= lastFrameIndex && lastFrameIndex > 0) {
+          return frames[0]?.frame_index ?? 0
+        }
+        return value
+      })
     } else if (action === "step") {
       setStatus("paused")
-      setFrameIndex((value) => Math.min(Math.max(0, frames.length - 1), value + 1))
+      setFrameIndex((value) =>
+        Math.min(frames[frames.length - 1]?.frame_index ?? 0, value + 1),
+      )
     } else {
       setStatus("paused")
-      setFrameIndex(0)
+      setFrameIndex(frames[0]?.frame_index ?? 0)
     }
   }
 
@@ -1411,8 +1531,15 @@ export function App() {
         setPerfStatus("live_unavailable")
         setStatus(session.status)
       } else if (action === "play") {
+        // The control response can carry a fresher Rust-authoritative frame
+        // than the local loop has buffered, especially around pause/resume.
+        applyLiveSessionFrame(result, guard)
+        // Keep the visible cursor aligned even when the server has not yet
+        // produced a latest_frame/live_frame_summary payload for this response.
+        setFrameIndex(session.current_frame_index)
         setStatus("playing")
       } else if (action === "pause") {
+        applyLiveSessionFrame(result, guard)
         setStatus("paused")
       }
     } catch (error) {
@@ -1479,6 +1606,87 @@ export function App() {
         ),
       )
     }
+  }
+
+  async function handleApplyGravityPatch(
+    nextVector: GravityVector = gravityVector,
+    { rememberUndo = true }: { rememberUndo?: boolean } = {},
+  ) {
+    setUseCustomGravity(true)
+    setGravityPatchError(null)
+    if (source !== "live" || !sessionId) {
+      return
+    }
+    if (liveStepInFlight.current || gravityPatchBusy) {
+      return
+    }
+
+    const previousApplied = appliedGravityVector
+    const guard = issueLiveGuard(sessionId)
+    liveStepInFlight.current = true
+    setGravityPatchBusy(true)
+    try {
+      const result = await applyLiveGravity(sessionId, {
+        session_epoch: sessionEpoch,
+        gravity: [nextVector.x, nextVector.y],
+      })
+      if (shouldIgnoreLiveResponse(guard, result.session)) {
+        return
+      }
+      if (rememberUndo) {
+        setGravityUndoVector(previousApplied)
+      }
+      setAppliedGravityVector(nextVector)
+      setGravityVector(nextVector)
+      applyLiveSessionFrame(result, guard)
+      pushLogs(
+        log(
+          "info",
+          t(locale, "log.serverAccepted", {
+            action: t(locale, "run.gravityApply"),
+            status: statusLabel(locale, result.session.status),
+          }),
+        ),
+      )
+    } catch (error) {
+      setGravityPatchError(messageOf(error))
+      pushLogs(
+        log(
+          "warn",
+          t(locale, "log.serverControlFailed", {
+            action: t(locale, "run.gravityApply"),
+            message: messageOf(error),
+          }),
+        ),
+      )
+    } finally {
+      liveStepInFlight.current = false
+      setGravityPatchBusy(false)
+    }
+  }
+
+  async function handleUndoGravityChange() {
+    setUseCustomGravity(true)
+    setGravityPatchError(null)
+    if (gravityDraftChanged) {
+      setGravityVector(appliedGravityVector)
+      return
+    }
+    if (source === "live" && sessionId && gravityUndoVector) {
+      const undoTarget = gravityUndoVector
+      setGravityUndoVector(null)
+      await handleApplyGravityPatch(undoTarget, { rememberUndo: false })
+      return
+    }
+    if (gravityUndoVector) {
+      setGravityVector(gravityUndoVector)
+    }
+  }
+
+  function handleResetGravityDraft() {
+    setUseCustomGravity(true)
+    setGravityPatchError(null)
+    setGravityVector(DEFAULT_GRAVITY)
   }
 
   async function handleVelocityPerturbationPreview() {
@@ -1614,6 +1822,9 @@ export function App() {
     invalidateLiveResponses()
     setSessionId(null)
     setSessionEpoch(0)
+    setGravityPatchBusy(false)
+    setGravityPatchError(null)
+    setGravityUndoVector(null)
     clearArtifacts()
   }
 
@@ -1804,6 +2015,8 @@ export function App() {
         runId,
         frameIndex,
         bufferedFrameCount: frames.length,
+        retainedFrameStart,
+        retainedFrameEndExclusive,
         stateHash: currentFrame.state_hash,
         worldRevision: currentFrame.snapshot.meta.revision,
         liveAuthority: {
@@ -1961,6 +2174,8 @@ export function App() {
       perturbationPreview,
       runId,
       runMode,
+      retainedFrameEndExclusive,
+      retainedFrameStart,
       scenario.description,
       scenario.name,
       selectedEntity,
@@ -2042,8 +2257,16 @@ export function App() {
       setFrameCount={setFrameCount}
       useCustomGravity={useCustomGravity}
       setUseCustomGravity={setUseCustomGravity}
-      gravityY={gravityY}
-      setGravityY={setGravityY}
+      gravityVector={gravityVector}
+      setGravityVector={setGravityVector}
+      appliedGravityVector={appliedGravityVector}
+      canApplyGravity={canApplyGravityLive}
+      canUndoGravity={canUndoGravity}
+      gravityPatchBusy={gravityPatchBusy}
+      gravityPatchError={gravityPatchError}
+      onApplyGravity={() => void handleApplyGravityPatch()}
+      onUndoGravity={() => void handleUndoGravityChange()}
+      onResetGravity={handleResetGravityDraft}
       velocityPerturbation={velocityPerturbation}
       onVelocityPerturbationDeltaChange={(axis, value) => {
         if (axis === "x") {

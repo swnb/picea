@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { ClipboardCopy, Gauge, Pause, RotateCcw, SkipForward } from "lucide-react"
+import { ClipboardCopy, Pause, Play, RotateCcw, SkipForward } from "lucide-react"
 
 import { Input } from "../ui/input"
 import { PanelHeader } from "../ui/panel"
@@ -43,6 +43,7 @@ import {
   buildTrajectoryOverlay,
   type TrajectoryMarker,
 } from "./trajectory"
+import { GravityDial, type GravityVector } from "./GravityDial"
 import { deriveLatticeProxy } from "./types"
 import type {
   CanvasDebugView,
@@ -64,8 +65,43 @@ type BottomPanelId =
   | "evidence"
   | "run"
 
+type PlaybackToggleState = "play" | "pause" | "replay"
+
 function isLiveSummaryFrame(frame: FrameRecord | undefined): boolean {
   return frame?.kind === "summary" || frame?.live_authority?.not_hydrated === true
+}
+
+function frameArrayIndexForAbsolute(
+  frames: FrameRecord[],
+  absoluteFrameIndex: number,
+): number {
+  const retainedFrameStart = frames[0]?.frame_index ?? 0
+  const index = absoluteFrameIndex - retainedFrameStart
+  return index >= 0 && index < frames.length ? index : -1
+}
+
+function resolvePlaybackToggleState({
+  source,
+  status,
+  frameIndex,
+  frameCount,
+}: {
+  source: SourceKind
+  status: StatusKind
+  frameIndex: number
+  frameCount: number
+}): PlaybackToggleState {
+  if (status === "playing" || status === "running") {
+    return "pause"
+  }
+  const atFinitePlaybackEnd =
+    frameCount > 0 &&
+    frameIndex >= Math.max(0, frameCount - 1) &&
+    (source !== "live" || status === "completed")
+  if (atFinitePlaybackEnd) {
+    return "replay"
+  }
+  return "play"
 }
 
 type TimelineJumpMarker = {
@@ -87,8 +123,16 @@ export function BottomTimeline({
   setFrameCount,
   useCustomGravity,
   setUseCustomGravity,
-  gravityY,
-  setGravityY,
+  gravityVector,
+  setGravityVector,
+  appliedGravityVector,
+  canApplyGravity,
+  canUndoGravity,
+  gravityPatchBusy,
+  gravityPatchError,
+  onApplyGravity,
+  onUndoGravity,
+  onResetGravity,
   locale,
   source,
   status,
@@ -120,8 +164,16 @@ export function BottomTimeline({
   setFrameCount: (value: number) => void
   useCustomGravity: boolean
   setUseCustomGravity: (value: boolean) => void
-  gravityY: number
-  setGravityY: (value: number) => void
+  gravityVector: GravityVector
+  setGravityVector: (value: GravityVector) => void
+  appliedGravityVector: GravityVector
+  canApplyGravity: boolean
+  canUndoGravity: boolean
+  gravityPatchBusy: boolean
+  gravityPatchError: string | null
+  onApplyGravity: () => void
+  onUndoGravity: () => void
+  onResetGravity: () => void
   locale: Locale
   runMode: RunMode
   setRunMode: (value: RunMode) => void
@@ -157,8 +209,9 @@ export function BottomTimeline({
     hasUnhydratedFrames,
   } = useMemo(() => {
     const startedAt = profileStart()
-    const nextFrame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))]
-    const nextPreviousFrame = frameIndex > 0 ? frames[frameIndex - 1] : null
+    const localFrameIndex = Math.max(0, frameArrayIndexForAbsolute(frames, frameIndex))
+    const nextFrame = frames[localFrameIndex]
+    const nextPreviousFrame = localFrameIndex > 0 ? frames[localFrameIndex - 1] : null
     const hasUnhydratedFrames = frames.some(isLiveSummaryFrame)
     if (hasUnhydratedFrames) {
       profileMeasure("timeline.derive", startedAt, {
@@ -178,12 +231,12 @@ export function BottomTimeline({
         hasUnhydratedFrames,
       }
     }
-    const nextStackSummary = buildStackStabilitySummary(frames, frameIndex)
+    const nextStackSummary = buildStackStabilitySummary(frames, localFrameIndex)
     const stackMarkers = buildStackMarkers(frames)
     const diagnosticMarkers = buildDiagnosticTimelineMarkers(locale, frames)
     const nextTrajectoryOverlay = buildTrajectoryOverlay(
       frames,
-      frameIndex,
+      localFrameIndex,
       selectedEntity,
       trajectorySettings,
     )
@@ -231,6 +284,15 @@ export function BottomTimeline({
   const handlePause = useStableEvent(onPause)
   const handleStep = useStableEvent(onStep)
   const handleReset = useStableEvent(onReset)
+  const playbackState = resolvePlaybackToggleState({
+    source,
+    status,
+    frameIndex,
+    frameCount: (frames[frames.length - 1]?.frame_index ?? -1) + 1,
+  })
+  const retainedFrameStart = frames[0]?.frame_index ?? 0
+  const retainedFrameEndExclusive = retainedFrameStart + frames.length
+  const latestFrameIndex = Math.max(retainedFrameStart, retainedFrameEndExclusive - 1)
   const [activePanel, setActivePanel] = useState<BottomPanelId>("timeline")
   const handlePanelChange = useCallback((panel: BottomPanelId) => {
     setActivePanel(panel)
@@ -244,6 +306,7 @@ export function BottomTimeline({
         activePanel={activePanel}
         controlBusy={controlBusy}
         liveCadence={liveCadence}
+        playbackState={playbackState}
         onPanelChange={handlePanelChange}
         onPlay={handlePlay}
         onPause={handlePause}
@@ -264,8 +327,8 @@ export function BottomTimeline({
           </span>
           <Slider
             value={frameIndex}
-            min={0}
-            max={Math.max(0, frames.length - 1)}
+            min={retainedFrameStart}
+            max={latestFrameIndex}
             step={1}
             onValueChange={onFrameChange}
           />
@@ -284,6 +347,8 @@ export function BottomTimeline({
             sessionId: sessionId ?? "-",
             buffered: frames.length,
             current: frameIndex,
+            start: retainedFrameStart,
+            end: retainedFrameEndExclusive,
           })}
         </div>
         <FrameIdentityRow locale={locale} frame={frame} />
@@ -449,7 +514,7 @@ export function BottomTimeline({
         id="bottom-panel-run"
         role="tabpanel"
         aria-labelledby="bottom-panel-tab-run"
-        className="min-h-0 flex-1 p-3 outline-none"
+        className="min-h-0 flex-1 overflow-auto p-3 outline-none"
       >
         <div className="grid max-w-2xl grid-cols-[140px_1fr] items-center gap-3">
           <label className="text-sm text-lab-muted">
@@ -490,15 +555,25 @@ export function BottomTimeline({
             onCheckedChange={setUseCustomGravity}
             label={t(locale, "run.sendOverride")}
           />
-          <label className="text-sm text-lab-muted">
-            {t(locale, "run.gravityY")}
-          </label>
-          <Input
-            type="number"
-            step="0.1"
-            value={gravityY}
-            disabled={!useCustomGravity}
-            onChange={(event) => setGravityY(Number(event.target.value) || 0)}
+          <div className="self-start pt-1 text-sm text-lab-muted">
+            {t(locale, "run.gravityVector")}
+          </div>
+          <GravityDial
+            locale={locale}
+            enabled={useCustomGravity}
+            vector={gravityVector}
+            onEnabledChange={setUseCustomGravity}
+            onVectorChange={setGravityVector}
+            showNextRunHint={source !== "demo" || status !== "paused"}
+            appliedVector={appliedGravityVector}
+            liveApplyAvailable={source === "live" && sessionId != null}
+            canApply={canApplyGravity}
+            canUndo={canUndoGravity}
+            applyBusy={gravityPatchBusy}
+            applyError={gravityPatchError}
+            onApply={onApplyGravity}
+            onUndo={onUndoGravity}
+            onReset={onResetGravity}
           />
         </div>
       </div>
@@ -522,6 +597,7 @@ const TimelineHeader = memo(function TimelineHeader({
   activePanel,
   controlBusy,
   liveCadence,
+  playbackState,
   onPanelChange,
   onPlay,
   onPause,
@@ -534,27 +610,38 @@ const TimelineHeader = memo(function TimelineHeader({
   activePanel: BottomPanelId
   controlBusy: boolean
   liveCadence: LiveCadenceStatus
+  playbackState: PlaybackToggleState
   onPanelChange: (panel: BottomPanelId) => void
   onPlay: () => void
   onPause: () => void
   onStep: () => void
   onReset: () => void
 }) {
+  const playbackAction =
+    playbackState === "pause" ? onPause : playbackState === "replay" ? onReset : onPlay
+  const playbackLabel =
+    playbackState === "pause"
+      ? t(locale, "tooltip.pausePlayback")
+      : playbackState === "replay"
+        ? t(locale, "tooltip.replayTimeline")
+        : t(locale, "tooltip.playTimeline")
+  const playbackIcon =
+    playbackState === "pause" ? (
+      <Pause className="h-3.5 w-3.5" />
+    ) : playbackState === "replay" ? (
+      <RotateCcw className="h-3.5 w-3.5" />
+    ) : (
+      <Play className="h-3.5 w-3.5" />
+    )
   return (
     <PanelHeader>
       <div className="flex items-center gap-3">
         <div className="flex items-center rounded-md bg-black/20 p-0.5 shadow-inner">
           <TimelineIconButton
-            label={t(locale, "tooltip.pausePlayback")}
+            label={playbackLabel}
             disabled={controlBusy}
-            onClick={onPause}
-            icon={<Pause className="h-3.5 w-3.5" />}
-          />
-          <TimelineIconButton
-            label={t(locale, "tooltip.playTimeline")}
-            disabled={controlBusy}
-            onClick={onPlay}
-            icon={<Gauge className="h-3.5 w-3.5" />}
+            onClick={playbackAction}
+            icon={playbackIcon}
           />
           <TimelineIconButton
             label={t(locale, "tooltip.advanceFrame")}

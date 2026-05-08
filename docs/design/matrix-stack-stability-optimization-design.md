@@ -683,3 +683,48 @@ positive 简化为 “retain correction”；必须同时引入能量传播约�
 
 如果下一次实现不能同时满足 source-row 几何有效性和 tangent/rotation energy 约束，应暂停并把
 E4c 升级为更完整的 dense pressure propagation / position solver 设计，而不是继续堆局部补丁。
+
+### 2026-05-07 Box2D / Matter.js 对照复核
+
+这次复核的结论是：Picea 当前已经具备 Box2D / Matter.js 稳定堆叠路线中的一部分能力，
+包括 SAT + clipped manifold、feature-id contact persistence、warm-started sequential
+impulse、Coulomb friction、resting restitution threshold、island solve 和 residual position
+correction。`matrix_stack 8x6` 仍然不稳，不是因为缺少一个“打开稳定堆叠”的单开关，而是因为
+dense contact graph 中 position-level correction 还没有完整的 pseudo-position / position-row
+求解边界。
+
+外部参考给出的共同原则如下：
+
+- Box2D 的 PGS / sequential impulse 依赖 warm starting、accumulated impulse clamp 和固定
+  iteration count；accumulated impulse 必须 clamp 总量而不是每次 delta，这是避免 contact jitter
+  的核心。
+- Box2D v3 进一步强调 sub-stepping / smaller step 往往比单纯加 iteration 更有效；但这改变了
+  step cadence 和外力语义，不能作为本轮无脑默认值。
+- Matter.js 的更新顺序明确拆出 position iterations 和 velocity iterations；position solve 有
+  独立 `positionImpulse` / warming，而不是把 penetration 全部塞进 velocity bias。
+- Box2D 文档还强调 contact points 在 step 开始时计算，使 solver 能在 body 移动前看到新接触；
+  对 Picea 来说，下一步不能在 solver loop 中重跑 full narrowphase，但必须在 position row 内用
+  local anchors / pseudo pose 重新评估 separation。
+
+本轮实验证实两个“看起来像成熟引擎”的简单修法都不能保留：
+
+- 在 dense graph 中直接启用 non-dense two-point block normal solve：`stack_4` 通过，但
+  180-frame `matrix_stack` 的 late support gap 提前到 frame `138`，late angular spike 升到
+  `6.305823`，违反当前 stress gate。
+- 全局把 default velocity iterations 从 `10` 提到 `16`：大矩阵最终速度有所下降，但
+  `stack_4` settled penetration 退化到 `0.051698446`，直接突破 D2 hard gate。
+
+因此基础方案保持为三层推进，而不是继续调参：
+
+1. **保留当前 velocity solver contract**：继续使用 PGS accumulated impulse、warm-start 和
+   conservative friction；不提高默认 iteration，不在 dense graph 复用 non-dense block solve。
+2. **拆出真正的 dense position-row pass**：沿 `ContactPositionRow` /
+   `QueuedPositionTranslation` seam，增加 pseudo pose / pseudo translation state。每个 position
+   iteration 重新评估 row separation，只写回 pose，不写 velocity，不重跑 full narrowphase。
+3. **给 source-row pressure propagation 加 gate**：source-row candidate 进入 position row 前必须
+   同时通过 geometry continuity、pseudo-state support skin、counterpart motion、tangent/rotation
+   energy、frame-level correction budget。失败时保留 diagnostics，不合成 speculative support。
+
+第一版实现门仍按小到大验收：`stack_4` hard gate、aligned `4x3` matrix、180-frame
+`matrix_stack` stress gate、240-frame E4c support-gap red lock。只有四者同时不退化，才能把
+E4c 从“诊断/方案”推进到“稳定性修复已完成”。

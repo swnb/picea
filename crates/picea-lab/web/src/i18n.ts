@@ -35,6 +35,7 @@ export type LayerKey =
   | "trace"
   | "broadphaseTree"
   | "islands"
+  | "sleep"
   | "provenance"
   | "stackStability"
   | "lattice";
@@ -58,9 +59,12 @@ const enMessages = {
   "scenario.group.lattice": "Lattice proxy",
   "scenario.group.diagnostics": "Diagnostics",
   "tooltip.runScenario": "Run selected scenario",
+  "tooltip.startRunScenario": "Start a new run",
+  "tooltip.rerunScenario": "Rerun scenario",
   "tooltip.overlayPresets": "Overlay presets",
   "tooltip.pausePlayback": "Pause playback",
-  "tooltip.playTimeline": "Play timeline",
+  "tooltip.playTimeline": "Resume current session",
+  "tooltip.replayTimeline": "Reset timeline to replay",
   "tooltip.advanceFrame": "Advance one frame",
   "tooltip.resetTimeline": "Reset timeline",
   "tooltip.canvasLayers": "Canvas layers",
@@ -188,7 +192,8 @@ const enMessages = {
   "timeline.frameAt": "frame {frame}",
   "timeline.totalFrames": "{count} total",
   "timeline.sourceStatus": "{source} / {status}",
-  "timeline.sessionStatus": "session {sessionId} / buffered {buffered} / current {current}",
+  "timeline.sessionStatus":
+    "session {sessionId} / retained [{start}, {end}) / buffered {buffered} / current {current}",
   "timeline.liveCadence": "live {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadenceDegraded": "degraded {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadencePending": "live measuring",
@@ -280,11 +285,26 @@ const enMessages = {
   "perf.finalHash": "final hash",
   "run.frameCount": "frame count",
   "run.mode": "run mode",
-  "run.modeArtifact": "Rust artifact replay",
+  "run.modeArtifact": "Rust generate artifact + replay",
   "run.modeLive": "Rust live session",
   "run.gravityOverride": "gravity override",
   "run.sendOverride": "send override with next run",
+  "run.gravityVector": "gravity vector",
+  "run.gravityDial": "gravity direction and strength",
+  "run.gravityX": "gravity x",
   "run.gravityY": "gravity y",
+  "run.gravityMagnitude": "strength",
+  "run.gravityApply": "Apply",
+  "run.gravityApplying": "Applying",
+  "run.gravityUndo": "undo gravity change",
+  "run.gravityReset": "reset gravity",
+  "run.gravityPendingIdle": "applies to the next run",
+  "run.gravityPendingActive": "next restart only; the current replay keeps its gravity",
+  "run.gravityPendingDisabled": "not sent until gravity override is enabled",
+  "run.gravityDirtyLive": "unapplied gravity edit; Apply updates the live session now",
+  "run.gravityAppliedLive": "current gravity is applied to the live session",
+  "run.gravityAppliedValue": "applied {x}, {y}",
+  "run.gravityApplyError": "apply failed: {message}",
   "perturbation.absoluteVelocityHelp":
     "Paused-only absolute velocity perturbation. This is not a continuous force, torque, or mouse joint control.",
   "perturbation.preview": "Preview",
@@ -456,9 +476,12 @@ const zhMessages: Record<MessageKey, string> = {
   "scenario.group.lattice": "格点代理",
   "scenario.group.diagnostics": "诊断",
   "tooltip.runScenario": "运行当前场景",
+  "tooltip.startRunScenario": "启动新运行",
+  "tooltip.rerunScenario": "重新运行场景",
   "tooltip.overlayPresets": "叠加预设",
   "tooltip.pausePlayback": "暂停播放",
-  "tooltip.playTimeline": "播放时间线",
+  "tooltip.playTimeline": "继续当前会话",
+  "tooltip.replayTimeline": "回到起点后重新播放",
   "tooltip.advanceFrame": "前进一帧",
   "tooltip.resetTimeline": "重置时间线",
   "tooltip.canvasLayers": "画布图层",
@@ -586,7 +609,8 @@ const zhMessages: Record<MessageKey, string> = {
   "timeline.frameAt": "第 {frame} 帧",
   "timeline.totalFrames": "共 {count} 帧",
   "timeline.sourceStatus": "{source} / {status}",
-  "timeline.sessionStatus": "会话 {sessionId} / 已缓存 {buffered} / 当前 {current}",
+  "timeline.sessionStatus":
+    "会话 {sessionId} / 保留 [{start}, {end}) / 已缓存 {buffered} / 当前 {current}",
   "timeline.liveCadence": "live {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadenceDegraded": "降级 {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadencePending": "live 测量中",
@@ -678,11 +702,26 @@ const zhMessages: Record<MessageKey, string> = {
   "perf.finalHash": "最终 hash",
   "run.frameCount": "帧数",
   "run.mode": "运行模式",
-  "run.modeArtifact": "Rust 产物回放",
+  "run.modeArtifact": "Rust 生成产物并回放",
   "run.modeLive": "Rust 实时会话",
   "run.gravityOverride": "重力覆盖",
   "run.sendOverride": "下次运行发送覆盖",
+  "run.gravityVector": "重力向量",
+  "run.gravityDial": "重力方向和强度",
+  "run.gravityX": "重力 x",
   "run.gravityY": "重力 y",
+  "run.gravityMagnitude": "强度",
+  "run.gravityApply": "应用",
+  "run.gravityApplying": "应用中",
+  "run.gravityUndo": "撤销重力更改",
+  "run.gravityReset": "重置重力",
+  "run.gravityPendingIdle": "将在下次运行生效",
+  "run.gravityPendingActive": "仅下次重新运行生效；当前回放保持已有重力",
+  "run.gravityPendingDisabled": "开启重力覆盖后才会发送",
+  "run.gravityDirtyLive": "有未应用的重力更改；点击应用会立即更新实时会话",
+  "run.gravityAppliedLive": "当前重力已应用到实时会话",
+  "run.gravityAppliedValue": "已应用 {x}, {y}",
+  "run.gravityApplyError": "应用失败：{message}",
   "perturbation.absoluteVelocityHelp":
     "这是 paused-only 的绝对速度扰动，不是连续力、扭矩或鼠标关节控制。",
   "perturbation.preview": "预览",
@@ -906,19 +945,19 @@ const entityKindLabels: Record<Locale, Record<EntityKind, string>> = {
 };
 
 const layerLabels: Record<Locale, Record<LayerKey, string>> = {
-  "zh-CN": { grid: "网格", rulers: "标尺", shapes: "形状", aabbs: "AABB", contacts: "接触点", velocities: "速度", trace: "轨迹", broadphaseTree: "宽阶段树", islands: "岛", provenance: "来源", stackStability: "稳定性", lattice: "格点代理" },
-  "en-US": { grid: "Grid", rulers: "Rulers", shapes: "Shapes", aabbs: "AABBs", contacts: "Contacts", velocities: "Velocities", trace: "Trace", broadphaseTree: "Broadphase tree", islands: "Islands", provenance: "Provenance", stackStability: "Stack stability", lattice: "Lattice proxy" },
+  "zh-CN": { grid: "网格", rulers: "标尺", shapes: "形状", aabbs: "AABB", contacts: "接触点", velocities: "速度", trace: "轨迹", broadphaseTree: "宽阶段树", islands: "岛", sleep: "休眠", provenance: "来源", stackStability: "稳定性", lattice: "格点代理" },
+  "en-US": { grid: "Grid", rulers: "Rulers", shapes: "Shapes", aabbs: "AABBs", contacts: "Contacts", velocities: "Velocities", trace: "Trace", broadphaseTree: "Broadphase tree", islands: "Islands", sleep: "Sleep", provenance: "Provenance", stackStability: "Stack stability", lattice: "Lattice proxy" },
 };
 
 const sourceLabels: Record<Locale, Record<SourceKind, string>> = {
   "zh-CN": {
     demo: "演示回放",
-    artifact: "Rust 产物回放",
+    artifact: "Rust 生成产物并回放",
     live: "Rust 实时会话",
   },
   "en-US": {
     demo: "demo replay",
-    artifact: "Rust artifact replay",
+    artifact: "Rust generate artifact + replay",
     live: "Rust live session",
   },
 };

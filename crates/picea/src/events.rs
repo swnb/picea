@@ -237,6 +237,54 @@ impl WarmStartCacheReason {
     }
 }
 
+/// Why a contact is or is not eligible for source-row continuity diagnostics.
+///
+/// A source row is a later position-solve concept for rows that look like the
+/// same geometric support contact across frames even when point-level warm-start
+/// identity missed. This enum is provenance only: it explains why a row was a
+/// continuity candidate or why it was rejected, and does not mean any previous
+/// impulse was transferred.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceRowContinuityReason {
+    /// Older serialized payloads did not include a structured continuity reason.
+    #[default]
+    Unknown,
+    /// Same pair, compatible normal, and local anchors stayed within drift tolerance.
+    Candidate,
+    /// Sensor overlaps never enter source-row solver continuity.
+    Sensor,
+    /// No previous contact pair existed to compare against.
+    NoPreviousPair,
+    /// Previous contacts existed, but none belonged to the same normalized collider pair.
+    PairMismatch,
+    /// The pair looks like a clipped edge-swap lifecycle instead of source-row continuity.
+    EdgeSwap,
+    /// The contact normal changed too much to trust continuity.
+    NormalMismatch,
+    /// Local anchors drifted too far to treat the row as continuous.
+    AnchorDrift,
+}
+
+/// How the current contact event relates to the previous step's contact state.
+///
+/// This is lifecycle provenance only. A `PersistentEdgeSwap` contact keeps the
+/// conservative contact/manifold identity alive for diagnostics and events, but
+/// it does not imply that cached impulses were transferred.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContactLifecycleReason {
+    /// Older payloads or manually-built debug data did not carry lifecycle provenance.
+    #[default]
+    Unknown,
+    /// The contact did not match any active contact from the previous step.
+    Started,
+    /// The previous step had the exact same pair + feature-id contact key.
+    ExactFeature,
+    /// A clipped-manifold edge swap kept the same local contact identity.
+    PersistentEdgeSwap,
+}
+
 /// Stable reason attached to sleep/wake transitions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -308,6 +356,20 @@ pub struct ContactEvent {
     /// Same-pair, local-anchor-continuous feature miss reserved for source-row position gating.
     #[serde(default)]
     pub source_row_continuity_candidate: bool,
+    /// Provenance-only explanation for source-row continuity diagnostics.
+    ///
+    /// This does not imply warm-start impulse transfer or solver reuse by
+    /// itself; it only records why this row was a continuity candidate or why
+    /// it was rejected.
+    #[serde(default)]
+    pub source_row_continuity_reason: SourceRowContinuityReason,
+    /// Core-owned contact lifecycle provenance for this event.
+    ///
+    /// This tracks event/manifold continuity separately from warm-start cache
+    /// transfer. Keeping those concepts separate prevents diagnostics from
+    /// silently becoming solver truth.
+    #[serde(default)]
+    pub lifecycle_reason: ContactLifecycleReason,
     /// Final normal impulse accumulated by the current step's contact solver.
     #[serde(default)]
     pub solver_normal_impulse: FloatNum,
@@ -421,8 +483,9 @@ pub enum WorldEvent {
 mod tests {
     use crate::{
         events::{
-            CcdTargetKind, CcdTrace, ContactEvent, ContactReductionReason, NumericsWarningEvent,
-            SleepEvent, SleepTransitionReason, WarmStartCacheReason, WorldEvent,
+            CcdTargetKind, CcdTrace, ContactEvent, ContactLifecycleReason, ContactReductionReason,
+            NumericsWarningEvent, SleepEvent, SleepTransitionReason, SourceRowContinuityReason,
+            WarmStartCacheReason, WorldEvent,
         },
         handles::{
             BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
@@ -451,6 +514,8 @@ mod tests {
             warm_start_normal_impulse: 1.0,
             warm_start_tangent_impulse: -0.25,
             source_row_continuity_candidate: true,
+            source_row_continuity_reason: SourceRowContinuityReason::Candidate,
+            lifecycle_reason: ContactLifecycleReason::PersistentEdgeSwap,
             solver_normal_impulse: 1.25,
             solver_tangent_impulse: -0.125,
             solver_initial_normal_speed: -0.75,

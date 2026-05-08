@@ -44,6 +44,24 @@ impl World {
         &self.desc
     }
 
+    /// Replaces world gravity and bumps the revision so query/debug consumers
+    /// can distinguish frames captured before and after the runtime edit.
+    pub fn set_gravity(&mut self, gravity: Vector) -> Result<(), WorldError> {
+        if !gravity.x().is_finite() {
+            return Err(WorldError::Validation(super::ValidationError::WorldDesc {
+                field: "gravity.x",
+            }));
+        }
+        if !gravity.y().is_finite() {
+            return Err(WorldError::Validation(super::ValidationError::WorldDesc {
+                field: "gravity.y",
+            }));
+        }
+        self.desc.gravity = gravity;
+        self.bump_revision();
+        Ok(())
+    }
+
     /// Returns the current world revision.
     pub fn revision(&self) -> WorldRevision {
         self.revision

@@ -20,6 +20,7 @@ import { ResizeHandle } from "./ResizeHandle"
 import { SceneHierarchy } from "./SceneHierarchy"
 import { Toolbar } from "./Toolbar"
 import { WorldCanvas } from "./WorldCanvas"
+import type { GravityVector } from "./GravityDial"
 import type {
   ControlAction,
   CanvasDebugView,
@@ -74,8 +75,16 @@ export function WorkbenchLayout({
   setFrameCount,
   useCustomGravity,
   setUseCustomGravity,
-  gravityY,
-  setGravityY,
+  gravityVector,
+  setGravityVector,
+  appliedGravityVector,
+  canApplyGravity,
+  canUndoGravity,
+  gravityPatchBusy,
+  gravityPatchError,
+  onApplyGravity,
+  onUndoGravity,
+  onResetGravity,
   velocityPerturbation,
   onVelocityPerturbationDeltaChange,
   onVelocityPerturbationPreview,
@@ -123,8 +132,16 @@ export function WorkbenchLayout({
   setFrameCount: (value: number) => void
   useCustomGravity: boolean
   setUseCustomGravity: (value: boolean) => void
-  gravityY: number
-  setGravityY: (value: number) => void
+  gravityVector: GravityVector
+  setGravityVector: (value: GravityVector) => void
+  appliedGravityVector: GravityVector
+  canApplyGravity: boolean
+  canUndoGravity: boolean
+  gravityPatchBusy: boolean
+  gravityPatchError: string | null
+  onApplyGravity: () => void
+  onUndoGravity: () => void
+  onResetGravity: () => void
   velocityPerturbation: VelocityPerturbationPanelState
   onVelocityPerturbationDeltaChange: (axis: "x" | "y", value: string) => void
   onVelocityPerturbationPreview: () => void
@@ -241,8 +258,16 @@ export function WorkbenchLayout({
                 setFrameCount={setFrameCount}
                 useCustomGravity={useCustomGravity}
                 setUseCustomGravity={setUseCustomGravity}
-                gravityY={gravityY}
-                setGravityY={setGravityY}
+                gravityVector={gravityVector}
+                setGravityVector={setGravityVector}
+                appliedGravityVector={appliedGravityVector}
+                canApplyGravity={canApplyGravity}
+                canUndoGravity={canUndoGravity}
+                gravityPatchBusy={gravityPatchBusy}
+                gravityPatchError={gravityPatchError}
+                onApplyGravity={onApplyGravity}
+                onUndoGravity={onUndoGravity}
+                onResetGravity={onResetGravity}
                 locale={locale}
                 source={source}
                 status={status}

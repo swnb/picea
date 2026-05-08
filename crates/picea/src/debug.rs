@@ -13,8 +13,8 @@ use crate::{
     body::{BodyType, MassProperties, Pose},
     collider::{CollisionFilter, Material, SharedShape},
     events::{
-        CcdTrace, ContactEvent, ContactReductionReason, GenericConvexTrace, SleepTransitionReason,
-        WarmStartCacheReason, WorldEvent,
+        CcdTrace, ContactEvent, ContactLifecycleReason, ContactReductionReason, GenericConvexTrace,
+        SleepTransitionReason, SourceRowContinuityReason, WarmStartCacheReason, WorldEvent,
     },
     handles::{
         BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,
@@ -529,6 +529,12 @@ pub struct DebugContact {
     /// Same-pair, local-anchor-continuous feature miss reserved for source-row position gating.
     #[serde(default)]
     pub source_row_continuity_candidate: bool,
+    /// Provenance-only explanation for source-row continuity diagnostics.
+    #[serde(default)]
+    pub source_row_continuity_reason: SourceRowContinuityReason,
+    /// Core-owned contact lifecycle provenance.
+    #[serde(default)]
+    pub lifecycle_reason: ContactLifecycleReason,
     /// Final normal impulse accumulated by the current step's contact solver.
     #[serde(default)]
     pub solver_normal_impulse: FloatNum,
@@ -609,6 +615,8 @@ impl DebugContact {
             normal_impulse: sanitize_scalar(self.normal_impulse),
             tangent_impulse: sanitize_scalar(self.tangent_impulse),
             source_row_continuity_candidate: self.source_row_continuity_candidate,
+            source_row_continuity_reason: self.source_row_continuity_reason,
+            lifecycle_reason: self.lifecycle_reason,
             solver_normal_impulse: sanitize_scalar(self.solver_normal_impulse),
             solver_tangent_impulse: sanitize_scalar(self.solver_tangent_impulse),
             solver_initial_normal_speed: sanitize_scalar(self.solver_initial_normal_speed),
@@ -1235,6 +1243,8 @@ fn debug_contacts_and_manifolds(events: &[WorldEvent]) -> (Vec<DebugContact>, Ve
             normal_impulse: event.warm_start_normal_impulse,
             tangent_impulse: event.warm_start_tangent_impulse,
             source_row_continuity_candidate: event.source_row_continuity_candidate,
+            source_row_continuity_reason: event.source_row_continuity_reason,
+            lifecycle_reason: event.lifecycle_reason,
             solver_normal_impulse: event.solver_normal_impulse,
             solver_tangent_impulse: event.solver_tangent_impulse,
             solver_initial_normal_speed: event.solver_initial_normal_speed,

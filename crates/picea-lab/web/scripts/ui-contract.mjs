@@ -9,6 +9,7 @@ const contractSources = [
   "../src/components/workbench/Toolbar.tsx",
   "../src/components/workbench/WorkbenchLayout.tsx",
   "../src/components/workbench/Timeline.tsx",
+  "../src/components/workbench/GravityDial.tsx",
   "../src/components/workbench/SceneHierarchy.tsx",
   "../src/components/workbench/Inspector.tsx",
   "../src/components/workbench/WorldCanvas.tsx",
@@ -37,6 +38,10 @@ const timelineSource = fs.readFileSync(
 );
 const timelineHeaderSource =
   timelineSource.match(/const TimelineHeader = memo\([\s\S]*?\n\}\)/)?.[0] ?? "";
+const toolbarSource = fs.readFileSync(
+  new URL("../src/components/workbench/Toolbar.tsx", import.meta.url),
+  "utf8",
+);
 
 assert.doesNotMatch(
   appSource,
@@ -54,9 +59,89 @@ assert.match(
   "Toolbar should use the same DropdownMenu popup pattern for language options as other header popups.",
 );
 assert.match(
+  toolbarSource,
+  /const runTriggerLabel =[\s\S]*(tooltip\.startRunScenario[\s\S]*tooltip\.rerunScenario|tooltip\.rerunScenario[\s\S]*tooltip\.startRunScenario)/,
+  "Top toolbar run control should distinguish between starting a new run and rerunning an existing scenario instead of reading like resume playback.",
+);
+assert.doesNotMatch(
+  toolbarSource,
+  /tooltip\.runScenario/,
+  "Top toolbar run control should stop using the generic runScenario copy once M41 clarifies new-run versus resume semantics.",
+);
+assert.match(
+  toolbarSource,
+  /<RotateCcw className="h-4 w-4" \/>/,
+  "Top toolbar run control should use a rerun/restart icon instead of the playback icon so it does not look like timeline resume.",
+);
+assert.match(
   appSource,
   /ariaLabel=\{t\(locale, "scenario\.select"\)\}/,
   "Toolbar scenario selector should have its own accessible label instead of reusing the run action label.",
+);
+assert.match(
+  appSource,
+  /const \[gravityVector, setGravityVector\]/,
+  "Run settings should keep a pending gravity vector instead of a y-only scalar.",
+);
+assert.doesNotMatch(
+  appSource,
+  /const \[gravityY, setGravityY\]/,
+  "Gravity override should no longer be limited to a y-only pending value.",
+);
+assert.match(
+  appSource,
+  /\[gravityVector\.x, gravityVector\.y\]/,
+  "New sessions should send the full pending gravity vector to the server override.",
+);
+assert.match(
+  appSource,
+  /function GravityDial\(/,
+  "Run settings should expose a dedicated gravity dial component for direction and strength.",
+);
+assert.match(
+  appSource,
+  /role="slider"[\s\S]*aria-valuenow/,
+  "Gravity dial should provide a keyboard/focusable accessibility surface.",
+);
+assert.match(
+  appSource,
+  /updateFromPointer\(event\.clientX, event\.clientY\)/,
+  "Gravity dial should map pointer drag direction and length into the pending gravity vector.",
+);
+assert.match(
+  appSource,
+  /run\.gravityPendingActive/,
+  "Run settings should tell users gravity edits apply on the next restart while a session exists.",
+);
+assert.match(
+  appSource,
+  /function applyLiveGravity[\s\S]*\/api\/sessions\/\$\{sessionId\}\/gravity/,
+  "Run settings should call the dedicated live gravity endpoint instead of mutating generic overrides.",
+);
+assert.match(
+  appSource,
+  /async function handleApplyGravityPatch[\s\S]*applyLiveGravity[\s\S]*applyLiveSessionFrame/,
+  "Apply should patch live gravity immediately and refresh the authoritative live frame.",
+);
+assert.match(
+  appSource,
+  /function handleResetGravityDraft[\s\S]*setGravityVector\(DEFAULT_GRAVITY\)/,
+  "Reset should restore the pending gravity draft to the default vector without hiding the apply step.",
+);
+assert.match(
+  appSource,
+  /async function handleUndoGravityChange[\s\S]*gravityUndoVector[\s\S]*handleApplyGravityPatch/,
+  "Undo should be able to apply the previous live gravity value after a committed Apply.",
+);
+assert.match(
+  appSource,
+  /run\.gravityDirtyLive/,
+  "Run settings should distinguish unapplied live gravity edits from replay-only next-run edits.",
+);
+assert.match(
+  timelineSource,
+  /id="bottom-panel-run"[\s\S]*className="[^"]*overflow-auto[^"]*"/,
+  "Run settings tab panel should scroll when the bottom panel is dragged shorter.",
 );
 assert.match(
   appSource,
@@ -265,6 +350,16 @@ assert.doesNotMatch(
   artifactControlSource,
   /setFrameIndex\(\s*Math\.min\(session\.current_frame_index/,
   "Artifact pause/play/step should not overwrite the local timeline with stale server current_frame_index.",
+);
+assert.match(
+  liveControlSource,
+  /if \(action === "reset"\)[\s\S]*else if \(action === "play"\) \{[\s\S]*applyLiveSessionFrame\(result, guard\)[\s\S]*setFrameIndex\(session\.current_frame_index\)[\s\S]*setStatus\("playing"\)/,
+  "Live play should merge any server-returned authoritative frame before re-anchoring the local cursor and entering playing state.",
+);
+assert.match(
+  liveControlSource,
+  /else if \(action === "pause"\) \{[\s\S]*applyLiveSessionFrame\(result, guard\)[\s\S]*setStatus\("paused"\)/,
+  "Live pause should merge any server-returned authoritative frame before showing the paused cursor.",
 );
 assert.match(
   appSource,
@@ -713,8 +808,8 @@ assert.match(
 );
 assert.match(
   liveControlSource,
-  /async function handleLiveControl[\s\S]*const result = await controlSession\(activeSessionId, action\)[\s\S]*const session = result\.session[\s\S]*if \(action === "play"\) \{\s*setStatus\("playing"\)/,
-  "Live play should enter playing only after the Rust control endpoint acknowledges play.",
+  /async function handleLiveControl[\s\S]*const result = await controlSession\(activeSessionId, action\)[\s\S]*const session = result\.session[\s\S]*if \(action === "play"\) \{[\s\S]*setFrameIndex\(session\.current_frame_index\)[\s\S]*setStatus\("playing"\)/,
+  "Live play should re-anchor to the Rust-authoritative current frame and enter playing only after the control endpoint acknowledges play.",
 );
 assert.doesNotMatch(
   liveControlSource,
@@ -725,6 +820,11 @@ assert.match(
   appSource,
   /async function startLiveSessionFromRun[\s\S]*controlSession\(nextSessionId, "play"\)[\s\S]*setStatus\("playing"\)/,
   "Top-level Run selected scenario should start Rust live sessions instead of leaving them in the created state.",
+);
+assert.match(
+  appSource,
+  /} else if \(action === "play"\) \{[\s\S]*setFrameIndex\(\(value\) => \{[\s\S]*const lastFrameIndex = frames\[frames\.length - 1\]\?\.frame_index \?\? 0[\s\S]*if \(value >= lastFrameIndex && lastFrameIndex > 0\) \{[\s\S]*return frames\[0\]\?\.frame_index \?\? 0[\s\S]*}\s*return value[\s\S]*}\)/,
+  "Finite playback should restart from the first retained frame when play is triggered after the viewer is already parked at the end.",
 );
 assert.match(
   timelineSource,
@@ -755,6 +855,31 @@ assert.match(
   timelineSource,
   /function FrameIdentityRow\(/,
   "Per-frame time/hash identity should live inside the timeline content instead of the tab chrome.",
+);
+assert.match(
+  timelineSource,
+  /type PlaybackToggleState = "play" \| "pause" \| "replay"/,
+  "Timeline playback chrome should model a single toggle state machine for play, pause, and finite-end replay.",
+);
+assert.match(
+  timelineSource,
+  /function resolvePlaybackToggleState\(/,
+  "Timeline should derive one playback toggle state from source, status, frame index, and buffered length instead of rendering separate play and pause buttons.",
+);
+assert.doesNotMatch(
+  timelineHeaderSource,
+  /label=\{t\(locale, "tooltip\.pausePlayback"\)\}[\s\S]*label=\{t\(locale, "tooltip\.playTimeline"\)\}/,
+  "Timeline header should not render separate pause and play buttons after M41 merges them into one toggle.",
+);
+assert.match(
+  timelineSource,
+  /const playbackAction =[\s\S]*playbackState === "pause"[\s\S]*onPause[\s\S]*playbackState === "replay"[\s\S]*onReset[\s\S]*onPlay/,
+  "Timeline header toggle should pause while running, resume the current session while paused, and switch to reset-to-replay at a finite end.",
+);
+assert.match(
+  timelineSource,
+  /const playbackLabel =[\s\S]*playbackState === "pause"[\s\S]*tooltip\.pausePlayback[\s\S]*tooltip\.replayTimeline[\s\S]*tooltip\.playTimeline/,
+  "Timeline header toggle should expose localized pause, resume-current-session, and replay-from-start labels.",
 );
 assert.match(
   appSource,
@@ -1147,8 +1272,8 @@ assert.match(
 );
 assert.match(
   applyLiveSessionFrameSource,
-  /const next = prev\.slice\(0, nextFrame\.frame_index\)[\s\S]*next\.push\(nextFrame\)/,
-  "Accepted live responses should rebuild the authoritative frame buffer from the server summary/full payload and truncate any future history.",
+  /const retainedStart = session\.retained_frame_start \?\? 0[\s\S]*const retainedEnd =[\s\S]*session\.retained_frame_end_exclusive \?\?[\s\S]*Math\.max\(session\.buffered_frame_count, nextFrame\.frame_index \+ 1\)[\s\S]*byFrameIndex\.set\(nextFrame\.frame_index, nextFrame\)[\s\S]*for \(let index = retainedStart; index < retainedEnd; index \+= 1\)/,
+  "Accepted live responses should rebuild the retained live frame window from absolute frame numbers instead of using array indexes as frame indexes.",
 );
 assert.match(
   appSource,

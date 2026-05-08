@@ -7,7 +7,7 @@ import {
   ChevronRight,
   Languages,
   Layers,
-  Play,
+  RotateCcw,
   SlidersHorizontal,
 } from "lucide-react"
 
@@ -76,6 +76,10 @@ export function Toolbar({
   onApplyOverlayPreset: (preset: OverlayPresetId) => void
 }) {
   const groupedScenarios = buildScenarioGroups(locale, scenarios)
+  const runTriggerLabel =
+    sessionId || runId || source !== "demo" || status !== "idle"
+      ? t(locale, "tooltip.rerunScenario")
+      : t(locale, "tooltip.startRunScenario")
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-lab-line bg-lab-panel px-3">
       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -138,14 +142,14 @@ export function Toolbar({
       </div>
 
       <div className="flex items-center gap-1">
-        <Tooltip label={t(locale, "tooltip.runScenario")}>
+        <Tooltip label={runTriggerLabel}>
           <Button
             size="icon"
             onClick={onRun}
             disabled={status === "loading"}
-            aria-label={t(locale, "tooltip.runScenario")}
+            aria-label={runTriggerLabel}
           >
-            <Play className="h-4 w-4" />
+            <RotateCcw className="h-4 w-4" />
           </Button>
         </Tooltip>
         <LayerMenu

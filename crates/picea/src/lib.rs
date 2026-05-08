@@ -22,9 +22,10 @@ pub mod prelude {
         DebugManifoldPoint, DebugPrimitive, DebugSnapshot, DebugSnapshotOptions,
     };
     pub use super::events::{
-        CcdTrace, ContactEvent, ContactReductionReason, EpaTerminationReason,
-        GenericConvexFallbackReason, GenericConvexTrace, GjkTerminationReason, SleepEvent,
-        SleepTransitionReason, WarmStartCacheReason, WorldEvent,
+        CcdTrace, ContactEvent, ContactLifecycleReason, ContactReductionReason,
+        EpaTerminationReason, GenericConvexFallbackReason, GenericConvexTrace,
+        GjkTerminationReason, SleepEvent, SleepTransitionReason, SourceRowContinuityReason,
+        WarmStartCacheReason, WorldEvent,
     };
     pub use super::handles::{
         BodyHandle, ColliderHandle, ContactFeatureId, ContactId, JointHandle, ManifoldId,

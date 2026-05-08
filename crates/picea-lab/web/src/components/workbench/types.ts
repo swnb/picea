@@ -17,6 +17,7 @@ export type LayerState = {
   trace: boolean
   broadphaseTree: boolean
   islands: boolean
+  sleep: boolean
   provenance: boolean
   stackStability: boolean
   lattice: boolean
@@ -49,6 +50,7 @@ export const defaultLayers: LayerState = {
   trace: true,
   broadphaseTree: false,
   islands: false,
+  sleep: true,
   provenance: false,
   stackStability: false,
   lattice: true,

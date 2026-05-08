@@ -594,6 +594,10 @@ function drawWorld(
     }
   }
 
+  if (layers.sleep) {
+    drawSleepLayer(ctx, frame.snapshot.bodies, frame.snapshot.colliders, camera);
+  }
+
   if (layers.aabbs) {
     for (const collider of frame.snapshot.colliders) {
       if (collider.aabb) {
@@ -883,6 +887,54 @@ function drawIslands(
     ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
     ctx.fillText(`I${island.id}`, labelPoint.x + 4, labelPoint.y - 4);
   }
+}
+
+function drawSleepLayer(
+  ctx: CanvasRenderingContext2D,
+  bodies: DebugBody[],
+  colliders: DebugCollider[],
+  camera: Camera,
+) {
+  const sleepingBodies = new Set(
+    bodies
+      .filter((body) => body.body_type === "dynamic" && body.sleeping)
+      .map((body) => body.handle),
+  );
+  if (sleepingBodies.size === 0) {
+    return;
+  }
+
+  ctx.save();
+  for (const collider of colliders) {
+    if (!sleepingBodies.has(collider.body)) {
+      continue;
+    }
+    ctx.fillStyle = "rgba(143, 154, 170, 0.26)";
+    ctx.strokeStyle = "rgba(203, 213, 225, 0.92)";
+    ctx.lineWidth = 2.2;
+    ctx.setLineDash([6, 4]);
+    shapePath(ctx, collider.shape, camera);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+  for (const body of bodies) {
+    if (!sleepingBodies.has(body.handle)) {
+      continue;
+    }
+    const center = worldToScreen(body.transform.translation, camera);
+    ctx.fillStyle = "rgba(17, 20, 24, 0.9)";
+    ctx.fillRect(center.x + 8, center.y - 18, 24, 14);
+    ctx.strokeStyle = "#cbd5e1";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(center.x + 8, center.y - 18, 24, 14);
+    ctx.fillStyle = "#cbd5e1";
+    ctx.fillText("Zz", center.x + 11, center.y - 8);
+  }
+  ctx.restore();
 }
 
 function drawProvenance(ctx: CanvasRenderingContext2D, frame: FrameRecord, camera: Camera) {

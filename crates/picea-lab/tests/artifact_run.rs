@@ -5,7 +5,9 @@ use std::{
 };
 
 use picea::debug::DebugShape;
-use picea::events::{CcdTargetKind, WarmStartCacheReason};
+use picea::events::{
+    CcdTargetKind, ContactLifecycleReason, SourceRowContinuityReason, WarmStartCacheReason,
+};
 use picea::prelude::{
     BodyHandle, ColliderHandle, CollisionLayerPreset, DebugCollider, DebugContact, MaterialPreset,
 };
@@ -167,6 +169,7 @@ struct MatrixStackStressReport {
     ejection_support_gap_upstream_source_contact_count: usize,
     ejection_support_gap_upstream_source_candidate_count: usize,
     ejection_support_gap_upstream_source_warm_start_reasons: Vec<String>,
+    ejection_support_gap_upstream_source_continuity_reasons: Vec<String>,
     ejection_support_gap_upstream_source_same_pair_previous_count: usize,
     ejection_support_gap_upstream_source_edge_swap_candidate_count: usize,
     ejection_support_gap_upstream_source_point_drift_min: Option<f32>,
@@ -202,6 +205,72 @@ struct MatrixStackStressReport {
 }
 
 impl MatrixStackStressReport {
+    // E2 is a read-only triage layer: it turns existing lifecycle and pressure facts
+    // into a milestone-routing hint without changing solver truth or artifact hashes.
+    fn e2_shadow_direction(&self) -> &'static str {
+        let identity_lifecycle_signal = self.feature_churn_trace.miss_feature_id_count > 0
+            && self.feature_churn_trace.same_pair_previous_count > 0
+            && self.feature_churn_trace.close_local_anchor_count > 0;
+        let stale_position_row_signal = self
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .any(|frame| {
+                matches!(
+                    frame.eligibility_decision.as_str(),
+                    "retain_candidate_correction_active"
+                        | "retain_candidate_needs_position_re_evaluation"
+                        | "reject_counterpart_motion"
+                )
+            })
+            && self.late_position_correction_total_translation > 0.0;
+
+        match (identity_lifecycle_signal, stale_position_row_signal) {
+            (true, true) => "intertwined",
+            (true, false) => "identity_lifecycle_primary",
+            (false, true) => "stale_position_row_primary",
+            (false, false) => "insufficient_evidence",
+        }
+    }
+
+    fn e2_shadow_gate(&self) -> &'static str {
+        if self
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .any(|frame| frame.eligibility_decision == "reject_counterpart_motion")
+        {
+            "reject_counterpart_motion"
+        } else if self
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .any(|frame| {
+                frame.eligibility_decision == "retain_candidate_needs_position_re_evaluation"
+            })
+        {
+            "candidate_needs_position_re_evaluation"
+        } else if self
+            .late_linear_spike_trace
+            .support_gap_lifecycle
+            .iter()
+            .any(|frame| frame.eligibility_decision == "retain_candidate_correction_active")
+        {
+            "correction_active"
+        } else {
+            "no_shadow_gate"
+        }
+    }
+
+    fn e2_next_milestone_hint(&self) -> &'static str {
+        match self.e2_shadow_direction() {
+            "identity_lifecycle_primary" => "D4/E6",
+            "stale_position_row_primary" => "E3",
+            "intertwined" => "E3 with D4/E6 watch",
+            _ => "collect more evidence",
+        }
+    }
+
     fn to_markdown(&self, run: &RunResult) -> String {
         let first_bad_frame = self
             .first_bad_frame
@@ -388,13 +457,15 @@ impl MatrixStackStressReport {
             self.ejection_support_gap_upstream_counterpart.as_deref(),
         ) {
             (Some(frame), Some(counterpart)) => format!(
-                "frame {frame} counterpart {counterpart} speed {:.6}/{:.6}; source_bodies [{}] source_contacts {} source_candidates {} warm_start [{}] continuity same_pair_previous {} edge_swap_candidate {} point_drift {} normal_dot {} local_anchor_drift {}; max_depth {:.6} initial_speed {:.6}..{:.6} post_speed {:.6}..{:.6}/{:.6} bias {:.6} support_friction {:.6} impulse {:.6}/{:.6} correction {:.6}/{:.6}; dry_run geometry {} pressure {} reject_counterpart {} reject_tangent {} eligible {} decision {} pseudo_depth {}..{} pseudo_skin {}; handoff frame_delta {} speed_delta {:.6}/{:.6}",
+                "frame {frame} counterpart {counterpart} speed {:.6}/{:.6}; source_bodies [{}] source_contacts {} source_candidates {} warm_start [{}] continuity_reasons [{}] continuity same_pair_previous {} edge_swap_candidate {} point_drift {} normal_dot {} local_anchor_drift {}; max_depth {:.6} initial_speed {:.6}..{:.6} post_speed {:.6}..{:.6}/{:.6} bias {:.6} support_friction {:.6} impulse {:.6}/{:.6} correction {:.6}/{:.6}; dry_run geometry {} pressure {} reject_counterpart {} reject_tangent {} eligible {} decision {} pseudo_depth {}..{} pseudo_skin {}; handoff frame_delta {} speed_delta {:.6}/{:.6}",
                 self.ejection_support_gap_upstream_counterpart_linear_speed,
                 self.ejection_support_gap_upstream_counterpart_angular_speed,
                 self.ejection_support_gap_upstream_source_bodies.join(", "),
                 self.ejection_support_gap_upstream_source_contact_count,
                 self.ejection_support_gap_upstream_source_candidate_count,
                 self.ejection_support_gap_upstream_source_warm_start_reasons
+                    .join(", "),
+                self.ejection_support_gap_upstream_source_continuity_reasons
                     .join(", "),
                 self.ejection_support_gap_upstream_source_same_pair_previous_count,
                 self.ejection_support_gap_upstream_source_edge_swap_candidate_count,
@@ -432,6 +503,9 @@ impl MatrixStackStressReport {
         let late_angular_spike_trace = self.late_angular_spike_trace.to_report_line();
         let early_pressure_trace = self.early_pressure_trace.to_report_line();
         let feature_churn_trace = self.feature_churn_trace.to_report_line();
+        let e2_shadow_direction = self.e2_shadow_direction();
+        let e2_shadow_gate = self.e2_shadow_gate();
+        let e2_next_milestone_hint = self.e2_next_milestone_hint();
 
         format!(
             "## Matrix Stack Stability Report\n\n\
@@ -451,6 +525,7 @@ impl MatrixStackStressReport {
 - Late angular spike trace: {}\n\
 - Early pressure trace f={}..{}: {}\n\
 - Feature churn trace: {}\n\
+- E2 shadow direction: {} (miss_feature_id {} same_pair_previous {} close_local_anchor {} edge_swap_candidate {}; dry_run {} late_correction {:.6})\n\
 - Late correction/churn f>={}: max correction translation {:.6}, max correction total {:.6}, max corrected bodies {}, warm-start drop peak {}, churn peak {}\n\
 - Dense support friction: max {:.6} at frame {}, contacts used {}\n\
 - Floor ejection: {}; final outside floor bodies={}\n\
@@ -462,7 +537,7 @@ impl MatrixStackStressReport {
 - Ejection support-gap upstream trace: {}\n\
 - Solver row max: {} at frame {}\n\
 - Missing evidence: {}\n\
-- Suspected next milestone: E4\n\
+- Suspected next milestone: {}\n\
 - Verification commands: rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack\n",
             run.manifest.scenario_id,
             run.frames.len(),
@@ -500,6 +575,13 @@ impl MatrixStackStressReport {
             self.early_pressure_trace.end_frame,
             early_pressure_trace,
             feature_churn_trace,
+            e2_shadow_direction,
+            self.feature_churn_trace.miss_feature_id_count,
+            self.feature_churn_trace.same_pair_previous_count,
+            self.feature_churn_trace.close_local_anchor_count,
+            self.feature_churn_trace.edge_swap_candidate_count,
+            e2_shadow_gate,
+            self.late_position_correction_total_translation,
             self.quiet_window_start_frame,
             self.late_position_correction_max_translation,
             self.late_position_correction_total_translation,
@@ -524,6 +606,7 @@ impl MatrixStackStressReport {
                 .map(|frame| frame.to_string())
                 .unwrap_or_else(|| "none".to_owned()),
             missing,
+            e2_next_milestone_hint,
         )
     }
 }
@@ -962,6 +1045,8 @@ fn matrix_stack_stress_report(run: &RunResult) -> MatrixStackStressReport {
             .support_gap_upstream_source_candidate_count,
         ejection_support_gap_upstream_source_warm_start_reasons: ejection_trace
             .support_gap_upstream_source_warm_start_reasons,
+        ejection_support_gap_upstream_source_continuity_reasons: ejection_trace
+            .support_gap_upstream_source_continuity_reasons,
         ejection_support_gap_upstream_source_same_pair_previous_count: ejection_trace
             .support_gap_upstream_source_same_pair_previous_count,
         ejection_support_gap_upstream_source_edge_swap_candidate_count: ejection_trace
@@ -1132,6 +1217,7 @@ struct EjectionTrace {
     support_gap_upstream_source_contact_count: usize,
     support_gap_upstream_source_candidate_count: usize,
     support_gap_upstream_source_warm_start_reasons: Vec<String>,
+    support_gap_upstream_source_continuity_reasons: Vec<String>,
     support_gap_upstream_source_same_pair_previous_count: usize,
     support_gap_upstream_source_edge_swap_candidate_count: usize,
     support_gap_upstream_source_point_drift_min: Option<f32>,
@@ -1400,6 +1486,7 @@ struct FeatureTransitionTrace {
     best_local_anchor_drift: f32,
 }
 
+#[allow(dead_code)]
 #[derive(Default, Debug)]
 struct LateVelocityTrace {
     frame: Option<usize>,
@@ -2937,6 +3024,12 @@ fn populate_support_gap_upstream_trace(
                 .collect::<Vec<_>>();
             source_warm_start_reasons.sort();
             source_warm_start_reasons.dedup();
+            let mut source_continuity_reasons = source_contacts
+                .iter()
+                .map(|contact| format!("{:?}", contact.source_row_continuity_reason))
+                .collect::<Vec<_>>();
+            source_continuity_reasons.sort();
+            source_continuity_reasons.dedup();
             let source_continuity = source_continuity_facts(run, frame, &source_contacts);
             let source_max_depth = source_contacts
                 .iter()
@@ -3005,6 +3098,7 @@ fn populate_support_gap_upstream_trace(
                 source_contact_count,
                 source_candidate_count,
                 source_warm_start_reasons,
+                source_continuity_reasons,
                 source_same_pair_previous_count: source_continuity.same_pair_previous_count,
                 source_edge_swap_candidate_count: source_continuity.edge_swap_candidate_count,
                 source_point_drift_min: source_continuity.point_drift_min,
@@ -3074,6 +3168,7 @@ fn populate_support_gap_upstream_trace(
     trace.support_gap_upstream_source_contact_count = best.source_contact_count;
     trace.support_gap_upstream_source_candidate_count = best.source_candidate_count;
     trace.support_gap_upstream_source_warm_start_reasons = best.source_warm_start_reasons;
+    trace.support_gap_upstream_source_continuity_reasons = best.source_continuity_reasons;
     trace.support_gap_upstream_source_same_pair_previous_count =
         best.source_same_pair_previous_count;
     trace.support_gap_upstream_source_edge_swap_candidate_count =
@@ -3124,6 +3219,7 @@ struct SupportGapUpstreamCandidate {
     source_contact_count: usize,
     source_candidate_count: usize,
     source_warm_start_reasons: Vec<String>,
+    source_continuity_reasons: Vec<String>,
     source_same_pair_previous_count: usize,
     source_edge_swap_candidate_count: usize,
     source_point_drift_min: Option<f32>,
@@ -4176,6 +4272,35 @@ fn matrix_stack_artifacts_capture_nxm_grid_stack_facts() {
             .any(|frame| !frame.diagnostics.markers.is_empty()),
         "matrix stack should produce diagnostics markers for acceptance triage"
     );
+    let source_row_candidate_count = run
+        .frames
+        .iter()
+        .flat_map(|frame| &frame.snapshot.contacts)
+        .filter(|contact| contact.source_row_continuity_candidate)
+        .count();
+    assert!(
+        source_row_candidate_count > 0,
+        "matrix stack should export source-row continuity candidates for D4/E6 triage"
+    );
+    assert!(
+        run.frames
+            .iter()
+            .flat_map(|frame| &frame.snapshot.contacts)
+            .filter(|contact| contact.source_row_continuity_candidate)
+            .all(|contact| contact.source_row_continuity_reason
+                == SourceRowContinuityReason::Candidate),
+        "source-row candidates should carry core-owned Candidate provenance"
+    );
+    let persistent_edge_swap_count = run
+        .frames
+        .iter()
+        .flat_map(|frame| &frame.snapshot.contacts)
+        .filter(|contact| contact.lifecycle_reason == ContactLifecycleReason::PersistentEdgeSwap)
+        .count();
+    assert!(
+        persistent_edge_swap_count > 0,
+        "matrix stack should export persistent-manifold edge-swap lifecycle provenance"
+    );
 
     let static_bodies = first
         .snapshot
@@ -4228,23 +4353,15 @@ fn matrix_stack_artifacts_capture_nxm_grid_stack_facts() {
     assert!(markdown.contains("- Quiet window f>=120:"));
     assert!(markdown.contains("- Late linear spike trace:"));
     assert!(markdown.contains("- Late angular spike trace:"));
-    assert!(markdown.contains("late_support_gap start frame"));
-    assert!(markdown.contains("previous_speed"));
-    assert!(markdown.contains("tangent_components"));
-    assert!(markdown.contains("energy_onset frame"));
-    assert!(markdown.contains("lifecycle ["));
-    assert!(markdown.contains("eligibility "));
-    assert!(markdown.contains("correction_depth"));
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_start_frame
-            .is_some_and(|frame| frame >= 165),
-        "E4 position-row work should not make the late support gap start earlier than the retained baseline; report={report:?}"
+    assert!(markdown.contains("late_support_gap none"));
+    assert_eq!(
+        report.late_linear_spike_trace.support_gap_start_frame,
+        None,
+        "persistent manifold warm-start should remove the retained 180-frame late support gap; report={report:?}"
     );
-    assert!(
-        report.late_linear_spike_trace.support_gap_duration <= 10,
-        "E4 position-row work should not lengthen the retained support gap baseline; report={report:?}"
+    assert_eq!(
+        report.late_linear_spike_trace.support_gap_duration, 0,
+        "persistent manifold warm-start should remove the retained 180-frame late support gap duration; report={report:?}"
     );
     assert!(
         report.max_penetration_depth <= 0.041646,
@@ -4264,239 +4381,27 @@ fn matrix_stack_artifacts_capture_nxm_grid_stack_facts() {
     );
     assert_eq!(
         report.first_floor_exit_frame, None,
-        "E4 position-row work must keep the 8x6 stress run free of floor ejection; report={report:?}"
+        "persistent manifold warm-start must keep the 180-frame 8x6 stress run free of floor ejection; report={report:?}"
     );
     assert_eq!(
         report.final_outside_floor_body_count, 0,
         "E4 position-row work must keep all 8x6 bodies inside the floor support at the final frame; report={report:?}"
     );
     assert_eq!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_normal_impulse_sum,
-        0.0
+        report.final_awake_dynamic_body_count, 0,
+        "E5 resting-island sleep should let the 180-frame 8x6 stress run settle instead of requiring late solver impulses; report={report:?}"
     );
     assert_eq!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_position_correction_depth_sum,
-        0.0
-    );
-    assert_eq!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_position_correction_translation_sum,
-        0.0
+        report.final_sleeping_dynamic_body_count, 48,
+        "E5 resting-island sleep should keep every 8x6 dynamic body asleep at the 180-frame endpoint; report={report:?}"
     );
     assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_normal_speed_min
-            > 0.0,
-        "late linear support gap should preserve the separating normal speed of the last support contact; report={report:?}"
+        report.late_linear_spike_trace.contact_count > 0,
+        "sleeping islands should still retain late contact facts for inspection; report={report:?}"
     );
     assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_body_linear_speed
-            > 1.0,
-        "late support gap should expose that the blocker already has substantial linear speed before contact loss; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_body_angular_speed
-            > 4.0,
-        "late support gap should expose that the blocker is already rotating quickly before contact loss; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_counterpart_linear_speed_max
-            < 0.1,
-        "late support gap should expose that the support counterpart contributes little linear speed; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_counterpart_angular_speed_max
-            < 0.05,
-        "late support gap should expose that the support counterpart is not the angular-energy source; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_body_tangent_linear_component_max
-            > 1.0,
-        "late support gap should expose blocker-side tangent linear energy before contact loss; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_body_tangent_angular_component_max
-            > 0.5,
-        "late support gap should expose blocker-side tangent angular energy before contact loss; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_counterpart_tangent_linear_component_max
-            < 0.05,
-        "late support gap should expose the counterpart contributes little tangent linear energy; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_previous_counterpart_tangent_angular_component_max
-            < 0.05,
-        "late support gap should expose the counterpart contributes little tangent angular energy; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_energy_onset_frame
-            .is_some_and(|frame| frame < report
-                .late_linear_spike_trace
-                .support_gap_start_frame
-                .unwrap()),
-        "late support gap should expose when blocker-side tangent energy first crosses the onset threshold before contact loss; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_energy_onset_body_tangent_linear_component_max
-            > SUPPORT_GAP_TANGENT_LINEAR_ONSET_THRESHOLD,
-        "energy onset should preserve the first blocker-side tangent linear crossing; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_energy_onset_body_tangent_angular_component_max
-            > SUPPORT_GAP_TANGENT_ANGULAR_ONSET_THRESHOLD,
-        "energy onset should preserve the first blocker-side tangent angular crossing; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_energy_onset_counterpart_tangent_linear_component_max
-            < 0.05,
-        "energy onset should show the support counterpart is still not the tangent linear source; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_energy_onset_counterpart_tangent_angular_component_max
-            < 0.05,
-        "energy onset should show the support counterpart is still not the tangent angular source; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_energy_onset_normal_impulse_sum
-            > 0.0,
-        "energy onset should preserve that the contact still has a normal impulse before the later zero-impulse support gap; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_energy_onset_normal_speed_min
-            < 0.0,
-        "energy onset should preserve that the contact is still slightly closing before it later becomes separating; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_energy_onset_max_depth
-            > 0.0,
-        "energy onset should keep contact depth so the next solver design can distinguish shallow contact loss from deeper row coupling; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .len()
-            >= 2,
-        "late support gap should expose the contact lifecycle from energy onset to last support contact; report={report:?}"
-    );
-    assert_eq!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .first()
-            .map(|frame| frame.frame),
-        report
-            .late_linear_spike_trace
-            .support_gap_energy_onset_frame
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .first()
-            .is_some_and(|frame| frame.normal_impulse_sum > 0.0
-                && frame.position_correction_depth_sum > 0.0),
-        "energy onset should preserve the last frame where normal impulse and position correction are still active; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .iter()
-            .skip(1)
-            .any(|frame| frame.normal_impulse_sum == 0.0
-                && frame.position_correction_depth_sum > 0.0),
-        "support lifecycle should expose the intermediate window where position correction still runs after normal impulse is lost; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .iter()
-            .any(|frame| frame.normal_impulse_sum == 0.0
-                && frame.position_correction_depth_sum == 0.0
-                && frame.normal_speed_min > 0.0),
-        "support lifecycle should expose the shallow separating window where both normal impulse and correction have dropped before contact loss; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .iter()
-            .any(|frame| frame.eligibility_decision == "retain_candidate_correction_active"),
-        "eligibility oracle should show frames where retained support still has active correction; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .iter()
-            .any(|frame| frame.eligibility_decision
-                == "retain_candidate_needs_position_re_evaluation"),
-        "eligibility oracle should show the exact shallow support frames that need position-level re-evaluation; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .iter()
-            .any(|frame| frame.eligibility_decision == "reject_counterpart_motion"),
-        "deferred position-row writeback should preserve the shifted lifecycle evidence where counterpart motion becomes the rejection gate; report={report:?}"
-    );
-    assert!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .iter()
-            .all(|frame| !frame.eligibility_decision.starts_with("reject_anchor")),
-        "current lifecycle should not be rejected by anchor drift gates; report={report:?}"
-    );
-    assert_eq!(
-        report
-            .late_linear_spike_trace
-            .support_gap_lifecycle
-            .last()
-            .map(|frame| frame.frame),
-        report.late_linear_spike_trace.last_contact_frame
+        report.late_linear_spike_trace.normal_speed_min <= 0.0,
+        "sleeping late support facts should not report separating motion at the 180-frame endpoint; report={report:?}"
     );
     assert!(markdown.contains("- Early pressure trace f=12..46:"));
     assert!(markdown.contains("anchor_drift max"));
@@ -4504,6 +4409,14 @@ fn matrix_stack_artifacts_capture_nxm_grid_stack_facts() {
     assert!(markdown.contains("row_coupling correction_tangent"));
     assert!(markdown.contains("warm_start reasons ["));
     assert!(markdown.contains("- Feature churn trace:"));
+    assert!(
+        markdown.contains("- E2 shadow direction:"),
+        "E2 report should expose a shadow-only routing hint without hard-locking a specific milestone decision; markdown={markdown}"
+    );
+    assert!(
+        markdown.contains("dry_run "),
+        "E2 report should surface the source-row dry-run decision without treating the current decision as a permanent behavior contract; markdown={markdown}"
+    );
     assert!(
         markdown.contains("same_shape_signature"),
         "E4b lifecycle diagnostics should report whether feature-id churn stays within the same shape signature; markdown={markdown}"
@@ -4600,7 +4513,7 @@ fn aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock() {
         &store,
         RunConfig {
             scenario_id: ScenarioId::MatrixStackAligned,
-            frame_count: 180,
+            frame_count: 1200,
             run_id: Some("matrix-stack-aligned-behavior-lock".to_owned()),
             ..RunConfig::default()
         },
@@ -4626,11 +4539,13 @@ fn aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock() {
 
     let report = matrix_stack_stress_report(&run);
     println!("{}", report.to_markdown(&run));
-    assert!(report.quiet_window_max_linear_speed > 0.0);
-    assert!(report.quiet_window_max_angular_speed > 0.0);
-    assert!(
-        report.late_position_correction_max_translation > 0.0,
-        "aligned matrix lock should report late correction work until E4/E5 settles it; report={report:?}"
+    assert_eq!(
+        report.final_awake_dynamic_body_count, 0,
+        "aligned matrix lock should let the whole 4x3 stack converge to sleep; report={report:?}"
+    );
+    assert_eq!(
+        report.final_sleeping_dynamic_body_count, 12,
+        "aligned matrix lock should preserve every dynamic body through sleep convergence; report={report:?}"
     );
     assert!(
         report.max_penetration_depth <= 0.04,
@@ -4646,11 +4561,26 @@ fn aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock() {
     );
     assert!(
         report.final_max_linear_speed <= 0.2,
-        "aligned matrix lock should keep final linear speed bounded before E5 sleep convergence; report={report:?}"
+        "aligned matrix lock should keep final linear speed bounded through sleep convergence; report={report:?}"
     );
     assert!(
         report.final_max_angular_speed <= 0.6,
-        "aligned matrix lock should keep final angular speed bounded before E5 sleep convergence; report={report:?}"
+        "aligned matrix lock should keep final angular speed bounded through sleep convergence; report={report:?}"
+    );
+
+    let final_max_abs_rotation = run
+        .frames
+        .last()
+        .expect("aligned matrix stack should write a final frame")
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+        .map(|body| body.transform.rotation.abs())
+        .fold(0.0, f32::max);
+    assert!(
+        final_max_abs_rotation <= 0.01,
+        "aligned matrix lock should not settle into a one-sided tilted stack; max_abs_rotation={final_max_abs_rotation}; report={report:?}"
     );
 }
 
@@ -4717,8 +4647,8 @@ fn matrix_stack_long_settle_observation_reports_residual_e4_risk() {
     );
     assert_eq!(
         report.first_floor_exit_frame,
-        Some(214),
-        "long-settle observation should keep the current first ejection frame explicit until E4 removes it; report={report:?}"
+        Some(245),
+        "long-settle observation should keep the current first ejection frame explicit until the next stability slice removes it; report={report:?}"
     );
     assert_eq!(
         report.first_floor_exit_body.as_deref(),
@@ -4727,14 +4657,14 @@ fn matrix_stack_long_settle_observation_reports_residual_e4_risk() {
     );
     assert_eq!(
         report.ejection_support_gap_start_frame,
-        Some(180),
+        Some(239),
         "long-settle observation should preserve the pre-ejection dynamic support gap; report={report:?}"
     );
     assert_eq!(
         report
             .late_linear_spike_trace
             .support_gap_start_frame,
-        Some(229),
+        Some(239),
         "long-settle observation should preserve the post-ejection long support gap story; report={report:?}"
     );
     assert!(
@@ -4744,7 +4674,7 @@ fn matrix_stack_long_settle_observation_reports_residual_e4_risk() {
 }
 
 #[test]
-#[ignore = "future E4c support-gap behavior lock; position re-evaluation must remove the current frame-214 ejection"]
+#[ignore = "future support-retention behavior lock; position re-evaluation must remove the current frame-245 ejection"]
 fn matrix_stack_support_gap_re_evaluation_prevents_current_ejection_window() {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let store = ArtifactStore::new(temp.path().join("runs"));
@@ -4806,6 +4736,12 @@ fn matrix_stack_support_gap_re_evaluation_prevents_current_ejection_window() {
                 .ejection_support_gap_upstream_source_warm_start_reasons
                 .is_empty(),
             "E4c upstream trace should expose whether the source contact was warm-started or re-solved cold; report={report:?}"
+        );
+        assert!(
+            report
+                .ejection_support_gap_upstream_source_continuity_reasons
+                .contains(&format!("{:?}", SourceRowContinuityReason::Candidate)),
+            "E4c upstream trace should consume core-owned source-row continuity reasons instead of re-inferring every candidate; report={report:?}"
         );
         assert!(
             report.ejection_support_gap_upstream_source_position_bias_max <= f32::EPSILON,
@@ -4944,6 +4880,59 @@ fn matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed() {
     assert!(
         report.quiet_window_max_angular_speed <= 6.0,
         "stable 8x6 matrix stack must remove the long-window runaway angular speed before E5 sleep tuning; report={report:?}"
+    );
+}
+
+#[test]
+#[ignore = "future E5 sleep convergence gate; set PICEA_MATRIX_STACK_E5_SLEEP_ACCEPTANCE=1 to enforce it"]
+fn matrix_stack_long_run_acceptance_requires_resting_sleep_convergence() {
+    if env::var_os("PICEA_MATRIX_STACK_E5_SLEEP_ACCEPTANCE").is_none() {
+        eprintln!(
+            "skipping future matrix-stack E5 sleep gate; set PICEA_MATRIX_STACK_E5_SLEEP_ACCEPTANCE=1"
+        );
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::MatrixStack,
+            frame_count: 1200,
+            run_id: Some("matrix-stack-e5-sleep-convergence".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("matrix stack E5 sleep-convergence run should write artifacts");
+
+    let report = matrix_stack_stress_report(&run);
+    println!("{}", report.to_markdown(&run));
+    assert_eq!(run.frames.len(), 1200);
+    assert_eq!(
+        report.first_floor_exit_frame, None,
+        "stable 8x6 matrix stack must not drift out of floor support before sleeping; report={report:?}"
+    );
+    assert_eq!(
+        report.final_outside_floor_body_count, 0,
+        "stable 8x6 matrix stack must finish with every body inside floor support; report={report:?}"
+    );
+    assert!(
+        report.quiet_window_max_linear_speed <= 4.0,
+        "stable 8x6 matrix stack must avoid late-window runaway before sleep convergence; report={report:?}"
+    );
+    assert!(
+        report.quiet_window_max_angular_speed <= 6.0,
+        "stable 8x6 matrix stack must avoid late-window spin before sleep convergence; report={report:?}"
+    );
+    assert_eq!(
+        report.final_awake_dynamic_body_count, 0,
+        "stable 8x6 matrix stack should end with no awake dynamic bodies after the long settle window; report={report:?}"
+    );
+    assert_eq!(
+        report.final_sleeping_dynamic_body_count, 48,
+        "stable 8x6 matrix stack should end with every dynamic body sleeping after the long settle window; report={report:?}"
     );
 }
 

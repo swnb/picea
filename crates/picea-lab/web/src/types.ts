@@ -166,6 +166,20 @@ export type DebugContact = {
   normal_impulse: number;
   tangent_impulse: number;
   source_row_continuity_candidate?: boolean;
+  source_row_continuity_reason?:
+    | "unknown"
+    | "candidate"
+    | "sensor"
+    | "no_previous_pair"
+    | "pair_mismatch"
+    | "edge_swap"
+    | "normal_mismatch"
+    | "anchor_drift";
+  lifecycle_reason?:
+    | "unknown"
+    | "started"
+    | "exact_feature"
+    | "persistent_edge_swap";
   solver_normal_impulse?: number;
   solver_tangent_impulse?: number;
   normal_impulse_clamped?: boolean;
@@ -435,6 +449,11 @@ export type LiveFrameAuthority = {
   world_revision: number | null;
   status: SessionStatus;
   buffered_frame_count: number;
+  produced_frame_count?: number;
+  retained_frame_start?: number;
+  retained_frame_end_exclusive?: number;
+  live_buffer_capacity?: number;
+  live_unbounded?: boolean;
   frame_count: number;
   not_hydrated: boolean;
 };
@@ -464,6 +483,11 @@ export type LiveFrameSummary = {
   world_revision: number | null;
   status: SessionStatus;
   buffered_frame_count: number;
+  produced_frame_count?: number;
+  retained_frame_start?: number;
+  retained_frame_end_exclusive?: number;
+  live_buffer_capacity?: number;
+  live_unbounded?: boolean;
   frame_count: number;
   snapshot: Pick<
     DebugSnapshot,
@@ -540,8 +564,13 @@ export type SessionRecord = {
   session_epoch: number;
   run_id: string | null;
   frame_count: number;
+  produced_frame_count?: number;
   buffered_frame_count: number;
   current_frame_index: number;
+  retained_frame_start?: number;
+  retained_frame_end_exclusive?: number;
+  live_buffer_capacity?: number;
+  live_unbounded?: boolean;
   overrides: {
     frame_count?: number | null;
     gravity?: [number, number] | null;
