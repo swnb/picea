@@ -285,8 +285,10 @@ const enMessages = {
   "perf.finalHash": "final hash",
   "run.frameCount": "frame count",
   "run.mode": "run mode",
-  "run.modeArtifact": "Rust generate artifact + replay",
-  "run.modeLive": "Rust live session",
+  "run.modeArtifact": "Generate artifact + replay",
+  "run.modeLive": "Live session",
+  "run.generatingArtifact": "Generating artifact...",
+  "run.startingLiveSession": "Starting live session...",
   "run.gravityOverride": "gravity override",
   "run.sendOverride": "send override with next run",
   "run.gravityVector": "gravity vector",
@@ -312,7 +314,7 @@ const enMessages = {
   "perturbation.previewResult": "Preview result",
   "perturbation.commitResult": "Commit result",
   "perturbation.unavailable": "Unavailable",
-  "perturbation.liveOnly": "Available only in a Rust live session.",
+  "perturbation.liveOnly": "Available only in a live session.",
   "perturbation.selectDynamicBody":
     "Select a dynamic body (or a collider owned by one) to preview a paused velocity perturbation.",
   "perturbation.runningBlocked":
@@ -702,8 +704,10 @@ const zhMessages: Record<MessageKey, string> = {
   "perf.finalHash": "最终 hash",
   "run.frameCount": "帧数",
   "run.mode": "运行模式",
-  "run.modeArtifact": "Rust 生成产物并回放",
-  "run.modeLive": "Rust 实时会话",
+  "run.modeArtifact": "生成产物并回放",
+  "run.modeLive": "实时会话",
+  "run.generatingArtifact": "正在生成产物...",
+  "run.startingLiveSession": "正在创建实时会话...",
   "run.gravityOverride": "重力覆盖",
   "run.sendOverride": "下次运行发送覆盖",
   "run.gravityVector": "重力向量",
@@ -729,7 +733,7 @@ const zhMessages: Record<MessageKey, string> = {
   "perturbation.previewResult": "预览结果",
   "perturbation.commitResult": "提交结果",
   "perturbation.unavailable": "当前不可用",
-  "perturbation.liveOnly": "仅 Rust 实时会话支持该操作。",
+  "perturbation.liveOnly": "仅实时会话支持该操作。",
   "perturbation.selectDynamicBody":
     "请选择动态物体，或选择其所属的碰撞体，再预览 paused-only 速度扰动。",
   "perturbation.runningBlocked":
@@ -952,13 +956,13 @@ const layerLabels: Record<Locale, Record<LayerKey, string>> = {
 const sourceLabels: Record<Locale, Record<SourceKind, string>> = {
   "zh-CN": {
     demo: "演示回放",
-    artifact: "Rust 生成产物并回放",
-    live: "Rust 实时会话",
+    artifact: "生成产物并回放",
+    live: "实时会话",
   },
   "en-US": {
     demo: "demo replay",
-    artifact: "Rust generate artifact + replay",
-    live: "Rust live session",
+    artifact: "generate artifact + replay",
+    live: "live session",
   },
 };
 

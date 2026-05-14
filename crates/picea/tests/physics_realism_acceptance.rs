@@ -157,13 +157,14 @@ fn build_stack_4_world() -> World {
         Material::default(),
     );
     for index in 0..4 {
-        let body = create_body(
-            &mut world,
-            BodyType::Dynamic,
-            0.0,
-            1.7 - index as f32,
-            Vector::default(),
-        );
+        let body = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                pose: Pose::from_xy_angle(0.0, 1.7 - index as f32, 0.0),
+                can_sleep: true,
+                ..BodyDesc::default()
+            })
+            .expect("stack body should be created");
         attach_shape(
             &mut world,
             body,
@@ -399,6 +400,81 @@ fn stack_4_behavior_lock_stays_deterministic_and_quiet_after_settling() {
                     <= 2
             }),
         "late stack_4 windows should not keep churning contact identity after settling"
+    );
+}
+
+#[test]
+fn stack_4_long_window_retains_vertical_support_chain() {
+    let mut world = build_stack_4_world();
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    let mut final_snapshot = None;
+    for _ in 0..1200 {
+        let report = pipeline.step(&mut world);
+        final_snapshot = Some(DebugSnapshot::from_world_with_step_report(
+            &world,
+            &report,
+            &DebugSnapshotOptions::default(),
+        ));
+    }
+    let final_snapshot = final_snapshot.expect("long stack run should produce a final snapshot");
+    let dynamic_support_links = final_snapshot
+        .contacts
+        .iter()
+        .filter(|contact| {
+            contact.bodies.iter().all(|handle| {
+                final_snapshot
+                    .bodies
+                    .iter()
+                    .find(|body| body.handle == *handle)
+                    .map(|body| body.body_type == BodyType::Dynamic)
+                    .unwrap_or(false)
+            })
+        })
+        .count();
+    let dynamic_x_positions = final_snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == BodyType::Dynamic)
+        .map(|body| body.transform.translation.x())
+        .collect::<Vec<_>>();
+    let x_spread = dynamic_x_positions
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max)
+        - dynamic_x_positions
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min);
+
+    assert!(
+        dynamic_support_links >= 3,
+        "stack_4 should retain the three dynamic support links of a vertical four-box stack; dynamic_support_links={dynamic_support_links}, contacts={:?}",
+        final_snapshot.contacts
+    );
+    assert!(
+        x_spread <= 0.35,
+        "stack_4 should not quietly collapse into floor-spread boxes; x_positions={dynamic_x_positions:?}, spread={x_spread}"
+    );
+}
+
+#[test]
+fn stack_4_long_window_enters_sleep_after_stable_vertical_stack() {
+    let mut world = build_stack_4_world();
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    for _ in 0..1200 {
+        pipeline.step(&mut world);
+    }
+    let snapshot = DebugSnapshot::from_world(&world, &DebugSnapshotOptions::default());
+    let awake_dynamic_bodies = snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == BodyType::Dynamic && !body.sleeping)
+        .map(|body| body.handle)
+        .collect::<Vec<_>>();
+
+    assert!(
+        awake_dynamic_bodies.is_empty(),
+        "stack_4 should enter sleep once the vertical support chain is stable; awake_dynamic_bodies={awake_dynamic_bodies:?}"
     );
 }
 

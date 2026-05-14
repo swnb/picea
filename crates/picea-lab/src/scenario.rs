@@ -1576,13 +1576,14 @@ pub(crate) fn build_scenario(
         ScenarioId::Stack4 => {
             add_box(&mut world, BodyType::Static, 0.0, 2.5, 10.0, 0.5)?;
             for index in 0..4 {
-                add_box(
+                add_box_can_sleep(
                     &mut world,
                     BodyType::Dynamic,
                     0.0,
                     1.7 - index as f32,
                     0.9,
                     0.9,
+                    true,
                 )?;
             }
         }
@@ -1775,6 +1776,35 @@ fn add_box(
             body_type,
             pose: Pose::from_xy_angle(x, y, 0.0),
             can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .map_err(|error| LabError::World(error.to_string()))?;
+    world
+        .create_collider(
+            body,
+            ColliderDesc {
+                shape: SharedShape::rect(width, height),
+                ..ColliderDesc::default()
+            },
+        )
+        .map_err(|error| LabError::World(error.to_string()))?;
+    Ok(body)
+}
+
+fn add_box_can_sleep(
+    world: &mut World,
+    body_type: BodyType,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    can_sleep: bool,
+) -> LabResult<BodyHandle> {
+    let body = world
+        .create_body(BodyDesc {
+            body_type,
+            pose: Pose::from_xy_angle(x, y, 0.0),
+            can_sleep,
             ..BodyDesc::default()
         })
         .map_err(|error| LabError::World(error.to_string()))?;

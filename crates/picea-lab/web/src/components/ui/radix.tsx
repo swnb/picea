@@ -88,6 +88,7 @@ export function Select({
   items,
   className,
   ariaLabel,
+  disabled = false,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -96,18 +97,19 @@ export function Select({
   >;
   className?: string;
   ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
-    <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
+    <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={cn(
-          "inline-grid h-8 min-w-40 grid-cols-[minmax(0,1fr)_1rem] items-center gap-2 rounded-md border border-lab-line bg-lab-panel2 px-2 text-left text-sm text-lab-text",
-          "focus-visible:outline-none focus-visible:shadow-focus",
+          "inline-grid h-8 min-w-40 grid-cols-[minmax(0,1fr)_1rem] items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-lab-line bg-lab-panel2 px-2 text-left text-sm text-lab-text",
+          "focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-55",
           className,
         )}
       >
-        <SelectPrimitive.Value className="min-w-0 truncate" />
+        <SelectPrimitive.Value className="min-w-0 overflow-hidden truncate whitespace-nowrap" />
         <SelectPrimitive.Icon className="grid h-4 w-4 shrink-0 place-items-center">
           <ChevronDown className="h-4 w-4 text-lab-muted" />
         </SelectPrimitive.Icon>

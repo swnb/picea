@@ -74,6 +74,41 @@ assert.match(
   "Top toolbar run control should use a rerun/restart icon instead of the playback icon so it does not look like timeline resume.",
 );
 assert.match(
+  toolbarSource,
+  /className="flex w-60 shrink-0 items-center gap-2[\s\S]*<div className="min-w-0 leading-tight">[\s\S]*scenario\.description/,
+  "Top toolbar identity block should reserve a stable width so scenario descriptions cannot resize the header.",
+);
+assert.match(
+  toolbarSource,
+  /<Tooltip label=\{scenario\.description\}>[\s\S]*aria-label=\{scenario\.description\}[\s\S]*tabIndex=\{0\}[\s\S]*<div className="min-w-0 leading-tight">[\s\S]*scenario\.description[\s\S]*<\/Tooltip>/,
+  "Top toolbar identity block should show the full scenario description in a tooltip when hovered.",
+);
+assert.match(
+  toolbarSource,
+  /const isRunLoading = status === "loading"/,
+  "Top toolbar should name the loading state so long artifact generation has an explicit UI contract.",
+);
+assert.match(
+  toolbarSource,
+  /runMode === "artifact_replay"[\s\S]*run\.generatingArtifact[\s\S]*run\.startingLiveSession/,
+  "Top toolbar loading copy should distinguish artifact generation from live-session startup.",
+);
+assert.match(
+  toolbarSource,
+  /aria-busy=\{isRunLoading\}/,
+  "Top toolbar run control should expose busy semantics while a new run is being created.",
+);
+assert.match(
+  toolbarSource,
+  /LoaderCircle[\s\S]*animate-spin/,
+  "Top toolbar run control should show a spinner while artifact generation or live-session startup is pending.",
+);
+assert.match(
+  toolbarSource,
+  /className=\{cn\([\s\S]*"flex w-40 shrink-0 items-center gap-1\.5 text-xs text-lab-muted"[\s\S]*!isRunLoading && "invisible"/,
+  "Top toolbar should reserve a stable progress slot instead of inserting and removing width during runs.",
+);
+assert.match(
   appSource,
   /ariaLabel=\{t\(locale, "scenario\.select"\)\}/,
   "Toolbar scenario selector should have its own accessible label instead of reusing the run action label.",
@@ -215,13 +250,13 @@ assert.match(
 );
 assert.match(
   appSource,
-  /inline-grid h-8 min-w-40 grid-cols-\[minmax\(0,1fr\)_1rem\]/,
-  "Shared Select trigger should reserve a fixed icon column so long scenario labels cannot shift header layout.",
+  /inline-grid h-8 min-w-40 grid-cols-\[minmax\(0,1fr\)_1rem\][^"]*overflow-hidden[^"]*whitespace-nowrap/,
+  "Shared Select trigger should reserve a fixed icon column and prevent long labels from wrapping out of the trigger height.",
 );
 assert.match(
   appSource,
-  /SelectPrimitive\.Value className="min-w-0 truncate"/,
-  "Shared Select trigger value should truncate inside its own grid cell instead of resizing the trigger chrome.",
+  /SelectPrimitive\.Value className="min-w-0 overflow-hidden truncate whitespace-nowrap"/,
+  "Shared Select trigger value should stay single-line and truncate inside its own grid cell instead of resizing the trigger chrome.",
 );
 assert.doesNotMatch(
   appSource,

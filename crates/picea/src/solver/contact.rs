@@ -15,10 +15,17 @@ const DENSE_POSITION_CORRECTION_SLOP: FloatNum = 0.0025;
 const POSITION_CORRECTION_SLEEP_RESET_TRANSLATION: FloatNum = POSITION_CORRECTION_SLOP;
 const CONTACT_VELOCITY_BIAS: FloatNum = 0.5;
 const SHALLOW_SUPPORT_FRICTION_BUDGET_SCALE: FloatNum = 0.6;
+const SPARSE_STACK_BLOCK_SOLVE_TANGENT_SPEED_THRESHOLD: FloatNum = 0.02;
+const SPARSE_STACK_BLOCK_SOLVE_BODY_SLOT_THRESHOLD: usize = 5;
+const SPARSE_STACK_BLOCK_SOLVE_ROW_THRESHOLD: usize = 8;
 // Dense contact graphs are the matrix-stack case: many overlapping rows can
-// reuse stale frame-start depth and over-correct the same bodies. Small stacks
-// keep the legacy path because it currently satisfies the quiet behavior lock.
-const DENSE_POSITION_CORRECTION_CONTACT_THRESHOLD: usize = 16;
+// reuse stale frame-start depth and over-correct the same bodies. Keep the
+// velocity-side dense damping scoped there.
+const DENSE_CONTACT_GRAPH_CONTACT_THRESHOLD: usize = 16;
+// Position-row correction is also useful for sparse vertical support chains:
+// four-box stacks need pseudo-position depth re-evaluation even though they are
+// not dense enough to justify the dense velocity damping path.
+const POSITION_ROW_CORRECTION_CONTACT_THRESHOLD: usize = 1;
 // Mature iterative solvers rely on warm-starting plus a small amount of
 // resting-contact energy dissipation to keep dense stacks from converting
 // correction noise into long-lived sliding/spinning motion. Keep this scoped to
@@ -29,6 +36,16 @@ const SHALLOW_SUPPORT_TANGENT_DAMPING_PER_SECOND: FloatNum = 8.0;
 const SHALLOW_SUPPORT_ANGULAR_DAMPING_PER_SECOND: FloatNum = 8.0;
 const SHALLOW_SUPPORT_MAX_SEPARATING_SPEED: FloatNum = 0.25;
 const DENSE_POSITION_ANGULAR_CORRECTION_SCALE: FloatNum = 0.0;
+// The red dense-stack lock asserts output work below input depth * 0.78. Keep
+// the private dense budget slightly under that ceiling so rounding and row
+// ordering cannot spend the whole assertion margin. The design doc's 0.76 was
+// an illustrative value; the final 0.775 is the least aggressive limiter that
+// still leaves matrix/aligned artifact gates as support-retention guards.
+const DENSE_PRESSURE_TOTAL_TRANSLATION_BUDGET_RATIO: FloatNum = 0.775;
+// Very small tail fragments are skipped instead of creating near-zero pseudo
+// deltas. This only discards the final sliver once the frame budget is spent;
+// larger partial rows still use one shared scale for queued and pseudo motion.
+const DENSE_PRESSURE_MIN_PARTIAL_CORRECTION_SCALE: FloatNum = 0.05;
 // E5 reuses the artifact dry-run motion threshold so the residual-correction
 // gate only suppresses source rows that are already acting like high-motion
 // pressure handoffs rather than quiet resting support.
@@ -130,12 +147,292 @@ struct PositionRowCorrection {
     rotation_b: FloatNum,
 }
 
+impl PositionRowCorrection {
+    fn scaled(self, scale: FloatNum) -> Self {
+        let scale = finite_unit_scale(scale);
+        Self {
+            correction_a: self.correction_a * scale,
+            correction_b: self.correction_b * scale,
+            rotation_a: self.rotation_a * scale,
+            rotation_b: self.rotation_b * scale,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct QueuedPositionTranslation {
     translation: Vector,
     rotation: FloatNum,
     distance_sum: FloatNum,
     reset_idle: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PositionRowDecision {
+    Correct { scale: FloatNum },
+    PressureLimited { scale: FloatNum },
+    BudgetExhausted,
+    SkipResolved,
+    SkipSourcePressureGate,
+}
+
+struct DensePressureBudget {
+    total_translation_limit: FloatNum,
+    consumed_translation: FloatNum,
+    min_partial_correction_scale: FloatNum,
+}
+
+impl DensePressureBudget {
+    fn new(input_total_depth: FloatNum) -> Self {
+        let total_translation_limit = if input_total_depth.is_finite() && input_total_depth > 0.0 {
+            input_total_depth * DENSE_PRESSURE_TOTAL_TRANSLATION_BUDGET_RATIO
+        } else {
+            0.0
+        };
+
+        Self {
+            total_translation_limit,
+            consumed_translation: 0.0,
+            min_partial_correction_scale: DENSE_PRESSURE_MIN_PARTIAL_CORRECTION_SCALE,
+        }
+    }
+
+    fn row_decision(
+        &self,
+        row: &ContactPositionRow,
+        depth: FloatNum,
+        correction: Option<PositionRowCorrection>,
+        candidate_translation_work: FloatNum,
+    ) -> PositionRowDecision {
+        if dense_contact_position_correction_gate(row, depth) {
+            return PositionRowDecision::SkipSourcePressureGate;
+        }
+        let Some(_) = correction else {
+            return PositionRowDecision::SkipResolved;
+        };
+        if !candidate_translation_work.is_finite()
+            || candidate_translation_work <= FloatNum::EPSILON
+        {
+            return PositionRowDecision::SkipResolved;
+        }
+        if !self.total_translation_limit.is_finite() || self.total_translation_limit <= 0.0 {
+            return PositionRowDecision::BudgetExhausted;
+        }
+
+        let remaining = self.total_translation_limit - self.consumed_translation;
+        if !remaining.is_finite() || remaining <= FloatNum::EPSILON {
+            return PositionRowDecision::BudgetExhausted;
+        }
+        if candidate_translation_work <= remaining {
+            return PositionRowDecision::Correct { scale: 1.0 };
+        }
+
+        let scale = finite_unit_scale(remaining / candidate_translation_work);
+        if scale < self.min_partial_correction_scale {
+            PositionRowDecision::BudgetExhausted
+        } else {
+            PositionRowDecision::PressureLimited { scale }
+        }
+    }
+
+    fn consume(&mut self, translation_work: FloatNum) {
+        if translation_work.is_finite() && translation_work > 0.0 {
+            self.consumed_translation =
+                (self.consumed_translation + translation_work).min(self.total_translation_limit);
+        }
+    }
+}
+
+struct DensePositionSolveContext {
+    dense_correction_mode: bool,
+    iterations: u16,
+    rows: Vec<ContactPositionRow>,
+    pressure_budget: Option<DensePressureBudget>,
+    queued_translations: BTreeMap<BodyHandle, QueuedPositionTranslation>,
+    // Pseudo-position belongs to this residual position pass only. It lets
+    // dense rows re-read already-consumed overlap without mutating world poses
+    // before all queued corrections are ready to apply.
+    position_solve_bodies: BTreeMap<BodyHandle, PositionSolveBody>,
+    stats: PositionCorrectionStats,
+}
+
+impl DensePositionSolveContext {
+    fn new(world: &World, contacts: &[ContactObservation], iterations: u16) -> Self {
+        let eligible_contact_count = contacts
+            .iter()
+            .filter(|contact| !contact.is_sensor && residual_correction_depth(contact) > 0.0)
+            .count();
+        let dense_correction_mode =
+            eligible_contact_count >= POSITION_ROW_CORRECTION_CONTACT_THRESHOLD;
+        let rows = contact_position_rows(world, contacts, dense_correction_mode);
+        let pressure_budget = dense_correction_mode.then(|| {
+            DensePressureBudget::new(
+                rows.iter()
+                    .map(|row| row.raw_depth.max(0.0))
+                    .sum::<FloatNum>(),
+            )
+        });
+
+        Self {
+            dense_correction_mode,
+            iterations,
+            rows,
+            pressure_budget,
+            queued_translations: BTreeMap::new(),
+            position_solve_bodies: BTreeMap::new(),
+            stats: PositionCorrectionStats::default(),
+        }
+    }
+
+    fn solve(&mut self, world: &World, contacts: &mut [ContactObservation]) {
+        for iteration in 0..self.iterations {
+            for row_index in 0..self.rows.len() {
+                let row = self.rows[row_index];
+                self.solve_row(world, contacts, row, iteration);
+            }
+        }
+    }
+
+    fn into_queued_translations(
+        mut self,
+    ) -> (
+        PositionCorrectionStats,
+        BTreeMap<BodyHandle, QueuedPositionTranslation>,
+    ) {
+        self.stats.corrected_body_count = self.queued_translations.len();
+        self.stats.max_translation = self
+            .queued_translations
+            .values()
+            .map(|translation| translation.distance_sum)
+            .fold(0.0, FloatNum::max);
+        self.stats.total_translation = self
+            .queued_translations
+            .values()
+            .map(|translation| translation.distance_sum)
+            .sum();
+        (self.stats, self.queued_translations)
+    }
+
+    fn solve_row(
+        &mut self,
+        world: &World,
+        contacts: &mut [ContactObservation],
+        row: ContactPositionRow,
+        iteration: u16,
+    ) {
+        if iteration == 0 {
+            self.stats.input_contact_count += 1;
+            self.stats.input_max_depth = self.stats.input_max_depth.max(row.raw_depth.max(0.0));
+            self.stats.input_total_depth += row.raw_depth.max(0.0);
+        }
+
+        let depth = self.row_depth(&row);
+        let Some(correction) = self.decide_row_correction(world, &row, depth) else {
+            return;
+        };
+
+        let contact = &mut contacts[row.contact_index];
+        contact.solver_position_correction_depth += depth;
+        let applied_a = self.queue_body_correction(
+            world,
+            contact,
+            row.body_a,
+            row.body_b,
+            correction.correction_a,
+            correction.rotation_a,
+            true,
+        );
+        let applied_b = self.queue_body_correction(
+            world,
+            contact,
+            row.body_b,
+            row.body_a,
+            correction.correction_b,
+            correction.rotation_b,
+            false,
+        );
+        if let Some(budget) = &mut self.pressure_budget {
+            budget.consume(applied_a + applied_b);
+        }
+    }
+
+    fn row_depth(&self, row: &ContactPositionRow) -> FloatNum {
+        if self.dense_correction_mode {
+            dense_position_row_depth(row, &self.position_solve_bodies)
+        } else {
+            row.frame_start_depth
+        }
+    }
+
+    fn decide_row_correction(
+        &mut self,
+        world: &World,
+        row: &ContactPositionRow,
+        depth: FloatNum,
+    ) -> Option<PositionRowCorrection> {
+        let correction =
+            position_row_correction(row, depth, self.iterations, self.dense_correction_mode);
+        if !self.dense_correction_mode {
+            return correction;
+        }
+        let candidate_work = correction
+            .map(|candidate| position_row_translation_work(world, row, candidate))
+            .unwrap_or(0.0);
+        let decision = self
+            .pressure_budget
+            .as_ref()
+            .map(|budget| budget.row_decision(row, depth, correction, candidate_work))
+            .unwrap_or(PositionRowDecision::Correct { scale: 1.0 });
+
+        match decision {
+            PositionRowDecision::Correct { scale }
+            | PositionRowDecision::PressureLimited { scale } => {
+                correction.map(|candidate| candidate.scaled(scale))
+            }
+            PositionRowDecision::BudgetExhausted
+            | PositionRowDecision::SkipResolved
+            | PositionRowDecision::SkipSourcePressureGate => None,
+        }
+    }
+
+    fn queue_body_correction(
+        &mut self,
+        world: &World,
+        contact: &mut ContactObservation,
+        body: BodyHandle,
+        counterpart: BodyHandle,
+        translation: Vector,
+        rotation: FloatNum,
+        body_a: bool,
+    ) -> FloatNum {
+        let wake_sleeping_body =
+            contact_counterpart_can_wake_with_queued(world, counterpart, &self.queued_translations);
+        if let Some(distance) = queue_position_correction(
+            world,
+            &mut self.queued_translations,
+            body,
+            translation,
+            rotation,
+            wake_sleeping_body,
+        ) {
+            if body_a {
+                contact.solver_position_correction_body_a_translation += distance;
+            } else {
+                contact.solver_position_correction_body_b_translation += distance;
+            }
+            if self.dense_correction_mode {
+                record_shadow_position_delta(
+                    &mut self.position_solve_bodies,
+                    body,
+                    translation,
+                    rotation,
+                );
+            }
+            distance
+        } else {
+            0.0
+        }
+    }
 }
 
 pub(crate) fn resolve_contacts(
@@ -260,9 +557,17 @@ fn contact_solver_row_batches(
         .into_iter()
         .filter_map(|island| {
             let bodies = solver_body_cache(world, &island.body_slots);
+            let small_world_body_count =
+                world.bodies().count() <= SPARSE_STACK_BLOCK_SOLVE_BODY_SLOT_THRESHOLD;
             let dense_contact_graph =
-                island.contact_rows.len() >= DENSE_POSITION_CORRECTION_CONTACT_THRESHOLD;
-            let rows = island
+                island.contact_rows.len() >= DENSE_CONTACT_GRAPH_CONTACT_THRESHOLD;
+            let sparse_stack_stabilization_candidate = !dense_contact_graph
+                && small_world_body_count
+                && island.body_slots.len() >= 3
+                && island.body_slots.len() <= SPARSE_STACK_BLOCK_SOLVE_BODY_SLOT_THRESHOLD
+                && island.contact_rows.len() >= 2
+                && island.contact_rows.len() <= SPARSE_STACK_BLOCK_SOLVE_ROW_THRESHOLD;
+            let mut rows = island
                 .contact_rows
                 .iter()
                 .filter_map(|row| {
@@ -277,12 +582,37 @@ fn contact_solver_row_batches(
                     )
                 })
                 .collect::<Vec<_>>();
-            let normal_pair_partners = manifold_normal_pair_partners(&rows, dense_contact_graph);
+            let sparse_vertical_stack_graph =
+                sparse_stack_stabilization_candidate && sparse_vertical_stack_support_graph(&rows);
+            let stabilized_contact_graph = dense_contact_graph || sparse_vertical_stack_graph;
+            if sparse_vertical_stack_graph {
+                rows = island
+                    .contact_rows
+                    .iter()
+                    .filter_map(|row| {
+                        contact_solver_row(
+                            row.contact_index,
+                            row.body_a_slot,
+                            row.body_b_slot,
+                            &contacts[row.contact_index],
+                            &bodies,
+                            config,
+                            stabilized_contact_graph,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+            }
+            let sparse_stack_block_solve_guard = !stabilized_contact_graph
+                && small_world_body_count
+                && island.body_slots.len() <= SPARSE_STACK_BLOCK_SOLVE_BODY_SLOT_THRESHOLD
+                && rows.len() <= SPARSE_STACK_BLOCK_SOLVE_ROW_THRESHOLD;
+            let normal_pair_partners =
+                manifold_normal_pair_partners(&rows, sparse_stack_block_solve_guard);
             (!rows.is_empty()).then_some(ContactSolveBatch {
                 body_slots: island.body_slots,
                 rows,
                 normal_pair_partners,
-                dense_contact_graph,
+                dense_contact_graph: stabilized_contact_graph,
             })
         })
         .collect::<Vec<_>>();
@@ -509,6 +839,13 @@ fn contact_solver_row(
     })
 }
 
+fn sparse_vertical_stack_support_graph(rows: &[ContactSolverRow]) -> bool {
+    rows.iter()
+        .filter(|row| row.normal.y().abs() >= 0.9)
+        .count()
+        >= 2
+}
+
 fn is_resting_shallow_support_contact(
     body_a: SolverBody,
     body_b: SolverBody,
@@ -591,94 +928,13 @@ fn apply_residual_contact_position_correction(
     iterations: u16,
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
 ) -> PositionCorrectionStats {
-    let mut stats = PositionCorrectionStats::default();
     if iterations == 0 {
-        return stats;
+        return PositionCorrectionStats::default();
     }
 
-    let eligible_contact_count = contacts
-        .iter()
-        .filter(|contact| !contact.is_sensor && residual_correction_depth(contact) > 0.0)
-        .count();
-    let dense_correction_mode =
-        eligible_contact_count >= DENSE_POSITION_CORRECTION_CONTACT_THRESHOLD;
-
-    let mut queued_translations = BTreeMap::<BodyHandle, QueuedPositionTranslation>::new();
-    let mut position_solve_bodies = BTreeMap::<BodyHandle, PositionSolveBody>::new();
-    let rows = contact_position_rows(world, contacts, dense_correction_mode);
-    for iteration in 0..iterations {
-        for row in &rows {
-            if iteration == 0 {
-                stats.input_contact_count += 1;
-                stats.input_max_depth = stats.input_max_depth.max(row.raw_depth.max(0.0));
-                stats.input_total_depth += row.raw_depth.max(0.0);
-            }
-            let depth = if dense_correction_mode {
-                dense_position_row_depth(row, &position_solve_bodies)
-            } else {
-                row.frame_start_depth
-            };
-            if dense_correction_mode && dense_contact_position_correction_gate(row, depth) {
-                continue;
-            }
-            let Some(correction) =
-                position_row_correction(row, depth, iterations, dense_correction_mode)
-            else {
-                continue;
-            };
-            let contact = &mut contacts[row.contact_index];
-            contact.solver_position_correction_depth += depth;
-            let wake_a =
-                contact_counterpart_can_wake_with_queued(world, row.body_b, &queued_translations);
-            let wake_b =
-                contact_counterpart_can_wake_with_queued(world, row.body_a, &queued_translations);
-            if let Some(distance) = queue_position_correction(
-                world,
-                &mut queued_translations,
-                row.body_a,
-                correction.correction_a,
-                correction.rotation_a,
-                wake_a,
-            ) {
-                contact.solver_position_correction_body_a_translation += distance;
-                if dense_correction_mode {
-                    record_shadow_position_delta(
-                        &mut position_solve_bodies,
-                        row.body_a,
-                        correction.correction_a,
-                        correction.rotation_a,
-                    );
-                }
-            }
-            if let Some(distance) = queue_position_correction(
-                world,
-                &mut queued_translations,
-                row.body_b,
-                correction.correction_b,
-                correction.rotation_b,
-                wake_b,
-            ) {
-                contact.solver_position_correction_body_b_translation += distance;
-                if dense_correction_mode {
-                    record_shadow_position_delta(
-                        &mut position_solve_bodies,
-                        row.body_b,
-                        correction.correction_b,
-                        correction.rotation_b,
-                    );
-                }
-            }
-        }
-    }
-    stats.corrected_body_count = queued_translations.len();
-    stats.max_translation = queued_translations
-        .values()
-        .map(|translation| translation.distance_sum)
-        .fold(0.0, FloatNum::max);
-    stats.total_translation = queued_translations
-        .values()
-        .map(|translation| translation.distance_sum)
-        .sum();
+    let mut context = DensePositionSolveContext::new(world, contacts, iterations);
+    context.solve(world, contacts);
+    let (stats, queued_translations) = context.into_queued_translations();
     apply_queued_position_translations(world, queued_translations, wake_reasons);
     stats
 }
@@ -787,6 +1043,13 @@ fn residual_correction_depth_from_raw(raw_depth: FloatNum, slop: FloatNum) -> Fl
     (raw_depth - slop).max(0.0)
 }
 
+fn finite_unit_scale(scale: FloatNum) -> FloatNum {
+    if !scale.is_finite() {
+        return 0.0;
+    }
+    scale.clamp(0.0, 1.0)
+}
+
 fn dense_position_row_depth(
     row: &ContactPositionRow,
     position_solve_bodies: &BTreeMap<BodyHandle, PositionSolveBody>,
@@ -817,6 +1080,32 @@ fn dense_position_row_depth(
         (row.raw_depth - (point_delta_a - point_delta_b).dot(row.normal)).max(0.0),
         DENSE_POSITION_CORRECTION_SLOP,
     )
+}
+
+fn position_row_translation_work(
+    world: &World,
+    row: &ContactPositionRow,
+    correction: PositionRowCorrection,
+) -> FloatNum {
+    let mut work = 0.0;
+    if body_can_queue_position_correction(world, row.body_a) {
+        work += correction.correction_a.length();
+    }
+    if body_can_queue_position_correction(world, row.body_b) {
+        work += correction.correction_b.length();
+    }
+    if work.is_finite() {
+        work
+    } else {
+        0.0
+    }
+}
+
+fn body_can_queue_position_correction(world: &World, body: BodyHandle) -> bool {
+    world
+        .body_record(body)
+        .map(|record| record.body_type.is_dynamic())
+        .unwrap_or(false)
 }
 
 fn dense_contact_position_correction_gate(row: &ContactPositionRow, depth: FloatNum) -> bool {
@@ -1065,7 +1354,7 @@ fn apply_queued_position_translations(
 
 fn manifold_normal_pair_partners(
     rows: &[ContactSolverRow],
-    _dense_contact_graph: bool,
+    sparse_stack_block_solve_guard: bool,
 ) -> Vec<Option<usize>> {
     let mut partners = vec![None; rows.len()];
 
@@ -1091,7 +1380,21 @@ fn manifold_normal_pair_partners(
         let same_solver_pair = row_a.body_a_slot == row_b.body_a_slot
             && row_a.body_b_slot == row_b.body_b_slot
             && row_a.normal.dot(row_b.normal) > 0.999;
-        if same_solver_pair {
+        let tangent_speed_threshold = if sparse_stack_block_solve_guard {
+            SPARSE_STACK_BLOCK_SOLVE_TANGENT_SPEED_THRESHOLD
+        } else {
+            0.0
+        };
+        let stable_support_pair = !sparse_stack_block_solve_guard
+            || (row_a.position_bias <= FloatNum::EPSILON
+                && row_b.position_bias <= FloatNum::EPSILON);
+        let sliding_velocity_pair = stable_support_pair
+            && row_a
+                .initial_tangent_speed
+                .abs()
+                .max(row_b.initial_tangent_speed.abs())
+                >= tangent_speed_threshold;
+        if same_solver_pair && sliding_velocity_pair {
             partners[first] = Some(second);
             partners[second] = Some(first);
         }
@@ -1336,9 +1639,118 @@ fn angular_point_velocity(angular_velocity: FloatNum, anchor: Vector) -> Vector 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handles::ColliderHandle;
 
     fn body(index: u32) -> BodyHandle {
         BodyHandle::from_raw_parts(index, 0)
+    }
+
+    fn collider(index: u32) -> ColliderHandle {
+        ColliderHandle::from_raw_parts(index, 0)
+    }
+
+    fn block_solve_pair() -> ContactPairKey {
+        ContactPairKey::new(collider(0), collider(1))
+    }
+
+    fn block_solve_row(
+        contact_index: usize,
+        initial_tangent_speed: FloatNum,
+        position_bias: FloatNum,
+    ) -> ContactSolverRow {
+        ContactSolverRow {
+            contact_index,
+            pair_key: block_solve_pair(),
+            body_a_slot: 0,
+            body_b_slot: 1,
+            normal: Vector::new(0.0, 1.0),
+            tangent: Vector::new(-1.0, 0.0),
+            anchor_a: Vector::new(-0.25 + contact_index as FloatNum * 0.5, 0.5),
+            anchor_b: Vector::new(-0.25 + contact_index as FloatNum * 0.5, -0.5),
+            normal_mass: 1.0,
+            tangent_mass: 1.0,
+            friction: 0.2,
+            reduction_reason: ContactReductionReason::Clipped,
+            support_friction_impulse: 0.0,
+            restitution_bias: 0.0,
+            position_bias,
+            initial_normal_speed: 0.0,
+            initial_tangent_speed,
+            normal_impulse: 0.0,
+            tangent_impulse: 0.0,
+            normal_impulse_clamped: false,
+            tangent_impulse_clamped: false,
+            restitution_velocity_threshold: 1.0,
+            restitution_applied: false,
+            resting_shallow_support: false,
+        }
+    }
+
+    #[test]
+    fn block_solve_skips_resting_two_point_manifold_without_sliding_tangent_speed() {
+        let rows = vec![block_solve_row(0, 0.0, 0.0), block_solve_row(1, 0.0, 0.0)];
+
+        let partners = manifold_normal_pair_partners(&rows, true);
+
+        assert_eq!(partners, vec![None, None]);
+    }
+
+    #[test]
+    fn block_solve_allows_guarded_stack_when_two_point_manifold_is_sliding() {
+        let rows = vec![block_solve_row(0, 0.3, 0.0), block_solve_row(1, 0.3, 0.0)];
+
+        let partners = manifold_normal_pair_partners(&rows, true);
+
+        assert_eq!(partners, vec![Some(1), Some(0)]);
+    }
+
+    #[test]
+    fn block_solve_allows_non_dense_sliding_two_point_manifold() {
+        let rows = vec![block_solve_row(0, 0.3, 0.0), block_solve_row(1, 0.3, 0.0)];
+
+        let partners = manifold_normal_pair_partners(&rows, false);
+
+        assert_eq!(partners, vec![Some(1), Some(0)]);
+    }
+
+    #[test]
+    fn block_solve_allows_slow_sliding_above_resting_noise_floor() {
+        let rows = vec![block_solve_row(0, 0.02, 0.0), block_solve_row(1, 0.02, 0.0)];
+
+        let partners = manifold_normal_pair_partners(&rows, true);
+
+        assert_eq!(partners, vec![Some(1), Some(0)]);
+    }
+
+    #[test]
+    fn block_solve_skips_low_speed_duplicate_reduced_rows() {
+        let mut rows = vec![block_solve_row(0, 0.01, 0.0), block_solve_row(1, 0.01, 0.0)];
+        rows[0].reduction_reason = ContactReductionReason::DuplicateReduced;
+        rows[1].reduction_reason = ContactReductionReason::DuplicateReduced;
+
+        let partners = manifold_normal_pair_partners(&rows, true);
+
+        assert_eq!(partners, vec![None, None]);
+    }
+
+    #[test]
+    fn block_solve_allows_high_speed_duplicate_reduced_rows() {
+        let mut rows = vec![block_solve_row(0, 0.02, 0.0), block_solve_row(1, 0.02, 0.0)];
+        rows[0].reduction_reason = ContactReductionReason::DuplicateReduced;
+        rows[1].reduction_reason = ContactReductionReason::DuplicateReduced;
+
+        let partners = manifold_normal_pair_partners(&rows, true);
+
+        assert_eq!(partners, vec![Some(1), Some(0)]);
+    }
+
+    #[test]
+    fn block_solve_allows_dense_slow_sliding_below_sparse_threshold() {
+        let rows = vec![block_solve_row(0, 0.01, 0.0), block_solve_row(1, 0.01, 0.0)];
+
+        let partners = manifold_normal_pair_partners(&rows, false);
+
+        assert_eq!(partners, vec![Some(1), Some(0)]);
     }
 
     fn dense_row(raw_depth: FloatNum) -> ContactPositionRow {
@@ -1443,6 +1855,81 @@ mod tests {
                 .pseudo_translation,
             correction.correction_b
         );
+    }
+
+    fn budget_test_correction() -> PositionRowCorrection {
+        PositionRowCorrection {
+            correction_a: Vector::new(0.0, 0.06),
+            correction_b: Vector::new(0.0, -0.04),
+            rotation_a: 0.02,
+            rotation_b: -0.01,
+        }
+    }
+
+    #[test]
+    fn dense_pressure_budget_allows_full_row_when_work_fits() {
+        let row = dense_row(0.02);
+        let budget = DensePressureBudget::new(1.0);
+
+        let decision = budget.row_decision(
+            &row,
+            row.frame_start_depth,
+            Some(budget_test_correction()),
+            0.1,
+        );
+
+        assert_eq!(decision, PositionRowDecision::Correct { scale: 1.0 });
+    }
+
+    #[test]
+    fn dense_pressure_budget_partial_scales_row_correction_uniformly() {
+        let row = dense_row(0.02);
+        let mut budget = DensePressureBudget::new(1.0);
+        budget.consume(0.7);
+
+        let decision = budget.row_decision(
+            &row,
+            row.frame_start_depth,
+            Some(budget_test_correction()),
+            0.1,
+        );
+
+        let PositionRowDecision::PressureLimited { scale } = decision else {
+            panic!("expected partial pressure limit, got {decision:?}");
+        };
+        assert!((scale - 0.75).abs() < 1.0e-5);
+        let scaled = budget_test_correction().scaled(scale);
+        assert!((scaled.correction_a.y() - 0.045).abs() < 1.0e-5);
+        assert!((scaled.correction_b.y() + 0.03).abs() < 1.0e-5);
+        assert!((scaled.rotation_a - 0.015).abs() < 1.0e-5);
+        assert!((scaled.rotation_b + 0.0075).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn dense_pressure_budget_exhausted_skips_row() {
+        let row = dense_row(0.02);
+        let mut budget = DensePressureBudget::new(1.0);
+        budget.consume(1.0);
+
+        let decision = budget.row_decision(
+            &row,
+            row.frame_start_depth,
+            Some(budget_test_correction()),
+            0.1,
+        );
+
+        assert_eq!(decision, PositionRowDecision::BudgetExhausted);
+    }
+
+    #[test]
+    fn dense_pressure_budget_resolved_row_skips_without_consuming_budget() {
+        let row = dense_row(0.02);
+        let budget = DensePressureBudget::new(1.0);
+
+        let decision = budget.row_decision(&row, 0.0, None, 0.0);
+
+        assert_eq!(decision, PositionRowDecision::SkipResolved);
+        assert_eq!(budget.consumed_translation, 0.0);
     }
 
     #[test]
@@ -1551,6 +2038,26 @@ mod tests {
             &row,
             row.frame_start_depth
         ));
+    }
+
+    #[test]
+    fn dense_position_row_decision_applies_source_gate_before_budget() {
+        let mut row = dense_row(0.013);
+        row.source_row_continuity_candidate = true;
+        row.normal_impulse = 0.001;
+        row.body_b_linear_velocity = Vector::new(0.12, 0.0);
+        row.body_b_angular_velocity = 0.08;
+        let mut budget = DensePressureBudget::new(1.0);
+        budget.consume(1.0);
+
+        let decision = budget.row_decision(
+            &row,
+            row.frame_start_depth,
+            Some(budget_test_correction()),
+            0.1,
+        );
+
+        assert_eq!(decision, PositionRowDecision::SkipSourcePressureGate);
     }
 
     #[test]

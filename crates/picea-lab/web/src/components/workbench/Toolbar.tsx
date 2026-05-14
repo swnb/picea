@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Languages,
   Layers,
+  LoaderCircle,
   RotateCcw,
   SlidersHorizontal,
 } from "lucide-react"
@@ -14,6 +15,7 @@ import {
 import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
 import { Select, Tooltip } from "../ui/radix"
+import { cn } from "../../lib/utils"
 import {
   layerLabel,
   localeLabels,
@@ -76,24 +78,37 @@ export function Toolbar({
   onApplyOverlayPreset: (preset: OverlayPresetId) => void
 }) {
   const groupedScenarios = buildScenarioGroups(locale, scenarios)
+  const isRunLoading = status === "loading"
+  const runProgressLabel =
+    runMode === "artifact_replay"
+      ? t(locale, "run.generatingArtifact")
+      : t(locale, "run.startingLiveSession")
   const runTriggerLabel =
-    sessionId || runId || source !== "demo" || status !== "idle"
-      ? t(locale, "tooltip.rerunScenario")
-      : t(locale, "tooltip.startRunScenario")
+    isRunLoading
+      ? runProgressLabel
+      : sessionId || runId || source !== "demo" || status !== "idle"
+        ? t(locale, "tooltip.rerunScenario")
+        : t(locale, "tooltip.startRunScenario")
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-lab-line bg-lab-panel px-3">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Activity className="h-5 w-5 text-lab-accent" />
-          <div className="leading-tight">
-            <div className="text-sm font-semibold text-lab-text">
-              {t(locale, "app.name")}
-            </div>
-            <div className="truncate text-[11px] text-lab-muted">
-              {scenario.description}
+        <Tooltip label={scenario.description}>
+          <div
+            aria-label={scenario.description}
+            tabIndex={0}
+            className="flex w-60 shrink-0 items-center gap-2 rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
+          >
+            <Activity className="h-5 w-5 shrink-0 text-lab-accent" />
+            <div className="min-w-0 leading-tight">
+              <div className="truncate text-sm font-semibold text-lab-text">
+                {t(locale, "app.name")}
+              </div>
+              <div className="truncate text-[11px] text-lab-muted">
+                {scenario.description}
+              </div>
             </div>
           </div>
-        </div>
+        </Tooltip>
         <Select
           value={runMode}
           onValueChange={(value) => onRunModeChange(value as RunMode)}
@@ -109,6 +124,7 @@ export function Toolbar({
             },
           ]}
           className="ml-2 w-40"
+          disabled={isRunLoading}
         />
         <Select
           value={selectedScenario}
@@ -116,6 +132,7 @@ export function Toolbar({
           ariaLabel={t(locale, "scenario.select")}
           items={groupedScenarios}
           className="w-52"
+          disabled={isRunLoading}
         />
         <Badge
           tone={
@@ -132,13 +149,25 @@ export function Toolbar({
           tone={
             status === "failed"
               ? "danger"
-              : status === "playing"
+              : isRunLoading || status === "playing"
                 ? "accent"
                 : "neutral"
           }
         >
           {statusLabel(locale, status)}
         </Badge>
+        <div
+          role={isRunLoading ? "status" : undefined}
+          aria-live="polite"
+          aria-hidden={!isRunLoading}
+          className={cn(
+            "flex w-40 shrink-0 items-center gap-1.5 text-xs text-lab-muted",
+            !isRunLoading && "invisible",
+          )}
+        >
+          <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-lab-accent" />
+          <span className="truncate">{runProgressLabel}</span>
+        </div>
       </div>
 
       <div className="flex items-center gap-1">
@@ -146,10 +175,15 @@ export function Toolbar({
           <Button
             size="icon"
             onClick={onRun}
-            disabled={status === "loading"}
+            disabled={isRunLoading}
+            aria-busy={isRunLoading}
             aria-label={runTriggerLabel}
           >
-            <RotateCcw className="h-4 w-4" />
+            {isRunLoading ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCcw className="h-4 w-4" />
+            )}
           </Button>
         </Tooltip>
         <LayerMenu
