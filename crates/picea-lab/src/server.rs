@@ -19,7 +19,7 @@ use axum::{
     Json, Router,
 };
 use picea::prelude::{
-    BodyHandle, BodyPatch, BodyType, QueryPipeline, SimulationPipeline, StepConfig, Vector, World,
+    BodyHandle, BodyPatch, BodyType, QueryPipeline, SimulationPipeline, Vector, World,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -32,8 +32,8 @@ use crate::{
         LivePerturbationProvenance, LiveQuerySyncStatus,
     },
     scenario::{
-        build_scenario, list_scenarios, CompoundProvenance, RunConfig, ScenarioId,
-        ScenarioOverrides,
+        build_scenario, default_runtime_config_for_scenario, list_scenarios, CompoundProvenance,
+        RunConfig, ScenarioId, ScenarioOverrides, ScenarioRuntimeConfig,
     },
     LabError,
 };
@@ -74,6 +74,7 @@ enum SessionRuntime {
 struct LiveSessionState {
     world: World,
     pipeline: SimulationPipeline,
+    substeps_per_frame: usize,
     query: QueryPipeline,
     frames: Vec<FrameRecord>,
     retained_frame_start: usize,
@@ -102,6 +103,7 @@ pub struct SessionRecord {
     pub live_buffer_capacity: usize,
     pub live_unbounded: bool,
     pub overrides: ScenarioOverrides,
+    pub effective_runtime_config: ScenarioRuntimeConfig,
     pub final_state_hash: Option<String>,
     pub manifest_artifact: Option<String>,
     pub final_snapshot_artifact: Option<String>,
@@ -319,6 +321,7 @@ async fn create_session(
             live_buffer_capacity: request.live_buffer_capacity.max(1),
             live_unbounded: request.live_unbounded,
             overrides: request.overrides,
+            effective_runtime_config: default_runtime_config_for_scenario(request.scenario_id),
             final_state_hash: None,
             manifest_artifact: None,
             final_snapshot_artifact: None,
@@ -334,10 +337,10 @@ async fn create_session(
             run_artifact_session(&store, &mut session.record);
         }
         SessionMode::LiveSession => {
-            session.runtime = SessionRuntime::Live(build_live_runtime(
-                request.scenario_id,
-                &session.record.overrides,
-            )?);
+            let (runtime, effective_runtime_config) =
+                build_live_runtime(request.scenario_id, &session.record.overrides)?;
+            session.record.effective_runtime_config = effective_runtime_config;
+            session.runtime = SessionRuntime::Live(runtime);
         }
     }
 
@@ -385,6 +388,12 @@ async fn patch_overrides(
         session.record.overrides.gravity = overrides.gravity;
     }
     session.record.overrides.frame_count = overrides.frame_count;
+    session.record.overrides.scene_params = overrides.scene_params;
+    session.record.effective_runtime_config =
+        crate::scenario::effective_runtime_config_for_scenario(
+            session.record.scenario_id,
+            &session.record.overrides,
+        )?;
     Ok(Json(json!({ "session": session.record.clone() })))
 }
 
@@ -579,10 +588,10 @@ fn control_live_session(session: &mut SessionState, action: &str) -> Result<(), 
             }
         }
         "reset" => {
-            session.runtime = SessionRuntime::Live(build_live_runtime(
-                session.record.scenario_id,
-                &session.record.overrides,
-            )?);
+            let (runtime, effective_runtime_config) =
+                build_live_runtime(session.record.scenario_id, &session.record.overrides)?;
+            session.runtime = SessionRuntime::Live(runtime);
+            session.record.effective_runtime_config = effective_runtime_config;
             session.record.status = SessionStatus::Created;
             session.record.session_epoch = session.record.session_epoch.saturating_add(1);
             session.record.run_id = None;
@@ -1198,7 +1207,10 @@ fn step_live_session(session: &mut SessionState) -> Result<(), LabHttpError> {
     }
 
     let frame_index = session.record.produced_frame_count;
-    let report = runtime.pipeline.step(&mut runtime.world);
+    let mut report = runtime.pipeline.step(&mut runtime.world);
+    for _ in 1..runtime.substeps_per_frame.max(1) {
+        report = runtime.pipeline.step(&mut runtime.world);
+    }
     runtime.query.sync(&runtime.world);
     let frame = frame_record_from_step_with_provenance(
         &runtime.world,
@@ -1236,21 +1248,26 @@ fn step_live_session(session: &mut SessionState) -> Result<(), LabHttpError> {
 fn build_live_runtime(
     scenario_id: ScenarioId,
     overrides: &ScenarioOverrides,
-) -> Result<LiveSessionState, LabHttpError> {
+) -> Result<(LiveSessionState, ScenarioRuntimeConfig), LabHttpError> {
     let scenario = build_scenario(scenario_id, overrides)?;
+    let effective_runtime_config = scenario.effective_runtime_config.clone();
     let mut query = QueryPipeline::new();
     query.sync(&scenario.world);
-    Ok(LiveSessionState {
-        world: scenario.world,
-        pipeline: SimulationPipeline::new(StepConfig::default()),
-        query,
-        frames: Vec::new(),
-        retained_frame_start: 0,
-        compound_provenance: scenario.compound_provenance,
-        perturbation_provenance: Vec::new(),
-        velocity_preview_cache: BTreeMap::new(),
-        used_velocity_preview_actions: BTreeSet::new(),
-    })
+    Ok((
+        LiveSessionState {
+            world: scenario.world,
+            pipeline: SimulationPipeline::new(effective_runtime_config.step),
+            substeps_per_frame: effective_runtime_config.substeps_per_frame.max(1),
+            query,
+            frames: Vec::new(),
+            retained_frame_start: 0,
+            compound_provenance: scenario.compound_provenance,
+            perturbation_provenance: Vec::new(),
+            velocity_preview_cache: BTreeMap::new(),
+            used_velocity_preview_actions: BTreeSet::new(),
+        },
+        effective_runtime_config,
+    ))
 }
 
 fn live_retained_frame_end(runtime: &LiveSessionState) -> usize {
@@ -1393,6 +1410,7 @@ fn run_artifact_session(store: &ArtifactStore, session: &mut SessionRecord) {
             session.frame_count = result.manifest.frame_count;
             session.produced_frame_count = result.manifest.frame_count;
             session.buffered_frame_count = result.manifest.frame_count;
+            session.effective_runtime_config = result.manifest.effective_runtime_config.clone();
             session.current_frame_index = 0;
             session.retained_frame_start = 0;
             session.retained_frame_end_exclusive = result.manifest.frame_count;
@@ -1507,14 +1525,16 @@ impl LabHttpError {
 #[cfg(test)]
 mod tests {
     use picea::prelude::{
-        BodyDesc, BodyType, DebugSnapshot, DebugSnapshotOptions, StepReport, StepStats, WorldDesc,
+        BodyDesc, BodyType, DebugSnapshot, DebugSnapshotOptions, StepConfig, StepReport, StepStats,
+        WorldDesc,
     };
     use serde_json::json;
 
     use super::{
         format_session_events, preview_live_velocity_perturbation, FrameRecord, LiveSessionState,
-        QueryPipeline, ScenarioId, ScenarioOverrides, SessionEvent, SessionMode, SessionRecord,
-        SessionRuntime, SessionState, SessionStatus, SimulationPipeline, StepConfig, World,
+        QueryPipeline, ScenarioId, ScenarioOverrides, ScenarioRuntimeConfig, SessionEvent,
+        SessionMode, SessionRecord, SessionRuntime, SessionState, SessionStatus,
+        SimulationPipeline, World,
     };
 
     #[test]
@@ -1570,6 +1590,7 @@ mod tests {
                 live_buffer_capacity: super::default_live_buffer_capacity(),
                 live_unbounded: false,
                 overrides: ScenarioOverrides::default(),
+                effective_runtime_config: ScenarioRuntimeConfig::default(),
                 final_state_hash: Some("kinematic-preview-source".to_owned()),
                 manifest_artifact: None,
                 final_snapshot_artifact: None,
@@ -1580,6 +1601,7 @@ mod tests {
             runtime: SessionRuntime::Live(LiveSessionState {
                 world,
                 pipeline: SimulationPipeline::new(StepConfig::default()),
+                substeps_per_frame: 1,
                 query: QueryPipeline::new(),
                 frames: Vec::new(),
                 retained_frame_start: 0,

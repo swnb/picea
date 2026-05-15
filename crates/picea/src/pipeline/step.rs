@@ -37,6 +37,9 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         &mut step.wake_reasons,
         &step.pose_clamp.traces,
     );
+    if config.joint_velocity_projection {
+        crate::pipeline::joints::solve_joint_velocity_phase(world, &mut step.wake_reasons);
+    }
     step.record_contacts(
         contact_events,
         contact_count,

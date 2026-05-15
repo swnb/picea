@@ -550,10 +550,41 @@ export type PerfCounterSummary = {
 
 export type SessionMode = "artifact_replay" | "live_session";
 
+export type StepConfig = {
+  velocity_iterations: number;
+  position_iterations: number;
+  contact_position_correction: "enabled" | "conservative" | "disabled";
+  joint_velocity_projection: boolean;
+};
+
+export type ScenarioParameterValue = number | boolean | string;
+
+export type ScenarioParameterDescriptor = {
+  key: string;
+  label: string;
+  type: "integer" | "number" | "boolean" | "select";
+  default: ScenarioParameterValue;
+  min?: number | null;
+  max?: number | null;
+  step?: number | null;
+  options?: Array<{
+    value: ScenarioParameterValue;
+    label: string;
+  }>;
+};
+
+export type ScenarioRuntimeConfig = {
+  step: StepConfig;
+  substeps_per_frame: number;
+  scene_params?: Record<string, ScenarioParameterValue> | null;
+};
+
 export type ScenarioDescriptor = {
   id: string;
   name: string;
   description: string;
+  default_runtime_config?: ScenarioRuntimeConfig;
+  parameter_schema?: ScenarioParameterDescriptor[];
 };
 
 export type SessionRecord = {
@@ -574,7 +605,9 @@ export type SessionRecord = {
   overrides: {
     frame_count?: number | null;
     gravity?: [number, number] | null;
+    scene_params?: Record<string, ScenarioParameterValue> | null;
   };
+  effective_runtime_config?: ScenarioRuntimeConfig | null;
   final_state_hash: string | null;
   manifest_artifact?: string | null;
   final_snapshot_artifact?: string | null;

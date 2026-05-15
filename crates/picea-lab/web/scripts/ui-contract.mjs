@@ -10,6 +10,7 @@ const contractSources = [
   "../src/components/workbench/WorkbenchLayout.tsx",
   "../src/components/workbench/Timeline.tsx",
   "../src/components/workbench/GravityDial.tsx",
+  "../src/components/workbench/parameters/ParameterPanel.tsx",
   "../src/components/workbench/SceneHierarchy.tsx",
   "../src/components/workbench/Inspector.tsx",
   "../src/components/workbench/WorldCanvas.tsx",
@@ -34,6 +35,10 @@ const overlayPresetSource =
   appSource.match(/function overlayPresetState[\s\S]*?\n}\n\nfunction selectTrajectoryContextMarkers/)?.[0] ?? "";
 const timelineSource = fs.readFileSync(
   new URL("../src/components/workbench/Timeline.tsx", import.meta.url),
+  "utf8",
+);
+const parameterPanelSource = fs.readFileSync(
+  new URL("../src/components/workbench/parameters/ParameterPanel.tsx", import.meta.url),
   "utf8",
 );
 const timelineHeaderSource =
@@ -130,6 +135,81 @@ assert.match(
 );
 assert.match(
   appSource,
+  /export type ScenarioRuntimeConfig = \{/,
+  "Web types should expose ScenarioRuntimeConfig for backend default/effective runtime config payloads.",
+);
+assert.match(
+  appSource,
+  /substeps_per_frame: number/,
+  "Scenario runtime config should include substeps_per_frame from the backend contract.",
+);
+assert.match(
+  appSource,
+  /export type StepConfig = \{/,
+  "Web types should expose StepConfig so runtime-config step fields stay typed.",
+);
+assert.match(
+  appSource,
+  /export type ScenarioParameterDescriptor = \{/,
+  "Web types should expose ScenarioParameterDescriptor for scene parameter schemas.",
+);
+assert.match(
+  appSource,
+  /export type ScenarioParameterValue = number \| boolean \| string/,
+  "Web types should model scene parameter values as scalar number/boolean/string overrides.",
+);
+assert.match(
+  appSource,
+  /default_runtime_config\?: ScenarioRuntimeConfig/,
+  "Scenario descriptors should surface default_runtime_config from the server.",
+);
+assert.match(
+  appSource,
+  /parameter_schema\?: ScenarioParameterDescriptor\[\]/,
+  "Scenario descriptors should surface parameter_schema from the server.",
+);
+assert.match(
+  appSource,
+  /scene_params\?: Record<string, ScenarioParameterValue> \| null/,
+  "Session overrides and runtime config should carry typed scene_params maps.",
+);
+assert.match(
+  appSource,
+  /effective_runtime_config\?: ScenarioRuntimeConfig \| null/,
+  "Session records should expose effective_runtime_config so the UI can show authoritative running values.",
+);
+assert.match(
+  appSource,
+  /sceneParams\?: Record<string, ScenarioParameterValue> \| null/,
+  "createSession should accept optional scene params from the current scenario draft.",
+);
+assert.match(
+  appSource,
+  /scene_params: sceneParams \?\? undefined/,
+  "createSession should serialize sceneParams into overrides.scene_params.",
+);
+assert.match(
+  appSource,
+  /const \[scenarioParamDrafts, setScenarioParamDrafts\]/,
+  "App state should retain per-scenario scene parameter drafts instead of a single shared mutable map.",
+);
+assert.match(
+  appSource,
+  /default_runtime_config\?\.scene_params/,
+  "App should seed parameter drafts from the selected scenario default_runtime_config.scene_params.",
+);
+assert.match(
+  appSource,
+  /effective_runtime_config\?\.scene_params/,
+  "App should read back effective runtime config from session responses for running/revert behavior.",
+);
+assert.match(
+  appSource,
+  /const sceneParams =[\s\S]*createSession\([\s\S]*sceneParams,/,
+  "Top-level run action should pass the current scenario scene param draft into createSession.",
+);
+assert.match(
+  appSource,
   /function GravityDial\(/,
   "Run settings should expose a dedicated gravity dial component for direction and strength.",
 );
@@ -177,6 +257,76 @@ assert.match(
   timelineSource,
   /id="bottom-panel-run"[\s\S]*className="[^"]*overflow-auto[^"]*"/,
   "Run settings tab panel should scroll when the bottom panel is dragged shorter.",
+);
+assert.match(
+  timelineSource,
+  /<ParameterPanel[\s\S]*schema=\{scenario\.parameter_schema \?\? \[\]\}/,
+  "Timeline run settings should render the shared ParameterPanel using the selected scenario parameter schema.",
+);
+assert.match(
+  timelineSource,
+  /<GravityDial[\s\S]*\/>[\s\S]*<ParameterPanel/s,
+  "Scene parameter controls should live in the run-settings layout with GravityDial instead of a separate detached surface.",
+);
+assert.match(
+  parameterPanelSource,
+  /export function ParameterPanel\(/,
+  "Parameter UI should be encapsulated behind a dedicated ParameterPanel component.",
+);
+assert.match(
+  parameterPanelSource,
+  /export function ParameterRow\(/,
+  "ParameterPanel should expose a reusable ParameterRow wrapper for dense settings layout.",
+);
+assert.match(
+  parameterPanelSource,
+  /export function NumberField\(/,
+  "ParameterPanel should export NumberField for numeric parameter editing.",
+);
+assert.match(
+  parameterPanelSource,
+  /export function SliderField\(/,
+  "ParameterPanel should export SliderField for numeric slider controls.",
+);
+assert.match(
+  parameterPanelSource,
+  /export function RangeField\(/,
+  "ParameterPanel should export RangeField for slider plus numeric input composition.",
+);
+assert.match(
+  parameterPanelSource,
+  /export function ToggleField\(/,
+  "ParameterPanel should export ToggleField for boolean parameters.",
+);
+assert.match(
+  parameterPanelSource,
+  /export function SegmentedField\(/,
+  "ParameterPanel should export SegmentedField for enum/select parameters such as contact_position_correction.",
+);
+assert.match(
+  parameterPanelSource,
+  /export function ParameterSourceBadge\(/,
+  "ParameterPanel should export ParameterSourceBadge for default/current/effective provenance labels.",
+);
+assert.match(
+  parameterPanelSource,
+  /Reset defaults/,
+  "ParameterPanel should offer a reset-to-defaults action.",
+);
+assert.match(
+  parameterPanelSource,
+  /Revert running config/,
+  "ParameterPanel should offer a revert-to-running-config action when authoritative runtime values are known.",
+);
+assert.match(
+  appSource,
+  /newton_cradle[\s\S]*default_runtime_config[\s\S]*parameter_schema/s,
+  "Demo fallback should provide runtime defaults and parameter schema for newton_cradle.",
+);
+assert.match(
+  appSource,
+  /substeps_per_frame/,
+  "Newton cradle scene parameter support should include substeps_per_frame through types, demo fallback, and UI wiring.",
 );
 assert.match(
   appSource,
@@ -1000,6 +1150,11 @@ assert.match(
   appSource,
   /profileMeasure\("live\.cadence"[\s\S]*actualFps[\s\S]*nextDelayMs[\s\S]*degraded/,
   "Adaptive live cadence should be visible in profile output with actual fps and degraded realtime state.",
+);
+assert.match(
+  appSource,
+  /LIVE_CADENCE_DEGRADED_STREAK[\s\S]*liveCadenceSlowFrameStreakRef[\s\S]*>= LIVE_CADENCE_DEGRADED_STREAK/,
+  "Live cadence warning should require a sustained slow-frame streak instead of flickering on a single frame.",
 );
 assert.match(
   timelineSource,

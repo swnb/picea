@@ -41,6 +41,7 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "stack_stability_tower",
             "matrix_stack",
             "matrix_stack_aligned",
+            "newton_cradle",
             "joint_anchor",
             "lattice_grid",
             "broadphase_sparse",
@@ -51,6 +52,46 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "ccd_fast_convex_walls",
             "ccd_dynamic_convex_pair",
             "ccd_dynamic_compound_wall",
+        ]
+    );
+    let newton_descriptor = scenarios_body["scenarios"]
+        .as_array()
+        .expect("scenarios should be an array")
+        .iter()
+        .find(|scenario| scenario["id"] == "newton_cradle")
+        .expect("newton cradle descriptor should be exposed");
+    assert_eq!(
+        newton_descriptor["default_runtime_config"]["step"]["contact_position_correction"],
+        "conservative"
+    );
+    assert_eq!(
+        newton_descriptor["default_runtime_config"]["step"]["joint_velocity_projection"],
+        true
+    );
+    assert_eq!(
+        newton_descriptor["default_runtime_config"]["substeps_per_frame"],
+        16
+    );
+    let parameter_keys = newton_descriptor["parameter_schema"]
+        .as_array()
+        .expect("parameter schema should be an array")
+        .iter()
+        .map(|parameter| parameter["key"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parameter_keys,
+        vec![
+            "ball_count",
+            "radius",
+            "string_length",
+            "release_offset",
+            "restitution",
+            "friction",
+            "velocity_iterations",
+            "position_iterations",
+            "contact_position_correction",
+            "joint_velocity_projection",
+            "substeps_per_frame",
         ]
     );
 
@@ -85,6 +126,10 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
         serde_json::from_value::<SessionStatus>(created_body["session"]["status"].clone()).unwrap(),
         SessionStatus::Completed
     );
+    assert_eq!(
+        created_body["session"]["effective_runtime_config"]["step"]["velocity_iterations"],
+        10
+    );
     let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
     let run_id = created_body["session"]["run_id"]
         .as_str()
@@ -97,6 +142,41 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
     assert_eq!(
         created_body["session"]["final_snapshot_artifact"],
         "final_snapshot.json"
+    );
+
+    let newton_created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "scenario_id": "newton_cradle",
+                        "frame_count": 1,
+                        "overrides": {
+                            "scene_params": {
+                                "ball_count": 3,
+                                "velocity_iterations": 4
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(newton_created.status(), StatusCode::CREATED);
+    let newton_created_body = json_body(newton_created).await;
+    assert_eq!(
+        newton_created_body["session"]["effective_runtime_config"]["scene_params"]["ball_count"],
+        3
+    );
+    assert_eq!(
+        newton_created_body["session"]["effective_runtime_config"]["step"]["velocity_iterations"],
+        4
     );
 
     let fetched = app

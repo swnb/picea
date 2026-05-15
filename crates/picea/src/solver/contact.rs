@@ -5,7 +5,9 @@ use crate::{
     events::SleepTransitionReason,
     handles::BodyHandle,
     math::{point::Point, vector::Vector, FloatNum},
-    pipeline::{contacts::ContactObservation, island, sleep, StepConfig},
+    pipeline::{
+        contacts::ContactObservation, island, sleep, ContactPositionCorrectionPolicy, StepConfig,
+    },
     world::{contact_state::ContactPairKey, World},
 };
 
@@ -50,6 +52,7 @@ const DENSE_PRESSURE_MIN_PARTIAL_CORRECTION_SCALE: FloatNum = 0.05;
 // gate only suppresses source rows that are already acting like high-motion
 // pressure handoffs rather than quiet resting support.
 const SOURCE_ROW_PRESSURE_GATE_MOTION_THRESHOLD: FloatNum = 0.05;
+const HIGH_RESTITUTION_POSITION_CORRECTION_THRESHOLD: FloatNum = 0.9;
 
 #[derive(Clone, Copy, Debug)]
 struct SolverBody {
@@ -257,14 +260,26 @@ struct DensePositionSolveContext {
 }
 
 impl DensePositionSolveContext {
-    fn new(world: &World, contacts: &[ContactObservation], iterations: u16) -> Self {
+    fn new(
+        world: &World,
+        contacts: &[ContactObservation],
+        iterations: u16,
+        policy: ContactPositionCorrectionPolicy,
+    ) -> Self {
         let eligible_contact_count = contacts
             .iter()
-            .filter(|contact| !contact.is_sensor && residual_correction_depth(contact) > 0.0)
+            .filter(|contact| {
+                !contact.is_sensor
+                    && contact_position_correction_policy_allows(
+                        policy,
+                        contact.material.restitution,
+                    )
+                    && residual_correction_depth(contact) > 0.0
+            })
             .count();
         let dense_correction_mode =
             eligible_contact_count >= POSITION_ROW_CORRECTION_CONTACT_THRESHOLD;
-        let rows = contact_position_rows(world, contacts, dense_correction_mode);
+        let rows = contact_position_rows(world, contacts, dense_correction_mode, policy);
         let pressure_budget = dense_correction_mode.then(|| {
             DensePressureBudget::new(
                 rows.iter()
@@ -530,12 +545,8 @@ pub(crate) fn resolve_contacts(
         write_solver_velocities(world, &batch.body_slots, &solver_bodies, wake_reasons);
     }
 
-    let position_correction_stats = apply_residual_contact_position_correction(
-        world,
-        contacts,
-        config.position_iterations,
-        wake_reasons,
-    );
+    let position_correction_stats =
+        apply_residual_contact_position_correction(world, contacts, config, wake_reasons);
     stats.position_correction_input_contact_count = position_correction_stats.input_contact_count;
     stats.position_correction_input_max_depth = position_correction_stats.input_max_depth;
     stats.position_correction_input_total_depth = position_correction_stats.input_total_depth;
@@ -925,14 +936,24 @@ fn contact_counterpart_can_wake(world: &World, other: BodyHandle) -> bool {
 fn apply_residual_contact_position_correction(
     world: &mut World,
     contacts: &mut [ContactObservation],
-    iterations: u16,
+    config: &StepConfig,
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
 ) -> PositionCorrectionStats {
-    if iterations == 0 {
+    if config.position_iterations == 0
+        || matches!(
+            config.contact_position_correction,
+            ContactPositionCorrectionPolicy::Disabled
+        )
+    {
         return PositionCorrectionStats::default();
     }
 
-    let mut context = DensePositionSolveContext::new(world, contacts, iterations);
+    let mut context = DensePositionSolveContext::new(
+        world,
+        contacts,
+        config.position_iterations,
+        config.contact_position_correction,
+    );
     context.solve(world, contacts);
     let (stats, queued_translations) = context.into_queued_translations();
     apply_queued_position_translations(world, queued_translations, wake_reasons);
@@ -943,12 +964,13 @@ fn contact_position_rows(
     world: &World,
     contacts: &[ContactObservation],
     dense_correction_mode: bool,
+    policy: ContactPositionCorrectionPolicy,
 ) -> Vec<ContactPositionRow> {
     contacts
         .iter()
         .enumerate()
         .filter_map(|(contact_index, contact)| {
-            contact_position_row(world, contact_index, contact, dense_correction_mode)
+            contact_position_row(world, contact_index, contact, dense_correction_mode, policy)
         })
         .collect()
 }
@@ -958,8 +980,12 @@ fn contact_position_row(
     contact_index: usize,
     contact: &ContactObservation,
     dense_correction_mode: bool,
+    policy: ContactPositionCorrectionPolicy,
 ) -> Option<ContactPositionRow> {
     if contact.is_sensor {
+        return None;
+    }
+    if !contact_position_correction_policy_allows(policy, contact.material.restitution) {
         return None;
     }
     let normal = contact.normal.normalized_or_zero();
@@ -1033,6 +1059,19 @@ fn contact_position_row(
             .map(|record| record.angular_velocity)
             .unwrap_or(0.0),
     })
+}
+
+fn contact_position_correction_policy_allows(
+    policy: ContactPositionCorrectionPolicy,
+    restitution: FloatNum,
+) -> bool {
+    match policy {
+        ContactPositionCorrectionPolicy::Enabled => true,
+        ContactPositionCorrectionPolicy::Conservative => {
+            !restitution.is_finite() || restitution < HIGH_RESTITUTION_POSITION_CORRECTION_THRESHOLD
+        }
+        ContactPositionCorrectionPolicy::Disabled => false,
+    }
 }
 
 fn residual_correction_depth(contact: &ContactObservation) -> FloatNum {
@@ -1711,6 +1750,26 @@ mod tests {
         let partners = manifold_normal_pair_partners(&rows, false);
 
         assert_eq!(partners, vec![Some(1), Some(0)]);
+    }
+
+    #[test]
+    fn conservative_position_policy_skips_high_restitution_contacts() {
+        assert!(contact_position_correction_policy_allows(
+            ContactPositionCorrectionPolicy::Enabled,
+            1.0,
+        ));
+        assert!(!contact_position_correction_policy_allows(
+            ContactPositionCorrectionPolicy::Conservative,
+            1.0,
+        ));
+        assert!(contact_position_correction_policy_allows(
+            ContactPositionCorrectionPolicy::Conservative,
+            0.2,
+        ));
+        assert!(!contact_position_correction_policy_allows(
+            ContactPositionCorrectionPolicy::Disabled,
+            0.2,
+        ));
     }
 
     #[test]

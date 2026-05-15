@@ -1,7 +1,7 @@
 use picea::prelude::{
-    BodyDesc, BodyPatch, BodyType, ColliderDesc, ColliderPatch, DistanceJointDesc,
+    BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderDesc, ColliderPatch, DistanceJointDesc,
     DistanceJointPatch, JointDesc, JointPatch, Pose, SharedShape, SimulationPipeline, StepConfig,
-    World, WorldAnchorJointDesc, WorldAnchorJointPatch, WorldDesc, WorldError, WorldEvent,
+    Vector, World, WorldAnchorJointDesc, WorldAnchorJointPatch, WorldDesc, WorldError, WorldEvent,
 };
 use picea::world::{HandleError, TopologyError, ValidationError};
 
@@ -446,6 +446,94 @@ fn stale_reads_are_explicit_instead_of_collapsing_into_absence() {
         .expect("live handles should still resolve")
         .handle()
         .is_valid());
+}
+
+fn radial_velocity_joint_world() -> (World, BodyHandle, BodyHandle) {
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: false,
+    });
+    let body_a = world
+        .create_body(BodyDesc {
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            linear_velocity: (-1.0, 0.0).into(),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("body_a should be created");
+    let body_b = world
+        .create_body(BodyDesc {
+            pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+            linear_velocity: (1.0, 0.0).into(),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("body_b should be created");
+
+    for body in [body_a, body_b] {
+        world
+            .create_collider(
+                body,
+                ColliderDesc {
+                    shape: SharedShape::circle(0.1),
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("mass-bearing collider should be created");
+    }
+    world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a,
+            body_b,
+            rest_length: 1.0,
+            stiffness: 1.0,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("distance joint should be created");
+    (world, body_a, body_b)
+}
+
+fn distance_joint_radial_speed(world: &World, body_a: BodyHandle, body_b: BodyHandle) -> f32 {
+    let body_a = world
+        .try_body(body_a)
+        .expect("body_a should remain live after step");
+    let body_b = world
+        .try_body(body_b)
+        .expect("body_b should remain live after step");
+    let direction =
+        (body_b.pose().translation() - body_a.pose().translation()).normalized_or_zero();
+    (body_b.linear_velocity() - body_a.linear_velocity()).dot(direction)
+}
+
+#[test]
+fn joint_velocity_projection_flag_controls_radial_velocity_projection() {
+    let (mut disabled_world, disabled_a, disabled_b) = radial_velocity_joint_world();
+    let mut disabled_pipeline = SimulationPipeline::new(StepConfig {
+        joint_velocity_projection: false,
+        enable_sleep: false,
+        ..StepConfig::default()
+    });
+    disabled_pipeline.step(&mut disabled_world);
+    let disabled_radial_speed =
+        distance_joint_radial_speed(&disabled_world, disabled_a, disabled_b).abs();
+    assert!(
+        disabled_radial_speed > 1.0,
+        "disabled projection should leave the outgoing radial velocity visible, got {disabled_radial_speed}"
+    );
+
+    let (mut enabled_world, enabled_a, enabled_b) = radial_velocity_joint_world();
+    let mut enabled_pipeline = SimulationPipeline::new(StepConfig {
+        joint_velocity_projection: true,
+        enable_sleep: false,
+        ..StepConfig::default()
+    });
+    enabled_pipeline.step(&mut enabled_world);
+    let enabled_radial_speed =
+        distance_joint_radial_speed(&enabled_world, enabled_a, enabled_b).abs();
+    assert!(
+        enabled_radial_speed <= 1.0e-4,
+        "enabled projection should remove the distance-joint radial velocity, got {enabled_radial_speed}"
+    );
 }
 
 #[test]

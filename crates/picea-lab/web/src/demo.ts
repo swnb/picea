@@ -1,4 +1,64 @@
-import type { DebugAabb, DebugSnapshot, FrameRecord, ScenarioDescriptor, Vec2 } from "./types";
+import type {
+  DebugAabb,
+  DebugSnapshot,
+  FrameRecord,
+  ScenarioDescriptor,
+  ScenarioParameterDescriptor,
+  ScenarioRuntimeConfig,
+  Vec2,
+} from "./types";
+
+const newtonCradleDefaultRuntimeConfig: ScenarioRuntimeConfig = {
+  step: {
+    velocity_iterations: 10,
+    position_iterations: 20,
+    contact_position_correction: "conservative",
+    joint_velocity_projection: true,
+  },
+  substeps_per_frame: 16,
+  scene_params: {
+    ball_count: 5,
+    radius: 0.18,
+    string_length: 1.28,
+    release_offset: 0.72,
+    restitution: 1,
+    friction: 0,
+    velocity_iterations: 10,
+    position_iterations: 20,
+    substeps_per_frame: 16,
+    contact_position_correction: "conservative",
+    joint_velocity_projection: true,
+  },
+};
+
+const newtonCradleParameterSchema: ScenarioParameterDescriptor[] = [
+  { key: "ball_count", label: "Ball count", type: "integer", default: 5, min: 2, max: 12, step: 1 },
+  { key: "radius", label: "Ball radius", type: "number", default: 0.18, min: 0.05, max: 0.4, step: 0.01 },
+  { key: "string_length", label: "String length", type: "number", default: 1.28, min: 0.4, max: 3, step: 0.01 },
+  { key: "release_offset", label: "Release offset", type: "number", default: 0.72, min: 0, max: 2.8, step: 0.01 },
+  { key: "restitution", label: "Restitution", type: "number", default: 1, min: 0, max: 1, step: 0.01 },
+  { key: "friction", label: "Friction", type: "number", default: 0, min: 0, max: 1, step: 0.01 },
+  { key: "velocity_iterations", label: "Velocity iterations", type: "integer", default: 10, min: 0, max: 80, step: 1 },
+  { key: "position_iterations", label: "Position iterations", type: "integer", default: 20, min: 0, max: 120, step: 1 },
+  { key: "substeps_per_frame", label: "Substeps per frame", type: "integer", default: 16, min: 1, max: 16, step: 1 },
+  {
+    key: "contact_position_correction",
+    label: "Contact position correction",
+    type: "select",
+    default: "conservative",
+    options: [
+      { value: "enabled", label: "Enabled" },
+      { value: "conservative", label: "Conservative" },
+      { value: "disabled", label: "Disabled" },
+    ],
+  },
+  {
+    key: "joint_velocity_projection",
+    label: "Joint velocity projection",
+    type: "boolean",
+    default: true,
+  },
+];
 
 export const demoScenarios: ScenarioDescriptor[] = [
   {
@@ -25,6 +85,13 @@ export const demoScenarios: ScenarioDescriptor[] = [
     id: "matrix_stack_aligned",
     name: "Aligned matrix stack 4x3",
     description: "Offline aligned matrix stack preview for stable matrix-form behavior locks.",
+  },
+  {
+    id: "newton_cradle",
+    name: "Newton cradle",
+    description: "Offline five-ball cradle preview with non-decaying kinetic envelope.",
+    default_runtime_config: newtonCradleDefaultRuntimeConfig,
+    parameter_schema: newtonCradleParameterSchema,
   },
   {
     id: "joint_anchor",
@@ -74,6 +141,9 @@ export function makeDemoFrames(scenarioId = "falling_box_contact", frameCount = 
   }
   if (scenarioId === "matrix_stack" || scenarioId === "matrix_stack_aligned") {
     return makeStackStabilityFrames(frameCount);
+  }
+  if (scenarioId === "newton_cradle") {
+    return makeNewtonCradleFrames(frameCount);
   }
   if (scenarioId === "compound_provenance") {
     return makeCompoundProvenanceFrames(frameCount);
@@ -519,6 +589,102 @@ function makeLatticeGridFrames(frameCount: number): FrameRecord[] {
     record.stats = snapshot.stats
     void diagonalRestLength
     return record
+  })
+}
+
+function makeNewtonCradleFrames(frameCount: number): FrameRecord[] {
+  const ballCount = 5
+  const radius = 0.18
+  const spacing = radius * 2.02
+  const length = 1.28
+  const anchorY = -2.05
+  const restY = anchorY + length
+  const left = -0.5 * (ballCount - 1) * spacing
+  const releaseAngle = 0.62
+  const cycleFrames = 112
+  const anchorPoints = Array.from({ length: ballCount }, (_, index) => ({
+    x: left + index * spacing,
+    y: anchorY,
+  }))
+
+  return Array.from({ length: frameCount }, (_, frameIndex) => {
+    const cycle = Math.floor(frameIndex / cycleFrames)
+    const phase = (frameIndex % cycleFrames) / cycleFrames
+    const side = cycle % 2 === 0 ? "left" : "right"
+    const swing = Math.sin(phase * Math.PI)
+    const angle = releaseAngle * swing
+    const bodies = [] as DebugSnapshot["bodies"]
+    const colliders = [] as DebugSnapshot["colliders"]
+    const joints = [] as DebugSnapshot["joints"]
+    const activeIndex = side === "left" ? 0 : ballCount - 1
+    const direction = side === "left" ? -1 : 1
+
+    anchorPoints.forEach((anchor, index) => {
+      const isActive = index === activeIndex
+      const signedAngle = isActive ? direction * angle : 0
+      const center = {
+        x: anchor.x + length * Math.sin(signedAngle),
+        y: anchor.y + length * Math.cos(signedAngle),
+      }
+      const angularSpeed = isActive
+        ? direction * releaseAngle * Math.cos(phase * Math.PI) * Math.PI / (cycleFrames / 60)
+        : 0
+      const velocity = {
+        x: length * Math.cos(signedAngle) * angularSpeed,
+        y: -length * Math.sin(signedAngle) * angularSpeed,
+      }
+      const handle = index + 1
+      const entry = body(handle, "dynamic", center, velocity)
+      entry.angular_velocity = angularSpeed * 0.35
+      entry.island_id = 1
+      bodies.push(entry)
+      const entryCollider = circleCollider(handle, handle, center, radius)
+      entryCollider.material = { friction: 0, restitution: 1 }
+      colliders.push(entryCollider)
+      joints.push({
+        handle,
+        kind: "distance",
+        bodies: [100 + index, handle],
+        anchors: [anchor, center],
+      })
+    })
+
+    const snapshot = baseSnapshot(frameIndex, frameIndex / 60, bodies)
+    snapshot.colliders = colliders
+    snapshot.joints = joints
+    snapshot.contacts =
+      Math.min(phase, 1 - phase) < 0.08
+        ? [
+            makeStackContact(
+              1,
+              side === "left" ? 1 : 5,
+              side === "left" ? 2 : 4,
+              side === "left" ? 1 : 5,
+              side === "left" ? 2 : 4,
+              { x: side === "left" ? left + spacing * 0.5 : left + spacing * 3.5, y: restY },
+              1.2,
+              0,
+            ),
+          ]
+        : []
+    snapshot.islands = [{ id: 1, bodies: bodies.map((entry) => entry.handle), sleeping: false }]
+    snapshot.stats.active_collider_count = colliders.length
+    snapshot.stats.active_joint_count = joints.length
+    snapshot.stats.contact_count = snapshot.contacts.length
+    snapshot.stats.manifold_count = snapshot.contacts.length
+    snapshot.stats.island_count = 1
+    snapshot.stats.active_island_count = 1
+    snapshot.stats.joint_row_count = joints.length
+    snapshot.stats.contact_row_count = snapshot.contacts.length
+    snapshot.primitives = [
+      {
+        kind: "polyline",
+        points: anchorPoints,
+        closed: false,
+        color: { r: 84, g: 98, b: 118, a: 180 },
+      },
+    ]
+    return frame(frameIndex, snapshot)
   })
 }
 

@@ -16,7 +16,7 @@ use picea::{debug::DebugAabb, prelude::*};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    scenario::{build_scenario, CompoundProvenance, RunConfig, ScenarioId},
+    scenario::{build_scenario, CompoundProvenance, RunConfig, ScenarioId, ScenarioRuntimeConfig},
     LabError, LabResult,
 };
 
@@ -76,6 +76,8 @@ pub struct RunManifest {
     pub run_id: String,
     pub scenario_id: ScenarioId,
     pub frame_count: usize,
+    #[serde(default)]
+    pub effective_runtime_config: ScenarioRuntimeConfig,
     pub final_state_hash: String,
     pub artifacts: Vec<ArtifactEntry>,
 }
@@ -576,11 +578,15 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
     fs::create_dir_all(&run_path)?;
 
     let mut scenario = build_scenario(config.scenario_id, &config.overrides)?;
-    let mut pipeline = SimulationPipeline::new(StepConfig::default());
+    let effective_runtime_config = scenario.effective_runtime_config.clone();
+    let mut pipeline = SimulationPipeline::new(effective_runtime_config.step);
     let mut frames = Vec::with_capacity(frame_count);
 
     for frame_index in 0..frame_count {
-        let report = pipeline.step(&mut scenario.world);
+        let mut report = pipeline.step(&mut scenario.world);
+        for _ in 1..effective_runtime_config.substeps_per_frame.max(1) {
+            report = pipeline.step(&mut scenario.world);
+        }
         frames.push(frame_record_from_step(
             &scenario.world,
             report,
@@ -599,6 +605,7 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
         run_id: run_id.clone(),
         scenario_id: config.scenario_id,
         frame_count,
+        effective_runtime_config,
         final_state_hash: final_state_hash.clone(),
         artifacts: artifact_entries(),
     };

@@ -969,6 +969,9 @@ function drawStackStability(
   const palette = ["#7fb069", "#56b6c2", "#f0c36b", "#d3869b", "#8f9aaa"]
 
   for (const body of dynamicBodies) {
+    const bodyColliders = frame.snapshot.colliders.filter((collider) => collider.body === body.handle)
+    drawBodyStabilityEnvelope(ctx, body, bodyColliders, camera, palette[body.handle % palette.length])
+
     const trail = previousFrames
       .map(
         (pastFrame) =>
@@ -1014,12 +1017,13 @@ function drawStackStability(
       ctx.setLineDash([3, 2])
       ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.arc(point.x, point.y, 4.5, 0, Math.PI * 2)
+      ctx.arc(point.x, point.y, Math.max(3.5, 0.055 * camera.scale), 0, Math.PI * 2)
       ctx.stroke()
       ctx.restore()
       continue
     }
-    const radius = 4 + Math.min(10, impulseEvidence.totalImpulse * 5)
+    const worldRadius = 0.055 + Math.min(0.22, Math.sqrt(impulseEvidence.totalImpulse) * 0.08)
+    const radius = Math.max(4, Math.min(54, worldRadius * camera.scale))
     const alpha = Math.max(0.18, Math.min(0.72, impulseEvidence.totalImpulse / 2.4))
     ctx.fillStyle = `rgba(240, 195, 107, ${alpha})`
     ctx.beginPath()
@@ -1034,6 +1038,34 @@ function drawStackStability(
     ctx.stroke()
     ctx.restore()
   }
+}
+
+function drawBodyStabilityEnvelope(
+  ctx: CanvasRenderingContext2D,
+  body: DebugBody,
+  colliders: DebugCollider[],
+  camera: Camera,
+  color: string,
+) {
+  const bounds = aggregateBounds(colliders)
+  if (!bounds) {
+    return
+  }
+  const speed = Math.hypot(body.linear_velocity.x, body.linear_velocity.y)
+  const angularSpeed = Math.abs(body.angular_velocity)
+  const motionScore = Math.min(1, speed * 1.8 + angularSpeed * 0.8)
+  const padding = 0.045 + motionScore * 0.08
+  const rect = screenRectFromAabb(inflateAabb(bounds, padding), camera)
+
+  ctx.save()
+  ctx.strokeStyle = body.sleeping ? "rgba(143, 154, 170, 0.76)" : withAlpha(color, 0.76)
+  ctx.fillStyle = body.sleeping ? "rgba(143, 154, 170, 0.08)" : withAlpha(color, 0.08 + motionScore * 0.13)
+  ctx.lineWidth = Math.max(1.1, Math.min(3.6, padding * camera.scale * 0.18))
+  ctx.setLineDash(body.sleeping ? [0.12 * camera.scale, 0.08 * camera.scale] : [])
+  roundRect(ctx, rect.left, rect.top, rect.width, rect.height, Math.min(10, 0.05 * camera.scale))
+  ctx.fill()
+  ctx.stroke()
+  ctx.restore()
 }
 
 function readContactImpulseEvidence(contact: DebugContact): {

@@ -25,6 +25,7 @@ export type OverlayPresetId =
   | "trajectoryFocus"
   | "perturbationReview"
   | "latticeGrid";
+export type ParameterSourceKind = "default" | "current" | "effective" | "dirty";
 export type LayerKey =
   | "grid"
   | "rulers"
@@ -195,7 +196,7 @@ const enMessages = {
   "timeline.sessionStatus":
     "session {sessionId} / retained [{start}, {end}) / buffered {buffered} / current {current}",
   "timeline.liveCadence": "live {actual}/{target} fps · {stepMs}ms",
-  "timeline.liveCadenceDegraded": "degraded {actual}/{target} fps · {stepMs}ms",
+  "timeline.liveCadenceDegraded": "slow frame {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadencePending": "live measuring",
   "diagnostics.empty": "No exported diagnostics for this frame.",
   "diagnostics.exported": "exported diagnostics",
@@ -307,6 +308,41 @@ const enMessages = {
   "run.gravityAppliedLive": "current gravity is applied to the live session",
   "run.gravityAppliedValue": "applied {x}, {y}",
   "run.gravityApplyError": "apply failed: {message}",
+  "run.sceneParameters": "scene parameters",
+  "run.parameterDefault": "default",
+  "run.parameterCurrent": "current run",
+  "run.parameterEffective": "effective",
+  "run.parameterDirty": "draft has unapplied changes",
+  "run.parameterResetDefaults": "Reset defaults",
+  "run.parameterRevertRunning": "Revert running config",
+  "run.parameterNoSchema": "This scene does not expose runtime parameters.",
+  "run.param.ball_count.label": "ball count",
+  "run.param.ball_count.help": "How many cradle balls are authored for the scene.",
+  "run.param.radius.label": "ball radius",
+  "run.param.radius.help": "Radius of each cradle ball.",
+  "run.param.string_length.label": "string length",
+  "run.param.string_length.help": "Distance from anchor point to ball center.",
+  "run.param.release_offset.label": "release offset",
+  "run.param.release_offset.help": "Initial horizontal offset of the released ball.",
+  "run.param.restitution.label": "restitution",
+  "run.param.restitution.help": "Bounciness used by cradle ball contacts.",
+  "run.param.friction.label": "friction",
+  "run.param.friction.help": "Tangential friction used by cradle ball contacts.",
+  "run.param.velocity_iterations.label": "velocity iterations",
+  "run.param.velocity_iterations.help": "Velocity solve passes per simulation step.",
+  "run.param.position_iterations.label": "position iterations",
+  "run.param.position_iterations.help": "Residual position-correction passes per step.",
+  "run.param.substeps_per_frame.label": "substeps per frame",
+  "run.param.substeps_per_frame.help": "How many solver substeps run inside one rendered frame.",
+  "run.param.contact_position_correction.label": "contact correction",
+  "run.param.contact_position_correction.help": "Contact position correction strategy.",
+  "run.param.joint_velocity_projection.label": "joint velocity projection",
+  "run.param.joint_velocity_projection.help": "Project joint radial velocity before the main solve.",
+  "run.option.enabled": "enabled",
+  "run.option.disabled": "disabled",
+  "run.option.conservative": "conservative",
+  "run.option.baumgarte": "baumgarte",
+  "run.option.ngs": "NGS",
   "perturbation.absoluteVelocityHelp":
     "Paused-only absolute velocity perturbation. This is not a continuous force, torque, or mouse joint control.",
   "perturbation.preview": "Preview",
@@ -614,7 +650,7 @@ const zhMessages: Record<MessageKey, string> = {
   "timeline.sessionStatus":
     "会话 {sessionId} / 保留 [{start}, {end}) / 已缓存 {buffered} / 当前 {current}",
   "timeline.liveCadence": "live {actual}/{target} fps · {stepMs}ms",
-  "timeline.liveCadenceDegraded": "降级 {actual}/{target} fps · {stepMs}ms",
+  "timeline.liveCadenceDegraded": "慢帧 {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadencePending": "live 测量中",
   "diagnostics.empty": "当前帧没有导出的诊断事实。",
   "diagnostics.exported": "导出诊断",
@@ -726,6 +762,41 @@ const zhMessages: Record<MessageKey, string> = {
   "run.gravityAppliedLive": "当前重力已应用到实时会话",
   "run.gravityAppliedValue": "已应用 {x}, {y}",
   "run.gravityApplyError": "应用失败：{message}",
+  "run.sceneParameters": "场景参数",
+  "run.parameterDefault": "默认值",
+  "run.parameterCurrent": "当前运行",
+  "run.parameterEffective": "生效值",
+  "run.parameterDirty": "草稿有未应用改动",
+  "run.parameterResetDefaults": "重置默认值",
+  "run.parameterRevertRunning": "回退到当前运行配置",
+  "run.parameterNoSchema": "当前场景没有暴露可调运行参数。",
+  "run.param.ball_count.label": "球数量",
+  "run.param.ball_count.help": "当前场景会创建多少个牛顿摆小球。",
+  "run.param.radius.label": "球半径",
+  "run.param.radius.help": "每个摆球的半径。",
+  "run.param.string_length.label": "绳长",
+  "run.param.string_length.help": "锚点到球心的距离。",
+  "run.param.release_offset.label": "释放偏移",
+  "run.param.release_offset.help": "被释放摆球的初始水平偏移。",
+  "run.param.restitution.label": "反弹系数",
+  "run.param.restitution.help": "摆球接触时使用的弹性系数。",
+  "run.param.friction.label": "摩擦系数",
+  "run.param.friction.help": "摆球接触时使用的切向摩擦。",
+  "run.param.velocity_iterations.label": "速度迭代",
+  "run.param.velocity_iterations.help": "每一步模拟的速度求解轮数。",
+  "run.param.position_iterations.label": "位置迭代",
+  "run.param.position_iterations.help": "每一步残余位置修正的轮数。",
+  "run.param.substeps_per_frame.label": "每帧子步数",
+  "run.param.substeps_per_frame.help": "一帧渲染内部会执行多少次求解子步。",
+  "run.param.contact_position_correction.label": "接触位置修正",
+  "run.param.contact_position_correction.help": "接触位置修正策略。",
+  "run.param.joint_velocity_projection.label": "关节速度投影",
+  "run.param.joint_velocity_projection.help": "在主求解前先投影关节径向速度。",
+  "run.option.enabled": "启用",
+  "run.option.disabled": "禁用",
+  "run.option.conservative": "保守",
+  "run.option.baumgarte": "baumgarte",
+  "run.option.ngs": "NGS",
   "perturbation.absoluteVelocityHelp":
     "这是 paused-only 的绝对速度扰动，不是连续力、扭矩或鼠标关节控制。",
   "perturbation.preview": "预览",
@@ -906,6 +977,10 @@ const scenarioMessages: Record<string, Record<Locale, Pick<ScenarioDescriptor, "
     "zh-CN": { name: "对齐矩阵堆叠 4x3", description: "4x3 对齐动态箱体矩阵，用作稳定矩阵形态的行为锁。" },
     "en-US": { name: "Aligned matrix stack 4x3", description: "An aligned 4x3 dynamic box matrix for stable matrix-form behavior locks." },
   },
+  newton_cradle: {
+    "zh-CN": { name: "牛顿摆", description: "五球悬挂碰撞场景，用于观察摆绳约束、接触传递和长时间动能包络。" },
+    "en-US": { name: "Newton cradle", description: "Five suspended bouncy balls for pendulum constraints, contact transfer, and long-window kinetic retention." },
+  },
   joint_anchor: {
     "zh-CN": { name: "世界锚点关节", description: "带约束线的离线关节锚点预览。" },
     "en-US": { name: "World anchor joint", description: "Offline joint anchor preview with a constraint line." },
@@ -913,7 +988,7 @@ const scenarioMessages: Record<string, Record<Locale, Pick<ScenarioDescriptor, "
   lattice_grid: {
     "zh-CN": {
       name: "刚体格点代理",
-      description: "由刚体节点和关节网格组成的代理场景，不是 true soft-body 求解器。",
+      description: "用许多刚体节点和距离关节近似网格形变，只是调试代理，不是 true soft-body 求解器。",
     },
     "en-US": {
       name: "Rigid-body lattice grid proxy",
@@ -949,8 +1024,8 @@ const entityKindLabels: Record<Locale, Record<EntityKind, string>> = {
 };
 
 const layerLabels: Record<Locale, Record<LayerKey, string>> = {
-  "zh-CN": { grid: "网格", rulers: "标尺", shapes: "形状", aabbs: "AABB", contacts: "接触点", velocities: "速度", trace: "轨迹", broadphaseTree: "宽阶段树", islands: "岛", sleep: "休眠", provenance: "来源", stackStability: "稳定性", lattice: "格点代理" },
-  "en-US": { grid: "Grid", rulers: "Rulers", shapes: "Shapes", aabbs: "AABBs", contacts: "Contacts", velocities: "Velocities", trace: "Trace", broadphaseTree: "Broadphase tree", islands: "Islands", sleep: "Sleep", provenance: "Provenance", stackStability: "Stack stability", lattice: "Lattice proxy" },
+  "zh-CN": { grid: "网格", rulers: "标尺", shapes: "形状", aabbs: "AABB", contacts: "接触点", velocities: "速度", trace: "轨迹", broadphaseTree: "宽阶段树", islands: "岛", sleep: "休眠", provenance: "来源", stackStability: "稳定性叠加", lattice: "刚体格点代理" },
+  "en-US": { grid: "Grid", rulers: "Rulers", shapes: "Shapes", aabbs: "AABBs", contacts: "Contacts", velocities: "Velocities", trace: "Trace", broadphaseTree: "Broadphase tree", islands: "Islands", sleep: "Sleep", provenance: "Provenance", stackStability: "Stability overlay", lattice: "Rigid-body lattice proxy" },
 };
 
 const sourceLabels: Record<Locale, Record<SourceKind, string>> = {
@@ -1047,6 +1122,9 @@ const dynamicValueLabels: Record<Locale, Record<string, string>> = {
     stale_preview_action: "预览结果已过期",
     body_patch_failed: "物体补丁应用失败",
     reused_action: "动作已被重复使用",
+    enabled: "启用",
+    conservative: "保守",
+    disabled: "禁用",
   },
   "en-US": {
     circle: "circle",
@@ -1118,8 +1196,26 @@ const dynamicValueLabels: Record<Locale, Record<string, string>> = {
     stale_preview_action: "stale preview action",
     body_patch_failed: "body patch failed",
     reused_action: "reused action",
+    enabled: "enabled",
+    conservative: "conservative",
+    disabled: "disabled",
   },
 };
+
+const parameterSourceLabels: Record<Locale, Record<ParameterSourceKind, string>> = {
+  "zh-CN": {
+    default: "默认值",
+    current: "当前运行",
+    effective: "生效值",
+    dirty: "未应用",
+  },
+  "en-US": {
+    default: "default",
+    current: "current",
+    effective: "effective",
+    dirty: "dirty",
+  },
+}
 
 export function t(locale: Locale, key: MessageKey, params?: Record<string, string | number>): string {
   let text = messages[locale][key];
@@ -1317,6 +1413,10 @@ export function actionLabel(locale: Locale, action: keyof (typeof actionLabels)[
   return actionLabels[locale][action] ?? action;
 }
 
+export function parameterSourceLabel(locale: Locale, source: ParameterSourceKind): string {
+  return parameterSourceLabels[locale][source] ?? source
+}
+
 export function booleanLabel(locale: Locale, value: boolean): string {
   return t(locale, value ? "common.true" : "common.false");
 }
@@ -1326,6 +1426,20 @@ export function dynamicValueLabel(locale: Locale, value: string | null | undefin
     return t(locale, "common.unknown");
   }
   return dynamicValueLabels[locale][value] ?? value;
+}
+
+export function scenarioParameterLabel(
+  locale: Locale,
+  key: string,
+  fallback?: string,
+): string {
+  const messageKey = `run.param.${key}.label` as MessageKey
+  return messages[locale][messageKey] ?? fallback ?? key
+}
+
+export function scenarioParameterHelp(locale: Locale, key: string): string {
+  const messageKey = `run.param.${key}.help` as MessageKey
+  return messages[locale][messageKey] ?? key
 }
 
 function safeLocalStorage(): Storage | null {

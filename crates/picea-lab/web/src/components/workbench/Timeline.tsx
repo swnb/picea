@@ -4,6 +4,7 @@ import { ClipboardCopy, Pause, Play, RotateCcw, SkipForward } from "lucide-react
 import { Input } from "../ui/input"
 import { PanelHeader } from "../ui/panel"
 import { Checkbox, Select, Slider, Tooltip } from "../ui/radix"
+import { ParameterPanel } from "./parameters/ParameterPanel"
 import {
   diagnosticMarkerLabel,
   diagnosticSeverityLabel,
@@ -28,6 +29,8 @@ import type {
   MissingEvidence,
   MissingEvidenceKind,
   PerfArtifact,
+  ScenarioDescriptor,
+  ScenarioParameterValue,
   SelectedEntity,
   WorkbenchLog,
 } from "../../types"
@@ -121,6 +124,11 @@ export function BottomTimeline({
   logs,
   frameCount,
   setFrameCount,
+  scenario,
+  sceneParamDraft,
+  defaultSceneParams,
+  runningSceneParams,
+  effectiveSceneParams,
   useCustomGravity,
   setUseCustomGravity,
   gravityVector,
@@ -133,6 +141,9 @@ export function BottomTimeline({
   onApplyGravity,
   onUndoGravity,
   onResetGravity,
+  onSceneParamChange,
+  onResetSceneParams,
+  onRevertRunningSceneParams,
   locale,
   source,
   status,
@@ -162,6 +173,11 @@ export function BottomTimeline({
   logs: WorkbenchLog[]
   frameCount: number
   setFrameCount: (value: number) => void
+  scenario: ScenarioDescriptor
+  sceneParamDraft: Record<string, ScenarioParameterValue>
+  defaultSceneParams: Record<string, ScenarioParameterValue>
+  runningSceneParams: Record<string, ScenarioParameterValue>
+  effectiveSceneParams: Record<string, ScenarioParameterValue> | null
   useCustomGravity: boolean
   setUseCustomGravity: (value: boolean) => void
   gravityVector: GravityVector
@@ -174,6 +190,9 @@ export function BottomTimeline({
   onApplyGravity: () => void
   onUndoGravity: () => void
   onResetGravity: () => void
+  onSceneParamChange: (key: string, value: ScenarioParameterValue) => void
+  onResetSceneParams: () => void
+  onRevertRunningSceneParams: () => void
   locale: Locale
   runMode: RunMode
   setRunMode: (value: RunMode) => void
@@ -516,64 +535,77 @@ export function BottomTimeline({
         aria-labelledby="bottom-panel-tab-run"
         className="min-h-0 flex-1 overflow-auto p-3 outline-none"
       >
-        <div className="grid max-w-2xl grid-cols-[140px_1fr] items-center gap-3">
-          <label className="text-sm text-lab-muted">
-            {t(locale, "run.frameCount")}
-          </label>
-          <Input
-            type="number"
-            min={1}
-            max={2000}
-            value={frameCount}
-            onChange={(event) =>
-              setFrameCount(Math.max(1, Number(event.target.value) || 1))
-            }
-          />
-          <label className="text-sm text-lab-muted">
-            {t(locale, "run.mode")}
-          </label>
-          <Select
-            value={runMode}
-            onValueChange={(value) => setRunMode(value as RunMode)}
-            ariaLabel={t(locale, "run.mode")}
-            items={[
-              {
-                value: "artifact_replay",
-                label: t(locale, "run.modeArtifact"),
-              },
-              {
-                value: "live_session",
-                label: t(locale, "run.modeLive"),
-              },
-            ]}
-          />
-          <label className="text-sm text-lab-muted">
-            {t(locale, "run.gravityOverride")}
-          </label>
-          <Checkbox
-            checked={useCustomGravity}
-            onCheckedChange={setUseCustomGravity}
-            label={t(locale, "run.sendOverride")}
-          />
-          <div className="self-start pt-1 text-sm text-lab-muted">
-            {t(locale, "run.gravityVector")}
+        <div className="grid max-w-3xl gap-4">
+          <div className="grid grid-cols-[140px_1fr] items-center gap-3">
+            <label className="text-sm text-lab-muted">
+              {t(locale, "run.frameCount")}
+            </label>
+            <Input
+              type="number"
+              min={1}
+              max={6000}
+              value={frameCount}
+              onChange={(event) =>
+                setFrameCount(Math.max(1, Number(event.target.value) || 1))
+              }
+            />
+            <label className="text-sm text-lab-muted">
+              {t(locale, "run.mode")}
+            </label>
+            <Select
+              value={runMode}
+              onValueChange={(value) => setRunMode(value as RunMode)}
+              ariaLabel={t(locale, "run.mode")}
+              items={[
+                {
+                  value: "artifact_replay",
+                  label: t(locale, "run.modeArtifact"),
+                },
+                {
+                  value: "live_session",
+                  label: t(locale, "run.modeLive"),
+                },
+              ]}
+            />
+            <label className="text-sm text-lab-muted">
+              {t(locale, "run.gravityOverride")}
+            </label>
+            <Checkbox
+              checked={useCustomGravity}
+              onCheckedChange={setUseCustomGravity}
+              label={t(locale, "run.sendOverride")}
+            />
+            <div className="self-start pt-1 text-sm text-lab-muted">
+              {t(locale, "run.gravityVector")}
+            </div>
+            <GravityDial
+              locale={locale}
+              enabled={useCustomGravity}
+              vector={gravityVector}
+              onEnabledChange={setUseCustomGravity}
+              onVectorChange={setGravityVector}
+              showNextRunHint={source !== "demo" || status !== "paused"}
+              appliedVector={appliedGravityVector}
+              liveApplyAvailable={source === "live" && sessionId != null}
+              canApply={canApplyGravity}
+              canUndo={canUndoGravity}
+              applyBusy={gravityPatchBusy}
+              applyError={gravityPatchError}
+              onApply={onApplyGravity}
+              onUndo={onUndoGravity}
+              onReset={onResetGravity}
+            />
           </div>
-          <GravityDial
+          <ParameterPanel
             locale={locale}
-            enabled={useCustomGravity}
-            vector={gravityVector}
-            onEnabledChange={setUseCustomGravity}
-            onVectorChange={setGravityVector}
-            showNextRunHint={source !== "demo" || status !== "paused"}
-            appliedVector={appliedGravityVector}
-            liveApplyAvailable={source === "live" && sessionId != null}
-            canApply={canApplyGravity}
-            canUndo={canUndoGravity}
-            applyBusy={gravityPatchBusy}
-            applyError={gravityPatchError}
-            onApply={onApplyGravity}
-            onUndo={onUndoGravity}
-            onReset={onResetGravity}
+            schema={scenario.parameter_schema ?? []}
+            values={sceneParamDraft}
+            defaultValues={defaultSceneParams}
+            runningValues={runningSceneParams}
+            effectiveValues={effectiveSceneParams}
+            onChange={onSceneParamChange}
+            onResetDefaults={onResetSceneParams}
+            onRevertRunning={onRevertRunningSceneParams}
           />
         </div>
       </div>
@@ -757,7 +789,7 @@ function LiveCadenceBadge({
       className={`rounded border px-2 py-0.5 font-mono tabular-nums ${
         status.degraded
           ? "border-lab-warn/60 bg-lab-warn/10 text-lab-warn"
-          : "border-lab-line bg-black/15 text-lab-muted"
+          : "border-lab-line bg-lab-panel2/70 text-lab-muted"
       }`}
     >
       {status.pending && status.actualFps == null

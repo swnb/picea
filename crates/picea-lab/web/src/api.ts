@@ -6,6 +6,7 @@ import type {
   ScenarioDescriptor,
   SessionControlResponse,
   SessionMode,
+  ScenarioParameterValue,
   SessionRecord,
   Vec2,
   VelocityPerturbationCommit,
@@ -43,6 +44,7 @@ export async function createSession(
   frameCount: number,
   mode: SessionMode,
   gravity?: [number, number] | null,
+  sceneParams?: Record<string, ScenarioParameterValue> | null,
   liveOptions?: {
     liveUnbounded: boolean;
     liveBufferCapacity: number;
@@ -61,6 +63,7 @@ export async function createSession(
       overrides: {
         frame_count: frameCount,
         gravity: gravity ?? undefined,
+        scene_params: sceneParams ?? undefined,
       },
     }),
   });

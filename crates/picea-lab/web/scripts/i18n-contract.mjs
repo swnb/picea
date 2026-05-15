@@ -30,6 +30,9 @@ const {
   messages,
   overlayPresetDescription,
   overlayPresetLabel,
+  parameterSourceLabel,
+  scenarioParameterHelp,
+  scenarioParameterLabel,
   scenarioGroupForId,
   scenarioGroupLabel,
   sourceLabel,
@@ -216,6 +219,39 @@ for (const locale of supportedLocales) {
   assert.equal(typeof messages[locale]["run.gravityAppliedLive"], "string");
   assert.equal(typeof messages[locale]["run.gravityAppliedValue"], "string");
   assert.equal(typeof messages[locale]["run.gravityApplyError"], "string");
+  assert.equal(typeof messages[locale]["run.sceneParameters"], "string");
+  assert.equal(typeof messages[locale]["run.parameterDefault"], "string");
+  assert.equal(typeof messages[locale]["run.parameterCurrent"], "string");
+  assert.equal(typeof messages[locale]["run.parameterEffective"], "string");
+  assert.equal(typeof messages[locale]["run.parameterDirty"], "string");
+  assert.equal(typeof messages[locale]["run.parameterResetDefaults"], "string");
+  assert.equal(typeof messages[locale]["run.parameterRevertRunning"], "string");
+  assert.equal(typeof messages[locale]["run.parameterNoSchema"], "string");
+  assert.equal(typeof messages[locale]["run.param.ball_count.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.ball_count.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.radius.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.radius.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.string_length.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.string_length.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.release_offset.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.release_offset.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.restitution.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.restitution.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.friction.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.friction.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.velocity_iterations.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.velocity_iterations.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.position_iterations.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.position_iterations.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.substeps_per_frame.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.substeps_per_frame.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.contact_position_correction.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.contact_position_correction.help"], "string");
+  assert.equal(typeof messages[locale]["run.param.joint_velocity_projection.label"], "string");
+  assert.equal(typeof messages[locale]["run.param.joint_velocity_projection.help"], "string");
+  assert.equal(typeof messages[locale]["run.option.disabled"], "string");
+  assert.equal(typeof messages[locale]["run.option.baumgarte"], "string");
+  assert.equal(typeof messages[locale]["run.option.ngs"], "string");
   assert.equal(typeof messages[locale]["panel.velocityPerturbation"], "string");
   assert.equal(typeof messages[locale]["panel.latticeProxy"], "string");
   assert.equal(typeof messages[locale]["timeline.lattice"], "string");
@@ -257,6 +293,12 @@ assert.equal(messages["en-US"]["tooltip.playTimeline"], "Resume current session"
 assert.equal(messages["en-US"]["tooltip.replayTimeline"], "Reset timeline to replay");
 assert.equal(messages["en-US"]["run.generatingArtifact"], "Generating artifact...");
 assert.equal(messages["en-US"]["run.startingLiveSession"], "Starting live session...");
+assert.equal(scenarioParameterLabel("en-US", "ball_count"), "ball count");
+assert.equal(scenarioParameterLabel("zh-CN", "ball_count"), "球数量");
+assert.equal(scenarioParameterHelp("en-US", "contact_position_correction"), "Contact position correction strategy.");
+assert.equal(scenarioParameterHelp("zh-CN", "contact_position_correction"), "接触位置修正策略。");
+assert.equal(parameterSourceLabel("en-US", "effective"), "effective");
+assert.equal(parameterSourceLabel("zh-CN", "effective"), "生效值");
 assert.equal(messages["en-US"]["run.modeArtifact"], "Generate artifact + replay");
 assert.equal(messages["en-US"]["run.modeLive"], "Live session");
 assert.equal(messages["zh-CN"]["tooltip.startRunScenario"], "启动新运行");
@@ -275,8 +317,8 @@ assert.equal(sourceLabel("zh-CN", "artifact"), "生成产物并回放");
 assert.equal(sourceLabel("zh-CN", "live"), "实时会话");
 assert.equal(layerLabel("zh-CN", "contacts"), "接触点");
 assert.equal(layerLabel("zh-CN", "provenance"), "来源");
-assert.equal(layerLabel("zh-CN", "stackStability"), "稳定性");
-assert.equal(layerLabel("zh-CN", "lattice"), "格点代理");
+assert.equal(layerLabel("zh-CN", "stackStability"), "稳定性叠加");
+assert.equal(layerLabel("zh-CN", "lattice"), "刚体格点代理");
 assert.equal(layerLabel("zh-CN", "grid"), "网格");
 assert.equal(layerLabel("zh-CN", "rulers"), "标尺");
 assert.equal(messages["en-US"]["evidence.trajectory"], "trajectory (Web-derived)");
@@ -404,7 +446,20 @@ assertLocalizedScenario(
   {
     id: "lattice_grid",
     name: "刚体格点代理",
-    description: "由刚体节点和关节网格组成的代理场景，不是 true soft-body 求解器。",
+    description: "用许多刚体节点和距离关节近似网格形变，只是调试代理，不是 true soft-body 求解器。",
+  },
+);
+assertLocalizedScenario(
+  "zh-CN",
+  {
+    id: "newton_cradle",
+    name: "Newton cradle",
+    description: "Five suspended bouncy balls.",
+  },
+  {
+    id: "newton_cradle",
+    name: "牛顿摆",
+    description: "五球悬挂碰撞场景，用于观察摆绳约束、接触传递和长时间动能包络。",
   },
 );
 assertLocalizedScenario(

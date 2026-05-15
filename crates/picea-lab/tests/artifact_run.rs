@@ -14,8 +14,10 @@ use picea::prelude::{
 use picea_lab::{
     instantiate_scene_fixture, run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact,
     DebugRenderFrame, DiagnosticMarkerKind, DiagnosticSeverity, DiagnosticSource, FrameRecord,
-    MissingEvidenceKind, RunConfig, RunManifest, RunResult, ScenarioId, SceneRecipeFixture,
+    MissingEvidenceKind, RunConfig, RunManifest, RunResult, ScenarioId, ScenarioOverrides,
+    SceneRecipeFixture,
 };
+use serde_json::json;
 
 const MATRIX_STACK_QUIET_WINDOW_START_FRAME: usize = 120;
 const MATRIX_STACK_PRESSURE_WINDOW_START_FRAME: usize = 12;
@@ -5735,6 +5737,367 @@ fn lattice_grid_artifacts_capture_joint_lattice_proxy_facts() {
         !render_first.islands.is_empty(),
         "debug render should preserve island facts for lattice proxy frames"
     );
+}
+
+#[test]
+fn newton_cradle_artifact_retains_first_cycle_kinetic_motion() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::NewtonCradle,
+            frame_count: 720,
+            run_id: Some("newton-cradle-first-cycle-kinetic".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("newton cradle run should write artifacts");
+
+    assert_eq!(run.manifest.scenario_id, ScenarioId::NewtonCradle);
+    assert_eq!(run.frames.len(), 720);
+    let first = run.frames.first().expect("first frame should exist");
+    assert_eq!(
+        first
+            .snapshot
+            .bodies
+            .iter()
+            .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+            .count(),
+        5,
+        "newton cradle should export five dynamic bobs"
+    );
+    assert_eq!(
+        first
+            .snapshot
+            .joints
+            .iter()
+            .filter(|joint| joint.kind == picea::debug::DebugJointKind::Distance)
+            .count(),
+        5,
+        "newton cradle should export one suspension joint per bob"
+    );
+
+    let first_transfer_peak = peak_dynamic_kinetic_energy(&run.frames[30..90]);
+    let first_return_peak = peak_dynamic_kinetic_energy(&run.frames[90..240]);
+    let later_cycle_peak = peak_dynamic_kinetic_energy(&run.frames[540..720]);
+    assert!(
+        first_transfer_peak > 0.2,
+        "newton cradle should convert the release into visible first-transfer kinetic motion, got {first_transfer_peak}"
+    );
+    assert!(
+        first_return_peak > 0.18 && later_cycle_peak > 0.05,
+        "newton cradle should keep visible kinetic motion through the first return: first_return_peak={first_return_peak}, later_cycle_peak={later_cycle_peak}"
+    );
+}
+
+#[test]
+fn newton_cradle_artifact_keeps_suspension_length_bound() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::NewtonCradle,
+            frame_count: 240,
+            run_id: Some("newton-cradle-suspension-bound".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("newton cradle run should write artifacts");
+
+    let max_length = max_debug_joint_length(&run.frames);
+    assert!(
+        max_length <= 1.36,
+        "newton cradle suspension should keep each bob near its 1.28u string length, got max_length={max_length}"
+    );
+}
+
+#[test]
+fn newton_cradle_artifact_keeps_suspension_velocity_tangent() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::NewtonCradle,
+            frame_count: 6000,
+            run_id: Some("newton-cradle-tangent-velocity".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("newton cradle run should write artifacts");
+
+    let radial_speed = max_distance_joint_radial_speed(&run.frames[360..6000]);
+    assert!(
+        radial_speed <= 0.08,
+        "distance-joint suspension should remove radial velocity so the bobs swing instead of pushing through the rope, got {radial_speed}"
+    );
+    let max_length = max_debug_joint_length(&run.frames);
+    let max_escape = max_dynamic_center_escape(&run.frames);
+    let late_window_peak = peak_dynamic_kinetic_energy(&run.frames[3000..6000]);
+    assert!(
+        max_length <= 1.42 && max_escape <= 3.5,
+        "newton cradle should keep all bobs visible and attached over the long window: max_length={max_length}, max_escape={max_escape}"
+    );
+    assert!(
+        late_window_peak >= 0.08,
+        "newton cradle should retain a visible kinetic envelope over the long window, got {late_window_peak}"
+    );
+}
+
+#[test]
+fn newton_cradle_artifact_releases_left_bob_and_transfers_to_right_bob() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::NewtonCradle,
+            frame_count: 360,
+            run_id: Some("newton-cradle-transfer-pattern".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("newton cradle run should write artifacts");
+
+    let first_frame_speeds = dynamic_body_speeds(run.frames.first().expect("first frame"));
+    assert!(
+        first_frame_speeds.iter().all(|speed| *speed <= 0.2),
+        "newton cradle should start from a raised release, not an injected horizontal velocity: {first_frame_speeds:?}"
+    );
+
+    let first_frame_y = dynamic_body_centers(run.frames.first().expect("first frame"))
+        .into_iter()
+        .map(|center| center.y())
+        .collect::<Vec<_>>();
+    assert!(
+        first_frame_y[0] < first_frame_y[1] - 0.12,
+        "the released left bob should start visibly raised above the middle bobs: {first_frame_y:?}"
+    );
+
+    let peak_speeds = peak_dynamic_body_speeds(&run.frames[38..85]);
+    let middle_peak = peak_speeds[1..4].iter().copied().fold(0.0, f32::max);
+    assert!(
+        peak_speeds[4] >= 0.8 && peak_speeds[4] >= middle_peak * 5.0,
+        "rightmost bob should carry the first post-impact swing while middle bobs mostly transmit impulse: peak_speeds={peak_speeds:?}"
+    );
+}
+
+#[test]
+fn newton_cradle_scene_params_affect_manifest_world_and_solver_iterations() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+    let mut scene_params = BTreeMap::new();
+    scene_params.insert("ball_count".to_owned(), json!(3));
+    scene_params.insert("radius".to_owned(), json!(0.16));
+    scene_params.insert("string_length".to_owned(), json!(1.1));
+    scene_params.insert("release_offset".to_owned(), json!(0.45));
+    scene_params.insert("restitution".to_owned(), json!(0.9));
+    scene_params.insert("friction".to_owned(), json!(0.05));
+    scene_params.insert("velocity_iterations".to_owned(), json!(4));
+    scene_params.insert("position_iterations".to_owned(), json!(7));
+    scene_params.insert("contact_position_correction".to_owned(), json!("disabled"));
+    scene_params.insert("joint_velocity_projection".to_owned(), json!(false));
+
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::NewtonCradle,
+            frame_count: 8,
+            run_id: Some("newton-cradle-scene-params".to_owned()),
+            overrides: ScenarioOverrides {
+                scene_params,
+                ..ScenarioOverrides::default()
+            },
+        },
+    )
+    .expect("newton cradle run with scene params should write artifacts");
+
+    assert_eq!(run.manifest.scenario_id, ScenarioId::NewtonCradle);
+    assert_eq!(
+        run.manifest
+            .effective_runtime_config
+            .step
+            .velocity_iterations,
+        4
+    );
+    assert_eq!(
+        run.manifest
+            .effective_runtime_config
+            .step
+            .position_iterations,
+        7
+    );
+    assert!(
+        !run.manifest
+            .effective_runtime_config
+            .step
+            .joint_velocity_projection
+    );
+    assert_eq!(
+        run.manifest.effective_runtime_config.scene_params["ball_count"],
+        json!(3)
+    );
+
+    let first = run.frames.first().expect("first frame should exist");
+    assert_eq!(
+        first
+            .snapshot
+            .bodies
+            .iter()
+            .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+            .count(),
+        3,
+        "scene_params.ball_count should change the authored bob count"
+    );
+    assert_eq!(
+        first
+            .snapshot
+            .joints
+            .iter()
+            .filter(|joint| joint.kind == picea::debug::DebugJointKind::Distance)
+            .count(),
+        3,
+        "scene_params.ball_count should change the suspension joint count"
+    );
+    assert_eq!(first.stats.velocity_iterations, 4);
+    assert_eq!(first.stats.position_iterations, 7);
+
+    let manifest: RunManifest = serde_json::from_slice(
+        &fs::read(run.path.join(ArtifactFile::Manifest.file_name()))
+            .expect("manifest should be readable"),
+    )
+    .expect("manifest should match schema");
+    assert_eq!(
+        manifest.effective_runtime_config,
+        run.manifest.effective_runtime_config
+    );
+}
+
+fn peak_dynamic_kinetic_energy(frames: &[FrameRecord]) -> f32 {
+    frames
+        .iter()
+        .map(|frame| {
+            frame
+                .snapshot
+                .bodies
+                .iter()
+                .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+                .map(|body| {
+                    let speed_squared = body.linear_velocity.x() * body.linear_velocity.x()
+                        + body.linear_velocity.y() * body.linear_velocity.y();
+                    0.5 * body.mass_properties.mass * speed_squared
+                        + 0.5
+                            * body.mass_properties.inertia
+                            * body.angular_velocity
+                            * body.angular_velocity
+                })
+                .sum::<f32>()
+        })
+        .fold(0.0, f32::max)
+}
+
+fn dynamic_body_centers(frame: &FrameRecord) -> Vec<picea::prelude::Vector> {
+    frame
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+        .map(|body| body.transform.translation)
+        .collect()
+}
+
+fn dynamic_body_speeds(frame: &FrameRecord) -> Vec<f32> {
+    frame
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+        .map(|body| body.linear_velocity.length())
+        .collect()
+}
+
+fn peak_dynamic_body_speeds(frames: &[FrameRecord]) -> Vec<f32> {
+    let body_count = frames
+        .first()
+        .map(dynamic_body_speeds)
+        .map(|speeds| speeds.len())
+        .unwrap_or(0);
+    let mut peaks = vec![0.0; body_count];
+    for frame in frames {
+        for (index, speed) in dynamic_body_speeds(frame).into_iter().enumerate() {
+            peaks[index] = f32::max(peaks[index], speed);
+        }
+    }
+    peaks
+}
+
+fn max_debug_joint_length(frames: &[FrameRecord]) -> f32 {
+    frames
+        .iter()
+        .flat_map(|frame| &frame.snapshot.joints)
+        .filter_map(|joint| {
+            let [start, end] = joint.anchors.as_slice() else {
+                return None;
+            };
+            let dx = end.x() - start.x();
+            let dy = end.y() - start.y();
+            Some((dx * dx + dy * dy).sqrt())
+        })
+        .fold(0.0, f32::max)
+}
+
+fn max_distance_joint_radial_speed(frames: &[FrameRecord]) -> f32 {
+    frames
+        .iter()
+        .flat_map(|frame| {
+            frame.snapshot.joints.iter().filter_map(move |joint| {
+                let [anchor, bob] = joint.anchors.as_slice() else {
+                    return None;
+                };
+                let [_, bob_handle] = joint.bodies.as_slice() else {
+                    return None;
+                };
+                let bob_body = frame
+                    .snapshot
+                    .bodies
+                    .iter()
+                    .find(|body| body.handle == *bob_handle)?;
+                let delta = *bob - *anchor;
+                let length = delta.length();
+                if length <= f32::EPSILON {
+                    return None;
+                }
+                let direction = delta / length;
+                Some(bob_body.linear_velocity.dot(direction).abs())
+            })
+        })
+        .fold(0.0, f32::max)
+}
+
+fn max_dynamic_center_escape(frames: &[FrameRecord]) -> f32 {
+    frames
+        .iter()
+        .flat_map(|frame| {
+            frame
+                .snapshot
+                .bodies
+                .iter()
+                .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
+                .map(|body| {
+                    body.transform
+                        .translation
+                        .x()
+                        .abs()
+                        .max(body.transform.translation.y().abs())
+                })
+        })
+        .fold(0.0, f32::max)
 }
 
 #[test]

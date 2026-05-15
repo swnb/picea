@@ -10,6 +10,7 @@ import {
 import type {
   FrameRecord,
   PerfArtifact,
+  ScenarioParameterValue,
   ScenarioDescriptor,
   SelectedEntity,
   WorkbenchLog,
@@ -73,6 +74,10 @@ export function WorkbenchLayout({
   logs,
   frameCount,
   setFrameCount,
+  sceneParamDraft,
+  defaultSceneParams,
+  runningSceneParams,
+  effectiveSceneParams,
   useCustomGravity,
   setUseCustomGravity,
   gravityVector,
@@ -85,6 +90,9 @@ export function WorkbenchLayout({
   onApplyGravity,
   onUndoGravity,
   onResetGravity,
+  onSceneParamChange,
+  onResetSceneParams,
+  onRevertRunningSceneParams,
   velocityPerturbation,
   onVelocityPerturbationDeltaChange,
   onVelocityPerturbationPreview,
@@ -130,6 +138,10 @@ export function WorkbenchLayout({
   logs: WorkbenchLog[]
   frameCount: number
   setFrameCount: (value: number) => void
+  sceneParamDraft: Record<string, ScenarioParameterValue>
+  defaultSceneParams: Record<string, ScenarioParameterValue>
+  runningSceneParams: Record<string, ScenarioParameterValue>
+  effectiveSceneParams: Record<string, ScenarioParameterValue> | null
   useCustomGravity: boolean
   setUseCustomGravity: (value: boolean) => void
   gravityVector: GravityVector
@@ -142,6 +154,9 @@ export function WorkbenchLayout({
   onApplyGravity: () => void
   onUndoGravity: () => void
   onResetGravity: () => void
+  onSceneParamChange: (key: string, value: ScenarioParameterValue) => void
+  onResetSceneParams: () => void
+  onRevertRunningSceneParams: () => void
   velocityPerturbation: VelocityPerturbationPanelState
   onVelocityPerturbationDeltaChange: (axis: "x" | "y", value: string) => void
   onVelocityPerturbationPreview: () => void
@@ -256,6 +271,11 @@ export function WorkbenchLayout({
                 logs={logs}
                 frameCount={frameCount}
                 setFrameCount={setFrameCount}
+                scenario={scenario}
+                sceneParamDraft={sceneParamDraft}
+                defaultSceneParams={defaultSceneParams}
+                runningSceneParams={runningSceneParams}
+                effectiveSceneParams={effectiveSceneParams}
                 useCustomGravity={useCustomGravity}
                 setUseCustomGravity={setUseCustomGravity}
                 gravityVector={gravityVector}
@@ -268,6 +288,9 @@ export function WorkbenchLayout({
                 onApplyGravity={onApplyGravity}
                 onUndoGravity={onUndoGravity}
                 onResetGravity={onResetGravity}
+                onSceneParamChange={onSceneParamChange}
+                onResetSceneParams={onResetSceneParams}
+                onRevertRunningSceneParams={onRevertRunningSceneParams}
                 locale={locale}
                 source={source}
                 status={status}

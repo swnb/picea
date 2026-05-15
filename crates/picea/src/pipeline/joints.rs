@@ -44,6 +44,19 @@ pub(crate) fn solve_joint_phase(
     stats
 }
 
+pub(crate) fn solve_joint_velocity_phase(
+    world: &mut World,
+    wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
+) {
+    let islands = crate::pipeline::sleep::build_active_solver_islands(
+        world,
+        std::iter::empty::<(BodyHandle, BodyHandle)>(),
+        wake_reasons,
+    );
+    let (batches, _) = joint_solve_batches(world, &islands);
+    world.apply_joint_velocity_constraints(batches, wake_reasons);
+}
+
 impl World {
     fn apply_joint_constraints(
         &mut self,
@@ -76,10 +89,11 @@ impl World {
                         let distance = delta.length();
                         let direction = normalized_or_x_axis(delta);
                         let error = distance - desc.rest_length;
-                        if error.abs() <= f32::EPSILON {
+                        let stiffness = desc.stiffness.max(0.0);
+                        if stiffness <= f32::EPSILON {
                             continue;
                         }
-                        let correction = direction * error * desc.stiffness.max(0.0) * dt;
+                        let correction = direction * error * stiffness * dt;
                         if !is_finite_vector(correction) {
                             numeric_warnings.push(NumericsWarningEvent {
                                 phase: "joint_solve".into(),
@@ -87,7 +101,14 @@ impl World {
                             });
                             continue;
                         }
-                        self.apply_body_pair_correction(body_a, body_b, correction, wake_reasons);
+                        if error.abs() > f32::EPSILON {
+                            self.apply_body_pair_position_correction_preserve_velocity(
+                                body_a,
+                                body_b,
+                                correction,
+                                wake_reasons,
+                            );
+                        }
                     }
                     JointSolverRow::WorldAnchor { desc, body_slot } => {
                         let body = batch.body_slots[body_slot];
@@ -105,8 +126,52 @@ impl World {
                             });
                             continue;
                         }
-                        self.apply_single_body_correction(body, correction, wake_reasons);
+                        self.apply_single_body_position_correction_preserve_velocity(
+                            body,
+                            correction,
+                            wake_reasons,
+                        );
                     }
+                }
+            }
+        }
+    }
+
+    fn apply_joint_velocity_constraints(
+        &mut self,
+        batches: Vec<JointSolveBatch>,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
+    ) {
+        for batch in batches {
+            for row in batch.rows {
+                if let JointSolverRow::Distance {
+                    desc,
+                    body_a_slot,
+                    body_b_slot,
+                } = row
+                {
+                    if desc.stiffness.max(0.0) <= f32::EPSILON {
+                        continue;
+                    }
+                    let body_a = batch.body_slots[body_a_slot];
+                    let body_b = batch.body_slots[body_b_slot];
+                    let pose_a = self
+                        .body_record(body_a)
+                        .expect("joint endpoints must stay live during step")
+                        .pose;
+                    let pose_b = self
+                        .body_record(body_b)
+                        .expect("joint endpoints must stay live during step")
+                        .pose;
+                    let anchor_a = pose_a.transform_point(desc.local_anchor_a);
+                    let anchor_b = pose_b.transform_point(desc.local_anchor_b);
+                    let direction = normalized_or_x_axis(anchor_b - anchor_a);
+                    self.apply_body_pair_radial_velocity_constraint(
+                        body_a,
+                        body_b,
+                        direction,
+                        wake_reasons,
+                    );
                 }
             }
         }

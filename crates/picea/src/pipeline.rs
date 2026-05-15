@@ -23,24 +23,74 @@ const DEFAULT_STEP_DT: FloatNum = 1.0 / 60.0;
 const DEFAULT_VELOCITY_ITERATIONS: u16 = 10;
 const DEFAULT_POSITION_ITERATIONS: u16 = 20;
 const DEFAULT_RESTITUTION_VELOCITY_THRESHOLD: FloatNum = 1.0;
+const DEFAULT_JOINT_VELOCITY_PROJECTION: bool = true;
+
+const fn default_step_dt() -> FloatNum {
+    DEFAULT_STEP_DT
+}
+
+const fn default_velocity_iterations() -> u16 {
+    DEFAULT_VELOCITY_ITERATIONS
+}
+
+const fn default_position_iterations() -> u16 {
+    DEFAULT_POSITION_ITERATIONS
+}
 
 const fn default_restitution_velocity_threshold() -> FloatNum {
     DEFAULT_RESTITUTION_VELOCITY_THRESHOLD
+}
+
+const fn default_enable_sleep() -> bool {
+    true
+}
+
+const fn default_contact_position_correction_policy() -> ContactPositionCorrectionPolicy {
+    ContactPositionCorrectionPolicy::Enabled
+}
+
+const fn default_joint_velocity_projection() -> bool {
+    DEFAULT_JOINT_VELOCITY_PROJECTION
+}
+
+/// Residual contact position-correction policy for the contact solver.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContactPositionCorrectionPolicy {
+    /// Preserve the legacy behavior: eligible contacts feed the residual
+    /// position pass after velocity solving.
+    #[default]
+    Enabled,
+    /// Keep correction for ordinary resting contacts, but skip high-restitution
+    /// contacts where positional pushback can inject visible extra bounce.
+    Conservative,
+    /// Disable the residual position pass for this step.
+    Disabled,
 }
 
 /// Stable step configuration owned by the simulation pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StepConfig {
     /// Fixed delta time for one simulation step.
+    #[serde(default = "default_step_dt")]
     pub dt: FloatNum,
     /// Number of velocity solver iterations requested from the world.
+    #[serde(default = "default_velocity_iterations")]
     pub velocity_iterations: u16,
     /// Number of position solver iterations requested from the world.
+    #[serde(default = "default_position_iterations")]
     pub position_iterations: u16,
     /// Closing speed below which contact restitution is treated as resting contact.
     #[serde(default = "default_restitution_velocity_threshold")]
     pub restitution_velocity_threshold: FloatNum,
+    /// Residual contact position-correction policy.
+    #[serde(default = "default_contact_position_correction_policy")]
+    pub contact_position_correction: ContactPositionCorrectionPolicy,
+    /// Enables the final distance-joint radial velocity projection pass.
+    #[serde(default = "default_joint_velocity_projection")]
+    pub joint_velocity_projection: bool,
     /// Enables or disables world sleep evaluation for this step.
+    #[serde(default = "default_enable_sleep")]
     pub enable_sleep: bool,
 }
 
@@ -51,6 +101,8 @@ impl Default for StepConfig {
             velocity_iterations: DEFAULT_VELOCITY_ITERATIONS,
             position_iterations: DEFAULT_POSITION_ITERATIONS,
             restitution_velocity_threshold: DEFAULT_RESTITUTION_VELOCITY_THRESHOLD,
+            contact_position_correction: ContactPositionCorrectionPolicy::Enabled,
+            joint_velocity_projection: DEFAULT_JOINT_VELOCITY_PROJECTION,
             enable_sleep: true,
         }
     }
@@ -308,7 +360,51 @@ mod tests {
         assert_eq!(config.velocity_iterations, 10);
         assert_eq!(config.position_iterations, 20);
         assert_eq!(config.restitution_velocity_threshold, 1.0);
+        assert_eq!(
+            config.contact_position_correction,
+            crate::pipeline::ContactPositionCorrectionPolicy::Enabled
+        );
+        assert!(config.joint_velocity_projection);
         assert!(config.enable_sleep);
+    }
+
+    #[test]
+    fn step_config_deserializes_new_solver_policy_with_defaults() {
+        let legacy_json = r#"{
+            "dt": 0.016666668,
+            "velocity_iterations": 4,
+            "position_iterations": 5,
+            "restitution_velocity_threshold": 0.25,
+            "enable_sleep": false
+        }"#;
+        let config: StepConfig =
+            serde_json::from_str(legacy_json).expect("legacy config should deserialize");
+        assert_eq!(
+            config.contact_position_correction,
+            crate::pipeline::ContactPositionCorrectionPolicy::Enabled
+        );
+        assert!(config.joint_velocity_projection);
+
+        let partial_json = r#"{
+            "contact_position_correction": "conservative",
+            "joint_velocity_projection": false
+        }"#;
+        let config: StepConfig =
+            serde_json::from_str(partial_json).expect("partial config should use defaults");
+        assert_eq!(config.dt, StepConfig::default().dt);
+        assert_eq!(
+            config.velocity_iterations,
+            StepConfig::default().velocity_iterations
+        );
+        assert_eq!(
+            config.position_iterations,
+            StepConfig::default().position_iterations
+        );
+        assert_eq!(
+            config.contact_position_correction,
+            crate::pipeline::ContactPositionCorrectionPolicy::Conservative
+        );
+        assert!(!config.joint_velocity_projection);
     }
 
     #[test]
@@ -397,6 +493,7 @@ mod tests {
             position_iterations: 4,
             restitution_velocity_threshold: 2.0,
             enable_sleep: false,
+            ..StepConfig::default()
         });
         let mut world = FakeWorld::with_outcomes([StepOutcome {
             revision: WorldRevision::from_raw(9),

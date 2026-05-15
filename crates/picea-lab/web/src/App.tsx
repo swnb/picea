@@ -67,7 +67,9 @@ import type {
   LiveFrameAuthority,
   LiveFrameSummary,
   PerfArtifact,
+  ScenarioParameterValue,
   ScenarioDescriptor,
+  ScenarioRuntimeConfig,
   SessionControlResponse,
   SelectedEntity,
   SessionRecord,
@@ -112,6 +114,8 @@ const EMPTY_FRAME: FrameRecord = {
 
 const LIVE_TARGET_FPS = 30
 const LIVE_TARGET_FRAME_MS = 1000 / LIVE_TARGET_FPS
+const LIVE_CADENCE_DEGRADED_RATIO = 1.15
+const LIVE_CADENCE_DEGRADED_STREAK = 3
 const LIVE_BUFFER_CAPACITY = 600
 const GRAVITY_EPSILON = 1.0e-3
 
@@ -136,6 +140,24 @@ function gravityVectorsMatch(left: GravityVector, right: GravityVector): boolean
 function frameGravityVector(frame: FrameRecord | null | undefined): GravityVector {
   const gravity = frame?.snapshot.meta.gravity
   return gravity ? { x: gravity.x, y: gravity.y } : DEFAULT_GRAVITY
+}
+
+function sceneParamValuesFromRuntimeConfig(
+  config: ScenarioRuntimeConfig | null | undefined,
+): Record<string, ScenarioParameterValue> {
+  return { ...(config?.scene_params ?? {}) }
+}
+
+function defaultSceneParamsForScenario(
+  scenario: ScenarioDescriptor | null | undefined,
+): Record<string, ScenarioParameterValue> {
+  const values = { ...(scenario?.default_runtime_config?.scene_params ?? {}) }
+  for (const descriptor of scenario?.parameter_schema ?? []) {
+    if (!(descriptor.key in values)) {
+      values[descriptor.key] = descriptor.default
+    }
+  }
+  return values
 }
 
 function liveAuthorityFromSummary(summary: LiveFrameSummary): LiveFrameAuthority {
@@ -629,6 +651,13 @@ export function App() {
     defaultTrajectorySettings,
   )
   const [canvasView, setCanvasView] = useState<CanvasDebugView | null>(null)
+  const [scenarioParamDrafts, setScenarioParamDrafts] = useState<
+    Record<string, Record<string, ScenarioParameterValue>>
+  >({
+    falling_box_contact: {},
+  })
+  const [scenarioEffectiveRuntimeConfigs, setScenarioEffectiveRuntimeConfigs] =
+    useState<Record<string, ScenarioRuntimeConfig | null>>({})
   const [useCustomGravity, setUseCustomGravity] = useState(false)
   const [gravityVector, setGravityVector] =
     useState<GravityVector>(DEFAULT_GRAVITY)
@@ -659,6 +688,7 @@ export function App() {
   const liveGenerationRef = useRef(0)
   const liveRequestTokenRef = useRef(0)
   const liveLoopGenerationRef = useRef(0)
+  const liveCadenceSlowFrameStreakRef = useRef(0)
   const perturbationRequestTokenRef = useRef(0)
 
   const retainedFrameStart = frames[0]?.frame_index ?? 0
@@ -685,15 +715,40 @@ export function App() {
     latestAuthoritativeLiveFrame != null &&
     frameIndex === latestAuthoritativeLiveFrame.frame_index &&
     currentFrame.state_hash === latestAuthoritativeLiveFrame.state_hash
-  const scenario = localizeScenario(
-    locale,
-    scenarios.find((entry) => entry.id === selectedScenario) ?? scenarios[0],
+  const selectedScenarioDescriptor =
+    scenarios.find((entry) => entry.id === selectedScenario) ?? scenarios[0]
+  const scenario = localizeScenario(locale, selectedScenarioDescriptor)
+  const defaultSceneParams = useMemo(
+    () => defaultSceneParamsForScenario(selectedScenarioDescriptor),
+    [selectedScenarioDescriptor],
   )
+  const runningRuntimeConfig =
+    scenarioEffectiveRuntimeConfigs[selectedScenario] ?? null
+  const runningSceneParams = useMemo(
+    () => sceneParamValuesFromRuntimeConfig(runningRuntimeConfig),
+    [runningRuntimeConfig],
+  )
+  const sceneParamDraft = scenarioParamDrafts[selectedScenario] ?? defaultSceneParams
 
   useEffect(() => {
     document.documentElement.lang = locale
     storeLocale(locale)
   }, [locale])
+
+  useEffect(() => {
+    if (!selectedScenarioDescriptor) {
+      return
+    }
+    const nextDefaults = defaultSceneParamsForScenario(selectedScenarioDescriptor)
+    setScenarioParamDrafts((current) =>
+      current[selectedScenarioDescriptor.id]
+        ? current
+        : {
+            ...current,
+            [selectedScenarioDescriptor.id]: nextDefaults,
+          },
+    )
+  }, [selectedScenarioDescriptor])
 
   useEffect(() => {
     let cancelled = false
@@ -747,7 +802,12 @@ export function App() {
       const stepMs = performance.now() - startedAt
       const nextDelayMs = Math.max(0, LIVE_TARGET_FRAME_MS - stepMs)
       const actualFps = 1000 / Math.max(LIVE_TARGET_FRAME_MS, stepMs)
-      const degraded = stepMs > LIVE_TARGET_FRAME_MS * 1.15
+      const slowFrame = stepMs > LIVE_TARGET_FRAME_MS * LIVE_CADENCE_DEGRADED_RATIO
+      liveCadenceSlowFrameStreakRef.current = slowFrame
+        ? liveCadenceSlowFrameStreakRef.current + 1
+        : 0
+      const degraded =
+        liveCadenceSlowFrameStreakRef.current >= LIVE_CADENCE_DEGRADED_STREAK
 
       setLiveCadence({
         targetFps: LIVE_TARGET_FPS,
@@ -762,6 +822,7 @@ export function App() {
         actualFps: Number(actualFps.toFixed(1)),
         stepMs: Number(stepMs.toFixed(1)),
         nextDelayMs: Number(nextDelayMs.toFixed(1)),
+        slowFrameStreak: liveCadenceSlowFrameStreakRef.current,
         degraded,
       })
 
@@ -775,6 +836,7 @@ export function App() {
     return () => {
       cancelled = true
       liveLoopGenerationRef.current += 1
+      liveCadenceSlowFrameStreakRef.current = 0
       if (playTimer.current !== null) {
         window.clearTimeout(playTimer.current)
         playTimer.current = null
@@ -964,6 +1026,8 @@ export function App() {
     const gravity = useCustomGravity
       ? ([gravityVector.x, gravityVector.y] as [number, number])
       : null
+    const sceneParams =
+      Object.keys(sceneParamDraft).length > 0 ? sceneParamDraft : null
 
     try {
       const session = await createSession(
@@ -971,12 +1035,14 @@ export function App() {
         frameCount,
         runMode,
         gravity,
+        sceneParams,
         {
           liveUnbounded: true,
           liveBufferCapacity: LIVE_BUFFER_CAPACITY,
         },
       )
       setSessionEpoch(session.session_epoch)
+      rememberScenarioRuntimeConfig(session)
       setAppliedGravityVector(
         useCustomGravity ? gravityVector : DEFAULT_GRAVITY,
       )
@@ -1142,6 +1208,7 @@ export function App() {
       if (!accepted) {
         return
       }
+      rememberScenarioRuntimeConfig(session)
       setSessionEpoch(session.session_epoch)
       if (nextFrame) {
         setAppliedGravityVector(frameGravityVector(nextFrame))
@@ -1273,6 +1340,7 @@ export function App() {
         return
       }
       setSessionEpoch(session.session_epoch)
+      rememberScenarioRuntimeConfig(session)
       pushLogs(
         log(
           "info",
@@ -1303,6 +1371,7 @@ export function App() {
     liveGenerationRef.current += 1
     liveRequestTokenRef.current = 0
     liveLoopGenerationRef.current += 1
+    liveCadenceSlowFrameStreakRef.current = 0
     liveStepInFlight.current = false
     liveHydrationInFlight.current = null
     setLiveCadence(idleLiveCadenceStatus())
@@ -1409,6 +1478,22 @@ export function App() {
     )
   }
 
+  function rememberScenarioRuntimeConfig(session: SessionRecord) {
+    if (!session.effective_runtime_config) {
+      return
+    }
+    const effectiveRuntimeConfig = session.effective_runtime_config
+    const effectiveSceneParams = session.effective_runtime_config?.scene_params ?? {}
+    setScenarioEffectiveRuntimeConfigs((current) => ({
+      ...current,
+      [session.scenario_id]: effectiveRuntimeConfig,
+    }))
+    setScenarioParamDrafts((current) => ({
+      ...current,
+      [session.scenario_id]: effectiveSceneParams,
+    }))
+  }
+
   function subscribeToEvents(nextSessionId: string) {
     try {
       const events = openSessionEvents(nextSessionId)
@@ -1435,7 +1520,18 @@ export function App() {
   }
 
   function changeScenario(nextScenario: string) {
+    const nextDescriptor =
+      scenarios.find((entry) => entry.id === nextScenario) ?? null
+    const nextDefaults = defaultSceneParamsForScenario(nextDescriptor)
     invalidateLiveResponses()
+    setScenarioParamDrafts((current) =>
+      current[nextScenario]
+        ? current
+        : {
+            ...current,
+            [nextScenario]: nextDefaults,
+          },
+    )
     setSelectedScenario(nextScenario)
     setFrames(makeDemoFrames(nextScenario, frameCount))
     setFrameIndex(0)
@@ -1445,6 +1541,36 @@ export function App() {
     setGravityUndoVector(null)
     setGravityPatchError(null)
     setSource("demo")
+  }
+
+  function updateScenarioParameter(
+    key: string,
+    value: ScenarioParameterValue,
+  ) {
+    setScenarioParamDrafts((current) => ({
+      ...current,
+      [selectedScenario]: {
+        ...(current[selectedScenario] ?? defaultSceneParams),
+        [key]: value,
+      },
+    }))
+  }
+
+  function resetScenarioParametersToDefaults() {
+    setScenarioParamDrafts((current) => ({
+      ...current,
+      [selectedScenario]: defaultSceneParams,
+    }))
+  }
+
+  function revertScenarioParametersToRunningConfig() {
+    setScenarioParamDrafts((current) => ({
+      ...current,
+      [selectedScenario]:
+        Object.keys(runningSceneParams).length > 0
+          ? runningSceneParams
+          : defaultSceneParams,
+    }))
   }
 
   async function handleControl(action: ControlAction) {
@@ -1513,6 +1639,7 @@ export function App() {
         return
       }
       setSessionEpoch(session.session_epoch)
+      rememberScenarioRuntimeConfig(session)
       pushLogs(
         log(
           "info",
@@ -1568,6 +1695,7 @@ export function App() {
       const result = await controlSession(activeSessionId, action)
       const session = result.session
       setSessionEpoch(session.session_epoch)
+      rememberScenarioRuntimeConfig(session)
       pushLogs(
         log(
           "info",
@@ -1636,6 +1764,7 @@ export function App() {
       if (rememberUndo) {
         setGravityUndoVector(previousApplied)
       }
+      rememberScenarioRuntimeConfig(result.session)
       setAppliedGravityVector(nextVector)
       setGravityVector(nextVector)
       applyLiveSessionFrame(result, guard)
@@ -2255,6 +2384,10 @@ export function App() {
       logs={logs}
       frameCount={frameCount}
       setFrameCount={setFrameCount}
+      sceneParamDraft={sceneParamDraft}
+      defaultSceneParams={defaultSceneParams}
+      runningSceneParams={runningSceneParams}
+      effectiveSceneParams={runningRuntimeConfig?.scene_params ?? null}
       useCustomGravity={useCustomGravity}
       setUseCustomGravity={setUseCustomGravity}
       gravityVector={gravityVector}
@@ -2267,6 +2400,9 @@ export function App() {
       onApplyGravity={() => void handleApplyGravityPatch()}
       onUndoGravity={() => void handleUndoGravityChange()}
       onResetGravity={handleResetGravityDraft}
+      onSceneParamChange={updateScenarioParameter}
+      onResetSceneParams={resetScenarioParametersToDefaults}
+      onRevertRunningSceneParams={revertScenarioParametersToRunningConfig}
       velocityPerturbation={velocityPerturbation}
       onVelocityPerturbationDeltaChange={(axis, value) => {
         if (axis === "x") {
