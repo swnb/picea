@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { Panel, PanelGroup } from "react-resizable-panels"
 
 import {
@@ -15,9 +16,11 @@ import type {
   SelectedEntity,
   WorkbenchLog,
 } from "../../types"
+import { cn } from "../../lib/utils"
 import { BottomTimeline } from "./Timeline"
 import { Inspector } from "./Inspector"
 import { ResizeHandle } from "./ResizeHandle"
+import { RunSettingsPanel } from "./RunSettingsPanel"
 import { SceneHierarchy } from "./SceneHierarchy"
 import { Toolbar } from "./Toolbar"
 import { WorldCanvas } from "./WorldCanvas"
@@ -34,6 +37,8 @@ import type {
   TrajectorySettings,
   VelocityPerturbationPanelState,
 } from "./types"
+
+type RightSidebarMode = "inspector" | "run"
 
 export function WorkbenchLayout({
   locale,
@@ -164,6 +169,22 @@ export function WorkbenchLayout({
   onControl: (action: ControlAction) => void
   onCopyDebugContext: () => void
 }) {
+  const [rightSidebarMode, setRightSidebarMode] = useState<RightSidebarMode>(
+    selectedEntity ? "inspector" : "run",
+  )
+
+  useEffect(() => {
+    setRightSidebarMode(selectedEntity ? "inspector" : "run")
+  }, [selectedEntity])
+
+  const rightSidebarModeSwitch = (
+    <RightSidebarModeSwitch
+      locale={locale}
+      mode={rightSidebarMode}
+      onModeChange={setRightSidebarMode}
+    />
+  )
+
   return (
     <div className="flex h-screen min-h-[720px] flex-col overflow-hidden bg-lab-canvas text-lab-text">
       <Toolbar
@@ -269,28 +290,6 @@ export function WorkbenchLayout({
                 frameIndex={frameIndex}
                 onFrameChange={onFrameChange}
                 logs={logs}
-                frameCount={frameCount}
-                setFrameCount={setFrameCount}
-                scenario={scenario}
-                sceneParamDraft={sceneParamDraft}
-                defaultSceneParams={defaultSceneParams}
-                runningSceneParams={runningSceneParams}
-                effectiveSceneParams={effectiveSceneParams}
-                useCustomGravity={useCustomGravity}
-                setUseCustomGravity={setUseCustomGravity}
-                gravityVector={gravityVector}
-                setGravityVector={setGravityVector}
-                appliedGravityVector={appliedGravityVector}
-                canApplyGravity={canApplyGravity}
-                canUndoGravity={canUndoGravity}
-                gravityPatchBusy={gravityPatchBusy}
-                gravityPatchError={gravityPatchError}
-                onApplyGravity={onApplyGravity}
-                onUndoGravity={onUndoGravity}
-                onResetGravity={onResetGravity}
-                onSceneParamChange={onSceneParamChange}
-                onResetSceneParams={onResetSceneParams}
-                onRevertRunningSceneParams={onRevertRunningSceneParams}
                 locale={locale}
                 source={source}
                 status={status}
@@ -306,8 +305,6 @@ export function WorkbenchLayout({
                 perfStatus={perfStatus}
                 controlBusy={status === "loading" || liveControlBusy}
                 liveCadence={liveCadence}
-                runMode={runMode}
-                setRunMode={onRunModeChange}
                 onPlay={() => onControl("play")}
                 onPause={() => onControl("pause")}
                 onStep={() => onControl("step")}
@@ -324,21 +321,102 @@ export function WorkbenchLayout({
           maxSize={34}
           className="min-w-[280px] border-l border-lab-line bg-lab-panel"
         >
-          <Inspector
-            frame={currentFrame}
-            frames={frames}
-            frameIndex={frameIndex}
-            selected={selectedDetails}
-            selectedEntity={selectedEntity}
-            trajectorySettings={trajectorySettings}
-            velocityPerturbation={velocityPerturbation}
-            onVelocityPerturbationDeltaChange={onVelocityPerturbationDeltaChange}
-            onVelocityPerturbationPreview={onVelocityPerturbationPreview}
-            onVelocityPerturbationSubmit={onVelocityPerturbationSubmit}
-            locale={locale}
-          />
+          {rightSidebarMode === "inspector" ? (
+            <Inspector
+              frame={currentFrame}
+              frames={frames}
+              frameIndex={frameIndex}
+              selected={selectedDetails}
+              selectedEntity={selectedEntity}
+              trajectorySettings={trajectorySettings}
+              velocityPerturbation={velocityPerturbation}
+              onVelocityPerturbationDeltaChange={
+                onVelocityPerturbationDeltaChange
+              }
+              onVelocityPerturbationPreview={onVelocityPerturbationPreview}
+              onVelocityPerturbationSubmit={onVelocityPerturbationSubmit}
+              locale={locale}
+              headerActions={rightSidebarModeSwitch}
+            />
+          ) : (
+            <RunSettingsPanel
+              locale={locale}
+              scenario={scenario}
+              frameCount={frameCount}
+              setFrameCount={setFrameCount}
+              runMode={runMode}
+              setRunMode={onRunModeChange}
+              source={source}
+              sessionId={sessionId}
+              status={status}
+              sceneParamDraft={sceneParamDraft}
+              defaultSceneParams={defaultSceneParams}
+              runningSceneParams={runningSceneParams}
+              effectiveSceneParams={effectiveSceneParams}
+              useCustomGravity={useCustomGravity}
+              setUseCustomGravity={setUseCustomGravity}
+              gravityVector={gravityVector}
+              setGravityVector={setGravityVector}
+              appliedGravityVector={appliedGravityVector}
+              canApplyGravity={canApplyGravity}
+              canUndoGravity={canUndoGravity}
+              gravityPatchBusy={gravityPatchBusy}
+              gravityPatchError={gravityPatchError}
+              onApplyGravity={onApplyGravity}
+              onUndoGravity={onUndoGravity}
+              onResetGravity={onResetGravity}
+              onSceneParamChange={onSceneParamChange}
+              onResetSceneParams={onResetSceneParams}
+              onRevertRunningSceneParams={onRevertRunningSceneParams}
+              headerActions={rightSidebarModeSwitch}
+            />
+          )}
         </Panel>
       </PanelGroup>
+    </div>
+  )
+}
+
+function RightSidebarModeSwitch({
+  locale,
+  mode,
+  onModeChange,
+}: {
+  locale: Locale
+  mode: RightSidebarMode
+  onModeChange: (mode: RightSidebarMode) => void
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label={`${t(locale, "panel.inspector")} / ${t(
+        locale,
+        "timeline.runSetup",
+      )}`}
+      className="flex shrink-0 items-center rounded-md border border-lab-line bg-black/20 p-0.5"
+    >
+      {(["inspector", "run"] as const).map((item) => {
+        const active = item === mode
+        return (
+          <button
+            key={item}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            className={cn(
+              "h-6 rounded px-2 text-[11px] font-medium tracking-normal whitespace-nowrap transition-colors",
+              active
+                ? "bg-lab-accent/15 text-lab-accent shadow-sm"
+                : "text-lab-muted hover:bg-white/5 hover:text-lab-text",
+            )}
+            onClick={() => onModeChange(item)}
+          >
+            {item === "inspector"
+              ? t(locale, "panel.inspector")
+              : t(locale, "timeline.runSetup")}
+          </button>
+        )
+      })}
     </div>
   )
 }

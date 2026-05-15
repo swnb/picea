@@ -9,6 +9,7 @@ const contractSources = [
   "../src/components/workbench/Toolbar.tsx",
   "../src/components/workbench/WorkbenchLayout.tsx",
   "../src/components/workbench/Timeline.tsx",
+  "../src/components/workbench/RunSettingsPanel.tsx",
   "../src/components/workbench/GravityDial.tsx",
   "../src/components/workbench/parameters/ParameterPanel.tsx",
   "../src/components/workbench/SceneHierarchy.tsx",
@@ -35,6 +36,14 @@ const overlayPresetSource =
   appSource.match(/function overlayPresetState[\s\S]*?\n}\n\nfunction selectTrajectoryContextMarkers/)?.[0] ?? "";
 const timelineSource = fs.readFileSync(
   new URL("../src/components/workbench/Timeline.tsx", import.meta.url),
+  "utf8",
+);
+const runSettingsSource = fs.readFileSync(
+  new URL("../src/components/workbench/RunSettingsPanel.tsx", import.meta.url),
+  "utf8",
+);
+const workbenchLayoutSource = fs.readFileSync(
+  new URL("../src/components/workbench/WorkbenchLayout.tsx", import.meta.url),
   "utf8",
 );
 const parameterPanelSource = fs.readFileSync(
@@ -254,19 +263,44 @@ assert.match(
   "Run settings should distinguish unapplied live gravity edits from replay-only next-run edits.",
 );
 assert.match(
-  timelineSource,
-  /id="bottom-panel-run"[\s\S]*className="[^"]*overflow-auto[^"]*"/,
-  "Run settings tab panel should scroll when the bottom panel is dragged shorter.",
+  runSettingsSource,
+  /export function RunSettingsPanel\(/,
+  "Run settings should be encapsulated behind a dedicated right-sidebar panel component.",
 );
 assert.match(
-  timelineSource,
+  runSettingsSource,
+  /<PanelHeader[^>]*>[\s\S]*timeline\.runSetup/,
+  "Run settings panel should keep its own localized right-sidebar header.",
+);
+assert.match(
+  runSettingsSource,
+  /max=\{6000\}/,
+  "Run settings panel should keep the long-run frame cap visible in the right sidebar.",
+);
+assert.match(
+  runSettingsSource,
   /<ParameterPanel[\s\S]*schema=\{scenario\.parameter_schema \?\? \[\]\}/,
-  "Timeline run settings should render the shared ParameterPanel using the selected scenario parameter schema.",
+  "Run settings panel should render the shared ParameterPanel using the selected scenario parameter schema.",
 );
 assert.match(
-  timelineSource,
+  runSettingsSource,
   /<GravityDial[\s\S]*\/>[\s\S]*<ParameterPanel/s,
-  "Scene parameter controls should live in the run-settings layout with GravityDial instead of a separate detached surface.",
+  "Scene parameter controls should live in the right-sidebar run-settings layout with GravityDial instead of a separate detached surface.",
+);
+assert.doesNotMatch(
+  timelineSource,
+  /panel="run"/,
+  "Bottom timeline should not keep a run-settings tab after moving runtime controls to the right sidebar.",
+);
+assert.doesNotMatch(
+  timelineSource,
+  /id="bottom-panel-run"/,
+  "Bottom timeline should not render a run-settings tab panel after the sidebar migration.",
+);
+assert.match(
+  workbenchLayoutSource,
+  /rightSidebarMode[\s\S]*<Inspector[\s\S]*<RunSettingsPanel/s,
+  "Workbench right sidebar should switch between Inspector and RunSettingsPanel.",
 );
 assert.match(
   parameterPanelSource,
@@ -1028,8 +1062,13 @@ assert.doesNotMatch(
 );
 assert.match(
   timelineSource,
-  /type BottomPanelId =[\s\S]*"timeline"[\s\S]*"logs"[\s\S]*"diagnostics"[\s\S]*"evidence"[\s\S]*"run"/,
+  /type BottomPanelId =[\s\S]*"timeline"[\s\S]*"logs"[\s\S]*"diagnostics"[\s\S]*"evidence"/,
   "Bottom timeline should keep its active panel in local primitive state outside Radix Tabs context.",
+);
+assert.doesNotMatch(
+  timelineSource,
+  /type BottomPanelId =[\s\S]*"run"/,
+  "Bottom timeline primitive panel ids should not include run settings after the sidebar migration.",
 );
 assert.match(
   timelineSource,

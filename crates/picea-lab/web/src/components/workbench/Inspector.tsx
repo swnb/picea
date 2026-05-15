@@ -49,6 +49,7 @@ export function Inspector({
   onVelocityPerturbationPreview,
   onVelocityPerturbationSubmit,
   locale,
+  headerActions,
 }: {
   frame: FrameRecord
   frames: FrameRecord[]
@@ -61,12 +62,20 @@ export function Inspector({
   onVelocityPerturbationDeltaChange: (axis: "x" | "y", value: string) => void
   onVelocityPerturbationPreview: () => void
   onVelocityPerturbationSubmit: () => void
+  headerActions?: ReactNode
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PanelHeader>
-        <PanelTitle>{t(locale, "panel.inspector")}</PanelTitle>
-        <Badge tone="warn">{t(locale, "panel.firstSliceFacts")}</Badge>
+      <PanelHeader className="gap-2">
+        <PanelTitle className="min-w-0 truncate">
+          {t(locale, "panel.inspector")}
+        </PanelTitle>
+        <div className="flex shrink-0 items-center gap-2">
+          {headerActions}
+          <Badge className="hidden 2xl:inline-flex" tone="warn">
+            {t(locale, "panel.firstSliceFacts")}
+          </Badge>
+        </div>
       </PanelHeader>
       <div className="min-h-0 flex-1 overflow-auto">
         <FrameSummaryStrip frame={frame} locale={locale} />
