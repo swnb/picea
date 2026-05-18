@@ -249,6 +249,24 @@ for (const locale of supportedLocales) {
   assert.equal(typeof messages[locale]["run.param.contact_position_correction.help"], "string");
   assert.equal(typeof messages[locale]["run.param.joint_velocity_projection.label"], "string");
   assert.equal(typeof messages[locale]["run.param.joint_velocity_projection.help"], "string");
+  for (const key of [
+    "columns",
+    "rows",
+    "box_width",
+    "box_height",
+    "gap_x",
+    "gap_y",
+    "layout",
+    "material",
+    "density",
+    "spacing_x",
+    "spacing_y",
+    "node_radius",
+    "constraint_profile",
+  ]) {
+    assert.equal(typeof messages[locale][`run.param.${key}.label`], "string");
+    assert.equal(typeof messages[locale][`run.param.${key}.help`], "string");
+  }
   assert.equal(typeof messages[locale]["run.option.disabled"], "string");
   assert.equal(typeof messages[locale]["run.option.baumgarte"], "string");
   assert.equal(typeof messages[locale]["run.option.ngs"], "string");
@@ -295,8 +313,11 @@ assert.equal(messages["en-US"]["run.generatingArtifact"], "Generating artifact..
 assert.equal(messages["en-US"]["run.startingLiveSession"], "Starting live session...");
 assert.equal(scenarioParameterLabel("en-US", "ball_count"), "ball count");
 assert.equal(scenarioParameterLabel("zh-CN", "ball_count"), "球数量");
+assert.equal(scenarioParameterLabel("zh-CN", "columns"), "列数");
+assert.equal(scenarioParameterLabel("zh-CN", "constraint_profile"), "约束档位");
 assert.equal(scenarioParameterHelp("en-US", "contact_position_correction"), "Contact position correction strategy.");
 assert.equal(scenarioParameterHelp("zh-CN", "contact_position_correction"), "接触位置修正策略。");
+assert.match(scenarioParameterHelp("en-US", "constraint_profile"), /Soft, balanced, or hard/);
 assert.equal(parameterSourceLabel("en-US", "effective"), "effective");
 assert.equal(parameterSourceLabel("zh-CN", "effective"), "生效值");
 assert.equal(messages["en-US"]["run.modeArtifact"], "Generate artifact + replay");

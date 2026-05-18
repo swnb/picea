@@ -7,8 +7,7 @@ Read these documents when you need to understand how the repository is structure
 ## Documents
 
 - `system-overview.md`: workspace, crate boundaries, core module ownership, and high-level dependency graph.
-- `runtime-pipeline.md`: archived `Scene::tick` runtime pipeline from the removed legacy engine path.
-- `collision-constraints.md`: archived collision/constraint architecture from the removed legacy engine path.
+- `legacy-scene-runtime.md`: merged archive for the removed `Scene` / `Context` runtime and collision/constraint path.
 
 ## Authority
 

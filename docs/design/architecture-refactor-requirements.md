@@ -151,7 +151,7 @@ Use separate locations for separate purposes:
 | Human/visual demos | `crates/picea/examples/` | Manual visual smoke and public usage examples. |
 | Performance benchmarks | `crates/picea/benches/` | Standard Cargo benchmark discovery. |
 | Benchmark result archives | `docs/perf/YYYY-MM-DD-*.md` or `docs/perf/results/*.json` | Keeps machine/commit/command/result evidence out of code. |
-| Debug/replay artifacts | shape in `docs/ai/debug-artifacts.md` | Shared trace/snapshot format for failures. |
+| Debug/replay artifacts | shape in `docs/ai/debug-playbook.md` | Shared trace/snapshot format for failures. |
 
 Do not use examples as the only acceptance gate. Examples should compile and remain useful, but architecture acceptance needs deterministic tests and benchmarks.
 

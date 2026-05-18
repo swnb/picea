@@ -15,6 +15,11 @@ This directory records design intent and future-facing engineering decisions.
 - `solver-island-ordering-contract.md`: M28 single-threaded island-local contact/joint ordering contract.
 - `performance-threshold-policy.md`: M29 benchmark baseline, warn/fail, and fallback policy.
 - `../public-beta.md`: M30 public beta surface, migration notes, examples, and final verification matrix.
+- `matrix-stack-stability-optimization-design.md`: D1 design for matrix-stack stability optimization order and solver boundaries.
+- `matrix-stack-stability-acceptance.md`: D2 acceptance gates for stack and matrix-stack stability evidence.
+- `stack-4-contact-block-solve-stability-design.md`: design note for the narrow `stack_4` block-solve stability guard.
+- `dense-pressure-position-row-architecture.md`: completed dense pressure / pseudo-position / position-row architecture record.
+- `scene-runtime-config-and-parameter-ui-design.md`: scene-owned runtime config and parameter UI architecture.
 - `architecture-refactor-requirements.md`: archived legacy `Scene`-path refactor requirements; not current default routing.
 
 Design docs describe the intended direction. When implementing, still verify against current code and milestone gates.

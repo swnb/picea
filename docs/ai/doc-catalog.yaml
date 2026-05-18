@@ -5,63 +5,36 @@ documents:
   authority: high
   status: active
   owner: ai-context
-  applies_to: [all]
+  applies_to: [all, rules, authority, commands]
   keywords: [rtk, navigation, milestone, dirty, authority]
-  last_reviewed: 2026-04-20
+  last_reviewed: 2026-05-17
 - path: README.md
   title: Picea User Entry
   kind: module
   authority: medium
   status: active
   owner: project
-  applies_to: [onboarding, current-routing, usage, workspace, validation, dependency-graph]
-  keywords: [readme, quick-start, public-beta, routing, lib-surface, workspace, dependency-graph, tests]
-  last_reviewed: 2026-05-03
-- path: docs/public-beta.md
-  title: Picea Public Beta Guide
-  kind: module
-  authority: medium
-  status: active
-  owner: project
-  applies_to: [onboarding, public-beta, migration, examples, validation, picea-lab]
-  keywords: [public-beta, quick-start, world, simulation-pipeline, query, debug-snapshot, recipe, lab, migration, verification]
-  last_reviewed: 2026-05-03
-- path: crates/picea/README.md
-  title: Picea Core Crate Entry
-  kind: module
-  authority: medium
-  status: active
-  owner: picea-core
-  applies_to: [core, crate, world, body, collider, joint, pipeline, query, debug]
-  keywords: [readme, core-crate, public-beta, world, pipeline, query, debug, recipe, tests, examples]
-  last_reviewed: 2026-05-03
-- path: crates/macro-tools/README.md
-  title: Macro Tools Crate Entry
-  kind: module
-  authority: medium
-  status: active
-  owner: macro-tools
-  applies_to: [proc-macro, workspace, standalone, accessors, builder, deref]
-  keywords: [readme, macro-tools, proc-macro, standalone, accessors, builder, deref]
-  last_reviewed: 2026-04-23
+  applies_to: [onboarding, usage, workspace, validation, dependency-graph]
+  keywords: [readme, quick-start, public-beta, routing, tests, picea-lab-web]
+  last_reviewed: 2026-05-17
 - path: docs/ai/index.md
   title: AI Route Index
   kind: module
   authority: high
   status: active
   owner: ai-context
-  applies_to: [all, triage, routing, current-facts]
-  keywords: [route, questions, module, current-facts, dependency-graph, verification, docs]
-  last_reviewed: 2026-04-28
+  applies_to: [all, triage, routing, progressive-disclosure]
+  keywords: [route, question-type, current-facts, status, deprecated, frozen]
+  last_reviewed: 2026-05-17
 - path: docs/ai/repo-map.md
   title: Repo Map
   kind: module
   authority: high
   status: active
   owner: ai-context
-  applies_to: [architecture, debugging, implementation, workspace, public-modules]
-  keywords: [algo, body, collider, debug, events, handles, joint, world, pipeline, query, solver, math, dependency-graph]
-  last_reviewed: 2026-04-28
+  applies_to: [architecture, modules, implementation, validation]
+  keywords: [world, pipeline, solver, query, picea-lab, picea-lab-web, macro-tools]
+  last_reviewed: 2026-05-17
 - path: docs/ai/doc-catalog.yaml
   title: AI Document Catalog
   kind: module
@@ -69,152 +42,17 @@ documents:
   status: active
   owner: ai-context
   applies_to: [routing, docs, freshness, authority]
-  keywords: [catalog, metadata, authority, freshness, routing, validation]
-  last_reviewed: 2026-04-29
-- path: docs/architecture/README.md
-  title: Architecture Docs Index
-  kind: architecture
+  keywords: [catalog, metadata, authority, status, freshness, validation]
+  last_reviewed: 2026-05-17
+- path: docs/ai/evals.md
+  title: Picea AI Evals
+  kind: eval
   authority: high
   status: active
-  owner: architecture
-  applies_to: [architecture, diagrams, module-boundaries]
-  keywords: [architecture, diagrams, overview, runtime, collision]
-  last_reviewed: 2026-04-20
-- path: docs/architecture/system-overview.md
-  title: System Overview
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [workspace, crates, module-boundaries, public-modules]
-  keywords: [workspace, crate, algo, body, collider, events, handles, joint, module, dependency-graph, proc-macro]
-  last_reviewed: 2026-04-23
-- path: docs/architecture/runtime-pipeline.md
-  title: Legacy Scene Runtime Pipeline
-  kind: architecture
-  authority: high
-  status: deprecated
-  owner: architecture
-  applies_to: [archive, legacy-scene, fixed-step-history, runtime]
-  keywords: [archive, scene, tick, fixed-dt, substep, pipeline]
-  last_reviewed: 2026-04-23
-- path: docs/architecture/collision-constraints.md
-  title: Legacy Collision And Constraints
-  kind: architecture
-  authority: high
-  status: deprecated
-  owner: architecture
-  applies_to: [archive, legacy-scene, collision, constraints, manifold, warm-start]
-  keywords: [archive, scene, broadphase, narrowphase, contact-key, manifold, lambda]
-  last_reviewed: 2026-04-23
-- path: docs/design/README.md
-  title: Design Docs Index
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [design, roadmap, decisions]
-  keywords: [design, intent, future-work, decisions, public-beta]
-  last_reviewed: 2026-05-03
-- path: docs/design/engine-design.md
-  title: Engine Design
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [engine, runtime, module-design, extension-points]
-  keywords: [world, simulation-pipeline, debug-snapshot, goals, non-goals, ownership, invariants]
-  last_reviewed: 2026-04-25
-- path: docs/design/physics-engine-upgrade-technical-plan.md
-  title: Physics Engine Upgrade Technical Plan
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [engine, physics-upgrade, broadphase, narrowphase, solver, sleep, ccd, api, performance]
-  keywords: [post-m10, post-m14, post-m15, post-m20, post-m22, post-m30, dynamic-aabb-tree, sat, gjk, vclip, manifold, sequential-impulse, active-island-solver, dense-island-execution, ccd-generalization, performance-substrate, performance-data-path, shape-cache, query-reuse, ergonomics, visualization, tree-visualization, island-visualization, scene-schema, public-distance-query, shape-query, compound-authoring, concave-authoring, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30]
-  last_reviewed: 2026-04-28
-- path: docs/design/debug-observability-design.md
-  title: Debug Observability Design
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [debugging, observability, trace, artifacts, world, pipeline]
-  keywords: [trace, debug-render, repro, snapshot, step-report, world-event, observability]
-  last_reviewed: 2026-04-24
-- path: docs/design/picea-lab-observability-architecture.md
-  title: Picea Lab Observability Architecture
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [observability, visualization, benchmarks, artifacts, viewer]
-  keywords: [picea-lab, artifact-capture, debug-render, criterion, viewer, perf]
-  last_reviewed: 2026-04-24
-- path: docs/design/performance-stability-diagnostics-contract.md
-  title: Performance And Stack Stability Diagnostics Contract
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [observability, performance, stack-stability, artifacts, picea-lab-web, diagnostics]
-  keywords: [performance, stability, diagnostics, frame-diagnostics, source-label, missing-evidence, counter-delta, copy-debug-context]
-  last_reviewed: 2026-05-06
-- path: docs/design/stack-stability-repro-diagnostics.md
-  title: Stack Stability Repro Diagnostics
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [stack-stability, first-bad-frame, solver-handoff, diagnostics, picea-lab]
-  keywords: [stack_4, stack-stability-tower, first-bad-frame, solver-row-spike, penetration-spike, contact-churn, missing-evidence, handoff]
-  last_reviewed: 2026-05-06
-- path: docs/design/picea-lab-live-session-semantics.md
-  title: Picea Lab Live Session Semantics
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [live-session, patch, transaction, reset, query-sync, handle-invalidation, picea-lab]
-  keywords: [m25, live-session, reset-time-override, running-world-patch, transaction, handle-invalidation, query-sync, provenance]
-  last_reviewed: 2026-05-03
-- path: docs/design/deformable-body-roadmap.md
-  title: Deformable Body Roadmap
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [soft-body, particle, cloth, deformable-body, deformable-mesh, mesh-topology, future-work]
-  keywords: [soft-body, deformable-body, particle, cloth, FEM, XPBD, PBD, mesh-topology, runtime-topology, rigid-body-lattice, lattice-proxy, debug-snapshot, artifact-schema, picea-lab-web, m39]
-  last_reviewed: 2026-05-05
-- path: docs/design/solver-island-ordering-contract.md
-  title: Solver Island Ordering Contract
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [solver, island, ordering, contacts, joints, sleep, warm-start]
-  keywords: [m28, island, solver-ordering, contact-rows, joint-rows, dense-slots, sleep, wake, warm-start]
-  last_reviewed: 2026-05-03
-- path: docs/design/performance-threshold-policy.md
-  title: Performance Threshold Policy
-  kind: architecture
-  authority: high
-  status: active
-  owner: architecture
-  applies_to: [benchmarks, performance, thresholds, baseline, ci, local-validation]
-  keywords: [m29, performance-threshold, criterion, baseline, warn, fail, query-heavy, broadphase, stack, ccd, api-batch]
-  last_reviewed: 2026-05-03
-- path: docs/design/architecture-refactor-requirements.md
-  title: Architecture Refactor Requirements
-  kind: architecture
-  authority: high
-  status: deprecated
-  owner: architecture
-  applies_to: [archive, legacy-scene, architecture, refactor, acceptance, benchmarks, examples]
-  keywords: [archive, legacy-scene, contact-manager, solver-world, shape-proxy, benchmark, examples]
-  last_reviewed: 2026-04-24
+  owner: ai-context
+  applies_to: [repo-understanding, routing, debug, readiness, freshness]
+  keywords: [eval, benchmark, routing, expected-sources, pass-criteria]
+  last_reviewed: 2026-05-17
 - path: docs/ai/skill-candidates.md
   title: Repository Skills
   kind: module
@@ -222,8 +60,18 @@ documents:
   status: active
   owner: ai-context
   applies_to: [skills, workflow, governance]
-  keywords: [skill, repository-skill, doc-routing, milestone-runner]
-  last_reviewed: 2026-04-24
+  keywords: [skill, doc-routing, milestone-runner, promotion]
+  last_reviewed: 2026-05-17
+- path: docs/ai/debug-playbook.md
+  title: Picea Debug Playbook
+  kind: runbook
+  authority: high
+  status: active
+  owner: ai-context
+  applies_to: [debugging, regression, reproduction, verification, artifacts]
+  keywords: [debug, repro, fixed-dt, behavior-lock, trace, snapshot, verification]
+  last_reviewed: 2026-05-17
+
 - path: .agents/skills/picea-doc-routing/SKILL.md
   title: Picea Doc Routing Skill
   kind: skill
@@ -232,7 +80,7 @@ documents:
   owner: ai-context
   applies_to: [docs, routing, ai-context, skills]
   keywords: [skill, doc-routing, AGENTS, repo-map, doc-catalog]
-  last_reviewed: 2026-04-20
+  last_reviewed: 2026-05-17
 - path: .agents/skills/picea-milestone-runner/SKILL.md
   title: Picea Milestone Runner Skill
   kind: skill
@@ -241,43 +89,218 @@ documents:
   owner: ai-context
   applies_to: [milestone, implementation, validation, review]
   keywords: [skill, milestone, behavior-lock, gates, supervisor]
-  last_reviewed: 2026-04-28
-- path: docs/ai/debug-playbook.md
-  title: Picea Debug Playbook
-  kind: runbook
+  last_reviewed: 2026-05-17
+
+- path: docs/public-beta.md
+  title: Picea Public Beta Guide
+  kind: module
   authority: high
   status: active
-  owner: ai-context
-  applies_to: [debugging, regression, reproduction, verification, world, pipeline]
-  keywords: [debug, repro, fixed-dt, behavior-lock, world, pipeline, review]
-  last_reviewed: 2026-04-24
-- path: docs/ai/debug-artifacts.md
-  title: Picea Debug Artifacts
-  kind: runbook
+  owner: project
+  applies_to: [onboarding, public-beta, migration, examples, validation]
+  keywords: [public-beta, world, simulation-pipeline, query, debug-snapshot, recipe]
+  last_reviewed: 2026-05-17
+- path: crates/picea/README.md
+  title: Picea Core Crate Entry
+  kind: module
+  authority: medium
+  status: active
+  owner: picea-core
+  applies_to: [core, crate, public-api]
+  keywords: [core-crate, world, pipeline, query, debug, recipe, tests]
+  last_reviewed: 2026-05-17
+- path: crates/macro-tools/README.md
+  title: Macro Tools Crate Entry
+  kind: module
+  authority: medium
+  status: active
+  owner: macro-tools
+  applies_to: [proc-macro, workspace, standalone]
+  keywords: [macro-tools, proc-macro, accessors, builder, deref]
+  last_reviewed: 2026-05-17
+
+- path: docs/architecture/README.md
+  title: Architecture Docs Index
+  kind: architecture
   authority: high
   status: active
-  owner: ai-context
-  applies_to: [debugging, trace, snapshot, visualization]
-  keywords: [trace-jsonl, repro, snapshot, contact-key, lambda, sleep]
-  last_reviewed: 2026-04-20
-- path: docs/ai/evals.md
-  title: Picea AI Evals
-  kind: eval
+  owner: architecture
+  applies_to: [architecture, diagrams, module-boundaries]
+  keywords: [architecture, overview, current, legacy]
+  last_reviewed: 2026-05-17
+- path: docs/architecture/system-overview.md
+  title: System Overview
+  kind: architecture
   authority: high
   status: active
-  owner: ai-context
-  applies_to: [repo-understanding, routing, debug, readiness, freshness, milestone]
-  keywords: [eval, benchmark, routing, pass-criteria, expected-sources, world, m23, m24, acceptance-criteria]
-  last_reviewed: 2026-04-29
-- path: docs/plans/2026-04-18-picea-physics-engine-milestones.md
-  title: Picea Physics Engine Milestones Archive
-  kind: plan
-  authority: high
+  owner: architecture
+  applies_to: [workspace, crates, module-boundaries, dependency-graph]
+  keywords: [workspace, crate, world, pipeline, picea-lab, macro-tools]
+  last_reviewed: 2026-05-17
+- path: docs/architecture/legacy-scene-runtime.md
+  title: Legacy Scene Runtime Archive
+  kind: architecture
+  authority: low
   status: deprecated
-  owner: supervisor
-  applies_to: [milestone, scope, acceptance, archive, history]
-  keywords: [archive, milestone, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, scene-history, wasm-history]
-  last_reviewed: 2026-04-23
+  owner: architecture
+  applies_to: [archive, legacy-scene, legacy-context, historical-design]
+  keywords: [archive, scene, context, tick, collision-constraints, picea-web, wasm]
+  last_reviewed: 2026-05-17
+
+- path: docs/design/README.md
+  title: Design Docs Index
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [design, roadmap, decisions]
+  keywords: [design, intent, future-work, decisions]
+  last_reviewed: 2026-05-17
+- path: docs/design/engine-design.md
+  title: Engine Design
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [engine, runtime, module-design, extension-points]
+  keywords: [world, simulation-pipeline, debug-snapshot, goals, invariants]
+  last_reviewed: 2026-05-17
+- path: docs/design/physics-engine-upgrade-technical-plan.md
+  title: Physics Engine Upgrade Technical Plan
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [engine, physics-upgrade, broadphase, narrowphase, solver, ccd, api]
+  keywords: [dynamic-aabb-tree, gjk, ccd, dense-island, performance, m21, m22, m30]
+  last_reviewed: 2026-05-17
+- path: docs/design/debug-observability-design.md
+  title: Debug Observability Design
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [debugging, observability, trace, artifacts, world, pipeline]
+  keywords: [trace, debug-render, repro, snapshot, step-report, world-event]
+  last_reviewed: 2026-05-17
+- path: docs/design/picea-lab-observability-architecture.md
+  title: Picea Lab Observability Architecture
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [observability, visualization, benchmarks, artifacts]
+  keywords: [picea-lab, artifact-capture, debug-render, criterion, viewer]
+  last_reviewed: 2026-05-17
+- path: docs/design/performance-stability-diagnostics-contract.md
+  title: Performance And Stack Stability Diagnostics Contract
+  kind: contract
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [observability, performance, stack-stability, artifacts, picea-lab-web]
+  keywords: [frame-diagnostics, source-label, missing-evidence, counter-delta]
+  last_reviewed: 2026-05-17
+- path: docs/design/stack-stability-repro-diagnostics.md
+  title: Stack Stability Repro Diagnostics
+  kind: contract
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [stack-stability, first-bad-frame, solver-handoff, diagnostics]
+  keywords: [stack_4, solver-row-spike, penetration-spike, contact-churn]
+  last_reviewed: 2026-05-17
+- path: docs/design/matrix-stack-stability-optimization-design.md
+  title: Matrix Stack Stability Optimization Design
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [matrix-stack, stack-stability, solver, contact-persistence]
+  keywords: [matrix-stack, warm-start, position-correction, row-ordering, sleep]
+  last_reviewed: 2026-05-17
+- path: docs/design/matrix-stack-stability-acceptance.md
+  title: Matrix Stack Stability Acceptance
+  kind: contract
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [matrix-stack, stack-stability, acceptance, browser-acceptance]
+  keywords: [stack_4, matrix_stack, hard-gates, stress-gates, quiet-window]
+  last_reviewed: 2026-05-17
+- path: docs/design/stack-4-contact-block-solve-stability-design.md
+  title: Stack 4 Contact Block Solve Stability Design
+  kind: architecture
+  authority: medium
+  status: draft
+  owner: architecture
+  applies_to: [stack_4, block-solve, solver, stability]
+  keywords: [stack_4, block-solve, warm-start, contact-churn, behavior-lock]
+  last_reviewed: 2026-05-17
+- path: docs/design/dense-pressure-position-row-architecture.md
+  title: Dense Pressure Position Row Architecture
+  kind: architecture
+  authority: high
+  status: frozen
+  owner: architecture
+  applies_to: [solver, dense-pressure, position-row, stack-stability]
+  keywords: [dense-pressure, pseudo-position, position-row, pressure-budget]
+  last_reviewed: 2026-05-17
+- path: docs/design/picea-lab-live-session-semantics.md
+  title: Picea Lab Live Session Semantics
+  kind: contract
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [live-session, patch, transaction, reset, query-sync, handle-invalidation]
+  keywords: [live-session, reset-time-override, running-world-patch, transaction]
+  last_reviewed: 2026-05-17
+- path: docs/design/scene-runtime-config-and-parameter-ui-design.md
+  title: Scene Runtime Config And Parameter UI Design
+  kind: architecture
+  authority: high
+  status: frozen
+  owner: architecture
+  applies_to: [picea-lab, picea-lab-web, runtime-config, parameters]
+  keywords: [scene-runtime-config, parameter-schema, effective-config, acceptance-panel]
+  last_reviewed: 2026-05-17
+- path: docs/design/deformable-body-roadmap.md
+  title: Deformable Body Roadmap
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [soft-body, particle, cloth, deformable-body, future-work]
+  keywords: [soft-body, deformable-body, particle, cloth, FEM, XPBD, rigid-body-lattice]
+  last_reviewed: 2026-05-17
+- path: docs/design/solver-island-ordering-contract.md
+  title: Solver Island Ordering Contract
+  kind: contract
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [solver, island, ordering, contacts, joints, sleep]
+  keywords: [island, solver-ordering, contact-rows, joint-rows, dense-slots]
+  last_reviewed: 2026-05-17
+- path: docs/design/performance-threshold-policy.md
+  title: Performance Threshold Policy
+  kind: contract
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [benchmarks, performance, thresholds, baseline, ci]
+  keywords: [performance-threshold, criterion, baseline, warn, fail]
+  last_reviewed: 2026-05-17
+- path: docs/design/architecture-refactor-requirements.md
+  title: Architecture Refactor Requirements Archive
+  kind: architecture
+  authority: low
+  status: deprecated
+  owner: architecture
+  applies_to: [archive, legacy-scene, architecture, refactor]
+  keywords: [archive, legacy-scene, contact-manager, solver-world, picea-web]
+  last_reviewed: 2026-05-17
+
 - path: docs/plans/2026-04-25-picea-physics-engine-production-milestones.md
   title: Picea Physics Engine Production Milestones
   kind: plan
@@ -285,71 +308,126 @@ documents:
   status: active
   owner: supervisor
   applies_to: [milestone, scope, acceptance, productionization, physics-upgrade]
-  keywords: [broadphase, dynamic-aabb-tree, sat, clipping, gjk, mass, inertia, sequential-impulse, warm-start, island-sleep, ccd, stepcontext, worldrecipe, picea-lab, picea-lab-web, observability, visualization, benchmarks, m10-5, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30, post-m14, post-m15, post-m22, post-m30, performance-substrate, performance-data-path, performance-evidence, performance-hardening, query-stats, counter-summary, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, subtree-pair-traversal, tree-visualization, island-visualization, scenario-gallery, overlay-panel, ccd-generalization, dynamic-vs-dynamic-ccd, rotational-ccd, compound-ccd, ergonomic-api-v2, scene-schema, public-distance-query, shape-query, compound-authoring, concave-authoring, compound-provenance, live-scene-patch, polygon-decomposition, solver-ordering, performance-threshold, public-beta]
-  last_reviewed: 2026-04-28
+  keywords: [m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30]
+  last_reviewed: 2026-05-17
+- path: docs/plans/2026-04-18-picea-physics-engine-milestones.md
+  title: Picea Physics Engine Milestones Archive
+  kind: plan
+  authority: low
+  status: deprecated
+  owner: supervisor
+  applies_to: [archive, milestone, history]
+  keywords: [archive, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, scene-history, wasm-history]
+  last_reviewed: 2026-05-17
 - path: docs/plans/2026-05-03-picea-lab-web-debuggability-milestones.md
   title: Picea Lab-Web Debuggability Milestones
   kind: plan
-  authority: high
-  status: completed
+  authority: medium
+  status: frozen
   owner: supervisor
-  applies_to: [picea-lab-web, debugging, live-session, canvas, diagnostics, evidence]
-  keywords: [picea-lab-web, live-first, live-session, step, play, pause, reset, zoomable-canvas, pan, zoom, grid, rulers, frame-diagnostics, perf-json, debug-context]
-  last_reviewed: 2026-05-03
+  applies_to: [picea-lab-web, debugging, live-session, canvas, diagnostics]
+  keywords: [live-first, step, play, pause, reset, zoomable-canvas, diagnostics]
+  last_reviewed: 2026-05-17
 - path: docs/plans/2026-05-03-picea-lab-web-stage-camera-milestones.md
   title: Picea Lab-Web Stage Camera Milestones
   kind: plan
-  authority: high
-  status: completed
+  authority: medium
+  status: frozen
   owner: supervisor
-  applies_to: [picea-lab-web, canvas, camera, stage, grid, rulers, interaction]
-  keywords: [picea-lab-web, stage-camera, camera-lock, core-focus, auto-focus, damped-wheel, smooth-zoom, grid-readability, rulers, debug-context, browser-use]
-  last_reviewed: 2026-05-03
+  applies_to: [picea-lab-web, canvas, camera, stage, grid, interaction]
+  keywords: [stage-camera, camera-lock, auto-focus, grid, rulers, browser-use]
+  last_reviewed: 2026-05-17
 - path: docs/plans/2026-05-04-picea-lab-web-industrial-ux-milestones.md
   title: Picea Lab-Web Industrial Debugger UX Milestones
   kind: plan
   authority: high
   status: active
   owner: supervisor
-  applies_to: [picea-lab-web, industrial-debugger, stack-stability, trajectory, perturbation, lattice, soft-body-roadmap]
-  keywords: [picea-lab-web, industrial-debugger, stack-stability, stack-observatory, browser-baseline, multi-body-trajectory, trajectory-workbench, perturbation, velocity-perturbation, preview-contract, absolute-velocity-patch, world-revision, session-epoch, paused-transaction, force-controls, lattice-grid, rigid-body-lattice, soft-body-roadmap, deformable-body, browser-use]
-  last_reviewed: 2026-05-05
+  applies_to: [picea-lab-web, industrial-debugger, stack-stability, trajectory, perturbation, lattice]
+  keywords: [picea-lab-web, stack-observatory, trajectory, perturbation, lattice, soft-body-roadmap]
+  last_reviewed: 2026-05-17
 - path: docs/plans/2026-05-06-performance-stability-observability-milestones.md
   title: Performance And Stack Stability Observability Milestones
   kind: plan
-  authority: high
-  status: completed
+  authority: medium
+  status: frozen
   owner: supervisor
-  applies_to: [observability, performance, stack-stability, picea-lab, picea-lab-web, solver-handoff]
-  keywords: [performance, stack-stability, frame-diagnostics, first-bad-frame, solver-row-spike, missing-evidence, diagnostics-surface, browser-acceptance]
-  last_reviewed: 2026-05-06
+  applies_to: [observability, performance, stack-stability, picea-lab, picea-lab-web]
+  keywords: [frame-diagnostics, first-bad-frame, solver-row-spike, missing-evidence]
+  last_reviewed: 2026-05-17
+- path: docs/plans/2026-05-06-matrix-stack-stability-optimization-milestones.md
+  title: Matrix Stack Stability Optimization Milestones
+  kind: plan
+  authority: high
+  status: active
+  owner: supervisor
+  applies_to: [matrix-stack, solver, stability, picea-lab]
+  keywords: [matrix-stack, stack_4, warm-start, position-correction, sleep]
+  last_reviewed: 2026-05-17
+- path: docs/plans/2026-05-07-picea-lab-web-live-performance-milestones.md
+  title: Picea Lab-Web Live Performance Milestones
+  kind: plan
+  authority: high
+  status: active
+  owner: supervisor
+  applies_to: [picea-lab-web, live-session, performance, summary-frame]
+  keywords: [live-performance, summary-full, payload, timeline, degraded-realtime]
+  last_reviewed: 2026-05-17
+- path: docs/plans/2026-05-07-picea-lab-web-runtime-controls-and-gravity-milestones.md
+  title: Picea Lab-Web Runtime Controls And Gravity Milestones
+  kind: plan
+  authority: medium
+  status: frozen
+  owner: supervisor
+  applies_to: [picea-lab-web, runtime-controls, gravity, live-session]
+  keywords: [runtime-controls, gravity-dial, ring-buffer, live-gravity-apply]
+  last_reviewed: 2026-05-17
+- path: docs/plans/2026-05-08-matrix-stack-physics-engine-stability-refactor-milestones.md
+  title: Matrix Stack Physics Engine Stability Refactor Milestones
+  kind: plan
+  authority: high
+  status: active
+  owner: supervisor
+  applies_to: [matrix-stack, solver, stability-refactor, sleep]
+  keywords: [matrix-stack, dense-island, sleep, warm-start, position-row]
+  last_reviewed: 2026-05-17
+- path: docs/plans/2026-05-14-dense-pressure-position-row-milestones.md
+  title: Dense Pressure Position Row Milestones
+  kind: plan
+  authority: medium
+  status: frozen
+  owner: supervisor
+  applies_to: [dense-pressure, position-row, solver, stack-stability]
+  keywords: [dense-pressure, pseudo-position, pressure-budget, stack_4]
+  last_reviewed: 2026-05-17
+- path: docs/plans/2026-05-15-picea-lab-scene-runtime-config-milestones.md
+  title: Picea Lab Scene Runtime Config Milestones
+  kind: plan
+  authority: medium
+  status: frozen
+  owner: supervisor
+  applies_to: [picea-lab, picea-lab-web, scene-runtime-config, parameter-ui]
+  keywords: [scene-runtime-config, parameter-schema, effective-config, newton-cradle]
+  last_reviewed: 2026-05-17
 - path: todo.md
   title: Picea Physics Engine Backlog Archive
   kind: plan
-  authority: medium
-  status: active
+  authority: low
+  status: frozen
   owner: supervisor
-  applies_to: [backlog, archive, post-m10, post-m14, post-m15, post-m22, future-work]
-  keywords: [m10-5, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, completed-baseline, post-m14, post-m15, post-m22, performance-substrate, performance-data-path, query-reuse, shape-cache, allocation-reduction, active-island-solver, dense-island-execution, island-solve-plan, solver-data-layout, ccd-generalization, ergonomic-api-v2, scene-schema, public-distance-query, shape-query, compound-authoring, concave-authoring]
-  last_reviewed: 2026-04-28
+  applies_to: [backlog, archive, future-work]
+  keywords: [backlog, archive, post-m10, post-m15, completed-baseline]
+  last_reviewed: 2026-05-17
+
 - path: crates/picea/src/lib.rs
-  title: Picea core entrypoint
+  title: Picea Core Entrypoint
   kind: module
   authority: high
   status: active
   owner: picea-core
   applies_to: [core, architecture, public-modules, prelude]
-  keywords: [lib, prelude, algo, body, collider, debug, events, handles, joint, math, pipeline, query, recipe, world]
-  last_reviewed: 2026-04-27
-- path: crates/picea/src/recipe.rs
-  title: Picea Recipe And Command API
-  kind: module
-  authority: high
-  status: active
-  owner: picea-core
-  applies_to: [core, public-api, recipes, world-commands, benchmarks]
-  keywords: [recipe, bodybundle, colliderbundle, jointbundle, worldrecipe, worldcommands, material-preset, collision-layer, batch-create, atomic]
-  last_reviewed: 2026-04-27
+  keywords: [lib, prelude, body, collider, debug, events, handles, joint, math, pipeline, query, recipe, world]
+  last_reviewed: 2026-05-17
 - path: crates/picea/src/pipeline/step.rs
   title: Picea Step Context Orchestration
   kind: module
@@ -357,8 +435,8 @@ documents:
   status: active
   owner: picea-core
   applies_to: [core, pipeline, step-context, stats, events]
-  keywords: [stepcontext, transient-facts, stepstats, wake-reasons, numeric-warnings, ccd-pose-clamp, performance-evidence, solver-counters, broadphase-counters]
-  last_reviewed: 2026-04-28
+  keywords: [stepcontext, transient-facts, stepstats, wake-reasons, numeric-warnings]
+  last_reviewed: 2026-05-17
 - path: crates/picea/src/pipeline/ccd.rs
   title: Picea CCD Pose Clamp
   kind: module
@@ -366,8 +444,26 @@ documents:
   status: active
   owner: picea-core
   applies_to: [core, pipeline, ccd, pose-clamp, dynamic-targets]
-  keywords: [ccd, pose-clamp, swept-convex-convex, swept-circle-convex, dynamic-vs-static, dynamic-vs-dynamic, target-kind, m13, m19]
-  last_reviewed: 2026-04-28
+  keywords: [ccd, pose-clamp, swept-convex, dynamic-vs-dynamic, target-kind]
+  last_reviewed: 2026-05-17
+- path: crates/picea/src/pipeline/gjk.rs
+  title: Internal GJK/EPA Convex Fallback
+  kind: module
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [pipeline, narrowphase, gjk, epa, support-mapping]
+  keywords: [gjk, epa, simplex, support-map, penetration, distance]
+  last_reviewed: 2026-05-17
+- path: crates/picea/src/pipeline/island.rs
+  title: Internal Island Solve Plan
+  kind: module
+  authority: high
+  status: active
+  owner: picea-core
+  applies_to: [core, pipeline, solver, dense-island-execution]
+  keywords: [island-solve-plan, body-slots, contact-row-indices, joint-rows]
+  last_reviewed: 2026-05-17
 - path: crates/picea/src/query.rs
   title: Picea Query Pipeline
   kind: module
@@ -375,26 +471,26 @@ documents:
   status: active
   owner: picea-core
   applies_to: [core, query, performance-evidence, public-api]
-  keywords: [querypipeline, queryfilter, querystats, traversal-count, candidate-count, prune-count, filter-drop-count, hit-count, m17]
-  last_reviewed: 2026-04-28
-- path: crates/picea/src/pipeline/island.rs
-  title: Internal Island Solve Plan
+  keywords: [querypipeline, queryfilter, querystats, candidate-count, shape-query]
+  last_reviewed: 2026-05-17
+- path: crates/picea/src/recipe.rs
+  title: Picea Recipe And Command API
   kind: module
   authority: high
   status: active
   owner: picea-core
-  applies_to: [core, pipeline, solver, dense-island-execution, active-island-solver]
-  keywords: [island-solve-plan, body-slots, contact-row-indices, joint-rows, solver-data-layout, solver-step-stats, m16, m17]
-  last_reviewed: 2026-04-28
+  applies_to: [core, public-api, recipes, world-commands, benchmarks]
+  keywords: [recipe, bodybundle, colliderbundle, jointbundle, worldrecipe, worldcommands]
+  last_reviewed: 2026-05-17
 - path: crates/picea/src/solver/contact.rs
   title: Internal Contact Solver
   kind: module
   authority: high
   status: active
   owner: picea-core
-  applies_to: [core, solver, contacts, sequential-impulse]
-  keywords: [contact-solver, solver-row, effective-mass, warm-start, residual-correction, wake-reasons]
-  last_reviewed: 2026-04-28
+  applies_to: [core, solver, contacts, sequential-impulse, position-row]
+  keywords: [contact-solver, solver-row, effective-mass, warm-start, residual-correction]
+  last_reviewed: 2026-05-17
 - path: crates/picea/benches/physics_scenarios.rs
   title: Picea Criterion Physics Scenario Baselines
   kind: module
@@ -402,59 +498,50 @@ documents:
   status: active
   owner: picea-core
   applies_to: [benchmarks, broadphase, stack, ccd, api, baseline]
-  keywords: [criterion, benchmark, sparse-broadphase, dense-broadphase, query-heavy, many-small-islands, one-large-island, stack-stability, ccd-bullet, ccd-dynamic-pair, api-batch, counters, query-stats, island-counters, m19]
-  last_reviewed: 2026-04-28
-- path: crates/picea/src/pipeline/gjk.rs
-  title: Internal GJK/EPA generic convex fallback
-  kind: module
-  authority: high
-  status: active
-  owner: picea-core
-  applies_to: [pipeline, narrowphase, gjk, epa, support-mapping, convex-fallback]
-  keywords: [gjk, epa, simplex, support-map, generic-convex-fallback, penetration, distance]
-  last_reviewed: 2026-04-27
+  keywords: [criterion, benchmark, stack-stability, ccd, counters]
+  last_reviewed: 2026-05-17
 - path: crates/picea-lab/src/lib.rs
-  title: Picea Lab crate entrypoint
+  title: Picea Lab Crate Entrypoint
   kind: module
   authority: medium
   status: active
   owner: picea-lab
-  applies_to: [lab, simulator, artifacts, server, cli, scenarios, authoring]
-  keywords: [picea-lab, artifact, scenario, scene-schema, schema-version, scene-recipe-fixture, server, sse, cli, viewer]
-  last_reviewed: 2026-04-28
+  applies_to: [lab, simulator, artifacts, server, cli, scenarios]
+  keywords: [picea-lab, artifact, scenario, scene-schema, server, sse, cli]
+  last_reviewed: 2026-05-17
 - path: crates/picea-lab/src/scenario.rs
   title: Picea Lab Scenarios And Scene Fixtures
   kind: module
   authority: high
   status: active
   owner: picea-lab
-  applies_to: [lab, scenarios, fixtures, scene-schema, authoring, recipes]
-  keywords: [scene-recipe-fixture, schema-version, distance-joint, world-anchor-joint, backward-compatibility, recipe-indexed-joints, scenario-overrides, m14, m19, m20]
-  last_reviewed: 2026-04-28
+  applies_to: [lab, scenarios, fixtures, scene-schema, authoring, runtime-config]
+  keywords: [scenario, scene-recipe-fixture, schema-version, parameter-schema]
+  last_reviewed: 2026-05-17
 - path: crates/picea-lab/src/artifact.rs
   title: Picea Lab Artifact Runner
   kind: module
   authority: medium
   status: active
   owner: picea-lab
-  applies_to: [lab, artifacts, performance-evidence, debug-render, perf-summary]
-  keywords: [artifact, frames-jsonl, debug-render, perf-json, counter-summary, perf-counter-summary, broadphase-counters, island-counters, ccd-trace, target-kind, m17, m19]
-  last_reviewed: 2026-04-28
+  applies_to: [lab, artifacts, performance-evidence, debug-render, diagnostics]
+  keywords: [artifact, frames-jsonl, debug-render, perf-json, frame-diagnostics]
+  last_reviewed: 2026-05-17
 - path: crates/picea-lab/web/src/App.tsx
-  title: Picea Lab web workbench
+  title: Picea Lab Web Workbench
   kind: module
   authority: medium
   status: active
   owner: picea-lab
-  applies_to: [lab, viewer, react, canvas, inspector, timeline, replay]
-  keywords: [react, canvas, tailwind, workbench, hierarchy, inspector, timeline, joints, replay-artifacts]
-  last_reviewed: 2026-04-27
+  applies_to: [lab, viewer, react, canvas, inspector, timeline, replay, live-session]
+  keywords: [react, canvas, workbench, timeline, live-session, parameter-ui]
+  last_reviewed: 2026-05-17
 - path: crates/macro-tools/src/lib.rs
-  title: Proc macro helpers
+  title: Proc Macro Helpers
   kind: module
   authority: medium
   status: active
   owner: macro-tools
   applies_to: [proc-macro, accessors, builder, deref]
   keywords: [syn, quote, accessors, builder, deref]
-  last_reviewed: 2026-04-23
+  last_reviewed: 2026-05-17

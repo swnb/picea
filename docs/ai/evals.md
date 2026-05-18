@@ -79,7 +79,7 @@
     - Pass criteria: 能指出问题其实在 narrowphase/solver/sleep，或没有候选对行为锁和验证门时，不应越界改 broadphase。
 
 16. **什么 artifact 最适合区分 broadphase 问题和 narrowphase 问题？**
-    - Expected sources: `docs/design/debug-observability-design.md`, `docs/design/picea-lab-observability-architecture.md`
+    - Expected sources: `docs/ai/debug-playbook.md`, `docs/design/debug-observability-design.md`, `docs/design/picea-lab-observability-architecture.md`
     - Pass criteria: 至少包含 broadphase candidate、narrowphase contact、contact normal/depth、reject reason 或 counters。
 
 ## Freshness / Conflict

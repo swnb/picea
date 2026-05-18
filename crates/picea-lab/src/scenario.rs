@@ -257,9 +257,17 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
 
 pub fn default_runtime_config_for_scenario(scenario_id: ScenarioId) -> ScenarioRuntimeConfig {
     match scenario_id {
+        ScenarioId::Stack4 | ScenarioId::MatrixStack | ScenarioId::MatrixStackAligned => {
+            let (params, step, substeps_per_frame) = default_rect_stack_runtime_parts(scenario_id);
+            rect_stack_runtime_config(params, step, substeps_per_frame)
+        }
         ScenarioId::NewtonCradle => {
             let (params, step, substeps_per_frame) = default_newton_cradle_runtime_parts();
             newton_cradle_runtime_config(params, step, substeps_per_frame)
+        }
+        ScenarioId::LatticeGrid => {
+            let (params, step, substeps_per_frame) = default_lattice_runtime_parts();
+            lattice_runtime_config(params, step, substeps_per_frame)
         }
         _ => ScenarioRuntimeConfig::default(),
     }
@@ -270,6 +278,11 @@ pub(crate) fn effective_runtime_config_for_scenario(
     overrides: &ScenarioOverrides,
 ) -> LabResult<ScenarioRuntimeConfig> {
     match scenario_id {
+        ScenarioId::Stack4 | ScenarioId::MatrixStack | ScenarioId::MatrixStackAligned => {
+            let (params, step, substeps_per_frame) =
+                resolve_rect_stack_runtime_parts(scenario_id, &overrides.scene_params)?;
+            Ok(rect_stack_runtime_config(params, step, substeps_per_frame))
+        }
         ScenarioId::NewtonCradle => {
             let (params, step, substeps_per_frame) =
                 resolve_newton_cradle_runtime_parts(&overrides.scene_params)?;
@@ -278,6 +291,11 @@ pub(crate) fn effective_runtime_config_for_scenario(
                 step,
                 substeps_per_frame,
             ))
+        }
+        ScenarioId::LatticeGrid => {
+            let (params, step, substeps_per_frame) =
+                resolve_lattice_runtime_parts(&overrides.scene_params)?;
+            Ok(lattice_runtime_config(params, step, substeps_per_frame))
         }
         _ if overrides.scene_params.is_empty() => {
             Ok(default_runtime_config_for_scenario(scenario_id))
@@ -290,7 +308,11 @@ pub(crate) fn effective_runtime_config_for_scenario(
 
 fn parameter_schema_for_scenario(scenario_id: ScenarioId) -> Vec<ScenarioParameterDescriptor> {
     match scenario_id {
+        ScenarioId::Stack4 | ScenarioId::MatrixStack | ScenarioId::MatrixStackAligned => {
+            rect_stack_parameter_schema(scenario_id)
+        }
         ScenarioId::NewtonCradle => newton_cradle_parameter_schema(),
+        ScenarioId::LatticeGrid => lattice_parameter_schema(),
         _ => Vec::new(),
     }
 }
@@ -1134,7 +1156,7 @@ fn falling_box_contact_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MatrixStackLayout {
     /// A deliberately asymmetric matrix that exercises edge ejection and churn.
     StaggeredStress,
@@ -1142,26 +1164,49 @@ enum MatrixStackLayout {
     Aligned,
 }
 
-fn matrix_stack_fixture(
-    gravity: [f32; 2],
+impl MatrixStackLayout {
+    const fn as_param_value(self) -> &'static str {
+        match self {
+            Self::StaggeredStress => "staggered",
+            Self::Aligned => "aligned",
+        }
+    }
+
+    fn from_param_value(key: &str, value: &Value) -> LabResult<Self> {
+        match value.as_str() {
+            Some("staggered") => Ok(Self::StaggeredStress),
+            Some("aligned") => Ok(Self::Aligned),
+            _ => Err(LabError::World(format!(
+                "scene_params.{key} must be aligned or staggered"
+            ))),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RectStackParams {
     columns: usize,
     rows: usize,
+    box_width: f32,
+    box_height: f32,
+    gap_x: f32,
+    gap_y: f32,
     layout: MatrixStackLayout,
-) -> SceneRecipeFixture {
-    const BOX_WIDTH: f32 = 0.42;
-    const BOX_HEIGHT: f32 = 0.42;
-    const GAP_X: f32 = 0.035;
-    const GAP_Y: f32 = 0.035;
+    material: MaterialPreset,
+    density: f32,
+}
+
+fn rect_stack_fixture(gravity: [f32; 2], params: RectStackParams) -> SceneRecipeFixture {
     const FLOOR_Y: f32 = 2.62;
     const FLOOR_HEIGHT: f32 = 0.45;
 
-    let columns = columns.max(1);
-    let rows = rows.max(1);
-    let spacing_x = BOX_WIDTH + GAP_X;
-    let spacing_y = BOX_HEIGHT + GAP_Y;
-    let total_width = columns as f32 * spacing_x;
-    let left = -0.5 * (total_width - spacing_x);
-    let bottom_center_y = FLOOR_Y - FLOOR_HEIGHT * 0.5 - BOX_HEIGHT * 0.5 - 0.015;
+    let columns = params.columns.max(1);
+    let rows = params.rows.max(1);
+    let spacing_x = params.box_width + params.gap_x;
+    let spacing_y = params.box_height + params.gap_y;
+    let total_width = params.box_width + (columns.saturating_sub(1) as f32 * spacing_x);
+    let left = -0.5 * (columns.saturating_sub(1) as f32 * spacing_x);
+    let bottom_center_y = FLOOR_Y - FLOOR_HEIGHT * 0.5 - params.box_height * 0.5 - 0.015;
 
     let mut bodies = Vec::with_capacity(columns * rows + 1);
     bodies.push(SceneBodyFixture {
@@ -1181,7 +1226,7 @@ fn matrix_stack_fixture(
 
     for row in 0..rows {
         for column in 0..columns {
-            let (centered_row_offset, column_bias, angle) = match layout {
+            let (centered_row_offset, column_bias, angle) = match params.layout {
                 MatrixStackLayout::StaggeredStress => {
                     // Small deterministic offsets keep the stress scene from
                     // being a perfectly symmetric toy case. This makes contact
@@ -1218,12 +1263,12 @@ fn matrix_stack_fixture(
                 linear_velocity: [0.0, 0.0],
                 can_sleep: true,
                 shape: SceneShapeFixture::Rect {
-                    width: BOX_WIDTH,
-                    height: BOX_HEIGHT,
+                    width: params.box_width,
+                    height: params.box_height,
                 },
-                material: MaterialPreset::Rough,
+                material: params.material,
                 filter: CollisionLayerPreset::DynamicBody,
-                density: default_fixture_density(),
+                density: params.density,
                 is_sensor: false,
             });
         }
@@ -1240,30 +1285,259 @@ fn matrix_stack_fixture(
     }
 }
 
+fn default_rect_stack_runtime_parts(
+    scenario_id: ScenarioId,
+) -> (RectStackParams, StepConfig, usize) {
+    let params = match scenario_id {
+        ScenarioId::Stack4 => RectStackParams {
+            columns: 1,
+            rows: 4,
+            box_width: 0.9,
+            box_height: 0.9,
+            gap_x: 0.035,
+            gap_y: 0.035,
+            layout: MatrixStackLayout::Aligned,
+            material: MaterialPreset::Default,
+            density: default_fixture_density(),
+        },
+        ScenarioId::MatrixStackAligned => RectStackParams {
+            columns: 4,
+            rows: 3,
+            box_width: 0.42,
+            box_height: 0.42,
+            gap_x: 0.035,
+            gap_y: 0.035,
+            layout: MatrixStackLayout::Aligned,
+            material: MaterialPreset::Rough,
+            density: default_fixture_density(),
+        },
+        _ => RectStackParams {
+            columns: 8,
+            rows: 6,
+            box_width: 0.42,
+            box_height: 0.42,
+            gap_x: 0.035,
+            gap_y: 0.035,
+            layout: MatrixStackLayout::StaggeredStress,
+            material: MaterialPreset::Rough,
+            density: default_fixture_density(),
+        },
+    };
+    (params, StepConfig::default(), 1)
+}
+
+fn rect_stack_runtime_config(
+    params: RectStackParams,
+    step: StepConfig,
+    substeps_per_frame: usize,
+) -> ScenarioRuntimeConfig {
+    let mut scene_params = BTreeMap::new();
+    scene_params.insert("columns".to_owned(), json!(params.columns));
+    scene_params.insert("rows".to_owned(), json!(params.rows));
+    scene_params.insert("box_width".to_owned(), json!(params.box_width));
+    scene_params.insert("box_height".to_owned(), json!(params.box_height));
+    scene_params.insert("gap_x".to_owned(), json!(params.gap_x));
+    scene_params.insert("gap_y".to_owned(), json!(params.gap_y));
+    scene_params.insert("layout".to_owned(), json!(params.layout.as_param_value()));
+    scene_params.insert("material".to_owned(), json!(params.material));
+    scene_params.insert("density".to_owned(), json!(params.density));
+    scene_params.insert(
+        "velocity_iterations".to_owned(),
+        json!(step.velocity_iterations),
+    );
+    scene_params.insert(
+        "position_iterations".to_owned(),
+        json!(step.position_iterations),
+    );
+    scene_params.insert(
+        "contact_position_correction".to_owned(),
+        json!(step.contact_position_correction),
+    );
+    scene_params.insert("substeps_per_frame".to_owned(), json!(substeps_per_frame));
+
+    ScenarioRuntimeConfig {
+        step,
+        substeps_per_frame,
+        scene_params,
+    }
+}
+
+fn resolve_rect_stack_runtime_parts(
+    scenario_id: ScenarioId,
+    overrides: &BTreeMap<String, Value>,
+) -> LabResult<(RectStackParams, StepConfig, usize)> {
+    let (mut params, mut step, mut substeps_per_frame) =
+        default_rect_stack_runtime_parts(scenario_id);
+    for (key, value) in overrides {
+        match key.as_str() {
+            "columns" => params.columns = parse_usize_param(key, value, 1, 16)?,
+            "rows" => params.rows = parse_usize_param(key, value, 1, 12)?,
+            "box_width" => params.box_width = parse_f32_param(key, value, 0.2, 1.5)?,
+            "box_height" => params.box_height = parse_f32_param(key, value, 0.2, 1.5)?,
+            "gap_x" => params.gap_x = parse_f32_param(key, value, 0.0, 0.25)?,
+            "gap_y" => params.gap_y = parse_f32_param(key, value, 0.0, 0.25)?,
+            "layout" => params.layout = MatrixStackLayout::from_param_value(key, value)?,
+            "material" => params.material = parse_material_preset_param(key, value)?,
+            "density" => params.density = parse_f32_param(key, value, 0.1, 5.0)?,
+            "velocity_iterations" => step.velocity_iterations = parse_u16_param(key, value, 0, 80)?,
+            "position_iterations" => {
+                step.position_iterations = parse_u16_param(key, value, 0, 120)?
+            }
+            "contact_position_correction" => {
+                step.contact_position_correction =
+                    serde_json::from_value(value.clone()).map_err(|_| {
+                        LabError::World(
+                            "scene_params.contact_position_correction must be enabled, conservative, or disabled"
+                                .to_owned(),
+                        )
+                    })?;
+            }
+            "substeps_per_frame" => substeps_per_frame = parse_usize_param(key, value, 1, 8)?,
+            other => {
+                return Err(LabError::World(format!(
+                    "scene_params.{other}: unknown rectangle stack parameter"
+                )));
+            }
+        }
+    }
+    validate_rect_stack_params(params)?;
+    step.dt = 1.0 / (60.0 * substeps_per_frame as f32);
+    Ok((params, step, substeps_per_frame))
+}
+
+fn validate_rect_stack_params(params: RectStackParams) -> LabResult<()> {
+    if params.box_width + params.gap_x <= 0.0 || params.box_height + params.gap_y <= 0.0 {
+        return Err(LabError::World(
+            "scene_params box size plus gap must stay positive".to_owned(),
+        ));
+    }
+    if params.columns.saturating_mul(params.rows) > 128 {
+        return Err(LabError::World(
+            "scene_params.columns * scene_params.rows must be <= 128".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LatticeConstraintProfile {
+    Soft,
+    Balanced,
+    Hard,
+}
+
+impl LatticeConstraintProfile {
+    const fn as_param_value(self) -> &'static str {
+        match self {
+            Self::Soft => "soft",
+            Self::Balanced => "balanced",
+            Self::Hard => "hard",
+        }
+    }
+
+    const fn default_joint_velocity_projection(self) -> bool {
+        match self {
+            Self::Soft => false,
+            Self::Balanced | Self::Hard => true,
+        }
+    }
+
+    const fn default_substeps_per_frame(self) -> usize {
+        match self {
+            Self::Soft => 1,
+            Self::Balanced => 8,
+            Self::Hard => 8,
+        }
+    }
+
+    const fn values(self) -> LatticeConstraintProfileValues {
+        match self {
+            Self::Soft => LatticeConstraintProfileValues {
+                anchor_stiffness: 6.5,
+                anchor_damping: 0.42,
+                distance_stiffness: 5.0,
+                diagonal_stiffness: 4.4,
+                distance_damping: 0.36,
+            },
+            Self::Balanced => LatticeConstraintProfileValues {
+                anchor_stiffness: 260.0,
+                anchor_damping: 1.2,
+                distance_stiffness: 220.0,
+                diagonal_stiffness: 200.0,
+                distance_damping: 1.0,
+            },
+            Self::Hard => LatticeConstraintProfileValues {
+                anchor_stiffness: 420.0,
+                anchor_damping: 1.8,
+                distance_stiffness: 360.0,
+                diagonal_stiffness: 320.0,
+                distance_damping: 1.4,
+            },
+        }
+    }
+
+    fn from_param_value(key: &str, value: &Value) -> LabResult<Self> {
+        match value.as_str() {
+            Some("soft") => Ok(Self::Soft),
+            Some("balanced") => Ok(Self::Balanced),
+            Some("hard") => Ok(Self::Hard),
+            _ => Err(LabError::World(format!(
+                "scene_params.{key} must be soft, balanced, or hard"
+            ))),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LatticeConstraintProfileValues {
+    anchor_stiffness: f32,
+    anchor_damping: f32,
+    distance_stiffness: f32,
+    diagonal_stiffness: f32,
+    distance_damping: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LatticeGridParams {
+    columns: usize,
+    rows: usize,
+    spacing_x: f32,
+    spacing_y: f32,
+    node_radius: f32,
+    constraint_profile: LatticeConstraintProfile,
+    joint_velocity_projection: bool,
+}
+
 /// M38 intentionally stops at a rigid-body proxy. Each "node" is still one
 /// ordinary rigid body, so any visible deformation comes from existing joint
 /// constraints and debug facts rather than a new soft-body solver.
-fn lattice_grid_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
-    const COLS: usize = 4;
-    const ROWS: usize = 3;
-    const SPACING_X: f32 = 0.62;
-    const SPACING_Y: f32 = 0.58;
-    const ORIGIN_X: f32 = -0.93;
+fn lattice_grid_fixture(gravity: [f32; 2], params: LatticeGridParams) -> SceneRecipeFixture {
     const ORIGIN_Y: f32 = -1.22;
 
-    let mut bodies = Vec::with_capacity(COLS * ROWS);
-    for row in 0..ROWS {
-        for col in 0..COLS {
+    let columns = params.columns.max(2);
+    let rows = params.rows.max(2);
+    let origin_x = -0.5 * (columns.saturating_sub(1) as f32 * params.spacing_x);
+    let profile = params.constraint_profile.values();
+
+    let mut bodies = Vec::with_capacity(columns * rows);
+    for row in 0..rows {
+        for col in 0..columns {
             bodies.push(SceneBodyFixture {
-                body_type: BodyType::Dynamic,
+                body_type: if row == 0 {
+                    BodyType::Kinematic
+                } else {
+                    BodyType::Dynamic
+                },
                 pose: [
-                    ORIGIN_X + col as f32 * SPACING_X,
-                    ORIGIN_Y + row as f32 * SPACING_Y,
+                    origin_x + col as f32 * params.spacing_x,
+                    ORIGIN_Y + row as f32 * params.spacing_y,
                     0.0,
                 ],
                 linear_velocity: [0.0, 0.0],
-                can_sleep: true,
-                shape: SceneShapeFixture::Circle { radius: 0.12 },
+                can_sleep: row != 0,
+                shape: SceneShapeFixture::Circle {
+                    radius: params.node_radius,
+                },
                 material: if row == 0 {
                     MaterialPreset::Rough
                 } else {
@@ -1276,49 +1550,49 @@ fn lattice_grid_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
         }
     }
 
-    let body_index = |row: usize, col: usize| row * COLS + col;
+    let body_index = |row: usize, col: usize| row * columns + col;
     let mut joints = Vec::new();
 
-    for col in 0..COLS {
+    for col in 0..columns {
         joints.push(SceneJointFixture::WorldAnchor(
             SceneWorldAnchorJointFixture {
                 body: body_index(0, col),
                 world_anchor: Some([
-                    ORIGIN_X + col as f32 * SPACING_X,
+                    origin_x + col as f32 * params.spacing_x,
                     ORIGIN_Y + if col % 2 == 0 { -0.18 } else { -0.22 },
                 ]),
                 local_anchor: None,
-                stiffness: Some(6.5),
-                damping: Some(0.42),
+                stiffness: Some(profile.anchor_stiffness),
+                damping: Some(profile.anchor_damping),
             },
         ));
     }
 
-    for row in 0..ROWS {
-        for col in 0..COLS {
-            if col + 1 < COLS {
+    for row in 0..rows {
+        for col in 0..columns {
+            if col + 1 < columns {
                 joints.push(SceneJointFixture::Distance(SceneDistanceJointFixture {
                     body_a: body_index(row, col),
                     body_b: body_index(row, col + 1),
-                    rest_length: Some(SPACING_X),
-                    stiffness: Some(5.2),
-                    damping: Some(0.38),
+                    rest_length: Some(params.spacing_x),
+                    stiffness: Some(profile.distance_stiffness),
+                    damping: Some(profile.distance_damping),
                     local_anchor_a: None,
                     local_anchor_b: None,
                 }));
             }
-            if row + 1 < ROWS {
+            if row + 1 < rows {
                 joints.push(SceneJointFixture::Distance(SceneDistanceJointFixture {
                     body_a: body_index(row, col),
                     body_b: body_index(row + 1, col),
-                    rest_length: Some(SPACING_Y),
-                    stiffness: Some(5.0),
-                    damping: Some(0.36),
+                    rest_length: Some(params.spacing_y),
+                    stiffness: Some(profile.distance_stiffness),
+                    damping: Some(profile.distance_damping),
                     local_anchor_a: None,
                     local_anchor_b: None,
                 }));
             }
-            if row + 1 < ROWS && col + 1 < COLS {
+            if row + 1 < rows && col + 1 < columns {
                 let (body_a, body_b) = if (row + col) % 2 == 0 {
                     (body_index(row, col), body_index(row + 1, col + 1))
                 } else {
@@ -1327,9 +1601,12 @@ fn lattice_grid_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
                 joints.push(SceneJointFixture::Distance(SceneDistanceJointFixture {
                     body_a,
                     body_b,
-                    rest_length: Some((SPACING_X * SPACING_X + SPACING_Y * SPACING_Y).sqrt()),
-                    stiffness: Some(4.4),
-                    damping: Some(0.32),
+                    rest_length: Some(
+                        (params.spacing_x * params.spacing_x + params.spacing_y * params.spacing_y)
+                            .sqrt(),
+                    ),
+                    stiffness: Some(profile.diagonal_stiffness),
+                    damping: Some(profile.distance_damping),
                     local_anchor_a: None,
                     local_anchor_b: None,
                 }));
@@ -1346,6 +1623,112 @@ fn lattice_grid_fixture(gravity: [f32; 2]) -> SceneRecipeFixture {
         bodies,
         joints,
     }
+}
+
+fn default_lattice_runtime_parts() -> (LatticeGridParams, StepConfig, usize) {
+    let profile = LatticeConstraintProfile::Balanced;
+    let params = LatticeGridParams {
+        columns: 4,
+        rows: 3,
+        spacing_x: 0.62,
+        spacing_y: 0.58,
+        node_radius: 0.12,
+        constraint_profile: profile,
+        joint_velocity_projection: profile.default_joint_velocity_projection(),
+    };
+    let substeps_per_frame = profile.default_substeps_per_frame();
+    let mut step = StepConfig::default();
+    step.dt = 1.0 / (60.0 * substeps_per_frame as f32);
+    step.joint_velocity_projection = params.joint_velocity_projection;
+    (params, step, substeps_per_frame)
+}
+
+fn lattice_runtime_config(
+    params: LatticeGridParams,
+    step: StepConfig,
+    substeps_per_frame: usize,
+) -> ScenarioRuntimeConfig {
+    let mut scene_params = BTreeMap::new();
+    scene_params.insert("columns".to_owned(), json!(params.columns));
+    scene_params.insert("rows".to_owned(), json!(params.rows));
+    scene_params.insert("spacing_x".to_owned(), json!(params.spacing_x));
+    scene_params.insert("spacing_y".to_owned(), json!(params.spacing_y));
+    scene_params.insert("node_radius".to_owned(), json!(params.node_radius));
+    scene_params.insert(
+        "constraint_profile".to_owned(),
+        json!(params.constraint_profile.as_param_value()),
+    );
+    scene_params.insert(
+        "joint_velocity_projection".to_owned(),
+        json!(step.joint_velocity_projection),
+    );
+    scene_params.insert("substeps_per_frame".to_owned(), json!(substeps_per_frame));
+
+    ScenarioRuntimeConfig {
+        step,
+        substeps_per_frame,
+        scene_params,
+    }
+}
+
+fn resolve_lattice_runtime_parts(
+    overrides: &BTreeMap<String, Value>,
+) -> LabResult<(LatticeGridParams, StepConfig, usize)> {
+    let requested_profile = overrides
+        .get("constraint_profile")
+        .map(|value| LatticeConstraintProfile::from_param_value("constraint_profile", value))
+        .transpose()?;
+    let (mut params, mut step, mut substeps_per_frame) = default_lattice_runtime_parts();
+    if let Some(profile) = requested_profile {
+        params.constraint_profile = profile;
+        params.joint_velocity_projection = profile.default_joint_velocity_projection();
+        substeps_per_frame = profile.default_substeps_per_frame();
+    }
+
+    for (key, value) in overrides {
+        match key.as_str() {
+            "columns" => params.columns = parse_usize_param(key, value, 2, 8)?,
+            "rows" => params.rows = parse_usize_param(key, value, 2, 6)?,
+            "spacing_x" => params.spacing_x = parse_f32_param(key, value, 0.3, 1.4)?,
+            "spacing_y" => params.spacing_y = parse_f32_param(key, value, 0.3, 1.4)?,
+            "node_radius" => params.node_radius = parse_f32_param(key, value, 0.05, 0.28)?,
+            "constraint_profile" => {}
+            "joint_velocity_projection" => {
+                params.joint_velocity_projection = value.as_bool().ok_or_else(|| {
+                    LabError::World(
+                        "scene_params.joint_velocity_projection must be a boolean".to_owned(),
+                    )
+                })?;
+            }
+            "substeps_per_frame" => substeps_per_frame = parse_usize_param(key, value, 1, 8)?,
+            other => {
+                return Err(LabError::World(format!(
+                    "scene_params.{other}: unknown lattice_grid parameter"
+                )));
+            }
+        }
+    }
+
+    validate_lattice_params(params)?;
+    step.dt = 1.0 / (60.0 * substeps_per_frame as f32);
+    step.joint_velocity_projection = params.joint_velocity_projection;
+    Ok((params, step, substeps_per_frame))
+}
+
+fn validate_lattice_params(params: LatticeGridParams) -> LabResult<()> {
+    if params.columns.saturating_mul(params.rows) > 48 {
+        return Err(LabError::World(
+            "scene_params.columns * scene_params.rows must be <= 48 for live lattice playback"
+                .to_owned(),
+        ));
+    }
+    let min_spacing = params.spacing_x.min(params.spacing_y);
+    if params.node_radius * 2.0 >= min_spacing {
+        return Err(LabError::World(
+            "scene_params.node_radius must be smaller than half of the lattice spacing".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1518,6 +1901,180 @@ fn parse_f32_param(key: &str, value: &Value, min: f32, max: f32) -> LabResult<f3
     } else {
         Ok(parsed)
     }
+}
+
+fn parse_material_preset_param(key: &str, value: &Value) -> LabResult<MaterialPreset> {
+    serde_json::from_value(value.clone()).map_err(|_| {
+        LabError::World(format!(
+            "scene_params.{key} must be default, ice, rough, bouncy, or sticky"
+        ))
+    })
+}
+
+fn rect_stack_parameter_schema(scenario_id: ScenarioId) -> Vec<ScenarioParameterDescriptor> {
+    let (params, step, substeps_per_frame) = default_rect_stack_runtime_parts(scenario_id);
+    vec![
+        integer_param("columns", "Columns", params.columns, 1.0, 16.0),
+        integer_param("rows", "Rows", params.rows, 1.0, 12.0),
+        number_param("box_width", "Box width", params.box_width, 0.2, 1.5, 0.01),
+        number_param(
+            "box_height",
+            "Box height",
+            params.box_height,
+            0.2,
+            1.5,
+            0.01,
+        ),
+        number_param("gap_x", "Horizontal gap", params.gap_x, 0.0, 0.25, 0.005),
+        number_param("gap_y", "Vertical gap", params.gap_y, 0.0, 0.25, 0.005),
+        select_param(
+            "layout",
+            "Layout",
+            json!(params.layout.as_param_value()),
+            vec![
+                ScenarioParameterOption {
+                    value: json!("aligned"),
+                    label: "Aligned",
+                },
+                ScenarioParameterOption {
+                    value: json!("staggered"),
+                    label: "Staggered",
+                },
+            ],
+        ),
+        select_param(
+            "material",
+            "Material",
+            json!(params.material),
+            vec![
+                ScenarioParameterOption {
+                    value: json!(MaterialPreset::Default),
+                    label: "Default",
+                },
+                ScenarioParameterOption {
+                    value: json!(MaterialPreset::Ice),
+                    label: "Ice",
+                },
+                ScenarioParameterOption {
+                    value: json!(MaterialPreset::Rough),
+                    label: "Rough",
+                },
+                ScenarioParameterOption {
+                    value: json!(MaterialPreset::Sticky),
+                    label: "Sticky",
+                },
+            ],
+        ),
+        number_param("density", "Density", params.density, 0.1, 5.0, 0.05),
+        integer_param(
+            "velocity_iterations",
+            "Velocity iterations",
+            usize::from(step.velocity_iterations),
+            0.0,
+            80.0,
+        ),
+        integer_param(
+            "position_iterations",
+            "Position iterations",
+            usize::from(step.position_iterations),
+            0.0,
+            120.0,
+        ),
+        select_param(
+            "contact_position_correction",
+            "Contact position correction",
+            json!(step.contact_position_correction),
+            vec![
+                ScenarioParameterOption {
+                    value: json!(ContactPositionCorrectionPolicy::Enabled),
+                    label: "Enabled",
+                },
+                ScenarioParameterOption {
+                    value: json!(ContactPositionCorrectionPolicy::Conservative),
+                    label: "Conservative",
+                },
+                ScenarioParameterOption {
+                    value: json!(ContactPositionCorrectionPolicy::Disabled),
+                    label: "Disabled",
+                },
+            ],
+        ),
+        integer_param(
+            "substeps_per_frame",
+            "Substeps per frame",
+            substeps_per_frame,
+            1.0,
+            8.0,
+        ),
+    ]
+}
+
+fn lattice_parameter_schema() -> Vec<ScenarioParameterDescriptor> {
+    let (params, _, substeps_per_frame) = default_lattice_runtime_parts();
+    vec![
+        integer_param("columns", "Columns", params.columns, 2.0, 8.0),
+        integer_param("rows", "Rows", params.rows, 2.0, 6.0),
+        number_param(
+            "spacing_x",
+            "Horizontal spacing",
+            params.spacing_x,
+            0.3,
+            1.4,
+            0.01,
+        ),
+        number_param(
+            "spacing_y",
+            "Vertical spacing",
+            params.spacing_y,
+            0.3,
+            1.4,
+            0.01,
+        ),
+        number_param(
+            "node_radius",
+            "Node radius",
+            params.node_radius,
+            0.05,
+            0.28,
+            0.01,
+        ),
+        select_param(
+            "constraint_profile",
+            "Constraint profile",
+            json!(params.constraint_profile.as_param_value()),
+            vec![
+                ScenarioParameterOption {
+                    value: json!("soft"),
+                    label: "Soft",
+                },
+                ScenarioParameterOption {
+                    value: json!("balanced"),
+                    label: "Balanced",
+                },
+                ScenarioParameterOption {
+                    value: json!("hard"),
+                    label: "Hard",
+                },
+            ],
+        ),
+        ScenarioParameterDescriptor {
+            key: "joint_velocity_projection",
+            label: "Joint velocity projection",
+            value_type: ScenarioParameterValueType::Boolean,
+            default: json!(params.joint_velocity_projection),
+            min: None,
+            max: None,
+            step: None,
+            options: Vec::new(),
+        },
+        integer_param(
+            "substeps_per_frame",
+            "Substeps per frame",
+            substeps_per_frame,
+            1.0,
+            8.0,
+        ),
+    ]
 }
 
 fn newton_cradle_parameter_schema() -> Vec<ScenarioParameterDescriptor> {
@@ -2028,10 +2585,7 @@ pub(crate) fn build_scenario(
         .gravity
         .map(|[x, y]| Vector::new(x, y))
         .unwrap_or_else(|| Vector::new(0.0, 9.8));
-    let mut world = World::new(WorldDesc {
-        gravity,
-        enable_sleep: true,
-    });
+    let mut world: World;
 
     match id {
         ScenarioId::FallingBoxContact => {
@@ -2041,18 +2595,9 @@ pub(crate) fn build_scenario(
             ]))?;
         }
         ScenarioId::Stack4 => {
-            add_box(&mut world, BodyType::Static, 0.0, 2.5, 10.0, 0.5)?;
-            for index in 0..4 {
-                add_box_can_sleep(
-                    &mut world,
-                    BodyType::Dynamic,
-                    0.0,
-                    1.7 - index as f32,
-                    0.9,
-                    0.9,
-                    true,
-                )?;
-            }
+            let (params, _, _) = resolve_rect_stack_runtime_parts(id, &overrides.scene_params)?;
+            world =
+                instantiate_scene_fixture(&rect_stack_fixture([gravity.x(), gravity.y()], params))?;
         }
         ScenarioId::StackStabilityTower => {
             world = instantiate_scene_fixture(&stack_stability_tower_fixture([
@@ -2061,20 +2606,14 @@ pub(crate) fn build_scenario(
             ]))?;
         }
         ScenarioId::MatrixStack => {
-            world = instantiate_scene_fixture(&matrix_stack_fixture(
-                [gravity.x(), gravity.y()],
-                8,
-                6,
-                MatrixStackLayout::StaggeredStress,
-            ))?;
+            let (params, _, _) = resolve_rect_stack_runtime_parts(id, &overrides.scene_params)?;
+            world =
+                instantiate_scene_fixture(&rect_stack_fixture([gravity.x(), gravity.y()], params))?;
         }
         ScenarioId::MatrixStackAligned => {
-            world = instantiate_scene_fixture(&matrix_stack_fixture(
-                [gravity.x(), gravity.y()],
-                4,
-                3,
-                MatrixStackLayout::Aligned,
-            ))?;
+            let (params, _, _) = resolve_rect_stack_runtime_parts(id, &overrides.scene_params)?;
+            world =
+                instantiate_scene_fixture(&rect_stack_fixture([gravity.x(), gravity.y()], params))?;
         }
         ScenarioId::NewtonCradle => {
             let (params, _, _) = resolve_newton_cradle_runtime_parts(&overrides.scene_params)?;
@@ -2097,7 +2636,11 @@ pub(crate) fn build_scenario(
                 .map_err(|error| LabError::World(error.to_string()))?;
         }
         ScenarioId::LatticeGrid => {
-            world = instantiate_scene_fixture(&lattice_grid_fixture([gravity.x(), gravity.y()]))?;
+            let (params, _, _) = resolve_lattice_runtime_parts(&overrides.scene_params)?;
+            world = instantiate_scene_fixture(&lattice_grid_fixture(
+                [gravity.x(), gravity.y()],
+                params,
+            ))?;
         }
         ScenarioId::BroadphaseSparse => {
             world = World::new(WorldDesc {
@@ -2250,35 +2793,6 @@ fn add_box(
             body_type,
             pose: Pose::from_xy_angle(x, y, 0.0),
             can_sleep: false,
-            ..BodyDesc::default()
-        })
-        .map_err(|error| LabError::World(error.to_string()))?;
-    world
-        .create_collider(
-            body,
-            ColliderDesc {
-                shape: SharedShape::rect(width, height),
-                ..ColliderDesc::default()
-            },
-        )
-        .map_err(|error| LabError::World(error.to_string()))?;
-    Ok(body)
-}
-
-fn add_box_can_sleep(
-    world: &mut World,
-    body_type: BodyType,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    can_sleep: bool,
-) -> LabResult<BodyHandle> {
-    let body = world
-        .create_body(BodyDesc {
-            body_type,
-            pose: Pose::from_xy_angle(x, y, 0.0),
-            can_sleep,
             ..BodyDesc::default()
         })
         .map_err(|error| LabError::World(error.to_string()))?;
@@ -2574,8 +3088,24 @@ mod tests {
             })
             .count();
         assert!(
-            dynamic_bodies >= 9,
-            "lattice grid should use a dynamic node lattice instead of one rigid body"
+            dynamic_bodies >= 6,
+            "lattice grid should keep a multi-body dynamic node lattice below its fixed top edge"
+        );
+        let kinematic_bodies = builtin
+            .world
+            .bodies()
+            .filter(|handle| {
+                builtin
+                    .world
+                    .body(*handle)
+                    .expect("body should resolve")
+                    .body_type()
+                    == BodyType::Kinematic
+            })
+            .count();
+        assert!(
+            kinematic_bodies >= 2,
+            "lattice grid should expose a fixed top edge so the proxy is readable in live playback"
         );
 
         let joints: Vec<_> = builtin.world.joints().collect();
@@ -2600,6 +3130,214 @@ mod tests {
 
         assert!(distance_joint_count >= 8);
         assert!(world_anchor_joint_count >= 2);
+    }
+
+    #[test]
+    fn matrix_stack_scene_params_affect_grid_shape_and_runtime_config() {
+        let mut scene_params = BTreeMap::new();
+        scene_params.insert("columns".to_owned(), json!(3));
+        scene_params.insert("rows".to_owned(), json!(2));
+        scene_params.insert("box_width".to_owned(), json!(0.5));
+        scene_params.insert("box_height".to_owned(), json!(0.3));
+        scene_params.insert("gap_x".to_owned(), json!(0.02));
+        scene_params.insert("gap_y".to_owned(), json!(0.01));
+        scene_params.insert("layout".to_owned(), json!("aligned"));
+        scene_params.insert("material".to_owned(), json!("sticky"));
+        scene_params.insert("density".to_owned(), json!(1.8));
+        scene_params.insert("velocity_iterations".to_owned(), json!(6));
+        scene_params.insert("position_iterations".to_owned(), json!(9));
+        scene_params.insert(
+            "contact_position_correction".to_owned(),
+            json!("conservative"),
+        );
+        scene_params.insert("substeps_per_frame".to_owned(), json!(3));
+
+        let builtin = build_scenario(
+            ScenarioId::MatrixStack,
+            &ScenarioOverrides {
+                scene_params,
+                ..ScenarioOverrides::default()
+            },
+        )
+        .expect("matrix stack scene params should build a parameterized grid");
+
+        assert_eq!(
+            builtin.effective_runtime_config.substeps_per_frame, 3,
+            "stack params should own substeps instead of borrowing another scene default"
+        );
+        assert_eq!(
+            builtin
+                .effective_runtime_config
+                .step
+                .contact_position_correction,
+            ContactPositionCorrectionPolicy::Conservative
+        );
+        assert_eq!(builtin.effective_runtime_config.step.velocity_iterations, 6);
+        assert_eq!(builtin.effective_runtime_config.step.position_iterations, 9);
+
+        let dynamic_bodies = builtin
+            .world
+            .bodies()
+            .filter(|handle| {
+                builtin
+                    .world
+                    .body(*handle)
+                    .expect("body should resolve")
+                    .body_type()
+                    == BodyType::Dynamic
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(dynamic_bodies.len(), 6);
+
+        let dynamic_colliders = dynamic_bodies
+            .iter()
+            .flat_map(|body| {
+                builtin
+                    .world
+                    .colliders_for_body(*body)
+                    .expect("dynamic body should resolve")
+            })
+            .filter_map(|collider| builtin.world.collider(collider).ok())
+            .collect::<Vec<_>>();
+        assert_eq!(dynamic_colliders.len(), 6);
+        assert!(
+            dynamic_colliders
+                .iter()
+                .all(|collider| (collider.density() - 1.8).abs() <= f32::EPSILON),
+            "density should be authored per dynamic stack box"
+        );
+        assert!(
+            dynamic_colliders
+                .iter()
+                .all(|collider| collider.material() == Material::preset(MaterialPreset::Sticky)),
+            "material preset should be authored per dynamic stack box"
+        );
+    }
+
+    #[test]
+    fn lattice_grid_default_profile_keeps_proxy_stretch_bounded() {
+        let builtin = build_scenario(ScenarioId::LatticeGrid, &ScenarioOverrides::default())
+            .expect("lattice grid scenario should build");
+        let mut world = builtin.world;
+        let runtime = builtin.effective_runtime_config;
+        let mut pipeline = SimulationPipeline::new(runtime.step);
+        let initial = picea::debug::DebugSnapshot::from_world(
+            &world,
+            &picea::debug::DebugSnapshotOptions::default(),
+        );
+        let mut observed_bounds = StretchRatioBounds { min: 1.0, max: 1.0 };
+
+        for _ in 0..180 {
+            for _ in 0..runtime.substeps_per_frame.max(1) {
+                pipeline.step(&mut world);
+            }
+            let snapshot = picea::debug::DebugSnapshot::from_world(
+                &world,
+                &picea::debug::DebugSnapshotOptions::default(),
+            );
+            let frame_bounds = joint_stretch_ratio_bounds(&initial, &snapshot);
+            observed_bounds.min = observed_bounds.min.min(frame_bounds.min);
+            observed_bounds.max = observed_bounds.max.max(frame_bounds.max);
+        }
+        assert!(
+            observed_bounds.max <= 2.0 && observed_bounds.min >= 0.5,
+            "default lattice profile should stay readable in live-style playback; stretch_bounds={observed_bounds:?}"
+        );
+    }
+
+    #[test]
+    fn lattice_grid_scene_params_make_soft_and_hard_profiles_observable() {
+        let mut soft_params = BTreeMap::new();
+        soft_params.insert("constraint_profile".to_owned(), json!("soft"));
+        let soft = build_scenario(
+            ScenarioId::LatticeGrid,
+            &ScenarioOverrides {
+                scene_params: soft_params,
+                ..ScenarioOverrides::default()
+            },
+        )
+        .expect("soft lattice profile should build");
+
+        let mut hard_params = BTreeMap::new();
+        hard_params.insert("constraint_profile".to_owned(), json!("hard"));
+        let hard = build_scenario(
+            ScenarioId::LatticeGrid,
+            &ScenarioOverrides {
+                scene_params: hard_params,
+                ..ScenarioOverrides::default()
+            },
+        )
+        .expect("hard lattice profile should build");
+
+        assert!(
+            soft.effective_runtime_config.substeps_per_frame
+                < hard.effective_runtime_config.substeps_per_frame,
+            "hard profile should buy rigidity with extra substeps"
+        );
+        assert!(
+            !soft.effective_runtime_config.step.joint_velocity_projection
+                && hard.effective_runtime_config.step.joint_velocity_projection,
+            "soft/hard profiles should expose the velocity-projection difference"
+        );
+        assert!(
+            first_distance_joint_stiffness(&hard.world)
+                > first_distance_joint_stiffness(&soft.world),
+            "hard profile should author stronger distance joints"
+        );
+    }
+
+    fn first_distance_joint_stiffness(world: &World) -> f32 {
+        world
+            .joints()
+            .find_map(
+                |handle| match world.joint(handle).expect("joint should resolve").desc() {
+                    JointDesc::Distance(desc) => Some(desc.stiffness),
+                    JointDesc::WorldAnchor(_) => None,
+                },
+            )
+            .expect("lattice should include at least one distance joint")
+    }
+
+    #[derive(Debug)]
+    struct StretchRatioBounds {
+        min: f32,
+        max: f32,
+    }
+
+    fn joint_stretch_ratio_bounds(
+        reference: &picea::debug::DebugSnapshot,
+        current: &picea::debug::DebugSnapshot,
+    ) -> StretchRatioBounds {
+        let reference_by_handle = reference
+            .joints
+            .iter()
+            .map(|joint| (joint.handle, joint))
+            .collect::<BTreeMap<_, _>>();
+        let mut min_ratio = f32::INFINITY;
+        let mut max_ratio: f32 = 1.0;
+        for ratio in current.joints.iter().filter_map(|joint| {
+            let reference_joint = reference_by_handle.get(&joint.handle)?;
+            let reference_length = joint_anchor_distance(reference_joint)?;
+            let current_length = joint_anchor_distance(joint)?;
+            (reference_length > 1.0e-6).then_some(current_length / reference_length)
+        }) {
+            min_ratio = min_ratio.min(ratio);
+            max_ratio = max_ratio.max(ratio);
+        }
+        StretchRatioBounds {
+            min: if min_ratio.is_finite() {
+                min_ratio
+            } else {
+                1.0
+            },
+            max: max_ratio,
+        }
+    }
+
+    fn joint_anchor_distance(joint: &picea::debug::DebugJoint) -> Option<f32> {
+        let first = joint.anchors.first()?;
+        let second = joint.anchors.get(1)?;
+        Some((*second - *first).length())
     }
 
     #[test]

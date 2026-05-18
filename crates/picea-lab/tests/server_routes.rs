@@ -94,6 +94,61 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "substeps_per_frame",
         ]
     );
+    let matrix_descriptor = scenarios_body["scenarios"]
+        .as_array()
+        .expect("scenarios should be an array")
+        .iter()
+        .find(|scenario| scenario["id"] == "matrix_stack")
+        .expect("matrix stack descriptor should be exposed");
+    let matrix_parameter_keys = matrix_descriptor["parameter_schema"]
+        .as_array()
+        .expect("matrix stack parameter schema should be an array")
+        .iter()
+        .map(|parameter| parameter["key"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matrix_parameter_keys,
+        vec![
+            "columns",
+            "rows",
+            "box_width",
+            "box_height",
+            "gap_x",
+            "gap_y",
+            "layout",
+            "material",
+            "density",
+            "velocity_iterations",
+            "position_iterations",
+            "contact_position_correction",
+            "substeps_per_frame",
+        ]
+    );
+    let lattice_descriptor = scenarios_body["scenarios"]
+        .as_array()
+        .expect("scenarios should be an array")
+        .iter()
+        .find(|scenario| scenario["id"] == "lattice_grid")
+        .expect("lattice grid descriptor should be exposed");
+    let lattice_parameter_keys = lattice_descriptor["parameter_schema"]
+        .as_array()
+        .expect("lattice grid parameter schema should be an array")
+        .iter()
+        .map(|parameter| parameter["key"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lattice_parameter_keys,
+        vec![
+            "columns",
+            "rows",
+            "spacing_x",
+            "spacing_y",
+            "node_radius",
+            "constraint_profile",
+            "joint_velocity_projection",
+            "substeps_per_frame",
+        ]
+    );
 
     let created = app
         .clone()
@@ -177,6 +232,47 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
     assert_eq!(
         newton_created_body["session"]["effective_runtime_config"]["step"]["velocity_iterations"],
         4
+    );
+
+    let matrix_created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "scenario_id": "matrix_stack",
+                        "frame_count": 1,
+                        "overrides": {
+                            "scene_params": {
+                                "columns": 3,
+                                "rows": 2,
+                                "layout": "aligned",
+                                "substeps_per_frame": 2
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(matrix_created.status(), StatusCode::CREATED);
+    let matrix_created_body = json_body(matrix_created).await;
+    assert_eq!(
+        matrix_created_body["session"]["effective_runtime_config"]["scene_params"]["columns"],
+        3
+    );
+    assert_eq!(
+        matrix_created_body["session"]["effective_runtime_config"]["scene_params"]["rows"],
+        2
+    );
+    assert_eq!(
+        matrix_created_body["session"]["effective_runtime_config"]["substeps_per_frame"],
+        2
     );
 
     let fetched = app
@@ -795,9 +891,19 @@ async fn live_lattice_grid_session_steps_with_joint_proxy_facts() {
         .iter()
         .filter(|body| body["body_type"] == "dynamic")
         .count();
+    let kinematic_body_count = bodies
+        .iter()
+        .filter(|body| body["body_type"] == "kinematic")
+        .count();
     assert_eq!(
-        dynamic_body_count, 12,
+        dynamic_body_count + kinematic_body_count,
+        12,
         "live lattice proxy should build the 4x3 rigid-body node grid"
+    );
+    assert_eq!(
+        (dynamic_body_count, kinematic_body_count),
+        (8, 4),
+        "live lattice proxy should pin the top row and simulate the remaining nodes"
     );
 
     let joints = snapshot["joints"]

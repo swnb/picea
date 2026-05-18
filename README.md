@@ -176,7 +176,9 @@ Do not debug Picea by visual guessing alone. Prefer a minimal repro, a fixed `dt
 Start with:
 
 - `docs/ai/debug-playbook.md`
-- `docs/ai/debug-artifacts.md`
+
+`debug-playbook.md` also defines the recommended repro, trace, snapshot,
+render, and verification artifact shape for reviewable debugging.
 
 The debug route usually starts from one of these modules:
 

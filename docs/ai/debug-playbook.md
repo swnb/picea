@@ -101,7 +101,30 @@ Picea 的 debug 归档必须按下面顺序过一遍：
 - 不在不明确的情况下改 solver、broadphase、narrowphase 或 public API。
 - 不用“继续推进”替代“先把 bug 修对”。
 
-## 6. 最低验收口径
+## 6. 调试证据产物
+
+调试产物不要求每轮都生成同一组文件，但需要保留同一种证据结构，方便
+reviewer 复核和后续复现。推荐最小集合：
+
+- `repro.md`：问题摘要、触发条件、最小复现命令、预期/实际结果、branch、`HEAD`、工作区状态、相关 milestone / spec 约束。
+- `trace.jsonl`：逐步时间线；每行至少说明 frame、step phase、source、相关 body/collider/joint handles、事件或 diagnostic marker。
+- `final_snapshot.json`：结束状态切片；用于对比 bodies、colliders、contacts、islands、sleep state、query/debug facts。
+- `debug_render.json` 或 artifact frame：可视化事实；表达 shapes、AABB、contacts、normals、islands、diagnostic overlays，不混入解释。
+- `verification.md`：修复前失败点、修复后通过点、定向测试、milestone gate、未触碰边界。
+
+当前 `World + SimulationPipeline` 路线中的 trace phase 应优先使用 live code
+能对应的阶段名，例如 `integrate`、`broadphase`、`narrowphase`、
+`warm_start`、`velocity_solve`、`position_correction`、`sleep`、`commit`。
+旧 `scene::tick`、`collision_detective`、`constraints` 字段只允许出现在归档分析里。
+
+最低可用证据要能回答四个问题：
+
+1. 问题在哪个 frame / phase 出现。
+2. 它是从 broadphase、narrowphase、contact lifecycle、solver、sleep 还是 query/debug 投影传出来的。
+3. contact identity、warm-start、impulse、position correction 或 sleep/wake 事实如何变化。
+4. 本轮验证为什么足以支持“已修复”或“仍有残余风险”。
+
+## 7. 最低验收口径
 
 一轮 debug 至少要留下这些东西：
 

@@ -359,6 +359,16 @@ assert.match(
 );
 assert.match(
   appSource,
+  /matrix_stack[\s\S]*default_runtime_config[\s\S]*parameter_schema/s,
+  "Demo fallback should provide runtime defaults and parameter schema for matrix stack scenes.",
+);
+assert.match(
+  appSource,
+  /lattice_grid[\s\S]*default_runtime_config[\s\S]*parameter_schema/s,
+  "Demo fallback should provide runtime defaults and parameter schema for lattice_grid.",
+);
+assert.match(
+  appSource,
   /substeps_per_frame/,
   "Newton cradle scene parameter support should include substeps_per_frame through types, demo fallback, and UI wiring.",
 );

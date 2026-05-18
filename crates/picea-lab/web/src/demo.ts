@@ -60,6 +60,159 @@ const newtonCradleParameterSchema: ScenarioParameterDescriptor[] = [
   },
 ];
 
+type RectStackDemoParams = {
+  columns: number;
+  rows: number;
+  box_width: number;
+  box_height: number;
+  gap_x: number;
+  gap_y: number;
+  layout: "aligned" | "staggered";
+  material: "default" | "ice" | "rough" | "sticky";
+  density: number;
+  substeps_per_frame: number;
+};
+
+function rectStackRuntimeConfig(params: RectStackDemoParams): ScenarioRuntimeConfig {
+  return {
+    step: {
+      velocity_iterations: 10,
+      position_iterations: 20,
+      contact_position_correction: "enabled",
+      joint_velocity_projection: true,
+    },
+    substeps_per_frame: params.substeps_per_frame,
+    scene_params: {
+      ...params,
+      velocity_iterations: 10,
+      position_iterations: 20,
+      contact_position_correction: "enabled",
+    },
+  };
+}
+
+function rectStackParameterSchema(params: RectStackDemoParams): ScenarioParameterDescriptor[] {
+  return [
+    { key: "columns", label: "Columns", type: "integer", default: params.columns, min: 1, max: 16, step: 1 },
+    { key: "rows", label: "Rows", type: "integer", default: params.rows, min: 1, max: 12, step: 1 },
+    { key: "box_width", label: "Box width", type: "number", default: params.box_width, min: 0.2, max: 1.5, step: 0.01 },
+    { key: "box_height", label: "Box height", type: "number", default: params.box_height, min: 0.2, max: 1.5, step: 0.01 },
+    { key: "gap_x", label: "Horizontal gap", type: "number", default: params.gap_x, min: 0, max: 0.25, step: 0.005 },
+    { key: "gap_y", label: "Vertical gap", type: "number", default: params.gap_y, min: 0, max: 0.25, step: 0.005 },
+    {
+      key: "layout",
+      label: "Layout",
+      type: "select",
+      default: params.layout,
+      options: [
+        { value: "aligned", label: "Aligned" },
+        { value: "staggered", label: "Staggered" },
+      ],
+    },
+    {
+      key: "material",
+      label: "Material",
+      type: "select",
+      default: params.material,
+      options: [
+        { value: "default", label: "Default" },
+        { value: "ice", label: "Ice" },
+        { value: "rough", label: "Rough" },
+        { value: "sticky", label: "Sticky" },
+      ],
+    },
+    { key: "density", label: "Density", type: "number", default: params.density, min: 0.1, max: 5, step: 0.05 },
+    { key: "velocity_iterations", label: "Velocity iterations", type: "integer", default: 10, min: 0, max: 80, step: 1 },
+    { key: "position_iterations", label: "Position iterations", type: "integer", default: 20, min: 0, max: 120, step: 1 },
+    {
+      key: "contact_position_correction",
+      label: "Contact position correction",
+      type: "select",
+      default: "enabled",
+      options: [
+        { value: "enabled", label: "Enabled" },
+        { value: "conservative", label: "Conservative" },
+        { value: "disabled", label: "Disabled" },
+      ],
+    },
+    { key: "substeps_per_frame", label: "Substeps per frame", type: "integer", default: params.substeps_per_frame, min: 1, max: 8, step: 1 },
+  ];
+}
+
+const stack4Params: RectStackDemoParams = {
+  columns: 1,
+  rows: 4,
+  box_width: 0.9,
+  box_height: 0.9,
+  gap_x: 0.035,
+  gap_y: 0.035,
+  layout: "aligned",
+  material: "default",
+  density: 1,
+  substeps_per_frame: 1,
+};
+
+const matrixStackParams: RectStackDemoParams = {
+  columns: 8,
+  rows: 6,
+  box_width: 0.42,
+  box_height: 0.42,
+  gap_x: 0.035,
+  gap_y: 0.035,
+  layout: "staggered",
+  material: "rough",
+  density: 1,
+  substeps_per_frame: 1,
+};
+
+const alignedMatrixStackParams: RectStackDemoParams = {
+  ...matrixStackParams,
+  columns: 4,
+  rows: 3,
+  layout: "aligned",
+};
+
+const latticeGridDefaultRuntimeConfig: ScenarioRuntimeConfig = {
+  step: {
+    velocity_iterations: 10,
+    position_iterations: 20,
+    contact_position_correction: "enabled",
+    joint_velocity_projection: true,
+  },
+  substeps_per_frame: 8,
+  scene_params: {
+    columns: 4,
+    rows: 3,
+    spacing_x: 0.62,
+    spacing_y: 0.58,
+    node_radius: 0.12,
+    constraint_profile: "balanced",
+    joint_velocity_projection: true,
+    substeps_per_frame: 8,
+  },
+};
+
+const latticeGridParameterSchema: ScenarioParameterDescriptor[] = [
+  { key: "columns", label: "Columns", type: "integer", default: 4, min: 2, max: 8, step: 1 },
+  { key: "rows", label: "Rows", type: "integer", default: 3, min: 2, max: 6, step: 1 },
+  { key: "spacing_x", label: "Horizontal spacing", type: "number", default: 0.62, min: 0.3, max: 1.4, step: 0.01 },
+  { key: "spacing_y", label: "Vertical spacing", type: "number", default: 0.58, min: 0.3, max: 1.4, step: 0.01 },
+  { key: "node_radius", label: "Node radius", type: "number", default: 0.12, min: 0.05, max: 0.28, step: 0.01 },
+  {
+    key: "constraint_profile",
+    label: "Constraint profile",
+    type: "select",
+    default: "balanced",
+    options: [
+      { value: "soft", label: "Soft" },
+      { value: "balanced", label: "Balanced" },
+      { value: "hard", label: "Hard" },
+    ],
+  },
+  { key: "joint_velocity_projection", label: "Joint velocity projection", type: "boolean", default: true },
+  { key: "substeps_per_frame", label: "Substeps per frame", type: "integer", default: 8, min: 1, max: 8, step: 1 },
+];
+
 export const demoScenarios: ScenarioDescriptor[] = [
   {
     id: "falling_box_contact",
@@ -70,6 +223,8 @@ export const demoScenarios: ScenarioDescriptor[] = [
     id: "stack_4",
     name: "Four box stack",
     description: "Offline stack preview for smoke builds without the Rust server.",
+    default_runtime_config: rectStackRuntimeConfig(stack4Params),
+    parameter_schema: rectStackParameterSchema(stack4Params),
   },
   {
     id: "stack_stability_tower",
@@ -80,11 +235,15 @@ export const demoScenarios: ScenarioDescriptor[] = [
     id: "matrix_stack",
     name: "Matrix stack 8x6",
     description: "Offline matrix stack preview for dense resting-contact diagnostics.",
+    default_runtime_config: rectStackRuntimeConfig(matrixStackParams),
+    parameter_schema: rectStackParameterSchema(matrixStackParams),
   },
   {
     id: "matrix_stack_aligned",
     name: "Aligned matrix stack 4x3",
     description: "Offline aligned matrix stack preview for stable matrix-form behavior locks.",
+    default_runtime_config: rectStackRuntimeConfig(alignedMatrixStackParams),
+    parameter_schema: rectStackParameterSchema(alignedMatrixStackParams),
   },
   {
     id: "newton_cradle",
@@ -103,6 +262,8 @@ export const demoScenarios: ScenarioDescriptor[] = [
     name: "Rigid-body lattice grid proxy",
     description:
       "Offline rigid-body joint lattice / grid proxy with node, edge, island and stretch facts, not a true soft-body solver.",
+    default_runtime_config: latticeGridDefaultRuntimeConfig,
+    parameter_schema: latticeGridParameterSchema,
   },
   {
     id: "compound_provenance",

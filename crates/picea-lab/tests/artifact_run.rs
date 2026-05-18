@@ -5679,9 +5679,19 @@ fn lattice_grid_artifacts_capture_joint_lattice_proxy_facts() {
         .iter()
         .filter(|body| body.body_type == picea::prelude::BodyType::Dynamic)
         .count();
+    let kinematic_body_count = first
+        .snapshot
+        .bodies
+        .iter()
+        .filter(|body| body.body_type == picea::prelude::BodyType::Kinematic)
+        .count();
     assert!(
-        dynamic_body_count >= 9,
-        "lattice proxy should export a grid of dynamic nodes"
+        dynamic_body_count + kinematic_body_count >= 9,
+        "lattice proxy should export a grid of node bodies"
+    );
+    assert!(
+        dynamic_body_count >= 6 && kinematic_body_count >= 2,
+        "lattice proxy should export a fixed kinematic edge plus dynamic nodes"
     );
     assert!(
         first.snapshot.joints.len() >= 12,

@@ -2,55 +2,23 @@
 
 当前路由优先级：先看实时仓库事实（`git status`、Cargo manifests、`crates/picea/src/lib.rs`、最新验证输出），再用本文定位模块。
 
-`docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`
-是当前生产化 milestone 路线；M11-M22 在当前路线已按 2026-04-28
-验收完成。`docs/design/physics-engine-upgrade-technical-plan.md`
-解释 Post-M20 baseline、M21 public query 和 M22 authoring boundary
-之后的系统深化方向。M15 已落地为 Performance Data Path：
-`QueryPipeline` 通过内部 broadphase-style spatial index 复用做候选遍历，
-collider 派生几何使用 transform/revision-backed cache，contact/CCD/GJK 路径
-减少重复几何重建并做保守 pre-sizing。M16 Dense Island Execution 已
-把 contact/joint active-island batching 收敛为 deterministic island-local
-body slots / contact row indices / joint rows。M17 Performance Evidence 已把
-query traversal/candidate/filter/hit counters、broadphase traversal/prune
-counters、solver island/row/slot counters、`picea-lab` perf counter summaries
-和 query/island Criterion 场景接到证据层。M18 已把 broadphase
-candidate-pair 路径从 per-leaf root scan 收敛为 internal child-pair
-traversal，同时保持 candidate/query 的 public ordering 和语义不变。M19
-已完成所选 translational dynamic-vs-dynamic convex CCD slice，并通过
-`CcdTrace.target_kind` / target sweep facts 暴露动态目标语义。M20 已把
-`picea-lab` scene fixture 稳定到 versioned v1 schema：老 fixture
-缺省 `schema_version` 会回落到 v1，非 v1 版本会在 world 实例化前直接报 clear
-scene-schema error，fixture 还能通过 recipe-indexed `distance` /
-`world_anchor` joints 走既有 `JointBundle` + `WorldRecipe::with_joint` 路径。
-M21 已把 public distance / shape query API 落到 `QueryShape`、
-`ShapeHit`、`QueryShapeError` 以及 `QueryPipeline::intersect_shape` /
-`closest_shape`。M22 已把 lab scene fixture 的 compound / concave
-authoring boundary 固定为 validated convex pieces 或稳定 authoring error；
-direct concave contact solving 仍不属于 core solver。
-M23-M30 是下一组计划 gate：先硬化 broadphase/query performance evidence，
-再把 `picea-lab-web` 提升为 broadphase tree / island lifecycle / compound
-provenance 的过程可视化基础，然后进入 M25 的两段式收口: M25-A 先做
-server-owned live `World + SimulationPipeline` request-driven session，M25-B
-已把 patch / transaction / query / handle 语义收口到
-`docs/design/picea-lab-live-session-semantics.md`，当前 live session 仍显式拒绝
-generic running-world patch，但 2026-05-07 追加了窄 live gravity apply
-例外；其后才是单片 CCD 扩展、
-automatic polygon decomposition、solver ordering contract、performance
-threshold policy，最后收束到 public beta hardening。M26 已选择 dynamic
-compound CCD 作为单片扩展，复用 per-collider translational convex sweep；rotational
-CCD 仍保持在后续算法 slice。M27 已把 lab authoring 中的 static
-`concave_polygon` 受限三角化为 deterministic convex pieces，并保持 dynamic
-concave / arbitrary concave solver 为非目标。M28 已把当前单线程 island-local
-ordering 固定为契约：contact rows 与 joint rows 共享 dense body slots，但保持
-separate-phase row vectors。M29 已固定 performance threshold policy：先用 Criterion
-和 deterministic counters 做 baseline/warn，不把单次本机 wall-clock 变成 hard fail。
-M30 已把 beta 上手面收口到 `docs/public-beta.md`、根 README、core crate README
-和 `crates/picea/examples/public_beta_smoke.rs`，当前 public beta 路线以
-`World` / `SimulationPipeline` / `QueryPipeline` / `DebugSnapshot` /
-`WorldRecipe` 为入口，并把 lab 作为证据与可视化层。
-`docs/plans/2026-04-18-picea-physics-engine-milestones.md`
-只用于历史归档；其中旧 `Scene` / `Context` / `picea-web` / wasm 叙述不代表当前默认路由。
+本文是模块地图，不是 milestone 日志。生产化路线和完成记录请读
+`docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`；
+旧 `Scene` / `Context` / `picea-web` / wasm 叙述只在
+`docs/plans/2026-04-18-picea-physics-engine-milestones.md` 和
+`docs/architecture/legacy-scene-runtime.md` 中作为归档背景保留。
+
+当前可稳定假设的主线：
+
+- public beta surface：`World` / `SimulationPipeline` / `QueryPipeline` /
+  `DebugSnapshot` / `WorldRecipe`。
+- core 事实层：`crates/picea` 拥有 authoritative runtime、pipeline、query、
+  debug 和 solver internals。
+- lab 事实层：`crates/picea-lab` 负责 scenario、artifact、server/live session
+  和证据导出。
+- web 展示层：`crates/picea-lab/web` 消费 Rust facts，不重新计算 physics。
+- macro 工具层：`crates/macro-tools` 是独立 workspace crate，不是 core runtime
+  直接依赖图的一部分。
 
 仓库是一个 Rust workspace，当前三类 crate / 工具入口：
 
@@ -124,6 +92,10 @@ M30 已把 beta 上手面收口到 `docs/public-beta.md`、根 README、core cra
 - `docs/public-beta.md`：M30 public beta surface、迁移说明、示例和最终验收矩阵
 - `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`：当前生产化 milestone 边界、M11-M22 完成状态、M23-M30 计划 gate 和 Post-M30 follow-up
 - `docs/design/physics-engine-upgrade-technical-plan.md`：Post-M20 baseline、M21 public query 和 M22 authoring boundary 之后的系统升级设计方向
+- `docs/design/matrix-stack-stability-optimization-design.md` 与 `docs/design/matrix-stack-stability-acceptance.md`：matrix stack 稳定性优化顺序和验收窗口
+- `docs/design/dense-pressure-position-row-architecture.md`：dense pressure / pseudo-position / position-row 已落地架构记录
+- `docs/design/scene-runtime-config-and-parameter-ui-design.md`：scene-owned runtime config 和参数 UI 设计
 - `docs/design/deformable-body-roadmap.md`：future soft-body / particle / cloth / deformable mesh RFC；先读它再讨论 true deformable physics，不要把 M38 rigid-body lattice proxy 当作已实现 soft-body
 - `docs/design/performance-threshold-policy.md`：M29 benchmark baseline、warn/fail 和 fallback policy
+- `docs/architecture/legacy-scene-runtime.md`：旧 `Scene` / `Context` runtime 和 collision/constraint 归档；不要作为当前默认路由
 - `docs/plans/2026-04-18-picea-physics-engine-milestones.md`：历史归档；不要把旧 `Scene` / `Context` / `picea-web` / wasm 条目当作当前默认路由
