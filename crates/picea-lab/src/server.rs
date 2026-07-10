@@ -1536,6 +1536,36 @@ fn apply_live_gravity_patch(
     Ok(())
 }
 
+/// Direct-mode grabs steer the body with a clamped velocity toward the pointer
+/// target once per frame, before the physics step, so collision response still
+/// owns the rest of the frame.
+fn apply_direct_grab_drive(record: &SessionRecord, runtime: &mut LiveSessionState) {
+    let Some(grab) = runtime.active_grab.as_ref() else {
+        return;
+    };
+    if !matches!(grab.mode, GrabMode::Direct) {
+        return;
+    }
+    let Ok(body) = runtime.world.body(grab.body_handle) else {
+        return;
+    };
+    let anchor_world = body.pose().transform_point(grab.local_anchor);
+    let dt = record.effective_runtime_config.step.dt.max(1.0e-6);
+    let mut velocity: Vector = (grab.target - anchor_world) / dt;
+    let speed = velocity.length();
+    if speed > grab.max_speed {
+        velocity = velocity * (grab.max_speed / speed);
+    }
+    let _ = runtime.world.apply_body_patch(
+        grab.body_handle,
+        BodyPatch {
+            linear_velocity: Some(velocity),
+            wake: true,
+            ..BodyPatch::default()
+        },
+    );
+}
+
 fn step_live_session(session: &mut SessionState) -> Result<(), LabHttpError> {
     let SessionRuntime::Live(runtime) = &mut session.runtime else {
         return Err(LabError::InvalidControlAction("step".to_owned()).into());
@@ -1547,6 +1577,7 @@ fn step_live_session(session: &mut SessionState) -> Result<(), LabHttpError> {
         return Ok(());
     }
 
+    apply_direct_grab_drive(&session.record, runtime);
     let frame_index = session.record.produced_frame_count;
     let mut report = runtime.pipeline.step(&mut runtime.world);
     for _ in 1..runtime.substeps_per_frame.max(1) {
