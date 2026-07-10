@@ -874,9 +874,22 @@ struct DerivedGeometryCache {
     world_vertices: Option<Vec<Point>>,
 }
 
+/// Bit-exact pose equality for cache freshness. `Pose`'s `PartialEq` compares
+/// translation through `Vector`'s epsilon-fuzzy `eq`, so a sub-epsilon pose
+/// change would falsely reuse stale geometry; compare the raw float bits here.
+fn pose_bits_equal(a: Pose, b: Pose) -> bool {
+    a.translation().x().to_bits() == b.translation().x().to_bits()
+        && a.translation().y().to_bits() == b.translation().y().to_bits()
+        && a.angle().to_bits() == b.angle().to_bits()
+}
+
 impl DerivedGeometryCache {
     fn is_fresh(&self, revision: u32, world_pose: Pose) -> bool {
-        self.world_pose == Some(world_pose) && self.revision == revision && self.aabb.is_some()
+        self.revision == revision
+            && self.aabb.is_some()
+            && self
+                .world_pose
+                .is_some_and(|cached| pose_bits_equal(cached, world_pose))
     }
 
     fn derived_geometry(&self, shape: &SharedShape, world_pose: Pose) -> DerivedGeometry {
@@ -951,6 +964,45 @@ mod tests {
         assert!(
             (actual - expected).abs() <= EPSILON,
             "expected {actual} to be within {EPSILON} of {expected}"
+        );
+    }
+
+    #[test]
+    fn geometry_cache_rejects_sub_epsilon_translation_change() {
+        use super::{DerivedGeometryCache, ShapeAabb};
+        use crate::math::FloatNum;
+
+        let pose0 = Pose::from_xy_angle(0.0, 0.0, 0.0);
+        // A translation delta strictly below one epsilon: fuzzy-equal under
+        // Vector's PartialEq, yet a distinct bit pattern.
+        let pose1 = Pose::from_xy_angle(FloatNum::EPSILON / 2.0, 0.0, 0.0);
+        assert!(
+            pose0.translation() == pose1.translation(),
+            "poses must be epsilon-equal to exercise the fuzzy-compare hazard",
+        );
+        assert_ne!(
+            pose0.translation().x().to_bits(),
+            pose1.translation().x().to_bits(),
+            "poses must differ at the bit level",
+        );
+
+        let cache = DerivedGeometryCache {
+            revision: 3,
+            world_pose: Some(pose0),
+            aabb: Some(ShapeAabb {
+                min: Point::new(-1.0, -1.0),
+                max: Point::new(1.0, 1.0),
+            }),
+            world_vertices: None,
+        };
+
+        assert!(
+            cache.is_fresh(3, pose0),
+            "the exact cached pose must stay fresh",
+        );
+        assert!(
+            !cache.is_fresh(3, pose1),
+            "a sub-epsilon translation change must invalidate the geometry cache",
         );
     }
 
