@@ -29,7 +29,6 @@ import {
   buildTrajectoryOverlay,
   buildTrajectorySummary,
   type TrajectoryMarker,
-  type TrajectoryOverlay,
 } from "./components/workbench/trajectory"
 import {
   deriveLatticeProxy,
@@ -37,7 +36,6 @@ import {
   defaultTrajectorySettings,
   type CanvasDebugView,
   type ControlAction,
-  type LatticeProxySummary,
   type LayerState,
   type LiveCadenceStatus,
   type PerfEvidenceStatus,

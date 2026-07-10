@@ -298,7 +298,6 @@ export function WorkbenchLayout({
                 frames={frames}
                 frameIndex={frameIndex}
                 trajectoryOverlay={trajectoryOverlay}
-                latticeSummary={latticeSummary}
                 stackSummary={stackSummary}
                 trajectoryMarkers={trajectoryMarkers}
                 onFrameChange={onFrameChange}

@@ -47,7 +47,6 @@ import {
 import { deriveLatticeProxy } from "./types"
 import type {
   CanvasDebugView,
-  LatticeProxySummary,
   LayerState,
   LiveCadenceStatus,
   PerfEvidenceStatus,
@@ -117,7 +116,6 @@ export function BottomTimeline({
   frames,
   frameIndex,
   trajectoryOverlay: trajectoryOverlayFacts,
-  latticeSummary: latticeSummaryFacts,
   stackSummary: stackSummaryFacts,
   trajectoryMarkers: trajectoryMarkersFacts,
   onFrameChange,
@@ -146,7 +144,6 @@ export function BottomTimeline({
   frames: FrameRecord[]
   frameIndex: number
   trajectoryOverlay: TrajectoryOverlay
-  latticeSummary: LatticeProxySummary
   stackSummary: StackStabilitySummary
   trajectoryMarkers: TrajectoryMarker[]
   onFrameChange: (value: number) => void
@@ -211,7 +208,7 @@ export function BottomTimeline({
     const diagnosticMarkers = buildDiagnosticTimelineMarkers(locale, frames)
     const nextTrajectoryOverlay = trajectoryOverlayFacts
     const trajectoryMarkers = trajectoryMarkersFacts
-    const nextLatticeSummary = nextFrame ? latticeSummaryFacts : null
+    const nextLatticeSummary = nextFrame ? deriveLatticeProxy(nextFrame, frames[0] ?? nextFrame) : null
     const railMarkers = pickRailMarkers([
       ...diagnosticMarkers,
       ...stackMarkers.map((marker) => ({
@@ -252,7 +249,6 @@ export function BottomTimeline({
   }, [
     frameIndex,
     frames,
-    latticeSummaryFacts,
     locale,
     stackSummaryFacts,
     trajectoryMarkersFacts,
