@@ -1568,3 +1568,20 @@ assert.match(
   /initialRunTriggeredRef\.current = true[\s\S]*?void runScenario\(\)/,
   "First successful scenario fetch should auto-run once so the initial canvas shows real physics, not demo frames.",
 );
+
+// --- Offline demo watermark contract ---
+assert.match(
+  appSource,
+  /offlineWatermark=\{source === "demo" \? t\(locale, "canvas\.offlineWatermark"\) : null\}/,
+  "Demo-sourced frames must surface an explicit offline watermark instead of silently posing as real simulation.",
+);
+assert.match(
+  appSource,
+  /offlineWatermark: string \| null/,
+  "WorldCanvas should accept the watermark as a nullable string prop so it stays locale-agnostic.",
+);
+assert.match(
+  appSource,
+  /offlineWatermark \?[\s\S]*?pointer-events-none[\s\S]*?\{offlineWatermark\}/,
+  "The watermark overlay must render as a non-interactive overlay showing the provided label.",
+);

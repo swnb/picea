@@ -2359,6 +2359,7 @@ export function App() {
       onScenarioChange={changeScenario}
       status={status}
       source={source}
+      offlineWatermark={source === "demo" ? t(locale, "canvas.offlineWatermark") : null}
       sessionId={sessionId}
       runId={runId}
       manifestArtifact={manifestArtifact}

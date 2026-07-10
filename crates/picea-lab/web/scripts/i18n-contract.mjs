@@ -118,6 +118,7 @@ for (const locale of supportedLocales) {
   assert.equal(typeof messages[locale]["canvas.targetActive"], "string");
   assert.equal(typeof messages[locale]["canvas.targetAllColliders"], "string");
   assert.equal(typeof messages[locale]["canvas.targetScene"], "string");
+  assert.equal(typeof messages[locale]["canvas.offlineWatermark"], "string");
   assert.equal(typeof messages[locale]["scenario.group.basics"], "string");
   assert.equal(typeof messages[locale]["scenario.group.stack"], "string");
   assert.equal(typeof messages[locale]["scenario.group.ccd"], "string");

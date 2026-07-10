@@ -45,6 +45,7 @@ type WorldCanvasProps = {
   layers: LayerState;
   trajectorySettings: TrajectorySettings;
   latticeSummary: LatticeProxySummary;
+  offlineWatermark: string | null;
   labels: {
     frame: string;
     colliders: string;
@@ -124,6 +125,7 @@ export function WorldCanvas({
   layers,
   trajectorySettings,
   latticeSummary,
+  offlineWatermark,
   labels,
   onSelect,
   onViewChange,
@@ -510,6 +512,13 @@ export function WorldCanvas({
         onPointerCancel={handlePointerCancel}
         onWheel={handleWheel}
       />
+      {offlineWatermark ? (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <div className="-rotate-12 rounded-md border border-lab-line bg-lab-panel/60 px-6 py-3 text-2xl font-bold tracking-widest text-lab-muted">
+            {offlineWatermark}
+          </div>
+        </div>
+      ) : null}
       <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded border border-lab-line bg-lab-panel/90 px-2 py-1 text-xs text-lab-muted">
         <span>{labels.frame} {frame?.frame_index ?? 0}</span>
         <span className="h-3 w-px bg-lab-line" />

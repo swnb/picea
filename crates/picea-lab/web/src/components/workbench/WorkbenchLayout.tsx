@@ -52,6 +52,7 @@ export function WorkbenchLayout({
   onScenarioChange,
   status,
   source,
+  offlineWatermark,
   sessionId,
   runId,
   manifestArtifact,
@@ -120,6 +121,7 @@ export function WorkbenchLayout({
   onScenarioChange: (value: string) => void
   status: StatusKind
   source: SourceKind
+  offlineWatermark: string | null
   sessionId: string | null
   runId: string | null
   manifestArtifact: string | null
@@ -284,6 +286,7 @@ export function WorkbenchLayout({
                 trajectorySettings={trajectorySettings}
                 labels={canvasLabels}
                 latticeSummary={latticeSummary}
+                offlineWatermark={offlineWatermark}
                 onSelect={onSelectEntity}
                 onViewChange={onCanvasViewChange}
               />
