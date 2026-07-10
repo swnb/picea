@@ -2305,6 +2305,370 @@ async fn live_grab_creates_spring_joint_and_rejects_invalid_targets() {
     );
 }
 
+#[tokio::test]
+async fn live_grab_update_moves_anchor_and_release_preserves_momentum() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "scenario_id": "falling_box_contact",
+                        "frame_count": 8,
+                        "mode": "live_session"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created_body = json_body(created).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    let session_epoch = created_body["session"]["session_epoch"].as_u64().unwrap();
+
+    // 先 step 一帧,拿到动态 body 的 handle 与位置。
+    let stepped = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/control"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let stepped_body = json_body(stepped).await;
+    let bodies = stepped_body["session"]["latest_frame"]["snapshot"]["bodies"]
+        .as_array()
+        .unwrap();
+    let dynamic_body = bodies
+        .iter()
+        .find(|body| body["body_type"] == "dynamic")
+        .expect("scenario should expose a dynamic body");
+    let dynamic_handle = dynamic_body["handle"].as_u64().unwrap();
+    let grab_x = dynamic_body["transform"]["translation"]["x"]
+        .as_f64()
+        .unwrap();
+    let grab_y = dynamic_body["transform"]["translation"]["y"]
+        .as_f64()
+        .unwrap();
+    let joint_count_before = stepped_body["session"]["latest_frame"]["snapshot"]["joints"]
+        .as_array()
+        .unwrap()
+        .len();
+
+    // POST grab(spring,grab_point 取 body 当前位置),得 grab_id、session_epoch。
+    let grabbed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": dynamic_handle,
+                        "grab_point": [grab_x, grab_y],
+                        "session_epoch": session_epoch
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(grabbed.status(), StatusCode::OK);
+    let grabbed_body = json_body(grabbed).await;
+    let grab_id = grabbed_body["grab"]["id"].as_str().unwrap().to_owned();
+
+    // PATCH 目标点:把 world_anchor 挪到 body 上方远处。
+    let updated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PATCH)
+                .uri(format!("/api/sessions/{session_id}/grabs/{grab_id}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "target": [grab_x + 2.0, grab_y - 2.0], "session_epoch": session_epoch })
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), StatusCode::OK);
+    let updated_body = json_body(updated).await;
+    assert_eq!(
+        updated_body["grab"]["target"]["x"].as_f64().unwrap(),
+        grab_x + 2.0
+    );
+
+    // 错误 grab_id → 404。
+    let missing = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::PATCH)
+                .uri(format!("/api/sessions/{session_id}/grabs/grab-999"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "target": [0.0, 0.0], "session_epoch": session_epoch }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    // 拖两帧,body 应朝新 target 方向移动。
+    //
+    // Note: the core `WorldAnchor` joint (crates/picea/src/pipeline/joints.rs
+    // `JointSolverRow::WorldAnchor`) is a position-space correction applied via
+    // `apply_single_body_position_correction_preserve_velocity` — it moves the
+    // body's pose toward `world_anchor` but, true to its name, never writes
+    // `linear_velocity`. Confirmed empirically: after these two drag steps
+    // `linear_velocity.x` stays bit-exact 0.0 while `translation.x` closes in on
+    // the new target. So "drag imparts motion toward target" is asserted on
+    // position (the fact the joint actually produces), not on velocity.
+    let mut dragged_body = Value::Null;
+    for _ in 0..2 {
+        let dragged = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/sessions/{session_id}/control"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "action": "step", "detail": "full" }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        dragged_body = json_body(dragged).await;
+    }
+    let dragged_bodies = dragged_body["session"]["latest_frame"]["snapshot"]["bodies"]
+        .as_array()
+        .unwrap();
+    let dragged_dynamic_body = dragged_bodies
+        .iter()
+        .find(|body| body["handle"].as_u64().unwrap() == dynamic_handle)
+        .expect("dragged body should still be present");
+    let drag_position_x = dragged_dynamic_body["transform"]["translation"]["x"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        drag_position_x > grab_x,
+        "body should move toward the new +x grab target, started at {grab_x}, now at {drag_position_x}"
+    );
+    let drag_velocity_y = dragged_dynamic_body["linear_velocity"]["y"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        drag_velocity_y.abs() > 1.0e-6,
+        "body should still accumulate gravity-driven y velocity while dragging, got {drag_velocity_y}"
+    );
+
+    // DELETE 释放:session.active_grab 清空,joint 从下一帧 snapshot 消失,
+    // 且 body 速度不被清零(保留甩飞动量)。Since the grab joint never touches
+    // linear_velocity (see note above), the momentum fact worth locking down is
+    // that `release_grab` itself does not reset velocity either — the
+    // gravity-driven linear_velocity.y must keep the same sign and stay nonzero
+    // across the release, i.e. no "clear velocity on release" regression.
+    let released = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/sessions/{session_id}/grabs/{grab_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(released.status(), StatusCode::OK);
+    let released_body = json_body(released).await;
+    assert_eq!(released_body["session"]["active_grab"], Value::Null);
+
+    let after_release = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/control"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let after_release_body = json_body(after_release).await;
+    let joints_after_release = after_release_body["session"]["latest_frame"]["snapshot"]["joints"]
+        .as_array()
+        .unwrap();
+    assert!(
+        !joints_after_release
+            .iter()
+            .any(|joint| joint["kind"] == "world_anchor"),
+        "world_anchor grab joint should be gone from the snapshot after release"
+    );
+    let bodies_after_release = after_release_body["session"]["latest_frame"]["snapshot"]["bodies"]
+        .as_array()
+        .unwrap();
+    let body_after_release = bodies_after_release
+        .iter()
+        .find(|body| body["handle"].as_u64().unwrap() == dynamic_handle)
+        .expect("released body should still be present");
+    let velocity_y_after_release = body_after_release["linear_velocity"]["y"].as_f64().unwrap();
+    assert!(
+        velocity_y_after_release.abs() > 1.0e-6,
+        "released body should keep nonzero momentum, got {velocity_y_after_release}"
+    );
+    assert_eq!(
+        velocity_y_after_release.signum(),
+        drag_velocity_y.signum(),
+        "released body should keep momentum in the same direction as before release: \
+         before={drag_velocity_y}, after={velocity_y_after_release}"
+    );
+
+    // 重复 DELETE 幂等。
+    let released_again = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/sessions/{session_id}/grabs/{grab_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(released_again.status(), StatusCode::OK);
+    let released_again_body = json_body(released_again).await;
+    assert_eq!(released_again_body["session"]["active_grab"], Value::Null);
+
+    // 二次 POST grab 替换语义:连续两次 POST,第二次响应的 grab.id 不同,
+    // session.active_grab 是第二个,且下一帧 snapshot 中 world_anchor joint 数量
+    // 仍为 1(替换,不累加)。
+    let first_replace = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": dynamic_handle,
+                        "grab_point": [grab_x, grab_y],
+                        "session_epoch": session_epoch
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first_replace.status(), StatusCode::OK);
+    let first_replace_body = json_body(first_replace).await;
+    let first_replace_id = first_replace_body["grab"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let second_replace = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": dynamic_handle,
+                        "grab_point": [grab_x, grab_y],
+                        "session_epoch": session_epoch
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second_replace.status(), StatusCode::OK);
+    let second_replace_body = json_body(second_replace).await;
+    let second_replace_id = second_replace_body["grab"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(first_replace_id, second_replace_id);
+    assert_eq!(
+        second_replace_body["session"]["active_grab"]["id"],
+        second_replace_id
+    );
+
+    let after_replace = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/control"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let after_replace_body = json_body(after_replace).await;
+    let joints_after_replace = after_replace_body["session"]["latest_frame"]["snapshot"]["joints"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        joints_after_replace
+            .iter()
+            .filter(|joint| joint["kind"] == "world_anchor")
+            .count(),
+        1,
+        "replacing an active grab must not accumulate world_anchor joints, baseline was {joint_count_before}"
+    );
+
+    // reset 后 active_grab 为 Null。
+    let reset = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/control"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "action": "reset" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reset.status(), StatusCode::OK);
+    let reset_body = json_body(reset).await;
+    assert_eq!(reset_body["session"]["active_grab"], Value::Null);
+}
+
 async fn create_live_session(app: &axum::Router, scenario_id: &str, frame_count: usize) -> Value {
     create_live_session_with_options(app, scenario_id, frame_count, false, 600).await
 }

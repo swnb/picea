@@ -19,8 +19,8 @@ use axum::{
     Json, Router,
 };
 use picea::prelude::{
-    BodyHandle, BodyPatch, BodyType, FloatNum, JointDesc, JointHandle, Point, QueryPipeline,
-    SimulationPipeline, Vector, World, WorldAnchorJointDesc,
+    BodyHandle, BodyPatch, BodyType, FloatNum, JointDesc, JointHandle, JointPatch, Point,
+    QueryPipeline, SimulationPipeline, Vector, World, WorldAnchorJointDesc, WorldAnchorJointPatch,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -312,6 +312,12 @@ struct CreateGrabRequest {
     session_epoch: u64,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct UpdateGrabRequest {
+    target: serde_json::Value,
+    session_epoch: u64,
+}
+
 pub fn app(state: LabServerState) -> Router {
     Router::new()
         .route("/api/scenarios", get(get_scenarios))
@@ -329,6 +335,10 @@ pub fn app(state: LabServerState) -> Router {
             post(commit_velocity_perturbation),
         )
         .route("/api/sessions/:id/grabs", post(create_grab))
+        .route(
+            "/api/sessions/:id/grabs/:grab_id",
+            patch(update_grab).delete(release_grab),
+        )
         .route("/api/sessions/:id/overrides", patch(patch_overrides))
         .route("/api/sessions/:id/events", get(session_events))
         .route("/api/runs/:id/artifacts/:file", get(get_artifact))
@@ -761,6 +771,86 @@ async fn create_grab(
     runtime.active_grab = Some(grab.clone());
     record.active_grab = Some(grab.clone());
     Ok(Json(json!({ "grab": grab, "session": record.clone() })))
+}
+
+async fn update_grab(
+    State(state): State<LabServerState>,
+    Path((id, grab_id)): Path<(String, String)>,
+    Json(request): Json<UpdateGrabRequest>,
+) -> Result<Json<serde_json::Value>, LabHttpError> {
+    let session = get_session_handle(&state, &id)?;
+    let mut session = session.lock().expect("session mutex should not poison");
+    if request.session_epoch != session.record.session_epoch {
+        return Err(LabHttpError::bad_request(format!(
+            "stale session epoch: expected {}, got {}",
+            session.record.session_epoch, request.session_epoch
+        )));
+    }
+    let Some(target) = parse_world_point(&request.target) else {
+        return Err(LabHttpError::bad_request(
+            "target requires a finite [x, y] point",
+        ));
+    };
+    let session = &mut *session;
+    let record = &mut session.record;
+    let SessionRuntime::Live(runtime) = &mut session.runtime else {
+        return Err(LabHttpError::bad_request(
+            "grabs are only available for live_session",
+        ));
+    };
+    let Some(grab) = runtime
+        .active_grab
+        .as_mut()
+        .filter(|grab| grab.id == grab_id)
+    else {
+        return Err(LabHttpError::not_found(format!(
+            "grab {grab_id} is not active for session {id}"
+        )));
+    };
+    grab.target = target;
+    if let Some(joint_handle) = grab.joint_handle {
+        runtime
+            .world
+            .apply_joint_patch(
+                joint_handle,
+                JointPatch::WorldAnchor(WorldAnchorJointPatch {
+                    world_anchor: Some(target),
+                    ..WorldAnchorJointPatch::default()
+                }),
+            )
+            .map_err(|error| {
+                LabHttpError::bad_request(format!("grab joint patch rejected: {error:?}"))
+            })?;
+        runtime.query.sync(&runtime.world);
+    }
+    let grab = grab.clone();
+    record.active_grab = Some(grab.clone());
+    Ok(Json(json!({ "grab": grab, "session": record.clone() })))
+}
+
+async fn release_grab(
+    State(state): State<LabServerState>,
+    Path((id, grab_id)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, LabHttpError> {
+    let session = get_session_handle(&state, &id)?;
+    let mut session = session.lock().expect("session mutex should not poison");
+    let session = &mut *session;
+    let record = &mut session.record;
+    let SessionRuntime::Live(runtime) = &mut session.runtime else {
+        return Err(LabHttpError::bad_request(
+            "grabs are only available for live_session",
+        ));
+    };
+    // Releasing an already-released grab is idempotent: pointerup can race a
+    // reset/replace, and the client outcome (no grab) is identical.
+    if runtime
+        .active_grab
+        .as_ref()
+        .is_some_and(|grab| grab.id == grab_id)
+    {
+        release_active_grab(record, runtime);
+    }
+    Ok(Json(json!({ "session": record.clone() })))
 }
 
 async fn session_events(
