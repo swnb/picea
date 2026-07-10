@@ -7,12 +7,12 @@ use crate::{
         CcdTrace, ContactEvent, ContactLifecycleReason, ContactReductionReason, GenericConvexTrace,
         SleepTransitionReason, SourceRowContinuityReason, WarmStartCacheReason, WorldEvent,
     },
-    handles::{BodyHandle, ColliderHandle},
+    handles::{BodyHandle, ColliderHandle, ContactId, ManifoldId},
     math::{point::Point, vector::Vector, FloatNum},
     pipeline::{
         broadphase::{BroadphaseStats, ColliderProxy},
         island::SolverStepStats,
-        narrowphase::contact_from_shapes_with_cached_vertices,
+        narrowphase::{contact_from_shapes_with_cached_vertices, decode_feature_id},
         StepConfig,
     },
     world::{
@@ -306,98 +306,22 @@ impl World {
             let is_persisted = existing.is_some();
             warm_start_stats.record(contact.warm_start_reason);
             let event = if let Some((existing, lifecycle_reason)) = existing {
-                ContactEvent {
-                    contact_id: existing.contact.contact_id,
-                    manifold_id: existing.contact.manifold_id,
-                    body_a: contact.body_a,
-                    body_b: contact.body_b,
-                    collider_a: contact.collider_a,
-                    collider_b: contact.collider_b,
-                    feature_id: contact.feature_id,
-                    point: contact.point,
-                    normal: contact.normal,
-                    depth: contact.depth,
-                    reduction_reason: contact.reduction_reason,
-                    warm_start_reason: contact.warm_start_reason,
-                    warm_start_anchor_drift: contact.warm_start_anchor_drift,
-                    warm_start_normal_anchor_drift: contact.warm_start_normal_anchor_drift,
-                    warm_start_tangent_anchor_drift: contact.warm_start_tangent_anchor_drift,
-                    warm_start_normal_impulse: contact.warm_start_normal_impulse,
-                    warm_start_tangent_impulse: contact.warm_start_tangent_impulse,
-                    source_row_continuity_candidate: contact.source_row_continuity_candidate,
-                    source_row_continuity_reason: contact.source_row_continuity_reason,
+                contact_event(
+                    existing.contact.contact_id,
+                    existing.contact.manifold_id,
                     lifecycle_reason,
-                    solver_normal_impulse: contact.normal_impulse,
-                    solver_tangent_impulse: contact.tangent_impulse,
-                    solver_initial_normal_speed: contact.solver_initial_normal_speed,
-                    solver_initial_tangent_speed: contact.solver_initial_tangent_speed,
-                    solver_final_normal_speed: contact.solver_final_normal_speed,
-                    solver_final_tangent_speed: contact.solver_final_tangent_speed,
-                    solver_position_bias: contact.solver_position_bias,
-                    solver_restitution_bias: contact.solver_restitution_bias,
-                    solver_support_friction_impulse: contact.solver_support_friction_impulse,
-                    solver_position_correction_depth: contact.solver_position_correction_depth,
-                    solver_position_correction_body_a_translation: contact
-                        .solver_position_correction_body_a_translation,
-                    solver_position_correction_body_b_translation: contact
-                        .solver_position_correction_body_b_translation,
-                    solver_normal_impulse_delta: contact.solver_normal_impulse_delta,
-                    solver_tangent_impulse_delta: contact.solver_tangent_impulse_delta,
-                    normal_impulse_clamped: contact.normal_impulse_clamped,
-                    tangent_impulse_clamped: contact.tangent_impulse_clamped,
-                    restitution_velocity_threshold: contact.restitution_velocity_threshold,
-                    restitution_applied: contact.restitution_applied,
-                    generic_convex_trace: contact.generic_convex_trace,
-                    ccd_trace: contact.ccd_trace,
-                }
+                    &contact,
+                )
             } else {
                 let manifold_id = *pair_manifold_ids
                     .entry(contact.pair_key)
                     .or_insert_with(|| self.alloc_next_manifold_id());
-                ContactEvent {
-                    contact_id: self.alloc_next_contact_id(),
+                contact_event(
+                    self.alloc_next_contact_id(),
                     manifold_id,
-                    body_a: contact.body_a,
-                    body_b: contact.body_b,
-                    collider_a: contact.collider_a,
-                    collider_b: contact.collider_b,
-                    feature_id: contact.feature_id,
-                    point: contact.point,
-                    normal: contact.normal,
-                    depth: contact.depth,
-                    reduction_reason: contact.reduction_reason,
-                    warm_start_reason: contact.warm_start_reason,
-                    warm_start_anchor_drift: contact.warm_start_anchor_drift,
-                    warm_start_normal_anchor_drift: contact.warm_start_normal_anchor_drift,
-                    warm_start_tangent_anchor_drift: contact.warm_start_tangent_anchor_drift,
-                    warm_start_normal_impulse: contact.warm_start_normal_impulse,
-                    warm_start_tangent_impulse: contact.warm_start_tangent_impulse,
-                    source_row_continuity_candidate: contact.source_row_continuity_candidate,
-                    source_row_continuity_reason: contact.source_row_continuity_reason,
-                    lifecycle_reason: ContactLifecycleReason::Started,
-                    solver_normal_impulse: contact.normal_impulse,
-                    solver_tangent_impulse: contact.tangent_impulse,
-                    solver_initial_normal_speed: contact.solver_initial_normal_speed,
-                    solver_initial_tangent_speed: contact.solver_initial_tangent_speed,
-                    solver_final_normal_speed: contact.solver_final_normal_speed,
-                    solver_final_tangent_speed: contact.solver_final_tangent_speed,
-                    solver_position_bias: contact.solver_position_bias,
-                    solver_restitution_bias: contact.solver_restitution_bias,
-                    solver_support_friction_impulse: contact.solver_support_friction_impulse,
-                    solver_position_correction_depth: contact.solver_position_correction_depth,
-                    solver_position_correction_body_a_translation: contact
-                        .solver_position_correction_body_a_translation,
-                    solver_position_correction_body_b_translation: contact
-                        .solver_position_correction_body_b_translation,
-                    solver_normal_impulse_delta: contact.solver_normal_impulse_delta,
-                    solver_tangent_impulse_delta: contact.solver_tangent_impulse_delta,
-                    normal_impulse_clamped: contact.normal_impulse_clamped,
-                    tangent_impulse_clamped: contact.tangent_impulse_clamped,
-                    restitution_velocity_threshold: contact.restitution_velocity_threshold,
-                    restitution_applied: contact.restitution_applied,
-                    generic_convex_trace: contact.generic_convex_trace,
-                    ccd_trace: contact.ccd_trace,
-                }
+                    ContactLifecycleReason::Started,
+                    &contact,
+                )
             };
 
             if is_persisted {
@@ -697,6 +621,58 @@ fn source_row_continuity_rejection_rank(classification: SourceRowContinuityReaso
     }
 }
 
+fn contact_event(
+    contact_id: ContactId,
+    manifold_id: ManifoldId,
+    lifecycle_reason: ContactLifecycleReason,
+    contact: &ContactObservation,
+) -> ContactEvent {
+    ContactEvent {
+        contact_id,
+        manifold_id,
+        body_a: contact.body_a,
+        body_b: contact.body_b,
+        collider_a: contact.collider_a,
+        collider_b: contact.collider_b,
+        feature_id: contact.feature_id,
+        point: contact.point,
+        normal: contact.normal,
+        depth: contact.depth,
+        reduction_reason: contact.reduction_reason,
+        warm_start_reason: contact.warm_start_reason,
+        warm_start_anchor_drift: contact.warm_start_anchor_drift,
+        warm_start_normal_anchor_drift: contact.warm_start_normal_anchor_drift,
+        warm_start_tangent_anchor_drift: contact.warm_start_tangent_anchor_drift,
+        warm_start_normal_impulse: contact.warm_start_normal_impulse,
+        warm_start_tangent_impulse: contact.warm_start_tangent_impulse,
+        source_row_continuity_candidate: contact.source_row_continuity_candidate,
+        source_row_continuity_reason: contact.source_row_continuity_reason,
+        lifecycle_reason,
+        solver_normal_impulse: contact.normal_impulse,
+        solver_tangent_impulse: contact.tangent_impulse,
+        solver_initial_normal_speed: contact.solver_initial_normal_speed,
+        solver_initial_tangent_speed: contact.solver_initial_tangent_speed,
+        solver_final_normal_speed: contact.solver_final_normal_speed,
+        solver_final_tangent_speed: contact.solver_final_tangent_speed,
+        solver_position_bias: contact.solver_position_bias,
+        solver_restitution_bias: contact.solver_restitution_bias,
+        solver_support_friction_impulse: contact.solver_support_friction_impulse,
+        solver_position_correction_depth: contact.solver_position_correction_depth,
+        solver_position_correction_body_a_translation: contact
+            .solver_position_correction_body_a_translation,
+        solver_position_correction_body_b_translation: contact
+            .solver_position_correction_body_b_translation,
+        solver_normal_impulse_delta: contact.solver_normal_impulse_delta,
+        solver_tangent_impulse_delta: contact.solver_tangent_impulse_delta,
+        normal_impulse_clamped: contact.normal_impulse_clamped,
+        tangent_impulse_clamped: contact.tangent_impulse_clamped,
+        restitution_velocity_threshold: contact.restitution_velocity_threshold,
+        restitution_applied: contact.restitution_applied,
+        generic_convex_trace: contact.generic_convex_trace,
+        ccd_trace: contact.ccd_trace,
+    }
+}
+
 fn contact_anchor_drift(previous: &ContactRecord, contact: &ContactObservation) -> FloatNum {
     let drift_a = contact.anchor_a - previous.anchor_a;
     let drift_b = contact.anchor_b - previous.anchor_b;
@@ -708,13 +684,6 @@ fn clipped_manifold_reduction(reason: ContactReductionReason) -> bool {
         reason,
         ContactReductionReason::Clipped | ContactReductionReason::DuplicateReduced
     )
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct DecodedFeatureId {
-    kind: usize,
-    reference_edge: usize,
-    incident_edge: usize,
 }
 
 fn feature_id_edge_swap(
@@ -731,15 +700,6 @@ fn feature_id_edge_swap(
     previous.kind == current.kind
         && previous.reference_edge == current.incident_edge
         && previous.incident_edge == current.reference_edge
-}
-
-fn decode_feature_id(feature_id: crate::handles::ContactFeatureId) -> Option<DecodedFeatureId> {
-    let raw = feature_id.index()?;
-    Some(DecodedFeatureId {
-        kind: (raw >> 24) & 0xff,
-        reference_edge: (raw >> 12) & 0xfff,
-        incident_edge: raw & 0xfff,
-    })
 }
 
 #[derive(Clone, Copy, Debug, Default)]

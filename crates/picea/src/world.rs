@@ -52,13 +52,10 @@ pub struct World {
     joints: Vec<Slot<JointRecord>>,
     free_joints: Vec<usize>,
     last_step_stats: StepStats,
-    #[allow(dead_code)]
     last_step_dt: FloatNum,
-    #[allow(dead_code)]
     simulated_time: f64,
     pending_events: Vec<WorldEvent>,
     pending_wake_reasons: BTreeMap<BodyHandle, SleepTransitionReason>,
-    #[allow(dead_code)]
     last_step_events: Vec<WorldEvent>,
     broadphase: Broadphase,
     active_contacts: BTreeMap<ContactKey, ContactRecord>,

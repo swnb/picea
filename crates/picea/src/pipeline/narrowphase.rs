@@ -44,6 +44,9 @@ pub(crate) fn contact_from_shapes(
     )
 }
 
+// Two symmetric per-shape argument groups (shape, pose, aabb, cached vertices);
+// bundling them would relocate the arity without clarifying the call sites.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn contact_from_shapes_with_cached_vertices(
     shape_a: &SharedShape,
     pose_a: Pose,
@@ -825,16 +828,49 @@ fn closest_point_on_segment(
     }
 }
 
+/// Single source of truth for the [`ContactFeatureId`] index bit layout shared
+/// by [`feature_id`] encoding and [`decode_feature_id`] decoding: `kind` in the
+/// top 8 bits, `reference_edge` and `incident_edge` in 12 bits each.
+const FEATURE_ID_KIND_SHIFT: u32 = 24;
+const FEATURE_ID_REFERENCE_EDGE_SHIFT: u32 = 12;
+const FEATURE_ID_KIND_MASK: usize = 0xff;
+const FEATURE_ID_EDGE_MASK: usize = 0xfff;
+
 fn feature_id(
     kind: usize,
     reference_edge: usize,
     incident_edge: usize,
     point_slot: usize,
 ) -> ContactFeatureId {
-    ContactFeatureId::from_raw_parts(
-        ((kind as u32) << 24) | ((reference_edge as u32) << 12) | incident_edge as u32,
-        point_slot as u32,
-    )
+    // `reference_edge` is always an edge or shape-kind index that fits the
+    // 12-bit field. `incident_edge` is intentionally left unguarded: circle vs
+    // segment contacts (kind 5) pack a 16-bit quantized parameter here
+    // (`feature_id(5, 0, (closest.t * 65535.0) as usize, 0)`), overflowing the
+    // field by design, so a 12-bit assert would trip on valid existing ids.
+    debug_assert!(
+        reference_edge <= FEATURE_ID_EDGE_MASK,
+        "reference_edge {reference_edge} overflows the 12-bit feature id field",
+    );
+    let index = ((kind as u32) << FEATURE_ID_KIND_SHIFT)
+        | ((reference_edge as u32) << FEATURE_ID_REFERENCE_EDGE_SHIFT)
+        | incident_edge as u32;
+    ContactFeatureId::from_raw_parts(index, point_slot as u32)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DecodedFeatureId {
+    pub(crate) kind: usize,
+    pub(crate) reference_edge: usize,
+    pub(crate) incident_edge: usize,
+}
+
+pub(crate) fn decode_feature_id(feature_id: ContactFeatureId) -> Option<DecodedFeatureId> {
+    let raw = feature_id.index()?;
+    Some(DecodedFeatureId {
+        kind: (raw >> FEATURE_ID_KIND_SHIFT) & FEATURE_ID_KIND_MASK,
+        reference_edge: (raw >> FEATURE_ID_REFERENCE_EDGE_SHIFT) & FEATURE_ID_EDGE_MASK,
+        incident_edge: raw & FEATURE_ID_EDGE_MASK,
+    })
 }
 
 fn min_feature_id(a: ContactFeatureId, b: ContactFeatureId) -> ContactFeatureId {
@@ -878,8 +914,9 @@ fn stabilize_normal(normal: Vector) -> Vector {
 #[cfg(test)]
 mod tests {
     use super::{
-        contact_from_shapes, contact_from_shapes_with_cached_vertices, feature_id,
-        overlap_from_aabbs, reduce_contact_points, ContactManifoldGeometry, ContactPointGeometry,
+        contact_from_shapes, contact_from_shapes_with_cached_vertices, decode_feature_id,
+        feature_id, overlap_from_aabbs, reduce_contact_points, ContactManifoldGeometry,
+        ContactPointGeometry,
     };
     use crate::{
         body::Pose,
@@ -892,6 +929,25 @@ mod tests {
         ShapeAabb {
             min: Point::new(min_x, min_y),
             max: Point::new(max_x, max_y),
+        }
+    }
+
+    #[test]
+    fn feature_id_encode_decode_round_trip() {
+        // Covers the corner values of every packed field, including the 12-bit
+        // maxima for reference/incident edges and the 8-bit maximum for kind.
+        for &(kind, reference_edge, incident_edge) in &[
+            (0usize, 0usize, 0usize),
+            (5, 0, 0),
+            (7, 5, 5),
+            (15, 4095, 4095),
+            (0xff, 0xfff, 0xfff),
+        ] {
+            let id = feature_id(kind, reference_edge, incident_edge, 0);
+            let decoded = decode_feature_id(id).expect("encoded feature id carries an index");
+            assert_eq!(decoded.kind, kind);
+            assert_eq!(decoded.reference_edge, reference_edge);
+            assert_eq!(decoded.incident_edge, incident_edge);
         }
     }
 

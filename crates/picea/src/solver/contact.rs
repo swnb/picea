@@ -94,6 +94,10 @@ struct ContactSolverRow {
 
 struct ContactSolveBatch {
     body_slots: Vec<BodyHandle>,
+    // Solver body cache captured while the rows were built. Islands partition
+    // dynamic bodies disjointly, so no other batch mutates these bodies before
+    // this batch solves; reusing the snapshot avoids a redundant rebuild.
+    solver_bodies: Vec<SolverBody>,
     rows: Vec<ContactSolverRow>,
     normal_pair_partners: Vec<Option<usize>>,
     dense_contact_graph: bool,
@@ -410,6 +414,9 @@ impl DensePositionSolveContext {
         }
     }
 
+    // Cohesive per-body position-correction inputs threaded with solver context;
+    // bundling them would obscure the single-body correction call sites.
+    #[allow(clippy::too_many_arguments)]
     fn queue_body_correction(
         &mut self,
         world: &World,
@@ -486,7 +493,7 @@ pub(crate) fn resolve_contacts(
         contact_solver_row_batches(world, contacts, &islands, plan, config);
 
     for batch in &mut batches {
-        let mut solver_bodies = solver_body_cache(world, &batch.body_slots);
+        let mut solver_bodies = std::mem::take(&mut batch.solver_bodies);
         for row in &batch.rows {
             let warm_start_impulse =
                 row.normal * row.normal_impulse + row.tangent * row.tangent_impulse;
@@ -621,6 +628,7 @@ fn contact_solver_row_batches(
                 manifold_normal_pair_partners(&rows, sparse_stack_block_solve_guard);
             (!rows.is_empty()).then_some(ContactSolveBatch {
                 body_slots: island.body_slots,
+                solver_bodies: bodies,
                 rows,
                 normal_pair_partners,
                 dense_contact_graph: stabilized_contact_graph,
@@ -867,8 +875,7 @@ fn is_resting_shallow_support_contact(
 ) -> bool {
     (body_a.dynamic || body_b.dynamic)
         && depth > 0.0
-        && relative_normal_speed >= 0.0
-        && relative_normal_speed <= SHALLOW_SUPPORT_MAX_SEPARATING_SPEED
+        && (0.0..=SHALLOW_SUPPORT_MAX_SEPARATING_SPEED).contains(&relative_normal_speed)
         && !restitution_applied
         && friction > 0.0
 }
