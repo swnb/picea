@@ -1305,7 +1305,7 @@ fn ray_cast_polygon(
         let candidate = (toi, point, normal);
         if best
             .as_ref()
-            .map_or(true, |(current_toi, _, _)| toi < *current_toi)
+            .is_none_or(|(current_toi, _, _)| toi < *current_toi)
         {
             best = Some(candidate);
         }

@@ -152,7 +152,7 @@ impl From<CollisionLayerPreset> for CollisionFilter {
 }
 
 /// Collider creation bundle used by recipes and batch commands.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ColliderBundle {
     /// Low-level collider descriptor passed through unchanged on success.
     pub desc: ColliderDesc,
@@ -212,14 +212,6 @@ impl ColliderBundle {
     pub fn with_sensor(mut self, is_sensor: bool) -> Self {
         self.desc.is_sensor = is_sensor;
         self
-    }
-}
-
-impl Default for ColliderBundle {
-    fn default() -> Self {
-        Self {
-            desc: ColliderDesc::default(),
-        }
     }
 }
 

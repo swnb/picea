@@ -909,7 +909,7 @@ impl Default for DebugSnapshotOptions {
 }
 
 /// Full read-only snapshot exported by the core.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DebugSnapshot {
     /// World-level metadata.
     pub meta: DebugMeta,
@@ -1104,7 +1104,6 @@ impl DebugSnapshot {
                 position_correction_body_count: stats.position_correction_body_count,
                 position_correction_max_translation: stats.position_correction_max_translation,
                 position_correction_total_translation: stats.position_correction_total_translation,
-                ..DebugStats::default()
             },
             bodies,
             colliders,
@@ -1165,23 +1164,6 @@ impl DebugSnapshot {
             aggregate = extend_aabb(aggregate, aabb);
         }
         Some(aggregate)
-    }
-}
-
-impl Default for DebugSnapshot {
-    fn default() -> Self {
-        Self {
-            meta: DebugMeta::default(),
-            bodies: Vec::new(),
-            colliders: Vec::new(),
-            joints: Vec::new(),
-            contacts: Vec::new(),
-            manifolds: Vec::new(),
-            islands: Vec::new(),
-            broadphase_tree: DebugBroadphaseTree::default(),
-            primitives: Vec::new(),
-            stats: DebugStats::default(),
-        }
     }
 }
 

@@ -71,7 +71,7 @@ fn bench_step_scenario(
     let mut group = c.benchmark_group(group_name);
     group.bench_function(id, |bench| {
         bench.iter_batched(
-            || make_world(),
+            &make_world,
             |world| black_box(run_steps(world, steps)),
             BatchSize::SmallInput,
         );
