@@ -1,6 +1,8 @@
 import type {
+  ActiveGrabRecord,
   DebugSnapshot,
   FrameRecord,
+  GrabMode,
   LiveFrameHydration,
   PerfArtifact,
   ScenarioDescriptor,
@@ -172,4 +174,42 @@ export async function commitVelocityPerturbation(
       body: JSON.stringify(request),
     },
   );
+}
+
+export async function createGrab(
+  sessionId: string,
+  request: {
+    body_handle: number;
+    grab_point: [number, number];
+    mode: GrabMode;
+    stiffness?: number;
+    damping?: number;
+    max_speed?: number;
+    session_epoch: number;
+  },
+): Promise<{ grab: ActiveGrabRecord; session: SessionRecord }> {
+  return requestJson(`/api/sessions/${sessionId}/grabs`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function updateGrab(
+  sessionId: string,
+  grabId: string,
+  request: { target: [number, number]; session_epoch: number },
+): Promise<{ grab: ActiveGrabRecord; session: SessionRecord }> {
+  return requestJson(`/api/sessions/${sessionId}/grabs/${grabId}`, {
+    method: "PATCH",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function releaseGrab(
+  sessionId: string,
+  grabId: string,
+): Promise<{ session: SessionRecord }> {
+  return requestJson(`/api/sessions/${sessionId}/grabs/${grabId}`, {
+    method: "DELETE",
+  });
 }

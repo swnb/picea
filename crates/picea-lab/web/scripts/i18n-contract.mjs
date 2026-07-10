@@ -304,6 +304,8 @@ for (const locale of supportedLocales) {
   assert.equal(typeof messages[locale]["perturbation.worldRevision"], "string");
   assert.equal(typeof messages[locale]["perturbation.currentFrameProvenance"], "string");
   assert.equal(typeof messages[locale]["perturbation.noProvenance"], "string");
+  assert.equal(typeof messages[locale]["log.grabFailed"], "string");
+  assert.equal(typeof messages[locale]["log.grabReleaseFailed"], "string");
 }
 assert.equal(t("zh-CN", "timeline.frameAt", { frame: 8 }), "第 8 帧");
 assert.equal(t("en-US", "timeline.frameAt", { frame: 8 }), "frame 8");

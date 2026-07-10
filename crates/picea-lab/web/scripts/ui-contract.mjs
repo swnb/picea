@@ -1590,3 +1590,44 @@ assert.match(
   /offlineWatermark \?[\s\S]*?pointer-events-none[\s\S]*?\{offlineWatermark\}/,
   "The watermark overlay must render as a non-interactive overlay showing the provided label.",
 );
+
+// --- Live grab interaction contract ---
+const canvasSource = fs.readFileSync(
+  new URL("../src/components/workbench/WorldCanvas.tsx", import.meta.url),
+  "utf8",
+);
+assert.match(
+  canvasSource,
+  /function handlePointerDown[\s\S]*?grabEnabled[\s\S]*?hitTest/,
+  "Pointer-down must attempt a body grab before falling back to camera panning when grabbing is enabled.",
+);
+assert.match(
+  canvasSource,
+  /body_type === "dynamic"/,
+  "Only dynamic bodies are grabbable from the canvas; static hits fall through to panning.",
+);
+assert.match(
+  canvasSource,
+  /onGrabMove\(/,
+  "Pointer moves while grabbing must forward the world-space target upward.",
+);
+assert.match(
+  canvasSource,
+  /onGrabEnd\(\)/,
+  "Pointer up/cancel while grabbing must release the grab.",
+);
+assert.match(
+  appSource,
+  /grabEnabled=\{source === "live" && sessionId != null\}/,
+  "Grabbing is gated to live sessions only; artifact/demo sources stay pan-only.",
+);
+assert.match(
+  appSource,
+  /async function handleGrabStart[\s\S]*?if \(status === "paused"\)[\s\S]*?handleControl\("play"\)/,
+  "Grabbing a paused live session must auto-resume playing so the drag has physical feedback.",
+);
+assert.match(
+  appSource,
+  /grabMoveInFlight[\s\S]*pendingGrabTarget/,
+  "Grab target updates must coalesce to the latest pointer position with a single in-flight request.",
+);

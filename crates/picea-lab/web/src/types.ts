@@ -587,6 +587,20 @@ export type ScenarioDescriptor = {
   parameter_schema?: ScenarioParameterDescriptor[];
 };
 
+export type GrabMode = "spring" | "direct";
+
+export type ActiveGrabRecord = {
+  id: string;
+  body_handle: number;
+  mode: GrabMode;
+  local_anchor: Vec2;
+  target: Vec2;
+  joint_handle: number | null;
+  stiffness: number;
+  damping: number;
+  max_speed: number;
+};
+
 export type SessionRecord = {
   id: string;
   scenario_id: string;
@@ -612,6 +626,7 @@ export type SessionRecord = {
   manifest_artifact?: string | null;
   final_snapshot_artifact?: string | null;
   latest_frame?: FrameRecord | null;
+  active_grab?: ActiveGrabRecord | null;
   last_error: string | null;
 };
 

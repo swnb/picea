@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Focus, Maximize2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import type {
+  ActiveGrabRecord,
   DebugAabb,
   DebugBody,
   DebugBroadphaseTree,
@@ -46,6 +47,8 @@ type WorldCanvasProps = {
   trajectorySettings: TrajectorySettings;
   latticeSummary: LatticeProxySummary;
   offlineWatermark: string | null;
+  grabEnabled: boolean;
+  activeGrab: ActiveGrabRecord | null;
   labels: {
     frame: string;
     colliders: string;
@@ -73,6 +76,9 @@ type WorldCanvasProps = {
     entity: (kind: SelectedEntity["kind"], id: number) => string;
   };
   onSelect: (entity: SelectedEntity | null) => void;
+  onGrabStart: (bodyHandle: number, point: Vec2) => void;
+  onGrabMove: (point: Vec2) => void;
+  onGrabEnd: () => void;
   onViewChange?: (view: CanvasDebugView) => void;
 };
 
@@ -126,8 +132,13 @@ export function WorldCanvas({
   trajectorySettings,
   latticeSummary,
   offlineWatermark,
+  grabEnabled,
+  activeGrab,
   labels,
   onSelect,
+  onGrabStart,
+  onGrabMove,
+  onGrabEnd,
   onViewChange,
 }: WorldCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -137,6 +148,7 @@ export function WorldCanvas({
   const [canvasCameraState, setCanvasCameraState] = useState<CameraState | null>(null);
   const [cameraSmoothingDisabled, setCameraSmoothingDisabled] = useState(false);
   const panGesture = useRef<PanGesture | null>(null);
+  const grabPointerId = useRef<number | null>(null);
   const cameraStateRef = useRef<CameraState | null>(null);
   const cameraTargetStateRef = useRef<CameraState | null>(null);
   const cameraAnimationFrameRef = useRef<number | null>(null);
@@ -334,6 +346,7 @@ export function WorldCanvas({
       trajectorySettings,
       latticeSummary,
       labels,
+      activeGrab,
     );
     profileMeasure("canvas.drawWorld", startedAt, {
       frameIndex: frame.frame_index,
@@ -347,6 +360,7 @@ export function WorldCanvas({
         .join(","),
     });
   }, [
+    activeGrab,
     camera,
     frame,
     labels,
@@ -378,6 +392,28 @@ export function WorldCanvas({
   }, [camera, canvasCameraState, coreFocusTarget, cameraSmoothingDisabled, layers.grid, layers.rulers, onViewChange]);
 
   function handlePointerDown(event: PointerEvent<HTMLCanvasElement>) {
+    if (grabEnabled && event.button === 0) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const point = screenToWorld(
+        { x: event.clientX - rect.left, y: event.clientY - rect.top },
+        camera,
+      );
+      const hit = hitTest(frame.snapshot.colliders, [], [], [], point);
+      if (hit?.kind === "collider") {
+        const collider = frame.snapshot.colliders.find(
+          (entry) => entry.handle === hit.id,
+        );
+        const body = collider
+          ? frame.snapshot.bodies.find((entry) => entry.handle === collider.body)
+          : undefined;
+        if (body && body.body_type === "dynamic") {
+          grabPointerId.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          onGrabStart(body.handle, point);
+          return;
+        }
+      }
+    }
     const rect = event.currentTarget.getBoundingClientRect();
     const start = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     panGesture.current = {
@@ -391,6 +427,15 @@ export function WorldCanvas({
   }
 
   function handlePointerMove(event: PointerEvent<HTMLCanvasElement>) {
+    if (grabPointerId.current === event.pointerId) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const point = screenToWorld(
+        { x: event.clientX - rect.left, y: event.clientY - rect.top },
+        camera,
+      );
+      onGrabMove(point);
+      return;
+    }
     const gesture = panGesture.current;
     if (!gesture || gesture.pointerId !== event.pointerId) {
       return;
@@ -416,6 +461,11 @@ export function WorldCanvas({
   }
 
   function handlePointerUp(event: PointerEvent<HTMLCanvasElement>) {
+    if (grabPointerId.current === event.pointerId) {
+      grabPointerId.current = null;
+      onGrabEnd();
+      return;
+    }
     const gesture = panGesture.current;
     panGesture.current = null;
     setIsPanning(false);
@@ -437,6 +487,11 @@ export function WorldCanvas({
   }
 
   function handlePointerCancel(event: PointerEvent<HTMLCanvasElement>) {
+    if (grabPointerId.current === event.pointerId) {
+      grabPointerId.current = null;
+      onGrabEnd();
+      return;
+    }
     panGesture.current = null;
     setIsPanning(false);
     event.currentTarget.releasePointerCapture(event.pointerId);
@@ -590,6 +645,7 @@ function drawWorld(
     | "trajectoryEmptyCcd"
     | "trajectoryEmptyUnsupportedSelection"
   >,
+  activeGrab: ActiveGrabRecord | null,
 ) {
   ctx.clearRect(0, 0, camera.width, camera.height);
   fillBackground(ctx, camera);
@@ -645,6 +701,10 @@ function drawWorld(
 
   if (layers.lattice) {
     drawLatticeProxy(ctx, latticeSummary, camera, selected);
+  }
+
+  if (activeGrab) {
+    drawGrabOverlay(ctx, activeGrab, frame, camera);
   }
 
   if (selected?.kind === "body") {
@@ -1275,6 +1335,53 @@ function drawLatticeStretchBadge(
   ctx.fillStyle = "#f8e3a2"
   ctx.fillText(label, center.x - width / 2 + 5, center.y - 12)
   ctx.restore()
+}
+
+function drawGrabOverlay(
+  ctx: CanvasRenderingContext2D,
+  grab: ActiveGrabRecord,
+  frame: FrameRecord,
+  camera: Camera,
+) {
+  const grabJoint =
+    grab.joint_handle != null
+      ? frame.snapshot.joints.find((joint) => joint.handle === grab.joint_handle)
+      : undefined
+  const body = frame.snapshot.bodies.find(
+    (entry) => entry.handle === grab.body_handle,
+  )
+  const anchorWorld = grabJoint
+    ? grabJoint.anchors[0]
+    : body
+      ? {
+          x:
+            body.transform.translation.x +
+            grab.local_anchor.x * Math.cos(body.transform.rotation) -
+            grab.local_anchor.y * Math.sin(body.transform.rotation),
+          y:
+            body.transform.translation.y +
+            grab.local_anchor.x * Math.sin(body.transform.rotation) +
+            grab.local_anchor.y * Math.cos(body.transform.rotation),
+        }
+      : null
+  const targetWorld = grabJoint ? grabJoint.anchors[1] : grab.target
+  if (!anchorWorld) {
+    return
+  }
+  const start = worldToScreen(anchorWorld, camera)
+  const end = worldToScreen(targetWorld, camera)
+  ctx.strokeStyle = grab.mode === "spring" ? "#8ec07c" : "#83a598"
+  ctx.lineWidth = 2.2
+  ctx.setLineDash(grab.mode === "spring" ? [] : [6, 4])
+  ctx.beginPath()
+  ctx.moveTo(start.x, start.y)
+  ctx.lineTo(end.x, end.y)
+  ctx.stroke()
+  ctx.setLineDash([])
+  ctx.fillStyle = "#8ec07c"
+  ctx.beginPath()
+  ctx.arc(end.x, end.y, 4, 0, Math.PI * 2)
+  ctx.fill()
 }
 
 function drawContact(ctx: CanvasRenderingContext2D, contact: DebugContact, camera: Camera, isSelected: boolean) {

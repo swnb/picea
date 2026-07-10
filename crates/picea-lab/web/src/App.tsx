@@ -4,6 +4,7 @@ import {
   applyLiveGravity,
   commitVelocityPerturbation,
   controlSession,
+  createGrab,
   createSession,
   fetchFinalSnapshot,
   fetchFrames,
@@ -12,6 +13,8 @@ import {
   fetchScenarios,
   openSessionEvents,
   previewVelocityPerturbation,
+  releaseGrab,
+  updateGrab,
 } from "./api"
 import { WorkbenchLayout } from "./components/workbench/WorkbenchLayout"
 import {
@@ -61,9 +64,11 @@ import {
 } from "./i18n"
 import { profileAsync, profileMeasure, profileStart } from "./profile"
 import type {
+  ActiveGrabRecord,
   DebugSnapshot,
   FrameDiagnostics,
   FrameRecord,
+  GrabMode,
   LiveFrameAuthority,
   LiveFrameSummary,
   PerfArtifact,
@@ -73,6 +78,7 @@ import type {
   SessionControlResponse,
   SelectedEntity,
   SessionRecord,
+  Vec2,
   VelocityPerturbationCommit,
   VelocityPerturbationPreview,
   WorkbenchLog,
@@ -691,6 +697,11 @@ export function App() {
   const liveCadenceSlowFrameStreakRef = useRef(0)
   const perturbationRequestTokenRef = useRef(0)
   const initialRunTriggeredRef = useRef(false)
+  const grabSettings = { mode: "spring" as GrabMode, stiffness: 40 }
+  const [activeGrab, setActiveGrab] = useState<ActiveGrabRecord | null>(null)
+  const activeGrabRef = useRef<ActiveGrabRecord | null>(null)
+  const grabMoveInFlight = useRef(false)
+  const pendingGrabTarget = useRef<Vec2 | null>(null)
 
   const retainedFrameStart = frames[0]?.frame_index ?? 0
   const retainedFrameEndExclusive = retainedFrameStart + frames.length
@@ -1020,6 +1031,10 @@ export function App() {
     currentFrame.state_hash,
     selectedPerturbationTarget?.bodyHandle,
   ])
+
+  useEffect(() => {
+    activeGrabRef.current = activeGrab
+  }, [activeGrab])
 
   async function runScenario(scenarioIdOverride?: string) {
     const scenarioId = scenarioIdOverride ?? selectedScenario
@@ -1387,6 +1402,9 @@ export function App() {
     liveHydrationInFlight.current = null
     setLiveCadence(idleLiveCadenceStatus())
     invalidatePerturbationResponses()
+    setActiveGrab(null)
+    pendingGrabTarget.current = null
+    grabMoveInFlight.current = false
     setLiveControlBusy(false)
   }
 
@@ -1938,6 +1956,77 @@ export function App() {
     }
   }
 
+  async function handleGrabStart(bodyHandle: number, point: Vec2) {
+    if (source !== "live" || !sessionId) {
+      return
+    }
+    if (status === "paused") {
+      void handleControl("play")
+    }
+    try {
+      const result = await createGrab(sessionId, {
+        body_handle: bodyHandle,
+        grab_point: [point.x, point.y],
+        mode: grabSettings.mode,
+        stiffness: grabSettings.stiffness,
+        session_epoch: sessionEpoch,
+      })
+      setActiveGrab(result.grab)
+    } catch (error) {
+      pushLogs(
+        log("warn", t(locale, "log.grabFailed", { message: messageOf(error) })),
+      )
+    }
+  }
+
+  function handleGrabMove(point: Vec2) {
+    pendingGrabTarget.current = point
+    void flushGrabTarget()
+  }
+
+  async function flushGrabTarget() {
+    if (grabMoveInFlight.current) {
+      return
+    }
+    const grab = activeGrabRef.current
+    const target = pendingGrabTarget.current
+    if (!grab || !target || !sessionId) {
+      return
+    }
+    pendingGrabTarget.current = null
+    grabMoveInFlight.current = true
+    try {
+      const result = await updateGrab(sessionId, grab.id, {
+        target: [target.x, target.y],
+        session_epoch: sessionEpoch,
+      })
+      setActiveGrab(result.grab)
+    } catch {
+      // 拖拽期间的瞬时失配交给下一次 move 重试;释放路径兜底清理。
+    } finally {
+      grabMoveInFlight.current = false
+      if (pendingGrabTarget.current) {
+        void flushGrabTarget()
+      }
+    }
+  }
+
+  async function handleGrabEnd() {
+    const grab = activeGrabRef.current
+    setActiveGrab(null)
+    pendingGrabTarget.current = null
+    if (!grab || !sessionId) {
+      return
+    }
+    try {
+      await releaseGrab(sessionId, grab.id)
+    } catch (error) {
+      pushLogs(
+        log("warn", t(locale, "log.grabReleaseFailed", { message: messageOf(error) })),
+      )
+    }
+  }
+
   function updateLayer(key: keyof LayerState, value: boolean) {
     setLayers((prev) => ({ ...prev, [key]: value }))
   }
@@ -2388,6 +2477,11 @@ export function App() {
       selectedEntity={selectedEntity}
       selectedDetails={selectedDetails}
       onSelectEntity={setSelectedEntity}
+      grabEnabled={source === "live" && sessionId != null}
+      activeGrab={activeGrab}
+      onGrabStart={handleGrabStart}
+      onGrabMove={handleGrabMove}
+      onGrabEnd={handleGrabEnd}
       canvasView={canvasView}
       buildDebugContextText={buildDebugContextText}
       onCanvasViewChange={setCanvasView}

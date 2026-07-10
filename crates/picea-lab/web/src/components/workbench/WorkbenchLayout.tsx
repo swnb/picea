@@ -9,11 +9,13 @@ import {
   type StatusKind,
 } from "../../i18n"
 import type {
+  ActiveGrabRecord,
   FrameRecord,
   PerfArtifact,
   ScenarioParameterValue,
   ScenarioDescriptor,
   SelectedEntity,
+  Vec2,
   WorkbenchLog,
 } from "../../types"
 import { cn } from "../../lib/utils"
@@ -81,6 +83,11 @@ export function WorkbenchLayout({
   selectedEntity,
   selectedDetails,
   onSelectEntity,
+  grabEnabled,
+  activeGrab,
+  onGrabStart,
+  onGrabMove,
+  onGrabEnd,
   canvasView,
   buildDebugContextText,
   onCanvasViewChange,
@@ -150,6 +157,11 @@ export function WorkbenchLayout({
   selectedEntity: SelectedEntity | null
   selectedDetails: ResolvedSelection
   onSelectEntity: (entity: SelectedEntity | null) => void
+  grabEnabled: boolean
+  activeGrab: ActiveGrabRecord | null
+  onGrabStart: (bodyHandle: number, point: Vec2) => void
+  onGrabMove: (point: Vec2) => void
+  onGrabEnd: () => void
   canvasView: CanvasDebugView | null
   buildDebugContextText: () => string
   onCanvasViewChange: (view: CanvasDebugView) => void
@@ -287,7 +299,12 @@ export function WorkbenchLayout({
                 labels={canvasLabels}
                 latticeSummary={latticeSummary}
                 offlineWatermark={offlineWatermark}
+                grabEnabled={grabEnabled}
+                activeGrab={activeGrab}
                 onSelect={onSelectEntity}
+                onGrabStart={onGrabStart}
+                onGrabMove={onGrabMove}
+                onGrabEnd={onGrabEnd}
                 onViewChange={onCanvasViewChange}
               />
             </Panel>
