@@ -21,6 +21,7 @@ This directory records design intent and future-facing engineering decisions.
 - `dense-pressure-position-row-architecture.md`: completed dense pressure / pseudo-position / position-row architecture record.
 - `scene-runtime-config-and-parameter-ui-design.md`: scene-owned runtime config and parameter UI architecture.
 - `2026-06-17-physics-realism-vnext-architecture.md`: vNext architecture package for seven physics-realism workstreams, including the scenario capability matrix for picea-lab showcase routing.
+- `2026-07-10-workbench-interactive-run-model-design.md`: workbench select-to-run model (real physics by default, explicit offline demo watermark, per-scenario watch-for copy) and live-session rigid-body drag interaction (spring / direct grab, zero core changes).
 - `architecture-refactor-requirements.md`: archived legacy `Scene`-path refactor requirements; not current default routing.
 
 Design docs describe the intended direction. When implementing, still verify against current code and milestone gates.

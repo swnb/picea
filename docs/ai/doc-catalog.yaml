@@ -563,3 +563,12 @@ documents:
   applies_to: [proc-macro, accessors, builder, deref]
   keywords: [syn, quote, accessors, builder, deref]
   last_reviewed: 2026-05-17
+- path: docs/design/2026-07-10-workbench-interactive-run-model-design.md
+  title: Workbench Interactive Run Model Design
+  kind: design
+  authority: medium
+  status: active
+  owner: architecture
+  applies_to: [picea-lab, picea-lab-web, scenario, live-session, interaction, run-model]
+  keywords: [select-to-run, demo-fallback, watermark, watch-for, grab, drag, mouse-joint, world-anchor, spring, direct, live-session, session-epoch]
+  last_reviewed: 2026-07-10
