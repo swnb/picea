@@ -19,7 +19,8 @@ use axum::{
     Json, Router,
 };
 use picea::prelude::{
-    BodyHandle, BodyPatch, BodyType, QueryPipeline, SimulationPipeline, Vector, World,
+    BodyHandle, BodyPatch, BodyType, FloatNum, JointDesc, JointHandle, Point, QueryPipeline,
+    SimulationPipeline, Vector, World, WorldAnchorJointDesc,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -92,6 +93,8 @@ struct LiveSessionState {
     perturbation_provenance: Vec<LivePerturbationProvenance>,
     velocity_preview_cache: BTreeMap<String, CachedVelocityPerturbationPreview>,
     used_velocity_preview_actions: BTreeSet<String>,
+    active_grab: Option<ActiveGrabRecord>,
+    next_grab_id: u64,
 }
 
 /// A session is the server-owned handle for one scenario source and its
@@ -119,6 +122,7 @@ pub struct SessionRecord {
     pub final_snapshot_artifact: Option<String>,
     pub latest_frame: Option<FrameRecord>,
     pub last_error: Option<String>,
+    pub active_grab: Option<ActiveGrabRecord>,
     #[serde(skip)]
     events: Vec<SessionEvent>,
     /// Per-frame `state_hash` values for the completed artifact run, cached in
@@ -265,6 +269,49 @@ struct CachedVelocityPerturbationPreview {
     wake_intent: bool,
 }
 
+const DEFAULT_GRAB_STIFFNESS: FloatNum = 40.0;
+const DEFAULT_GRAB_DAMPING: FloatNum = 2.0;
+const DEFAULT_GRAB_MAX_SPEED: FloatNum = 40.0;
+/// Marks grab-owned joints in DebugSnapshot facts.
+const GRAB_JOINT_USER_DATA: u64 = 0x505f_4752_4142; // "P_GRAB"
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrabMode {
+    #[default]
+    Spring,
+    Direct,
+}
+
+/// Server-owned state for the single active pointer grab of a live session.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActiveGrabRecord {
+    pub id: String,
+    pub body_handle: BodyHandle,
+    pub mode: GrabMode,
+    pub local_anchor: Point,
+    pub target: Point,
+    pub joint_handle: Option<JointHandle>,
+    pub stiffness: FloatNum,
+    pub damping: FloatNum,
+    pub max_speed: FloatNum,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CreateGrabRequest {
+    body_handle: BodyHandle,
+    grab_point: serde_json::Value,
+    #[serde(default)]
+    mode: GrabMode,
+    #[serde(default)]
+    stiffness: Option<FloatNum>,
+    #[serde(default)]
+    damping: Option<FloatNum>,
+    #[serde(default)]
+    max_speed: Option<FloatNum>,
+    session_epoch: u64,
+}
+
 pub fn app(state: LabServerState) -> Router {
     Router::new()
         .route("/api/scenarios", get(get_scenarios))
@@ -281,6 +328,7 @@ pub fn app(state: LabServerState) -> Router {
             "/api/sessions/:id/velocity-perturbations/commit",
             post(commit_velocity_perturbation),
         )
+        .route("/api/sessions/:id/grabs", post(create_grab))
         .route("/api/sessions/:id/overrides", patch(patch_overrides))
         .route("/api/sessions/:id/events", get(session_events))
         .route("/api/runs/:id/artifacts/:file", get(get_artifact))
@@ -340,6 +388,7 @@ async fn create_session(
         final_snapshot_artifact: None,
         latest_frame: None,
         last_error: None,
+        active_grab: None,
         events: Vec::new(),
         frame_state_hashes: Vec::new(),
     };
@@ -576,6 +625,126 @@ async fn commit_velocity_perturbation(
     ))
 }
 
+fn parse_world_point(value: &serde_json::Value) -> Option<Point> {
+    parse_velocity_vector(value).map(Point::from)
+}
+
+/// Destroys the grab-owned joint (spring mode) and clears grab state on both
+/// the runtime and the wire-visible record. Body velocity is intentionally
+/// preserved so releases keep momentum ("fling").
+fn release_active_grab(record: &mut SessionRecord, runtime: &mut LiveSessionState) {
+    if let Some(grab) = runtime.active_grab.take() {
+        if let Some(joint_handle) = grab.joint_handle {
+            let _ = runtime.world.destroy_joint(joint_handle);
+        }
+        runtime.query.sync(&runtime.world);
+    }
+    record.active_grab = None;
+}
+
+async fn create_grab(
+    State(state): State<LabServerState>,
+    Path(id): Path<String>,
+    Json(request): Json<CreateGrabRequest>,
+) -> Result<Json<serde_json::Value>, LabHttpError> {
+    let session = get_session_handle(&state, &id)?;
+    let mut session = session.lock().expect("session mutex should not poison");
+    if request.session_epoch != session.record.session_epoch {
+        return Err(LabHttpError::bad_request(format!(
+            "stale session epoch: expected {}, got {}",
+            session.record.session_epoch, request.session_epoch
+        )));
+    }
+    let Some(grab_point) = parse_world_point(&request.grab_point) else {
+        return Err(LabHttpError::bad_request(
+            "grab_point requires a finite [x, y] point",
+        ));
+    };
+    // Reborrow the guard once so record/runtime take disjoint field borrows.
+    let session = &mut *session;
+    let record = &mut session.record;
+    let SessionRuntime::Live(runtime) = &mut session.runtime else {
+        return Err(LabHttpError::bad_request(
+            "grabs are only available for live_session",
+        ));
+    };
+    release_active_grab(record, runtime);
+    let body = runtime
+        .world
+        .body(request.body_handle)
+        .map_err(|_| LabHttpError::bad_request("invalid body handle"))?;
+    if !matches!(body.body_type(), BodyType::Dynamic) {
+        return Err(LabHttpError::bad_request(
+            "only dynamic bodies can be grabbed",
+        ));
+    }
+    let local_anchor = body.pose().inverse_transform_point(grab_point);
+    let stiffness = request.stiffness.unwrap_or(DEFAULT_GRAB_STIFFNESS);
+    let damping = request.damping.unwrap_or(DEFAULT_GRAB_DAMPING);
+    let max_speed = request.max_speed.unwrap_or(DEFAULT_GRAB_MAX_SPEED);
+    if !stiffness.is_finite() || !damping.is_finite() || !max_speed.is_finite() || max_speed <= 0.0
+    {
+        return Err(LabHttpError::bad_request(
+            "grab stiffness/damping/max_speed must be finite (max_speed > 0)",
+        ));
+    }
+    let joint_handle = match request.mode {
+        GrabMode::Spring => Some(
+            runtime
+                .world
+                .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                    body: request.body_handle,
+                    local_anchor,
+                    world_anchor: grab_point,
+                    stiffness,
+                    damping,
+                    user_data: GRAB_JOINT_USER_DATA,
+                }))
+                .map_err(|error| {
+                    LabHttpError::bad_request(format!("grab joint rejected: {error:?}"))
+                })?,
+        ),
+        GrabMode::Direct => None,
+    };
+    if runtime
+        .world
+        .apply_body_patch(
+            request.body_handle,
+            BodyPatch {
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .is_err()
+    {
+        // `release_active_grab` would be a no-op here: the prior grab (if any)
+        // was already cleared above, and this new grab is not yet stored on
+        // `runtime`/`record`. Destroy the just-created joint directly so a
+        // failed wake patch cannot orphan it in the world.
+        if let Some(joint_handle) = joint_handle {
+            let _ = runtime.world.destroy_joint(joint_handle);
+            runtime.query.sync(&runtime.world);
+        }
+        return Err(LabHttpError::bad_request("grab wake patch failed"));
+    }
+    runtime.query.sync(&runtime.world);
+    let grab = ActiveGrabRecord {
+        id: format!("grab-{}", runtime.next_grab_id),
+        body_handle: request.body_handle,
+        mode: request.mode,
+        local_anchor,
+        target: grab_point,
+        joint_handle,
+        stiffness,
+        damping,
+        max_speed,
+    };
+    runtime.next_grab_id = runtime.next_grab_id.saturating_add(1);
+    runtime.active_grab = Some(grab.clone());
+    record.active_grab = Some(grab.clone());
+    Ok(Json(json!({ "grab": grab, "session": record.clone() })))
+}
+
 async fn session_events(
     State(state): State<LabServerState>,
     Path(id): Path<String>,
@@ -668,6 +837,7 @@ fn control_live_session(session: &mut SessionState, action: &str) -> Result<(), 
             session.record.final_snapshot_artifact = None;
             session.record.latest_frame = None;
             session.record.last_error = None;
+            session.record.active_grab = None;
             session.record.events.clear();
         }
         "step" => step_live_session(session)?,
@@ -1328,6 +1498,8 @@ fn build_live_runtime(
             perturbation_provenance: Vec::new(),
             velocity_preview_cache: BTreeMap::new(),
             used_velocity_preview_actions: BTreeSet::new(),
+            active_grab: None,
+            next_grab_id: 1,
         },
         effective_runtime_config,
     ))
@@ -1654,6 +1826,7 @@ mod tests {
                 final_snapshot_artifact: None,
                 latest_frame: Some(frame),
                 last_error: None,
+                active_grab: None,
                 events: Vec::new(),
                 frame_state_hashes: Vec::new(),
             },
@@ -1668,6 +1841,8 @@ mod tests {
                 perturbation_provenance: Vec::new(),
                 velocity_preview_cache: std::collections::BTreeMap::new(),
                 used_velocity_preview_actions: std::collections::BTreeSet::new(),
+                active_grab: None,
+                next_grab_id: 1,
             }),
             artifact_reset_generation: 0,
         };

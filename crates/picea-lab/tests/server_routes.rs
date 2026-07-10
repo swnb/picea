@@ -1943,6 +1943,224 @@ async fn live_session_epoch_starts_at_zero_and_reset_increments_without_preview_
     );
 }
 
+#[tokio::test]
+async fn live_grab_creates_spring_joint_and_rejects_invalid_targets() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "scenario_id": "falling_box_contact",
+                        "frame_count": 8,
+                        "mode": "live_session"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created_body = json_body(created).await;
+    let session_id = created_body["session"]["id"].as_str().unwrap().to_owned();
+    let session_epoch = created_body["session"]["session_epoch"].as_u64().unwrap();
+    assert_eq!(created_body["session"]["active_grab"], Value::Null);
+
+    // 先 step 一帧,拿到动态 body 的 handle 与位置。
+    let stepped = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/control"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let stepped_body = json_body(stepped).await;
+    let bodies = stepped_body["session"]["latest_frame"]["snapshot"]["bodies"]
+        .as_array()
+        .unwrap();
+    let dynamic_body = bodies
+        .iter()
+        .find(|body| body["body_type"] == "dynamic")
+        .expect("scenario should expose a dynamic body");
+    let static_body = bodies
+        .iter()
+        .find(|body| body["body_type"] == "static")
+        .expect("scenario should expose a static body");
+    let dynamic_handle = dynamic_body["handle"].as_u64().unwrap();
+    let grab_x = dynamic_body["transform"]["translation"]["x"]
+        .as_f64()
+        .unwrap();
+    let grab_y = dynamic_body["transform"]["translation"]["y"]
+        .as_f64()
+        .unwrap();
+    let joint_count_before = stepped_body["session"]["latest_frame"]["snapshot"]["joints"]
+        .as_array()
+        .unwrap()
+        .len();
+
+    // static body 拒绝。
+    let static_grab = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": static_body["handle"],
+                        "grab_point": [0.0, 0.0],
+                        "session_epoch": session_epoch
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(static_grab.status(), StatusCode::BAD_REQUEST);
+
+    // 过期 epoch 拒绝。
+    let stale_epoch = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": dynamic_handle,
+                        "grab_point": [grab_x, grab_y],
+                        "session_epoch": session_epoch + 999
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stale_epoch.status(), StatusCode::BAD_REQUEST);
+
+    // spring grab 成功:响应带 active_grab,默认 spring 模式,带 joint_handle。
+    let grabbed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": dynamic_handle,
+                        "grab_point": [grab_x, grab_y],
+                        "session_epoch": session_epoch
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(grabbed.status(), StatusCode::OK);
+    let grabbed_body = json_body(grabbed).await;
+    assert_eq!(grabbed_body["grab"]["mode"], "spring");
+    assert_eq!(grabbed_body["grab"]["body_handle"], dynamic_handle);
+    assert!(grabbed_body["grab"]["joint_handle"].is_number());
+    assert_eq!(
+        grabbed_body["session"]["active_grab"]["id"],
+        grabbed_body["grab"]["id"]
+    );
+    // grab 不 bump session_epoch。
+    assert_eq!(
+        grabbed_body["session"]["session_epoch"].as_u64().unwrap(),
+        session_epoch
+    );
+
+    // 下一帧的 snapshot 中出现 grab 的 world_anchor joint。
+    let after = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/control"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "action": "step", "detail": "full" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let after_body = json_body(after).await;
+    let joints_after = after_body["session"]["latest_frame"]["snapshot"]["joints"]
+        .as_array()
+        .unwrap();
+    assert_eq!(joints_after.len(), joint_count_before + 1);
+    assert!(joints_after
+        .iter()
+        .any(|joint| joint["kind"] == "world_anchor"));
+
+    // artifact 会话拒绝 grab。
+    let artifact_created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "scenario_id": "falling_box_contact",
+                        "frame_count": 2,
+                        "mode": "artifact_replay"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let artifact_body = json_body(artifact_created).await;
+    let artifact_id = artifact_body["session"]["id"].as_str().unwrap().to_owned();
+    let artifact_epoch = artifact_body["session"]["session_epoch"].as_u64().unwrap();
+    let artifact_grab = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{artifact_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": 1,
+                        "grab_point": [0.0, 0.0],
+                        "session_epoch": artifact_epoch
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(artifact_grab.status(), StatusCode::BAD_REQUEST);
+}
+
 async fn create_live_session(app: &axum::Router, scenario_id: &str, frame_count: usize) -> Value {
     create_live_session_with_options(app, scenario_id, frame_count, false, 600).await
 }
