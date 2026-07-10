@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
   applyLiveGravity,
@@ -29,6 +29,7 @@ import {
   buildTrajectoryOverlay,
   buildTrajectorySummary,
   type TrajectoryMarker,
+  type TrajectoryOverlay,
 } from "./components/workbench/trajectory"
 import {
   deriveLatticeProxy,
@@ -36,6 +37,7 @@ import {
   defaultTrajectorySettings,
   type CanvasDebugView,
   type ControlAction,
+  type LatticeProxySummary,
   type LayerState,
   type LiveCadenceStatus,
   type PerfEvidenceStatus,
@@ -2125,8 +2127,8 @@ export function App() {
     }))
   }, [currentFrame.perturbation_provenance, selectedPerturbationTarget?.bodyHandle])
 
-  const debugContextPayload = useMemo<DebugContextPayload>(
-    () => ({
+  const buildDebugContextText = useCallback((): string => {
+    const payload: DebugContextPayload = {
       scenario: {
         id: selectedScenario,
         group: scenarioGroupForId(selectedScenario),
@@ -2280,8 +2282,9 @@ export function App() {
             counterSummary: perfArtifact.counter_summary ?? null,
           }
         : null,
-    }),
-    [
+    }
+    return JSON.stringify(payload, null, 2)
+  }, [
       canvasView,
       currentFrame,
       currentFramePerturbationProvenance,
@@ -2321,17 +2324,11 @@ export function App() {
       trajectorySummary,
       velocityPerturbation.sessionEpoch,
       velocityPerturbation.worldRevision,
-    ],
-  )
-
-  const debugContextText = useMemo(
-    () => JSON.stringify(debugContextPayload, null, 2),
-    [debugContextPayload],
-  )
+    ])
 
   async function copyDebugContext() {
     try {
-      await copyTextToClipboard(debugContextText)
+      await copyTextToClipboard(buildDebugContextText())
       pushLogs(log("info", t(locale, "debug.contextCopied")))
     } catch (error) {
       pushLogs(
@@ -2374,12 +2371,16 @@ export function App() {
       currentFrame={currentFrame}
       frames={frames}
       frameIndex={frameIndex}
+      trajectoryOverlay={trajectoryOverlay}
+      latticeSummary={latticeSummary}
+      stackSummary={stackSummary}
+      trajectoryMarkers={trajectoryMarkers}
       onFrameChange={setFrameIndex}
       selectedEntity={selectedEntity}
       selectedDetails={selectedDetails}
       onSelectEntity={setSelectedEntity}
       canvasView={canvasView}
-      debugContextText={debugContextText}
+      buildDebugContextText={buildDebugContextText}
       onCanvasViewChange={setCanvasView}
       logs={logs}
       frameCount={frameCount}

@@ -32,10 +32,10 @@ import type {
   CanvasDebugView,
   LatticeProxyEdge,
   LatticeProxyNode,
+  LatticeProxySummary,
   LayerState,
   TrajectorySettings,
 } from "./types";
-import { deriveLatticeProxy } from "./types";
 
 type WorldCanvasProps = {
   frame: FrameRecord;
@@ -44,6 +44,7 @@ type WorldCanvasProps = {
   selected: SelectedEntity | null;
   layers: LayerState;
   trajectorySettings: TrajectorySettings;
+  latticeSummary: LatticeProxySummary;
   labels: {
     frame: string;
     colliders: string;
@@ -122,6 +123,7 @@ export function WorldCanvas({
   selected,
   layers,
   trajectorySettings,
+  latticeSummary,
   labels,
   onSelect,
   onViewChange,
@@ -153,6 +155,7 @@ export function WorldCanvas({
     }),
     [canvasCameraState, fitCamera, size],
   );
+
   const trajectoryOverlay = useMemo(
     () => buildTrajectoryOverlay(frames, frameIndex, selected, trajectorySettings),
     [frameIndex, frames, selected, trajectorySettings],
@@ -327,6 +330,7 @@ export function WorldCanvas({
       selected,
       trajectoryOverlay,
       trajectorySettings,
+      latticeSummary,
       labels,
     );
     profileMeasure("canvas.drawWorld", startedAt, {
@@ -344,6 +348,7 @@ export function WorldCanvas({
     camera,
     frame,
     labels,
+    latticeSummary,
     layers,
     selected,
     size,
@@ -418,7 +423,7 @@ export function WorldCanvas({
     }
     const rect = event.currentTarget.getBoundingClientRect();
     const point = screenToWorld({ x: event.clientX - rect.left, y: event.clientY - rect.top }, camera);
-    const latticeProxy = layers.lattice ? deriveLatticeProxy(frame, frames[0] ?? frame) : null;
+    const latticeProxy = layers.lattice ? latticeSummary : null;
     const hit = hitTest(
       frame.snapshot.colliders,
       frame.snapshot.contacts,
@@ -566,6 +571,7 @@ function drawWorld(
   selected: SelectedEntity | null,
   trajectoryOverlay: TrajectoryOverlay,
   trajectorySettings: TrajectorySettings,
+  latticeSummary: LatticeProxySummary,
   labels: Pick<
     WorldCanvasProps["labels"],
     | "trajectoryEmptySelectedBody"
@@ -629,13 +635,7 @@ function drawWorld(
   }
 
   if (layers.lattice) {
-    drawLatticeProxy(
-      ctx,
-      frame,
-      previousFrames[0] ?? frame,
-      camera,
-      selected,
-    );
+    drawLatticeProxy(ctx, latticeSummary, camera, selected);
   }
 
   if (selected?.kind === "body") {
@@ -1173,12 +1173,10 @@ function drawBodySelection(ctx: CanvasRenderingContext2D, body: DebugBody, colli
 
 function drawLatticeProxy(
   ctx: CanvasRenderingContext2D,
-  frame: FrameRecord,
-  referenceFrame: FrameRecord,
+  summary: LatticeProxySummary,
   camera: Camera,
   selected: SelectedEntity | null,
 ) {
-  const summary = deriveLatticeProxy(frame, referenceFrame)
   if (!summary.enabled || summary.edges.length === 0) {
     return
   }

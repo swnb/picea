@@ -1376,7 +1376,7 @@ assert.match(
 );
 assert.match(
   appSource,
-  /const debugContextPayload = useMemo<DebugContextPayload>/,
+  /const buildDebugContextText = useCallback\(\(\): string => \{[\s\S]*const payload: DebugContextPayload = \{/,
   "Debug context should be rebuilt from current workbench state so the preview stays aligned with source, frame, camera, layers, and perf evidence.",
 );
 assert.match(
@@ -1396,7 +1396,7 @@ assert.match(
 );
 assert.match(
   appSource,
-  /const debugContextText = useMemo\(\s*\(\) => JSON\.stringify\(debugContextPayload, null, 2\)/,
+  /return JSON\.stringify\(payload, null, 2\)/,
   "Debug context preview should serialize directly from the current derived payload instead of waiting for a stale manual refresh.",
 );
 assert.match(

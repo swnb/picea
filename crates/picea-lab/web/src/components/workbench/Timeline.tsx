@@ -37,15 +37,17 @@ import {
   buildStackStabilitySummary,
   type EvidenceMetric,
   type StackMarker,
+  type StackStabilitySummary,
 } from "./stackStability"
 import {
-  buildTrajectoryMarkers,
   buildTrajectoryOverlay,
   type TrajectoryMarker,
+  type TrajectoryOverlay,
 } from "./trajectory"
 import { deriveLatticeProxy } from "./types"
 import type {
   CanvasDebugView,
+  LatticeProxySummary,
   LayerState,
   LiveCadenceStatus,
   PerfEvidenceStatus,
@@ -114,6 +116,10 @@ type TimelineJumpMarker = {
 export function BottomTimeline({
   frames,
   frameIndex,
+  trajectoryOverlay: trajectoryOverlayFacts,
+  latticeSummary: latticeSummaryFacts,
+  stackSummary: stackSummaryFacts,
+  trajectoryMarkers: trajectoryMarkersFacts,
   onFrameChange,
   logs,
   locale,
@@ -126,7 +132,7 @@ export function BottomTimeline({
   trajectorySettings,
   onTrajectorySettingsChange,
   canvasView,
-  debugContextText,
+  buildDebugContextText,
   perfArtifact,
   perfStatus,
   controlBusy,
@@ -139,6 +145,10 @@ export function BottomTimeline({
 }: {
   frames: FrameRecord[]
   frameIndex: number
+  trajectoryOverlay: TrajectoryOverlay
+  latticeSummary: LatticeProxySummary
+  stackSummary: StackStabilitySummary
+  trajectoryMarkers: TrajectoryMarker[]
   onFrameChange: (value: number) => void
   logs: WorkbenchLog[]
   locale: Locale
@@ -155,7 +165,7 @@ export function BottomTimeline({
   trajectorySettings: TrajectorySettings
   onTrajectorySettingsChange: (value: TrajectorySettings) => void
   canvasView: CanvasDebugView | null
-  debugContextText: string | null
+  buildDebugContextText: () => string
   perfArtifact: PerfArtifact | null
   perfStatus: PerfEvidenceStatus
   controlBusy: boolean
@@ -196,17 +206,12 @@ export function BottomTimeline({
         hasUnhydratedFrames,
       }
     }
-    const nextStackSummary = buildStackStabilitySummary(frames, localFrameIndex)
+    const nextStackSummary = stackSummaryFacts
     const stackMarkers = buildStackMarkers(frames)
     const diagnosticMarkers = buildDiagnosticTimelineMarkers(locale, frames)
-    const nextTrajectoryOverlay = buildTrajectoryOverlay(
-      frames,
-      localFrameIndex,
-      selectedEntity,
-      trajectorySettings,
-    )
-    const trajectoryMarkers = buildTrajectoryMarkers(frames)
-    const nextLatticeSummary = nextFrame ? deriveLatticeProxy(nextFrame, frames[0] ?? nextFrame) : null
+    const nextTrajectoryOverlay = trajectoryOverlayFacts
+    const trajectoryMarkers = trajectoryMarkersFacts
+    const nextLatticeSummary = nextFrame ? latticeSummaryFacts : null
     const railMarkers = pickRailMarkers([
       ...diagnosticMarkers,
       ...stackMarkers.map((marker) => ({
@@ -244,7 +249,15 @@ export function BottomTimeline({
       railMarkers,
       hasUnhydratedFrames,
     }
-  }, [frameIndex, frames, locale, selectedEntity, trajectorySettings])
+  }, [
+    frameIndex,
+    frames,
+    latticeSummaryFacts,
+    locale,
+    stackSummaryFacts,
+    trajectoryMarkersFacts,
+    trajectoryOverlayFacts,
+  ])
   const handlePlay = useStableEvent(onPlay)
   const handlePause = useStableEvent(onPause)
   const handleStep = useStableEvent(onStep)
@@ -432,7 +445,7 @@ export function BottomTimeline({
           selectedEntity={selectedEntity}
           layers={layers}
           canvasView={canvasView}
-          debugContextText={debugContextText}
+          buildDebugContextText={buildDebugContextText}
           perfArtifact={perfArtifact}
           perfStatus={perfStatus}
           onCopyDebugContext={onCopyDebugContext}
@@ -1736,7 +1749,7 @@ function EvidencePanel({
   selectedEntity,
   layers,
   canvasView,
-  debugContextText,
+  buildDebugContextText,
   perfArtifact,
   perfStatus,
   onCopyDebugContext,
@@ -1749,11 +1762,15 @@ function EvidencePanel({
   selectedEntity: SelectedEntity | null
   layers: LayerState
   canvasView: CanvasDebugView | null
-  debugContextText: string | null
+  buildDebugContextText: () => string
   perfArtifact: PerfArtifact | null
   perfStatus: PerfEvidenceStatus
   onCopyDebugContext: () => void
 }) {
+  const debugContextText = useMemo(
+    () => buildDebugContextText(),
+    [buildDebugContextText],
+  )
   const summary = perfArtifact?.counter_summary ?? null
   const contextPreview = useMemo(
     () => summarizeDebugContext(debugContextText),

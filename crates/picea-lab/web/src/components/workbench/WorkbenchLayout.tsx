@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Panel, PanelGroup } from "react-resizable-panels"
 
 import {
@@ -17,6 +17,8 @@ import type {
   WorkbenchLog,
 } from "../../types"
 import { cn } from "../../lib/utils"
+import type { StackStabilitySummary } from "./stackStability"
+import type { TrajectoryMarker, TrajectoryOverlay } from "./trajectory"
 import { BottomTimeline } from "./Timeline"
 import { Inspector } from "./Inspector"
 import { ResizeHandle } from "./ResizeHandle"
@@ -28,6 +30,7 @@ import type { GravityVector } from "./GravityDial"
 import type {
   ControlAction,
   CanvasDebugView,
+  LatticeProxySummary,
   LayerState,
   LiveCadenceStatus,
   PerfEvidenceStatus,
@@ -69,12 +72,16 @@ export function WorkbenchLayout({
   currentFrame,
   frames,
   frameIndex,
+  trajectoryOverlay,
+  latticeSummary,
+  stackSummary,
+  trajectoryMarkers,
   onFrameChange,
   selectedEntity,
   selectedDetails,
   onSelectEntity,
   canvasView,
-  debugContextText,
+  buildDebugContextText,
   onCanvasViewChange,
   logs,
   frameCount,
@@ -133,12 +140,16 @@ export function WorkbenchLayout({
   currentFrame: FrameRecord
   frames: FrameRecord[]
   frameIndex: number
+  trajectoryOverlay: TrajectoryOverlay
+  latticeSummary: LatticeProxySummary
+  stackSummary: StackStabilitySummary
+  trajectoryMarkers: TrajectoryMarker[]
   onFrameChange: (value: number) => void
   selectedEntity: SelectedEntity | null
   selectedDetails: ResolvedSelection
   onSelectEntity: (entity: SelectedEntity | null) => void
   canvasView: CanvasDebugView | null
-  debugContextText: string | null
+  buildDebugContextText: () => string
   onCanvasViewChange: (view: CanvasDebugView) => void
   logs: WorkbenchLog[]
   frameCount: number
@@ -183,6 +194,43 @@ export function WorkbenchLayout({
       mode={rightSidebarMode}
       onModeChange={setRightSidebarMode}
     />
+  )
+
+  const canvasLabels = useMemo(
+    () => ({
+      frame: t(locale, "canvas.frame"),
+      colliders: t(locale, "canvas.colliders"),
+      contacts: t(locale, "canvas.contacts"),
+      zoom: t(locale, "canvas.zoom"),
+      scale: t(locale, "canvas.scale"),
+      mode: t(locale, "canvas.mode"),
+      modeFree: t(locale, "canvas.modeFree"),
+      modeLockedCore: t(locale, "canvas.modeLockedCore"),
+      fit: t(locale, "tooltip.canvasFit"),
+      lock: t(locale, "tooltip.canvasLockCore"),
+      unlock: t(locale, "tooltip.canvasUnlockCore"),
+      reset: t(locale, "tooltip.canvasReset"),
+      zoomIn: t(locale, "tooltip.canvasZoomIn"),
+      zoomOut: t(locale, "tooltip.canvasZoomOut"),
+      targetActive: t(locale, "canvas.targetActive"),
+      targetAllColliders: t(locale, "canvas.targetAllColliders"),
+      targetScene: t(locale, "canvas.targetScene"),
+      trajectoryEmptySelectedBody: t(locale, "trajectory.empty.selectedBody"),
+      trajectoryEmptyAllDynamic: t(locale, "trajectory.empty.allDynamic"),
+      trajectoryEmptySelectedIsland: t(
+        locale,
+        "trajectory.empty.selectedIsland",
+      ),
+      trajectoryEmptyContacts: t(locale, "trajectory.empty.contacts"),
+      trajectoryEmptyCcd: t(locale, "trajectory.empty.ccd"),
+      trajectoryEmptyUnsupportedSelection: t(
+        locale,
+        "trajectory.empty.unsupportedSelection",
+      ),
+      entity: (kind: SelectedEntity["kind"], id: number) =>
+        entityLabel(locale, kind, id),
+    }),
+    [locale],
   )
 
   return (
@@ -234,47 +282,8 @@ export function WorkbenchLayout({
                 selected={selectedEntity}
                 layers={layers}
                 trajectorySettings={trajectorySettings}
-                labels={{
-                  frame: t(locale, "canvas.frame"),
-                  colliders: t(locale, "canvas.colliders"),
-                  contacts: t(locale, "canvas.contacts"),
-                  zoom: t(locale, "canvas.zoom"),
-                  scale: t(locale, "canvas.scale"),
-                  mode: t(locale, "canvas.mode"),
-                  modeFree: t(locale, "canvas.modeFree"),
-                  modeLockedCore: t(locale, "canvas.modeLockedCore"),
-                  fit: t(locale, "tooltip.canvasFit"),
-                  lock: t(locale, "tooltip.canvasLockCore"),
-                  unlock: t(locale, "tooltip.canvasUnlockCore"),
-                  reset: t(locale, "tooltip.canvasReset"),
-                  zoomIn: t(locale, "tooltip.canvasZoomIn"),
-                  zoomOut: t(locale, "tooltip.canvasZoomOut"),
-                  targetActive: t(locale, "canvas.targetActive"),
-                  targetAllColliders: t(locale, "canvas.targetAllColliders"),
-                  targetScene: t(locale, "canvas.targetScene"),
-                  trajectoryEmptySelectedBody: t(
-                    locale,
-                    "trajectory.empty.selectedBody",
-                  ),
-                  trajectoryEmptyAllDynamic: t(
-                    locale,
-                    "trajectory.empty.allDynamic",
-                  ),
-                  trajectoryEmptySelectedIsland: t(
-                    locale,
-                    "trajectory.empty.selectedIsland",
-                  ),
-                  trajectoryEmptyContacts: t(
-                    locale,
-                    "trajectory.empty.contacts",
-                  ),
-                  trajectoryEmptyCcd: t(locale, "trajectory.empty.ccd"),
-                  trajectoryEmptyUnsupportedSelection: t(
-                    locale,
-                    "trajectory.empty.unsupportedSelection",
-                  ),
-                  entity: (kind, id) => entityLabel(locale, kind, id),
-                }}
+                labels={canvasLabels}
+                latticeSummary={latticeSummary}
                 onSelect={onSelectEntity}
                 onViewChange={onCanvasViewChange}
               />
@@ -288,6 +297,10 @@ export function WorkbenchLayout({
               <BottomTimeline
                 frames={frames}
                 frameIndex={frameIndex}
+                trajectoryOverlay={trajectoryOverlay}
+                latticeSummary={latticeSummary}
+                stackSummary={stackSummary}
+                trajectoryMarkers={trajectoryMarkers}
                 onFrameChange={onFrameChange}
                 logs={logs}
                 locale={locale}
@@ -300,7 +313,7 @@ export function WorkbenchLayout({
                 trajectorySettings={trajectorySettings}
                 onTrajectorySettingsChange={onTrajectorySettingsChange}
                 canvasView={canvasView}
-                debugContextText={debugContextText}
+                buildDebugContextText={buildDebugContextText}
                 perfArtifact={perfArtifact}
                 perfStatus={perfStatus}
                 controlBusy={status === "loading" || liveControlBusy}
