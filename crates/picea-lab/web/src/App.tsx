@@ -623,7 +623,7 @@ export function App() {
     "falling_box_contact",
   )
   const [frameCount, setFrameCount] = useState(120)
-  const [runMode, setRunMode] = useState<RunMode>("artifact_replay")
+  const [runMode, setRunMode] = useState<RunMode>("live_session")
   const [frames, setFrames] = useState<FrameRecord[]>(() =>
     makeDemoFrames("falling_box_contact", 120),
   )
@@ -690,6 +690,7 @@ export function App() {
   const liveLoopGenerationRef = useRef(0)
   const liveCadenceSlowFrameStreakRef = useRef(0)
   const perturbationRequestTokenRef = useRef(0)
+  const initialRunTriggeredRef = useRef(false)
 
   const retainedFrameStart = frames[0]?.frame_index ?? 0
   const retainedFrameEndExclusive = retainedFrameStart + frames.length
@@ -759,6 +760,10 @@ export function App() {
         }
         setScenarios(next)
         pushLogs(log("info", t(locale, "log.connectedScenarios")))
+        if (!initialRunTriggeredRef.current) {
+          initialRunTriggeredRef.current = true
+          void runScenario()
+        }
       })
       .catch((error: Error) => {
         if (cancelled) {
@@ -1016,7 +1021,13 @@ export function App() {
     selectedPerturbationTarget?.bodyHandle,
   ])
 
-  async function runScenario() {
+  async function runScenario(scenarioIdOverride?: string) {
+    const scenarioId = scenarioIdOverride ?? selectedScenario
+    const scenarioDescriptor =
+      scenarios.find((entry) => entry.id === scenarioId) ?? null
+    const draftSceneParams =
+      scenarioParamDrafts[scenarioId] ??
+      defaultSceneParamsForScenario(scenarioDescriptor)
     setStatus("loading")
     setFrameIndex(0)
     setSelectedEntity(null)
@@ -1027,11 +1038,11 @@ export function App() {
       ? ([gravityVector.x, gravityVector.y] as [number, number])
       : null
     const sceneParams =
-      Object.keys(sceneParamDraft).length > 0 ? sceneParamDraft : null
+      Object.keys(draftSceneParams).length > 0 ? draftSceneParams : null
 
     try {
       const session = await createSession(
-        selectedScenario,
+        scenarioId,
         frameCount,
         runMode,
         gravity,
@@ -1125,7 +1136,7 @@ export function App() {
         ),
       )
     } catch (error) {
-      const nextFrames = makeDemoFrames(selectedScenario, frameCount)
+      const nextFrames = makeDemoFrames(scenarioId, frameCount)
       setFrames(nextFrames)
       clearRunState()
       setSource("demo")
@@ -1139,7 +1150,7 @@ export function App() {
           "info",
           t(locale, "log.generatedDemoFrames", {
             count: nextFrames.length,
-            scenarioId: selectedScenario,
+            scenarioId,
           }),
         ),
       )
@@ -1533,14 +1544,13 @@ export function App() {
           },
     )
     setSelectedScenario(nextScenario)
-    setFrames(makeDemoFrames(nextScenario, frameCount))
     setFrameIndex(0)
     setSelectedEntity(null)
     clearRunState()
     setAppliedGravityVector(DEFAULT_GRAVITY)
     setGravityUndoVector(null)
     setGravityPatchError(null)
-    setSource("demo")
+    void runScenario(nextScenario)
   }
 
   function updateScenarioParameter(

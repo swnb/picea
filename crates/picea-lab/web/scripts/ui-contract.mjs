@@ -1539,3 +1539,32 @@ assert.match(
   /catch \(error\) \{\s*if \(isCurrentPerturbationGuard\(perturbationGuard\)\) \{\s*setPerturbationRequestError\(messageOf\(error\)\)\s*\}\s*\}\s*finally \{\s*if \(isCurrentPerturbationGuard\(perturbationGuard\)\) \{\s*setPerturbationBusy\("idle"\)\s*\}\s*\}/,
   "Perturbation commit catch/finally should stay behind the submit-lane guard so a late response cannot revive requestError or reset busy back to idle.",
 );
+
+// --- Select-to-run contract: selecting a scenario runs real physics ---
+assert.match(
+  appSource,
+  /const \[runMode, setRunMode\] = useState<RunMode>\(\s*"live_session",?\s*\)/,
+  "Workbench should default to live_session so the first scenario selection is interactive real physics.",
+);
+const changeScenarioSource =
+  appSource.match(/function changeScenario\(nextScenario: string\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+assert.doesNotMatch(
+  changeScenarioSource,
+  /makeDemoFrames/,
+  "Scenario selection must not seed the canvas with fabricated demo frames; demo is an explicit offline fallback only.",
+);
+assert.match(
+  changeScenarioSource,
+  /void runScenario\(nextScenario\)/,
+  "Selecting a scenario must trigger a real backend run (select-to-run).",
+);
+assert.match(
+  appSource,
+  /async function runScenario\(scenarioIdOverride\?: string\)/,
+  "runScenario must accept a scenario override so changeScenario can run the newly selected scenario without stale state.",
+);
+assert.match(
+  appSource,
+  /initialRunTriggeredRef\.current = true[\s\S]*?void runScenario\(\)/,
+  "First successful scenario fetch should auto-run once so the initial canvas shows real physics, not demo frames.",
+);
