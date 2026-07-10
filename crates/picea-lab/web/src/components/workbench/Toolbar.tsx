@@ -24,6 +24,7 @@ import {
   overlayPresetLabel,
   scenarioGroupForId,
   scenarioGroupLabel,
+  scenarioWatchFor,
   sourceLabel,
   statusLabel,
   t,
@@ -78,6 +79,10 @@ export function Toolbar({
   onApplyOverlayPreset: (preset: OverlayPresetId) => void
 }) {
   const groupedScenarios = buildScenarioGroups(locale, scenarios)
+  const watchFor = scenarioWatchFor(locale, selectedScenario)
+  const scenarioTooltip = watchFor
+    ? `${scenario.description} ${t(locale, "scenario.watchForLabel")}: ${watchFor}`
+    : scenario.description
   const isRunLoading = status === "loading"
   const runProgressLabel =
     runMode === "artifact_replay"
@@ -92,9 +97,9 @@ export function Toolbar({
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-lab-line bg-lab-panel px-3">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <Tooltip label={scenario.description}>
+        <Tooltip label={scenarioTooltip}>
           <div
-            aria-label={scenario.description}
+            aria-label={scenarioTooltip}
             tabIndex={0}
             className="flex w-60 shrink-0 items-center gap-2 rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
           >

@@ -94,8 +94,13 @@ assert.match(
 );
 assert.match(
   toolbarSource,
-  /<Tooltip label=\{scenario\.description\}>[\s\S]*aria-label=\{scenario\.description\}[\s\S]*tabIndex=\{0\}[\s\S]*<div className="min-w-0 leading-tight">[\s\S]*scenario\.description[\s\S]*<\/Tooltip>/,
-  "Top toolbar identity block should show the full scenario description in a tooltip when hovered.",
+  /<Tooltip label=\{scenarioTooltip\}>[\s\S]*aria-label=\{scenarioTooltip\}[\s\S]*tabIndex=\{0\}[\s\S]*<div className="min-w-0 leading-tight">[\s\S]*scenario\.description[\s\S]*<\/Tooltip>/,
+  "Top toolbar identity block should show the full scenario description (plus watch-for copy when available) in a tooltip when hovered.",
+);
+assert.match(
+  toolbarSource,
+  /const watchFor = scenarioWatchFor\(locale, selectedScenario\)[\s\S]*const scenarioTooltip = watchFor[\s\S]*scenario\.watchForLabel[\s\S]*: scenario\.description/,
+  "Toolbar scenario tooltip should append localized watch-for copy after the description when the scenario ships one, and fall back to the description alone otherwise.",
 );
 assert.match(
   toolbarSource,

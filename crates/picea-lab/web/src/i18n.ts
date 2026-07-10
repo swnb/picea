@@ -59,6 +59,7 @@ const enMessages = {
   "scenario.group.compound": "Compound / provenance",
   "scenario.group.lattice": "Lattice proxy",
   "scenario.group.diagnostics": "Diagnostics",
+  "scenario.watchForLabel": "Watch for",
   "tooltip.runScenario": "Run selected scenario",
   "tooltip.startRunScenario": "Start a new run",
   "tooltip.rerunScenario": "Rerun scenario",
@@ -544,6 +545,7 @@ const zhMessages: Record<MessageKey, string> = {
   "scenario.group.compound": "复合体 / 来源",
   "scenario.group.lattice": "格点代理",
   "scenario.group.diagnostics": "诊断",
+  "scenario.watchForLabel": "看点",
   "tooltip.runScenario": "运行当前场景",
   "tooltip.startRunScenario": "启动新运行",
   "tooltip.rerunScenario": "重新运行场景",
@@ -1073,6 +1075,77 @@ const scenarioMessages: Record<string, Record<Locale, Pick<ScenarioDescriptor, "
     "en-US": { name: "Compound provenance fixture", description: "An authored compound fixture exposing piece order, inherited collider semantics, broadphase tree, and island facts." },
   },
 };
+
+const scenarioWatchForMessages: Record<string, Record<Locale, string>> = {
+  falling_box_contact: {
+    "zh-CN": "盒子落到地板后稳定压住:接触点出现、法向冲量收敛,不抖动不下陷。",
+    "en-US": "The box lands and rests on the floor: contact points appear, normal impulses converge, no jitter or sinking.",
+  },
+  stack_4: {
+    "zh-CN": "四盒整列落定并休眠;列不歪斜、层间无滑移,任何抖动都是回归。",
+    "en-US": "Four boxes settle into a still, sleeping column with no lean or sliding — any jitter is a regression.",
+  },
+  stack_stability_tower: {
+    "zh-CN": "窄支撑高塔分阶段落定;开稳定性叠加层看接触压力,确认没有首个坏帧标记。",
+    "en-US": "The narrow-support tower settles in stages; open the stability overlay and confirm no first-bad-frame marker fires.",
+  },
+  matrix_stack: {
+    "zh-CN": "8x6 交错矩阵压测边缘弹出:边角盒子不应被挤飞,整堆逐步安静。",
+    "en-US": "The staggered 8x6 matrix stresses edge ejection: corner boxes must not pop out and the pile should quiet down.",
+  },
+  matrix_stack_aligned: {
+    "zh-CN": "4x3 对齐矩阵是稳定行为锁:干净落定、快速休眠。",
+    "en-US": "The aligned 4x3 matrix is a stability behavior lock: it settles cleanly and sleeps fast.",
+  },
+  newton_cradle: {
+    "zh-CN": "单球摆入,另一端单球等高摆出;长窗口动能不衰减(恢复系数 1、零摩擦)。",
+    "en-US": "One ball swings in, exactly one swings out to equal height; kinetic energy holds long-term (restitution 1, zero friction).",
+  },
+  joint_anchor: {
+    "zh-CN": "刚体绕固定世界锚点受约束运动,约束距离不被拉长;开轨迹层看轨道收敛。",
+    "en-US": "The body orbits a fixed world anchor without stretching the constraint; enable the trace layer to watch the orbit converge.",
+  },
+  lattice_grid: {
+    "zh-CN": "刚体节点 + 距离/锚点关节的格点代理(非真软体):看节点下垂、边伸长率与岛休眠。",
+    "en-US": "A rigid-body node + joint lattice proxy (not true soft-body): watch node sag, edge stretch ratios, and island sleep.",
+  },
+  broadphase_sparse: {
+    "zh-CN": "五个静态盒子恰好产生一对宽阶段重叠:候选对计数恒为 1;开宽阶段树层看剪枝。",
+    "en-US": "Five static boxes yield exactly one broadphase overlap: candidate count stays 1; open the broadphase tree layer to see pruning.",
+  },
+  sat_polygon: {
+    "zh-CN": "矩形与凸多边形的 SAT 裁剪流形:应得到两个裁剪接触点,法向稳定不翻转。",
+    "en-US": "SAT clipped manifold between a rectangle and a convex polygon: expect two clipped contact points with a stable, non-flipping normal.",
+  },
+  compound_provenance: {
+    "zh-CN": "复合体三个 piece 的顺序与继承(材质/密度/过滤)固定可追溯:开来源层核对 piece 编号。",
+    "en-US": "The compound body keeps stable piece order and inherited material/density/filter: open the provenance layer to verify piece indices.",
+  },
+  concave_decomposition: {
+    "zh-CN": "静态凹多边形确定性分解为凸块:分解缝不产生虚假接触,块数量恒定。",
+    "en-US": "The static concave polygon decomposes into deterministic convex pieces: no phantom contacts along seams, piece count constant.",
+  },
+  ccd_fast_circle_wall: {
+    "zh-CN": "高速圆不得穿透薄墙:看 swept 路径、TOI 点与 clamp 后的贴墙停点;ccd_hit 计数为 1。",
+    "en-US": "The fast circle must not tunnel through the thin wall: watch the swept path, TOI point, and clamped stop; ccd_hit count is 1.",
+  },
+  ccd_fast_convex_walls: {
+    "zh-CN": "高速矩形面对两道薄墙:应在更早命中的一道停下,绝不到达第二道。",
+    "en-US": "The fast rectangle facing two thin walls must clamp at the earlier hit and never reach the second wall.",
+  },
+  ccd_dynamic_convex_pair: {
+    "zh-CN": "两个高速动态矩形对撞:CCD 在相遇点 clamp,双方互不穿透。",
+    "en-US": "Two fast dynamic rectangles collide head-on: CCD clamps at the meeting point and neither tunnels through the other.",
+  },
+  ccd_dynamic_compound_wall: {
+    "zh-CN": "高速复合体按最早命中的凸 piece 结算 TOI:整体停在墙前,piece 之间不散开。",
+    "en-US": "The fast compound body resolves TOI by its earliest-hitting convex piece: it stops at the wall and pieces stay together.",
+  },
+}
+
+export function scenarioWatchFor(locale: Locale, scenarioId: string): string | null {
+  return scenarioWatchForMessages[scenarioId]?.[locale] ?? null
+}
 
 const bodyTypeLabels: Record<Locale, Record<BodyType, string>> = {
   "zh-CN": { static: "静态", dynamic: "动态", kinematic: "运动学" },

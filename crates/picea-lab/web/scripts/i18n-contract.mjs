@@ -35,6 +35,7 @@ const {
   scenarioParameterLabel,
   scenarioGroupForId,
   scenarioGroupLabel,
+  scenarioWatchFor,
   sourceLabel,
   statusLabel,
   supportedLocales,
@@ -497,3 +498,25 @@ assertLocalizedScenario(
     description: "两个高速动态矩形彼此扫掠命中，用于观察动态目标 CCD 的 TOI、目标扫掠和目标钳制事实。",
   },
 );
+
+// --- Scenario watch-for copy: every backend scenario explains what to watch ---
+const watchForScenarioIds = [
+  "falling_box_contact", "stack_4", "stack_stability_tower", "matrix_stack",
+  "matrix_stack_aligned", "newton_cradle", "joint_anchor", "lattice_grid",
+  "broadphase_sparse", "sat_polygon", "compound_provenance", "concave_decomposition",
+  "ccd_fast_circle_wall", "ccd_fast_convex_walls", "ccd_dynamic_convex_pair",
+  "ccd_dynamic_compound_wall",
+];
+for (const scenarioId of watchForScenarioIds) {
+  for (const locale of ["zh-CN", "en-US"]) {
+    assert.equal(
+      typeof scenarioWatchFor(locale, scenarioId),
+      "string",
+      `scenario ${scenarioId} must ship ${locale} watch-for copy`,
+    );
+  }
+}
+assert.equal(scenarioWatchFor("zh-CN", "unknown_scenario"), null);
+for (const locale of ["zh-CN", "en-US"]) {
+  assert.equal(typeof messages[locale]["scenario.watchForLabel"], "string");
+}
