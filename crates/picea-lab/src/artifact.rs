@@ -49,6 +49,15 @@ impl ArtifactFile {
             Self::Perf => "perf.json",
         }
     }
+
+    /// Single source of truth for artifact MIME types. Both the manifest entries
+    /// and the HTTP `get_artifact` handler read the content type from here.
+    pub(crate) const fn content_type(self) -> &'static str {
+        match self {
+            Self::Frames => "application/x-ndjson",
+            _ => "application/json",
+        }
+    }
 }
 
 impl FromStr for ArtifactFile {
@@ -70,6 +79,10 @@ pub struct ArtifactEntry {
     pub content_type: String,
 }
 
+/// Current `manifest.json` schema version. Read back with `#[serde(default)]`
+/// so pre-versioning manifests deserialize as version 0.
+const RUN_MANIFEST_SCHEMA_VERSION: u32 = 1;
+
 /// Manifest schema for `manifest.json`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RunManifest {
@@ -79,6 +92,11 @@ pub struct RunManifest {
     #[serde(default)]
     pub effective_runtime_config: ScenarioRuntimeConfig,
     pub final_state_hash: String,
+    /// Additive artifact-schema version. Older manifests without this field read
+    /// back as 0 via `#[serde(default)]`; freshly written manifests carry the
+    /// current `RUN_MANIFEST_SCHEMA_VERSION`.
+    #[serde(default)]
+    pub schema_version: u32,
     pub artifacts: Vec<ArtifactEntry>,
 }
 
@@ -607,6 +625,7 @@ pub fn run_scenario(store: &ArtifactStore, config: RunConfig) -> LabResult<RunRe
         frame_count,
         effective_runtime_config,
         final_state_hash: final_state_hash.clone(),
+        schema_version: RUN_MANIFEST_SCHEMA_VERSION,
         artifacts: artifact_entries(),
     };
 
@@ -1236,11 +1255,7 @@ fn artifact_entries() -> Vec<ArtifactEntry> {
         .into_iter()
         .map(|file| ArtifactEntry {
             file: file.file_name().to_owned(),
-            content_type: match file {
-                ArtifactFile::Frames => "application/x-ndjson",
-                _ => "application/json",
-            }
-            .to_owned(),
+            content_type: file.content_type().to_owned(),
         })
         .collect()
 }
@@ -1280,4 +1295,50 @@ fn state_hash_bytes(bytes: &[u8]) -> LabResult<String> {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     Ok(format!("{hash:016x}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{run_scenario, ArtifactStore, RunManifest};
+    use crate::scenario::{RunConfig, ScenarioId, ScenarioOverrides};
+    use serde_json::json;
+
+    #[test]
+    fn run_manifest_carries_current_schema_version() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let store = ArtifactStore::new(temp.path().join("runs"));
+        let result = run_scenario(
+            &store,
+            RunConfig {
+                scenario_id: ScenarioId::FallingBoxContact,
+                frame_count: 1,
+                run_id: None,
+                overrides: ScenarioOverrides::default(),
+            },
+        )
+        .expect("scenario run should succeed");
+        let value = serde_json::to_value(&result.manifest).expect("manifest should serialize");
+        assert_eq!(
+            value["schema_version"], 1,
+            "freshly generated manifests should carry schema_version 1"
+        );
+    }
+
+    #[test]
+    fn run_manifest_defaults_schema_version_for_legacy_json() {
+        let legacy = json!({
+            "run_id": "run-legacy",
+            "scenario_id": "falling_box_contact",
+            "frame_count": 2,
+            "final_state_hash": "legacy-hash",
+            "artifacts": []
+        });
+        let manifest: RunManifest = serde_json::from_value(legacy)
+            .expect("legacy manifest without schema_version should still deserialize");
+        let reserialized = serde_json::to_value(&manifest).expect("manifest should reserialize");
+        assert_eq!(
+            reserialized["schema_version"], 0,
+            "manifests missing schema_version should default to 0"
+        );
+    }
 }
