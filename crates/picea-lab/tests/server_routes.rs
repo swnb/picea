@@ -2024,7 +2024,7 @@ async fn live_grab_creates_spring_joint_and_rejects_invalid_targets() {
                 .body(Body::from(
                     json!({
                         "body_handle": static_body["handle"],
-                        "grab_point": [0.0, 0.0],
+                        "grab_point": [1.5, -2.0],
                         "session_epoch": session_epoch
                     })
                     .to_string(),
@@ -2034,6 +2034,14 @@ async fn live_grab_creates_spring_joint_and_rejects_invalid_targets() {
         .await
         .unwrap();
     assert_eq!(static_grab.status(), StatusCode::BAD_REQUEST);
+    let static_grab_body = json_body(static_grab).await;
+    assert!(
+        static_grab_body["error"]
+            .as_str()
+            .expect("error should be a string")
+            .contains("only dynamic bodies can be grabbed"),
+        "static body grab rejection should explain that only dynamic bodies can be grabbed"
+    );
 
     // 过期 epoch 拒绝。
     let stale_epoch = app
@@ -2116,6 +2124,134 @@ async fn live_grab_creates_spring_joint_and_rejects_invalid_targets() {
         .iter()
         .any(|joint| joint["kind"] == "world_anchor"));
 
+    // grab_point 恰好落在世界原点 (0, 0) 时也应被接受(defect 1 回归):
+    // 替换掉当前 active grab,同样是 spring 模式。
+    let zero_point_grab = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": dynamic_handle,
+                        "grab_point": [0.0, 0.0],
+                        "session_epoch": session_epoch
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(zero_point_grab.status(), StatusCode::OK);
+    let zero_point_body = json_body(zero_point_grab).await;
+    assert_eq!(zero_point_body["grab"]["mode"], "spring");
+    let active_grab_id = zero_point_body["grab"]["id"]
+        .as_str()
+        .expect("grab id should be a string")
+        .to_owned();
+
+    // 存在有效 grab 时,过期 session_epoch 的新请求必须被拒绝,且不能
+    // 影响当前 active grab(session_epoch 校验本就在最前面,这里锁的是
+    // 整体不变式;真正命中"先释放后校验"旧路径的回归见下面的
+    // invalid_handle_with_active_grab)。
+    let stale_epoch_with_active_grab = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": dynamic_handle,
+                        "grab_point": [grab_x, grab_y],
+                        "session_epoch": session_epoch + 999
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        stale_epoch_with_active_grab.status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    let fetched_after_stale = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(fetched_after_stale.status(), StatusCode::OK);
+    let fetched_after_stale_body = json_body(fetched_after_stale).await;
+    assert_eq!(
+        fetched_after_stale_body["session"]["active_grab"]["id"],
+        active_grab_id
+    );
+
+    // 无效 body_handle(session_epoch 有效、live 会话)时同样必须被拒绝,且不能
+    // 影响当前 active grab —— 这精确命中 defect 2 的旧 bug 位置:body-handle
+    // 校验失败发生在(修复前)"无条件释放旧 grab"之后。
+    let invalid_handle_with_active_grab = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/sessions/{session_id}/grabs"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "body_handle": dynamic_handle + 424_242,
+                        "grab_point": [grab_x, grab_y],
+                        "session_epoch": session_epoch
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        invalid_handle_with_active_grab.status(),
+        StatusCode::BAD_REQUEST
+    );
+    let invalid_handle_body = json_body(invalid_handle_with_active_grab).await;
+    assert!(
+        invalid_handle_body["error"]
+            .as_str()
+            .expect("error should be a string")
+            .contains("invalid body handle"),
+        "invalid body_handle rejection should explain the handle is invalid"
+    );
+
+    let fetched_after_invalid_handle = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(fetched_after_invalid_handle.status(), StatusCode::OK);
+    let fetched_after_invalid_handle_body = json_body(fetched_after_invalid_handle).await;
+    assert_eq!(
+        fetched_after_invalid_handle_body["session"]["active_grab"]["id"],
+        active_grab_id
+    );
+
     // artifact 会话拒绝 grab。
     let artifact_created = app
         .clone()
@@ -2149,7 +2285,7 @@ async fn live_grab_creates_spring_joint_and_rejects_invalid_targets() {
                 .body(Body::from(
                     json!({
                         "body_handle": 1,
-                        "grab_point": [0.0, 0.0],
+                        "grab_point": [1.5, -2.0],
                         "session_epoch": artifact_epoch
                     })
                     .to_string(),
@@ -2159,6 +2295,14 @@ async fn live_grab_creates_spring_joint_and_rejects_invalid_targets() {
         .await
         .unwrap();
     assert_eq!(artifact_grab.status(), StatusCode::BAD_REQUEST);
+    let artifact_grab_body = json_body(artifact_grab).await;
+    assert!(
+        artifact_grab_body["error"]
+            .as_str()
+            .expect("error should be a string")
+            .contains("grabs are only available for live_session"),
+        "artifact session grab rejection should explain that grabs require a live session"
+    );
 }
 
 async fn create_live_session(app: &axum::Router, scenario_id: &str, frame_count: usize) -> Value {

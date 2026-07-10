@@ -626,7 +626,23 @@ async fn commit_velocity_perturbation(
 }
 
 fn parse_world_point(value: &serde_json::Value) -> Option<Point> {
-    parse_velocity_vector(value).map(Point::from)
+    let (x, y) = if let Some(values) = value.as_array() {
+        let [x, y] = values.as_slice() else {
+            return None;
+        };
+        (x.as_f64()?, y.as_f64()?)
+    } else {
+        let object = value.as_object()?;
+        (object.get("x")?.as_f64()?, object.get("y")?.as_f64()?)
+    };
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    let point = Point::new(x as f32, y as f32);
+    if !point.x().is_finite() || !point.y().is_finite() {
+        return None;
+    }
+    Some(point)
 }
 
 /// Destroys the grab-owned joint (spring mode) and clears grab state on both
@@ -668,7 +684,6 @@ async fn create_grab(
             "grabs are only available for live_session",
         ));
     };
-    release_active_grab(record, runtime);
     let body = runtime
         .world
         .body(request.body_handle)
@@ -688,6 +703,9 @@ async fn create_grab(
             "grab stiffness/damping/max_speed must be finite (max_speed > 0)",
         ));
     }
+    // All validation has passed: only now is it safe to release any
+    // pre-existing grab before creating the replacement joint below.
+    release_active_grab(record, runtime);
     let joint_handle = match request.mode {
         GrabMode::Spring => Some(
             runtime
