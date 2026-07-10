@@ -469,6 +469,70 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
 }
 
 #[tokio::test]
+async fn artifact_reset_runs_off_worker_without_blocking_concurrent_reads() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "scenario_id": "falling_box_contact", "frame_count": 3 }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session_id = json_body(created).await["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // The artifact reset re-runs the full simulation on a blocking worker with
+    // the session mutex released. A concurrent read issued during that window
+    // must observe a consistent, completed record (never a torn or failed
+    // intermediate), and neither request may deadlock.
+    let reset_fut = app.clone().oneshot(
+        Request::builder()
+            .method(Method::POST)
+            .uri(format!("/api/sessions/{session_id}/control"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "action": "reset" }).to_string()))
+            .unwrap(),
+    );
+    let read_fut = app.clone().oneshot(
+        Request::builder()
+            .method(Method::GET)
+            .uri(format!("/api/sessions/{session_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    );
+    let (reset_res, read_res) = tokio::join!(reset_fut, read_fut);
+
+    let reset = reset_res.unwrap();
+    assert_eq!(reset.status(), StatusCode::OK);
+    let reset_body = json_body(reset).await;
+    assert_eq!(reset_body["session"]["status"], "completed");
+    assert_eq!(reset_body["session"]["frame_count"], 3);
+    assert_eq!(reset_body["session"]["current_frame_index"], 0);
+
+    let read = read_res.unwrap();
+    assert_eq!(read.status(), StatusCode::OK);
+    let read_body = json_body(read).await;
+    assert_eq!(
+        read_body["session"]["status"], "completed",
+        "a concurrent read during an artifact reset must never observe a torn or failed state"
+    );
+    assert_eq!(read_body["session"]["frame_count"], 3);
+}
+
+#[tokio::test]
 async fn live_session_step_advances_backend_world_and_reset_clears_buffer() {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));

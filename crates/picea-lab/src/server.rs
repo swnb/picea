@@ -23,19 +23,19 @@ use picea::prelude::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{catch_panic::CatchPanicLayer, cors::CorsLayer, trace::TraceLayer};
 
 use crate::{
     artifact::{
         frame_record_from_step_with_provenance, refreshed_frame_record_from_world, run_scenario,
         ArtifactFile, ArtifactStore, FrameRecord, LivePerturbationCommitOutcome,
-        LivePerturbationProvenance, LiveQuerySyncStatus,
+        LivePerturbationProvenance, LiveQuerySyncStatus, RunResult,
     },
     scenario::{
         build_scenario, default_runtime_config_for_scenario, list_scenarios, CompoundProvenance,
         RunConfig, ScenarioId, ScenarioOverrides, ScenarioRuntimeConfig,
     },
-    LabError,
+    LabError, LabResult,
 };
 
 #[derive(Clone)]
@@ -64,8 +64,18 @@ struct LabServerInner {
 struct SessionState {
     record: SessionRecord,
     runtime: SessionRuntime,
+    /// Monotonic counter bumped when an artifact reset starts. A reset only
+    /// writes its result back if it is still the latest one, so overlapping
+    /// resets resolve to a last-initiated-wins order instead of a torn
+    /// interleave while the session mutex is released for the blocking re-run.
+    artifact_reset_generation: u64,
 }
 
+// The `Live` variant dwarfs the unit `ArtifactReplay` variant, but every session
+// stores exactly one `SessionRuntime` behind `Arc<Mutex<SessionState>>`, so
+// boxing the live state would only add indirection on the live hot path without
+// meaningful memory savings for the handful of local sessions.
+#[allow(clippy::large_enum_variant)]
 enum SessionRuntime {
     ArtifactReplay,
     Live(LiveSessionState),
@@ -111,11 +121,18 @@ pub struct SessionRecord {
     pub last_error: Option<String>,
     #[serde(skip)]
     events: Vec<SessionEvent>,
+    /// Per-frame `state_hash` values for the completed artifact run, cached in
+    /// memory so play/step index directly instead of re-reading the whole
+    /// `frames.jsonl` on every step. Rebuilt on each (re)run and skipped from
+    /// the wire contract.
+    #[serde(skip)]
+    frame_state_hashes: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionMode {
+    #[default]
     ArtifactReplay,
     LiveSession,
 }
@@ -248,12 +265,6 @@ struct CachedVelocityPerturbationPreview {
     wake_intent: bool,
 }
 
-impl Default for SessionMode {
-    fn default() -> Self {
-        Self::ArtifactReplay
-    }
-}
-
 pub fn app(state: LabServerState) -> Router {
     Router::new()
         .route("/api/scenarios", get(get_scenarios))
@@ -275,6 +286,9 @@ pub fn app(state: LabServerState) -> Router {
         .route("/api/runs/:id/artifacts/:file", get(get_artifact))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
+        // Outermost layer: a panicking handler becomes a 500 instead of
+        // propagating and cascading through poisoned shared mutexes.
+        .layer(CatchPanicLayer::new())
         .with_state(state)
 }
 
@@ -294,57 +308,71 @@ async fn create_session(
     State(state): State<LabServerState>,
     Json(request): Json<CreateSessionRequest>,
 ) -> Result<impl IntoResponse, LabHttpError> {
-    let (id, store) = {
+    let id = {
         let mut inner = state
             .inner
             .lock()
             .expect("lab state mutex should not poison");
         let id = format!("session-{}", inner.next_session);
         inner.next_session += 1;
-        (id, inner.store.clone())
+        id
     };
 
-    let mut session = SessionState {
-        record: SessionRecord {
-            id: id.clone(),
-            scenario_id: request.scenario_id,
-            mode: request.mode,
-            status: SessionStatus::Created,
-            session_epoch: 0,
-            run_id: None,
-            frame_count: request.frame_count.max(1),
-            produced_frame_count: 0,
-            buffered_frame_count: 0,
-            current_frame_index: 0,
-            retained_frame_start: 0,
-            retained_frame_end_exclusive: 0,
-            live_buffer_capacity: request.live_buffer_capacity.max(1),
-            live_unbounded: request.live_unbounded,
-            overrides: request.overrides,
-            effective_runtime_config: default_runtime_config_for_scenario(request.scenario_id),
-            final_state_hash: None,
-            manifest_artifact: None,
-            final_snapshot_artifact: None,
-            latest_frame: None,
-            last_error: None,
-            events: Vec::new(),
-        },
-        runtime: SessionRuntime::ArtifactReplay,
+    let mut record = SessionRecord {
+        id: id.clone(),
+        scenario_id: request.scenario_id,
+        mode: request.mode,
+        status: SessionStatus::Created,
+        session_epoch: 0,
+        run_id: None,
+        frame_count: request.frame_count.max(1),
+        produced_frame_count: 0,
+        buffered_frame_count: 0,
+        current_frame_index: 0,
+        retained_frame_start: 0,
+        retained_frame_end_exclusive: 0,
+        live_buffer_capacity: request.live_buffer_capacity.max(1),
+        live_unbounded: request.live_unbounded,
+        overrides: request.overrides,
+        effective_runtime_config: default_runtime_config_for_scenario(request.scenario_id),
+        final_state_hash: None,
+        manifest_artifact: None,
+        final_snapshot_artifact: None,
+        latest_frame: None,
+        last_error: None,
+        events: Vec::new(),
+        frame_state_hashes: Vec::new(),
     };
 
-    match request.mode {
+    let runtime = match request.mode {
         SessionMode::ArtifactReplay => {
-            run_artifact_session(&store, &mut session.record);
+            let store = state
+                .inner
+                .lock()
+                .expect("lab state mutex should not poison")
+                .store
+                .clone();
+            let config = artifact_run_config(&record);
+            let result = tokio::task::spawn_blocking(move || run_scenario(&store, config))
+                .await
+                .expect("artifact run worker should not panic");
+            apply_artifact_run_result(&mut record, result);
+            SessionRuntime::ArtifactReplay
         }
         SessionMode::LiveSession => {
             let (runtime, effective_runtime_config) =
-                build_live_runtime(request.scenario_id, &session.record.overrides)?;
-            session.record.effective_runtime_config = effective_runtime_config;
-            session.runtime = SessionRuntime::Live(runtime);
+                build_live_runtime(request.scenario_id, &record.overrides)?;
+            record.effective_runtime_config = effective_runtime_config;
+            SessionRuntime::Live(runtime)
         }
-    }
+    };
 
-    let response_session = session.record.clone();
+    let response_session = record.clone();
+    let session = SessionState {
+        record,
+        runtime,
+        artifact_reset_generation: 0,
+    };
     state
         .inner
         .lock()
@@ -403,23 +431,55 @@ async fn control_session(
     Json(request): Json<ControlRequest>,
 ) -> Result<Json<serde_json::Value>, LabHttpError> {
     let session = get_session_handle(&state, &id)?;
-    let store = state
-        .inner
-        .lock()
-        .expect("lab state mutex should not poison")
-        .store
-        .clone();
-    let mut session = session.lock().expect("session mutex should not poison");
 
-    match session.record.mode {
-        SessionMode::ArtifactReplay => {
-            control_artifact_session(&store, &mut session.record, &request.action)?
+    let is_artifact_reset = {
+        let guard = session.lock().expect("session mutex should not poison");
+        matches!(guard.record.mode, SessionMode::ArtifactReplay) && request.action == "reset"
+    };
+
+    // The artifact reset re-runs the full simulation and writes five files. Run
+    // it on a blocking worker with the session mutex released, then swap the
+    // result back atomically under the lock.
+    if is_artifact_reset {
+        let store = state
+            .inner
+            .lock()
+            .expect("lab state mutex should not poison")
+            .store
+            .clone();
+        let (config, generation) = {
+            let mut guard = session.lock().expect("session mutex should not poison");
+            guard.artifact_reset_generation = guard.artifact_reset_generation.wrapping_add(1);
+            (
+                artifact_run_config(&guard.record),
+                guard.artifact_reset_generation,
+            )
+        };
+        let result = tokio::task::spawn_blocking(move || run_scenario(&store, config))
+            .await
+            .expect("artifact reset worker should not panic");
+        let mut guard = session.lock().expect("session mutex should not poison");
+        // Only the latest reset writes back; an older overlapping reset defers to
+        // it so concurrent readers never observe a torn record.
+        if guard.artifact_reset_generation == generation {
+            apply_artifact_run_result(&mut guard.record, result);
         }
-        SessionMode::LiveSession => control_live_session(&mut session, &request.action)?,
+        return Ok(Json(build_control_response(
+            &guard,
+            &request.action,
+            request.detail,
+        )));
     }
 
+    let mut guard = session.lock().expect("session mutex should not poison");
+    match guard.record.mode {
+        SessionMode::ArtifactReplay => {
+            control_artifact_session(&mut guard.record, &request.action)?
+        }
+        SessionMode::LiveSession => control_live_session(&mut guard, &request.action)?,
+    }
     Ok(Json(build_control_response(
-        &session,
+        &guard,
         &request.action,
         request.detail,
     )))
@@ -536,31 +596,24 @@ async fn session_events(
     Ok(response)
 }
 
-fn control_artifact_session(
-    store: &ArtifactStore,
-    session: &mut SessionRecord,
-    action: &str,
-) -> Result<(), LabHttpError> {
+fn control_artifact_session(session: &mut SessionRecord, action: &str) -> Result<(), LabHttpError> {
     match action {
         "play" | "run" => {
             session.status = SessionStatus::Running;
-            if let Some(run_id) = session.run_id.as_deref() {
-                let frame_hash = read_frame_hash(store, run_id, session.current_frame_index)
-                    .unwrap_or_else(|| "unknown".to_owned());
+            if session.run_id.is_some() {
+                let frame_hash = artifact_frame_hash(session, session.current_frame_index);
                 session.events.push(SessionEvent::Frame {
                     frame_index: session.current_frame_index,
                     state_hash: frame_hash,
                 });
             }
         }
-        "reset" => run_artifact_session(store, session),
         "step" => {
             session.status = SessionStatus::Paused;
             session.current_frame_index =
                 (session.current_frame_index + 1).min(session.frame_count.saturating_sub(1));
-            if let Some(run_id) = session.run_id.as_deref() {
-                let frame_hash = read_frame_hash(store, run_id, session.current_frame_index)
-                    .unwrap_or_else(|| "unknown".to_owned());
+            if session.run_id.is_some() {
+                let frame_hash = artifact_frame_hash(session, session.current_frame_index);
                 session.events.push(SessionEvent::Frame {
                     frame_index: session.current_frame_index,
                     state_hash: frame_hash,
@@ -571,9 +624,19 @@ fn control_artifact_session(
             session.status = SessionStatus::Paused;
             session.events.push(SessionEvent::Paused);
         }
+        // `reset` is intercepted in `control_session` so it can run off the async
+        // worker; it never reaches this synchronous artifact path.
         _ => return Err(LabError::InvalidControlAction(action.to_owned()).into()),
     }
     Ok(())
+}
+
+fn artifact_frame_hash(session: &SessionRecord, frame_index: usize) -> String {
+    session
+        .frame_state_hashes
+        .get(frame_index)
+        .cloned()
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 fn control_live_session(session: &mut SessionState, action: &str) -> Result<(), LabHttpError> {
@@ -1359,14 +1422,13 @@ async fn get_artifact(
         .expect("lab state mutex should not poison")
         .store
         .clone();
-    let bytes = store.read_artifact(&id, &file)?;
+    let bytes = tokio::task::spawn_blocking(move || store.read_artifact(&id, &file))
+        .await
+        .expect("artifact read worker should not panic")?;
     let mut response = Response::new(Body::from(bytes));
     response.headers_mut().insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_static(match artifact_file {
-            ArtifactFile::Frames => "application/x-ndjson",
-            _ => "application/json",
-        }),
+        HeaderValue::from_static(artifact_file.content_type()),
     );
     Ok(response)
 }
@@ -1385,25 +1447,25 @@ fn get_session_handle(
         .ok_or_else(|| LabError::SessionNotFound(id.to_owned()).into())
 }
 
-fn run_artifact_session(store: &ArtifactStore, session: &mut SessionRecord) {
-    session.status = SessionStatus::Running;
-    session.events.clear();
-    session.produced_frame_count = 0;
-    session.buffered_frame_count = 0;
-    session.retained_frame_start = 0;
-    session.retained_frame_end_exclusive = 0;
-    session.latest_frame = None;
+/// Build the deterministic run configuration for an artifact session. The
+/// heavy `run_scenario` call is executed off the async worker; this only
+/// captures the inputs under the session lock.
+fn artifact_run_config(session: &SessionRecord) -> RunConfig {
     let mut overrides = session.overrides.clone();
     overrides.frame_count = Some(session.frame_count);
-    match run_scenario(
-        store,
-        RunConfig {
-            scenario_id: session.scenario_id,
-            frame_count: session.frame_count,
-            run_id: None,
-            overrides,
-        },
-    ) {
+    RunConfig {
+        scenario_id: session.scenario_id,
+        frame_count: session.frame_count,
+        run_id: None,
+        overrides,
+    }
+}
+
+/// Apply the outcome of a blocking artifact run back onto the session record.
+/// This is the single write-back point for both create and reset, so the whole
+/// transition happens atomically under the session lock.
+fn apply_artifact_run_result(session: &mut SessionRecord, result: LabResult<RunResult>) {
+    match result {
         Ok(result) => {
             session.status = SessionStatus::Completed;
             session.run_id = Some(result.manifest.run_id);
@@ -1419,6 +1481,11 @@ fn run_artifact_session(store: &ArtifactStore, session: &mut SessionRecord) {
             session.final_snapshot_artifact =
                 Some(ArtifactFile::FinalSnapshot.file_name().to_owned());
             session.last_error = None;
+            session.frame_state_hashes = result
+                .frames
+                .iter()
+                .map(|frame| frame.state_hash.clone())
+                .collect();
             session.events = result
                 .frames
                 .iter()
@@ -1441,20 +1508,11 @@ fn run_artifact_session(store: &ArtifactStore, session: &mut SessionRecord) {
             session.manifest_artifact = None;
             session.final_snapshot_artifact = None;
             session.latest_frame = None;
+            session.frame_state_hashes = Vec::new();
             session.last_error = Some(message.clone());
             session.events = vec![SessionEvent::Failed { message }];
         }
     }
-}
-
-fn read_frame_hash(store: &ArtifactStore, run_id: &str, frame_index: usize) -> Option<String> {
-    let bytes = store
-        .read_artifact(run_id, ArtifactFile::Frames.file_name())
-        .ok()?;
-    let text = String::from_utf8(bytes).ok()?;
-    let line = text.lines().nth(frame_index)?;
-    let frame = serde_json::from_str::<FrameRecord>(line).ok()?;
-    Some(frame.state_hash)
 }
 
 #[derive(Debug)]
@@ -1597,6 +1655,7 @@ mod tests {
                 latest_frame: Some(frame),
                 last_error: None,
                 events: Vec::new(),
+                frame_state_hashes: Vec::new(),
             },
             runtime: SessionRuntime::Live(LiveSessionState {
                 world,
@@ -1610,6 +1669,7 @@ mod tests {
                 velocity_preview_cache: std::collections::BTreeMap::new(),
                 used_velocity_preview_actions: std::collections::BTreeSet::new(),
             }),
+            artifact_reset_generation: 0,
         };
 
         let world_revision = session
