@@ -4370,7 +4370,7 @@ fn matrix_stack_artifacts_capture_nxm_grid_stack_facts() {
         "E4 position-row work should not regress the retained 8x6 penetration baseline; report={report:?}"
     );
     assert!(
-        report.quiet_window_max_linear_speed <= 3.430820,
+        report.quiet_window_max_linear_speed <= 3.430_82,
         "E4 position-row work should not regress the retained 8x6 late linear spike baseline; report={report:?}"
     );
     assert!(
