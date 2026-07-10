@@ -244,7 +244,8 @@ fn contact_from_convex_polygons(a: &[Point], b: &[Point]) -> Option<ContactManif
         output_normal,
         sat.depth,
     );
-    if clipped.is_empty() {
+    let clipped_fallback = clipped.is_empty();
+    if clipped_fallback {
         clipped.push(ContactPointGeometry {
             point: support_midpoint(a, b, output_normal),
             depth: sat.depth,
@@ -252,7 +253,31 @@ fn contact_from_convex_polygons(a: &[Point], b: &[Point]) -> Option<ContactManif
         });
     }
 
-    let (points, reduction_reason) = reduce_contact_points(clipped);
+    let (mut points, reduction_reason) = reduce_contact_points(clipped);
+    // Clipping can interpolate both surviving points (double-clipped wide
+    // incident edge) or the slot-1 end alone, and interpolation collapses
+    // onto the smaller feature id. Rebuild clipped point identity as manifold
+    // slots anchored to reference-edge halves instead: the point on the start
+    // half keeps slot 0 and the point on the end half keeps slot 1. Two live
+    // points always get distinct ids, and when a settling manifold oscillates
+    // between two points and one, the survivor keeps its half's slot instead
+    // of being renamed, so warm-start and lifecycle keys stay continuous.
+    let side = (reference[(reference_edge + 1) % reference.len()] - reference[reference_edge])
+        .normalized_or_zero();
+    let reference_mid = (Vector::from(reference[reference_edge])
+        + Vector::from(reference[(reference_edge + 1) % reference.len()]))
+        * 0.5;
+    let along_side = |geometry: &ContactPointGeometry| Vector::from(geometry.point).dot(side);
+    if points.len() == 2 {
+        if along_side(&points[0]) > along_side(&points[1]) {
+            points.swap(0, 1);
+        }
+        points[0].feature_id = feature_id(1, reference_edge, incident_edge, 0);
+        points[1].feature_id = feature_id(1, reference_edge, incident_edge, 1);
+    } else if points.len() == 1 && !clipped_fallback {
+        let slot = usize::from(along_side(&points[0]) > reference_mid.dot(side));
+        points[0].feature_id = feature_id(1, reference_edge, incident_edge, slot);
+    }
     Some(ContactManifoldGeometry {
         normal: output_normal.normalized_or_zero(),
         depth: sat.depth,
@@ -1143,6 +1168,62 @@ mod tests {
         for point in &contact.points {
             assert!((point.point.x() - 0.75).abs() < 1.0e-4);
             assert!((point.depth - 0.5).abs() < 1.0e-4);
+        }
+    }
+
+    #[test]
+    fn double_clipped_incident_edge_keeps_distinct_point_feature_ids() {
+        // Narrow reference face under a wider incident face: both incident edge
+        // ends are clipped by the reference side planes, so both surviving
+        // manifold points are interpolated. Their feature ids must stay
+        // distinct or warm-start caches keyed by (pair, feature id) collide.
+        let shape_a = SharedShape::rect(1.0, 0.5);
+        let shape_b = SharedShape::rect(2.0, 0.5);
+        let pose_a = Pose::default();
+        let pose_b = Pose::from_xy_angle(0.0, 0.45, 0.0);
+        let contact = contact_from_shapes(
+            &shape_a,
+            pose_a,
+            shape_a.aabb(pose_a),
+            &shape_b,
+            pose_b,
+            shape_b.aabb(pose_b),
+        )
+        .expect("narrow-under-wide rectangles should produce a clipped manifold");
+
+        assert_eq!(contact.points.len(), 2);
+        assert_ne!(
+            contact.points[0].feature_id, contact.points[1].feature_id,
+            "double-clipped manifold points must keep distinct feature ids"
+        );
+    }
+
+    #[test]
+    fn single_end_clipped_incident_edge_keeps_distinct_point_feature_ids() {
+        // Wide reference face under a narrower offset incident face: exactly one
+        // incident edge end pokes past a reference side plane and is replaced by
+        // an interpolated point. Whichever end is clipped, the two surviving
+        // points must not share one feature id.
+        let shape_a = SharedShape::rect(2.0, 0.5);
+        let shape_b = SharedShape::rect(1.0, 0.5);
+        let pose_a = Pose::default();
+        for offset_x in [0.8_f32, -0.8_f32] {
+            let pose_b = Pose::from_xy_angle(offset_x, 0.45, 0.0);
+            let contact = contact_from_shapes(
+                &shape_a,
+                pose_a,
+                shape_a.aabb(pose_a),
+                &shape_b,
+                pose_b,
+                shape_b.aabb(pose_b),
+            )
+            .expect("offset stacked rectangles should produce a clipped manifold");
+
+            assert_eq!(contact.points.len(), 2, "offset_x={offset_x}");
+            assert_ne!(
+                contact.points[0].feature_id, contact.points[1].feature_id,
+                "single-end-clipped manifold points must keep distinct feature ids; offset_x={offset_x}"
+            );
         }
     }
 

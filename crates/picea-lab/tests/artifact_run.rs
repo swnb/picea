@@ -4459,17 +4459,17 @@ fn matrix_stack_artifacts_capture_nxm_grid_stack_facts() {
         report.feature_churn_trace.same_shape_signature_count > 0,
         "E4b lifecycle diagnostics should identify churn where collider shape signatures stayed compatible; report={report:?}"
     );
-    assert!(
-        report.feature_churn_trace.close_local_anchor_count > 0,
-        "E4b lifecycle diagnostics should identify churn where collider-local anchors stayed close; report={report:?}"
+    assert_eq!(
+        report.feature_churn_trace.close_local_anchor_count, 0,
+        "contact identity fix: a feature-id miss whose collider-local anchors stayed close must be absorbed by the warm-start fallbacks instead of surfacing as churn; report={report:?}"
     );
     assert!(
         report.feature_churn_trace.edge_swap_transition_count > 0,
         "E4b lifecycle diagnostics should identify feature churn that swaps reference/incident edges; report={report:?}"
     );
-    assert!(
-        report.feature_churn_trace.edge_swap_candidate_count > 0,
-        "E4b lifecycle diagnostics should identify edge-swap churn with compatible reduction, shape, normal, point, and local anchors; report={report:?}"
+    assert_eq!(
+        report.feature_churn_trace.edge_swap_candidate_count, 0,
+        "contact identity fix: edge-swap churn with compatible reduction, shape, normal, point, and local anchors must be absorbed by the persistent edge-swap path instead of remaining a miss; report={report:?}"
     );
     assert!(
         report

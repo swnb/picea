@@ -453,7 +453,10 @@ fn same_feature_index_warm_start_candidate<'a>(
         .filter(|record| {
             record.contact.collider_a == contact.collider_a
                 && record.contact.collider_b == contact.collider_b
-                && record.contact.reduction_reason == contact.reduction_reason
+                && same_point_identity_reduction(
+                    record.contact.reduction_reason,
+                    contact.reduction_reason,
+                )
                 && record.contact.feature_id.index() == contact.feature_id.index()
                 && warm_start_transfer(Some(record), contact, true)
                     .reason
@@ -504,11 +507,17 @@ fn persistent_manifold_lifecycle_candidate(
     previous: &ContactRecord,
     contact: &ContactObservation,
 ) -> bool {
+    // A settling clipped manifold may pass through a single-point frame while
+    // the reference face swaps, so point-count oscillation must not disqualify
+    // an otherwise compatible edge-swap candidate.
+    let clip_identity = |reason| {
+        clipped_manifold_reduction(reason) || reason == ContactReductionReason::SinglePoint
+    };
     if contact.is_sensor
         || previous.contact.collider_a != contact.collider_a
         || previous.contact.collider_b != contact.collider_b
-        || !clipped_manifold_reduction(previous.contact.reduction_reason)
-        || !clipped_manifold_reduction(contact.reduction_reason)
+        || !clip_identity(previous.contact.reduction_reason)
+        || !clip_identity(contact.reduction_reason)
         || !feature_id_edge_swap(previous.contact.feature_id, contact.feature_id)
     {
         return false;
@@ -684,6 +693,23 @@ fn clipped_manifold_reduction(reason: ContactReductionReason) -> bool {
         reason,
         ContactReductionReason::Clipped | ContactReductionReason::DuplicateReduced
     )
+}
+
+/// Whether two reduction reasons describe the same clip-path point identity.
+/// A settling clipped manifold oscillates between two points and one
+/// (`Clipped`/`DuplicateReduced` <-> `SinglePoint`); the reduction label tracks
+/// how the manifold was produced that frame, not which physical point survived,
+/// so it must not break same-feature-index warm-start continuity on its own.
+fn same_point_identity_reduction(a: ContactReductionReason, b: ContactReductionReason) -> bool {
+    let clip_family = |reason| {
+        matches!(
+            reason,
+            ContactReductionReason::SinglePoint
+                | ContactReductionReason::Clipped
+                | ContactReductionReason::DuplicateReduced
+        )
+    };
+    a == b || (clip_family(a) && clip_family(b))
 }
 
 fn feature_id_edge_swap(
@@ -974,6 +1000,37 @@ mod tests {
     }
 
     #[test]
+    fn warm_start_fallback_survives_clip_manifold_point_count_oscillation() {
+        // A settling two-point clipped manifold can drop to one point for a
+        // frame (reduction reason Clipped -> SinglePoint) and come back. The
+        // surviving point keeps its pair, feature index, anchors, and normal;
+        // the reduction label alone must not drop its warm-start impulses.
+        let previous_feature = test_feature(0x0100_1003, 1);
+        let current_feature = test_feature(0x0100_1003, 0);
+        let previous_record = ContactRecord {
+            contact: test_contact_event(previous_feature),
+            anchor_a: Vector::new(0.25, 0.0),
+            anchor_b: Vector::new(-0.25, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut contacts = vec![test_contact_observation(current_feature)];
+        contacts[0].reduction_reason = ContactReductionReason::SinglePoint;
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(contacts[0].warm_start_reason, WarmStartCacheReason::Hit);
+        assert_eq!(contacts[0].warm_start_normal_impulse, 0.25);
+        assert_eq!(contacts[0].warm_start_tangent_impulse, 0.05);
+    }
+
+    #[test]
     fn source_row_continuity_candidate_marks_non_edge_swap_feature_miss() {
         let previous_feature = test_feature(0x0100_1003, 0);
         let current_feature = test_feature(0x0100_1004, 0);
@@ -1050,6 +1107,41 @@ mod tests {
         assert_eq!(contacts[0].warm_start_tangent_impulse, 0.0);
         assert_eq!(contacts[0].normal_impulse, 0.25);
         assert_eq!(contacts[0].tangent_impulse, 0.0);
+    }
+
+    #[test]
+    fn edge_swap_warm_start_survives_clip_manifold_point_count_oscillation() {
+        // SAT reference-face swaps on a settling manifold often coincide with
+        // the manifold dropping to a single point for that frame. The reduction
+        // label change (Clipped -> SinglePoint) must not disqualify the
+        // persistent edge-swap warm-start path when pair, swapped feature
+        // edges, normal, and local anchors all stay compatible.
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_3001, 0);
+        let previous_record = ContactRecord {
+            contact: test_contact_event(previous_feature),
+            anchor_a: Vector::new(0.25, 0.0),
+            anchor_b: Vector::new(-0.25, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut contacts = vec![test_contact_observation(current_feature)];
+        contacts[0].reduction_reason = ContactReductionReason::SinglePoint;
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(contacts[0].warm_start_reason, WarmStartCacheReason::Hit);
+        assert_eq!(contacts[0].warm_start_normal_impulse, 0.25);
+        assert_eq!(
+            contacts[0].warm_start_tangent_impulse, 0.0,
+            "edge-swap transfers stay conservative about the tangent basis"
+        );
     }
 
     #[test]
