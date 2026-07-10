@@ -2538,8 +2538,10 @@ async fn live_grab_update_moves_anchor_and_release_preserves_momentum() {
         .expect("released body should still be present");
     let velocity_y_after_release = body_after_release["linear_velocity"]["y"].as_f64().unwrap();
     assert!(
-        velocity_y_after_release.abs() > 1.0e-6,
-        "released body should keep nonzero momentum, got {velocity_y_after_release}"
+        velocity_y_after_release.abs() > drag_velocity_y.abs(),
+        "release must preserve accumulated velocity: after-release |v_y|={velocity_y_after_release} \
+         should exceed pre-release |v_y|={drag_velocity_y} (zeroed velocity would only show one tick \
+         of gravity)"
     );
     assert_eq!(
         velocity_y_after_release.signum(),
