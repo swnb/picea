@@ -238,9 +238,11 @@ pub(super) fn default_lattice_runtime_parts() -> (LatticeGridParams, StepConfig,
         joint_velocity_projection: profile.default_joint_velocity_projection(),
     };
     let substeps_per_frame = profile.default_substeps_per_frame();
-    let mut step = StepConfig::default();
-    step.dt = 1.0 / (60.0 * substeps_per_frame as f32);
-    step.joint_velocity_projection = params.joint_velocity_projection;
+    let step = StepConfig {
+        dt: 1.0 / (60.0 * substeps_per_frame as f32),
+        joint_velocity_projection: params.joint_velocity_projection,
+        ..StepConfig::default()
+    };
     (params, step, substeps_per_frame)
 }
 

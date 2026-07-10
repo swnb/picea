@@ -34,10 +34,12 @@ pub(super) fn default_newton_cradle_runtime_parts() -> (NewtonCradleParams, Step
         restitution: 1.0,
         friction: 0.0,
     };
-    let mut step = StepConfig::default();
-    step.dt = 1.0 / 960.0;
-    step.restitution_velocity_threshold = 0.0;
-    step.contact_position_correction = ContactPositionCorrectionPolicy::Conservative;
+    let step = StepConfig {
+        dt: 1.0 / 960.0,
+        restitution_velocity_threshold: 0.0,
+        contact_position_correction: ContactPositionCorrectionPolicy::Conservative,
+        ..StepConfig::default()
+    };
     (params, step, 16)
 }
 
