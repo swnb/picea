@@ -1,6 +1,6 @@
 # Picea Lab Workbench 交互化与运行模型设计(选中即所得 + 刚体拖拽)
 
-状态:待评审
+状态:已确认
 设计文档:docs/design/2026-07-10-workbench-interactive-run-model-design.md
 最后更新:2026-07-10
 工作目录:/Users/asyncrustacean/projects/picea

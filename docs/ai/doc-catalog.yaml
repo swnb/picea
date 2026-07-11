@@ -572,3 +572,12 @@ documents:
   applies_to: [picea-lab, picea-lab-web, scenario, live-session, interaction, run-model]
   keywords: [select-to-run, demo-fallback, watermark, watch-for, grab, drag, mouse-joint, world-anchor, spring, direct, live-session, session-epoch]
   last_reviewed: 2026-07-10
+- path: docs/plans/2026-07-10-workbench-interactive-run-model-plan.md
+  title: Workbench Interactive Run Model Plan
+  kind: plan
+  authority: medium
+  status: active
+  owner: supervisor
+  applies_to: [picea-lab, picea-lab-web, live-session, interaction, run-model, milestone]
+  keywords: [select-to-run, watermark, watch-for, grab, drag, spring, direct, server-routes, ui-contract]
+  last_reviewed: 2026-07-10
