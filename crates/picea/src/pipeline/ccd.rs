@@ -1,7 +1,4 @@
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
-};
+use std::{cmp::Ordering, collections::BTreeSet};
 
 use crate::{
     body::{BodyType, Pose},
@@ -20,6 +17,11 @@ const CLIP_SUPPORT_EPSILON: FloatNum = 1.0e-4;
 pub(crate) struct CcdPoseClampOutcome {
     pub(crate) stats: CcdPoseClampStats,
     pub(crate) traces: Vec<CcdTrace>,
+    // Bodies advanced to their time-of-impact during this step's predictive
+    // clamp. They already consumed their positional move inside the clamp, so
+    // position integration skips them to avoid advancing a second time past the
+    // impact plane.
+    pub(crate) clamped_bodies: BTreeSet<BodyHandle>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -109,11 +111,8 @@ struct CcdHit {
     toi_point: Point,
 }
 
-pub(crate) fn run_pose_clamp_phase(
-    world: &mut World,
-    previous_body_poses: &BTreeMap<BodyHandle, Pose>,
-) -> CcdPoseClampOutcome {
-    let snapshots = collect_snapshots(world, previous_body_poses);
+pub(crate) fn run_pose_clamp_phase(world: &mut World, dt: FloatNum) -> CcdPoseClampOutcome {
+    let snapshots = collect_snapshots(world, dt);
     let mut moving_circles = Vec::with_capacity(snapshots.len());
     let mut moving_convexes = Vec::with_capacity(snapshots.len());
     let mut dynamic_convex_targets = Vec::with_capacity(snapshots.len());
@@ -288,28 +287,41 @@ pub(crate) fn run_pose_clamp_phase(
         }
     }
 
-    CcdPoseClampOutcome { stats, traces }
+    CcdPoseClampOutcome {
+        stats,
+        traces,
+        clamped_bodies,
+    }
 }
 
-fn collect_snapshots(
-    world: &World,
-    previous_body_poses: &BTreeMap<BodyHandle, Pose>,
-) -> Vec<CcdColliderSnapshot> {
+fn collect_snapshots(world: &World, dt: FloatNum) -> Vec<CcdColliderSnapshot> {
     world
         .collider_records()
         .filter_map(|(handle, collider)| {
             let body = world.body_record(collider.body).ok()?;
-            let start_body_pose = previous_body_poses
-                .get(&collider.body)
-                .copied()
-                .unwrap_or(body.pose);
-            let start_pose = start_body_pose.compose(collider.local_pose);
-            let end_pose = body.pose.compose(collider.local_pose);
-            let end_geometry = collider.derived_geometry(body.pose);
-            let start_convex_vertices = if start_body_pose == body.pose {
-                end_geometry.convex_vertices.clone()
+            let current_body_pose = body.pose;
+            // Predict where this step's velocity integration will carry the body
+            // so CCD can clamp fast movers before the contact phase runs. The
+            // predicted pose includes the angular sweep so the dynamic-convex
+            // path keeps skipping spinning bodies exactly as the post-integrate
+            // clamp did (rotational CCD stays out of scope).
+            let predicted_body_pose = if body.body_type.is_dynamic() {
+                crate::pipeline::integrate::translated_pose(
+                    current_body_pose,
+                    body.linear_velocity * dt,
+                    body.angular_velocity * dt,
+                )
             } else {
-                collider.convex_world_vertices(start_body_pose)
+                current_body_pose
+            };
+            let start_pose = current_body_pose.compose(collider.local_pose);
+            let end_pose = predicted_body_pose.compose(collider.local_pose);
+            let start_geometry = collider.derived_geometry(current_body_pose);
+            let start_convex_vertices = start_geometry.convex_vertices.clone();
+            let end_convex_vertices = if predicted_body_pose == current_body_pose {
+                start_geometry.convex_vertices.clone()
+            } else {
+                collider.convex_world_vertices(predicted_body_pose)
             };
             Some(CcdColliderSnapshot {
                 handle,
@@ -318,9 +330,9 @@ fn collect_snapshots(
                 shape: collider.shape.clone(),
                 start_pose,
                 end_pose,
-                aabb: end_geometry.aabb,
+                aabb: start_geometry.aabb,
                 start_convex_vertices,
-                end_convex_vertices: end_geometry.convex_vertices,
+                end_convex_vertices,
                 filter: collider.filter,
                 is_sensor: collider.is_sensor,
             })
@@ -944,22 +956,32 @@ fn clamp_hit_to_toi(world: &mut World, hit: CcdHit) -> Option<(CcdTrace, usize)>
     let advancement = (hit.toi + slop_fraction).min(safe_exit).clamp(hit.toi, 1.0);
     let clamped_center = hit.swept_start + sweep * advancement;
     let rollback = hit.swept_end - clamped_center;
+    // Reordered CCD runs before position integration, so the body still sits at
+    // the sweep start. Advance it forward to the TOI instead of rolling it back
+    // from the end pose it never reached; `rollback` still records the prevented
+    // penetration exposed in the trace.
+    let forward = sweep * advancement;
     let target_rollback = if target_is_dynamic {
         hit.target_swept_end - (hit.target_swept_start + target_sweep * advancement)
+    } else {
+        Vector::default()
+    };
+    let target_forward = if target_is_dynamic {
+        target_sweep * advancement
     } else {
         Vector::default()
     };
 
     {
         let record = world.body_record_mut(hit.moving_body).ok()?;
-        crate::solver::body_state::translate_pose(&mut record.pose, -rollback, 0.0);
+        crate::solver::body_state::translate_pose(&mut record.pose, forward, 0.0);
         record.sleeping = false;
         record.sleep_idle_time = 0.0;
     }
     let mut clamp_count = 1;
     if target_is_dynamic {
         let record = world.body_record_mut(hit.static_body).ok()?;
-        crate::solver::body_state::translate_pose(&mut record.pose, -target_rollback, 0.0);
+        crate::solver::body_state::translate_pose(&mut record.pose, target_forward, 0.0);
         record.sleeping = false;
         record.sleep_idle_time = 0.0;
         clamp_count += 1;

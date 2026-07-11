@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    body::Pose,
     events::{NumericsWarningEvent, SleepTransitionReason, WorldEvent},
     handles::BodyHandle,
     pipeline::{
@@ -15,14 +14,19 @@ use crate::{
 pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> StepOutcome {
     let mut step = StepContext::new(world);
 
-    // Spike variant A: solve velocities against pre-step poses, then integrate
-    // positions with solved velocities. CCD pose clamp moves after position
-    // integration, so this step's contact phases see no fresh CCD traces.
+    // Reordered step: gravity lands in velocities first, then predictive CCD
+    // advances fast movers to their time-of-impact so the contact phase sees
+    // them touching. Contacts collide and solve against those poses, and only
+    // then do positions integrate with the solved velocities. Running CCD
+    // before contacts (instead of after position integration) keeps its traces
+    // in the same step that consumes them, while the velocity-first solve still
+    // spares resting stacks the integrate-then-correct penetration cycle.
     crate::pipeline::integrate::run_velocity_integration_phase(
         world,
         config,
         &mut step.numeric_warnings,
     );
+    step.pose_clamp = crate::pipeline::ccd::run_pose_clamp_phase(world, config.dt);
     let joint_solver_stats = crate::pipeline::joints::solve_joint_phase(
         world,
         config.dt,
@@ -37,7 +41,12 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         broadphase_stats,
         warm_start_stats,
         contact_solver_stats,
-    ) = crate::pipeline::contacts::run_contact_phases(world, config, &mut step.wake_reasons, &[]);
+    ) = crate::pipeline::contacts::run_contact_phases(
+        world,
+        config,
+        &mut step.wake_reasons,
+        &step.pose_clamp.traces,
+    );
     if config.joint_velocity_projection {
         crate::pipeline::joints::solve_joint_velocity_phase(world, &mut step.wake_reasons);
     }
@@ -53,8 +62,8 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         world,
         config,
         &mut step.numeric_warnings,
+        &step.pose_clamp.clamped_bodies,
     );
-    step.pose_clamp = crate::pipeline::ccd::run_pose_clamp_phase(world, &step.previous_body_poses);
     let (sleep_events, sleep_transition_count, active_body_count) =
         crate::pipeline::sleep::refresh_sleep_phase(
             world,
@@ -71,7 +80,6 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
 }
 
 struct StepContext {
-    previous_body_poses: BTreeMap<BodyHandle, Pose>,
     previous_sleep_states: BTreeMap<BodyHandle, bool>,
     wake_reasons: BTreeMap<BodyHandle, SleepTransitionReason>,
     events: Vec<WorldEvent>,
@@ -88,10 +96,6 @@ struct StepContext {
 
 impl StepContext {
     fn new(world: &mut World) -> Self {
-        let previous_body_poses = world
-            .body_records()
-            .map(|(handle, record)| (handle, record.pose))
-            .collect::<BTreeMap<BodyHandle, Pose>>();
         let wake_reasons = world.take_pending_wake_reasons();
         let previous_sleep_states = world
             .bodies()
@@ -106,7 +110,6 @@ impl StepContext {
             })
             .collect::<BTreeMap<BodyHandle, bool>>();
         Self {
-            previous_body_poses,
             previous_sleep_states,
             wake_reasons,
             events: world.take_pending_events(),

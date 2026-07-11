@@ -1,6 +1,9 @@
+use std::collections::BTreeSet;
+
 use crate::{
     body::BodyType,
     events::NumericsWarningEvent,
+    handles::BodyHandle,
     math::{vector::Vector, FloatNum},
     pipeline::StepConfig,
     world::World,
@@ -18,8 +21,9 @@ pub(crate) fn run_position_integration_phase(
     world: &mut World,
     config: &StepConfig,
     numeric_warnings: &mut Vec<NumericsWarningEvent>,
+    skip_bodies: &BTreeSet<BodyHandle>,
 ) {
-    world.integrate_body_positions(config, numeric_warnings);
+    world.integrate_body_positions(config, numeric_warnings, skip_bodies);
 }
 
 impl World {
@@ -80,9 +84,15 @@ impl World {
         &mut self,
         config: &StepConfig,
         numeric_warnings: &mut Vec<NumericsWarningEvent>,
+        skip_bodies: &BTreeSet<BodyHandle>,
     ) {
         let body_handles = self.bodies().collect::<Vec<_>>();
         for handle in body_handles {
+            // Predictive CCD already advanced these bodies to their impact plane
+            // this step; integrating them again would push them past it.
+            if skip_bodies.contains(&handle) {
+                continue;
+            }
             let record = self
                 .body_record_mut(handle)
                 .expect("live body handles must resolve during step");
