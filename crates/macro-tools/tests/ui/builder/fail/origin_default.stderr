@@ -1,11 +1,11 @@
-error[E0599]: no function or associated item named `default` found for struct `Meta` in the current scope
+error[E0599]: no associated function or constant named `default` found for struct `Meta` in the current scope
  --> tests/ui/builder/fail/origin_default.rs:9:19
   |
 4 | struct Meta {
-  | ----------- function or associated item `default` not found for this struct
+  | ----------- associated function or constant `default` not found for this struct
 ...
 9 |     let _ = Meta::default();
-  |                   ^^^^^^^ function or associated item not found in `Meta`
+  |                   ^^^^^^^ associated function or constant not found in `Meta`
   |
   = help: items from traits can only be used if the trait is implemented and in scope
   = note: the following trait defines an item `default`, perhaps you need to implement it:
