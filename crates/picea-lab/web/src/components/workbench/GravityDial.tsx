@@ -137,7 +137,7 @@ export function GravityDial({
 
   return (
     <div className="grid gap-3">
-      <div className="grid grid-cols-[11rem_1fr] gap-4">
+      <div className="flex flex-wrap gap-4">
         <div
           ref={dialRef}
           role="slider"
@@ -146,7 +146,7 @@ export function GravityDial({
           aria-valuemin={0}
           aria-valuemax={MAX_GRAVITY_MAGNITUDE}
           aria-valuenow={roundForInput(magnitude)}
-          className="relative aspect-square w-44 touch-none select-none rounded-md border border-lab-line bg-lab-canvas focus-visible:outline-none focus-visible:shadow-focus"
+          className="relative aspect-square w-44 shrink-0 touch-none select-none rounded-md border border-lab-line bg-lab-canvas focus-visible:outline-none focus-visible:shadow-focus"
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId)
             updateFromPointer(event.clientX, event.clientY)
@@ -207,8 +207,8 @@ export function GravityDial({
           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-lab-muted">x+</span>
         </div>
 
-        <div className="grid content-start gap-2">
-          <div className="grid grid-cols-[5.5rem_1fr] items-center gap-2">
+        <div className="grid min-w-[12rem] flex-1 content-start gap-2">
+          <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2">
             <label className="text-xs text-lab-muted" htmlFor="gravity-x">
               {t(locale, "run.gravityX")}
             </label>
@@ -242,7 +242,7 @@ export function GravityDial({
               onChange={(event) => handleMagnitudeChange(Number(event.target.value))}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {liveApplyAvailable ? (
               <Tooltip label={t(locale, "run.gravityApply")}>
                 <Button
@@ -283,17 +283,17 @@ export function GravityDial({
                 <RotateCcw className="h-4 w-4" />
               </Button>
             </Tooltip>
-            <div className="min-w-0 text-xs text-lab-muted">
-              {t(locale, hintKey)}
-              {appliedVector ? (
-                <span className="ml-2 font-mono text-lab-muted/80">
-                  {t(locale, "run.gravityAppliedValue", {
-                    x: roundForInput(appliedVector.x),
-                    y: roundForInput(appliedVector.y),
-                  })}
-                </span>
-              ) : null}
-            </div>
+          </div>
+          <div className="text-xs leading-relaxed text-lab-muted">
+            {t(locale, hintKey)}
+            {appliedVector ? (
+              <span className="ml-2 font-mono text-lab-muted/80">
+                {t(locale, "run.gravityAppliedValue", {
+                  x: roundForInput(appliedVector.x),
+                  y: roundForInput(appliedVector.y),
+                })}
+              </span>
+            ) : null}
           </div>
           {applyError ? (
             <div className="text-xs text-lab-danger">

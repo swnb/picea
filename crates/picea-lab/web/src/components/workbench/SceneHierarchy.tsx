@@ -52,7 +52,7 @@ export function SceneHierarchy({
       <PanelHeader>
         <PanelTitle>{t(locale, "panel.sceneHierarchy")}</PanelTitle>
         <Badge className="tabular-nums">
-          {frame.snapshot.stats.step_index}
+          {t(locale, "metric.step")} {frame.snapshot.stats.step_index}
         </Badge>
       </PanelHeader>
       <div className="min-h-0 flex-1 overflow-auto p-2">

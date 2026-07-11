@@ -355,7 +355,7 @@ export function BottomTimeline({
         className="min-h-0 flex-1 overflow-auto p-3 outline-none"
       >
         {hasUnhydratedFrames ? (
-          <EmptyState label={`${t(locale, "stability.missing")} (live summary not hydrated)`} />
+          <EmptyState label={t(locale, "timeline.liveSummaryNotHydrated")} />
         ) : (
           <StackStabilityPanel
             locale={locale}
@@ -376,7 +376,7 @@ export function BottomTimeline({
         className="min-h-0 flex-1 overflow-auto p-3 outline-none"
       >
         {hasUnhydratedFrames ? (
-          <EmptyState label={`${t(locale, "trajectory.empty.contacts")} (live summary not hydrated)`} />
+          <EmptyState label={t(locale, "timeline.liveSummaryNotHydrated")} />
         ) : (
           <TrajectoryPanel
             locale={locale}
@@ -399,7 +399,7 @@ export function BottomTimeline({
         className="min-h-0 flex-1 overflow-auto p-3 outline-none"
       >
         {hasUnhydratedFrames ? (
-          <EmptyState label={`${t(locale, "stability.missing")} (live summary not hydrated)`} />
+          <EmptyState label={t(locale, "timeline.liveSummaryNotHydrated")} />
         ) : (
           <LatticeProxyPanel
             locale={locale}
@@ -539,9 +539,9 @@ const TimelineHeader = memo(function TimelineHeader({
       <Play className="h-3.5 w-3.5" />
     )
   return (
-    <PanelHeader>
-      <div className="flex items-center gap-3">
-        <div className="flex items-center rounded-md bg-black/20 p-0.5 shadow-inner">
+    <PanelHeader className="gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="flex shrink-0 items-center rounded-md bg-black/20 p-0.5 shadow-inner">
           <TimelineIconButton
             label={playbackLabel}
             disabled={controlBusy}
@@ -561,8 +561,11 @@ const TimelineHeader = memo(function TimelineHeader({
             icon={<RotateCcw className="h-3.5 w-3.5" />}
           />
         </div>
-        <div className="h-4 w-px bg-lab-line/80" />
-        <div role="tablist" className="flex items-center gap-1">
+        <div className="h-4 w-px shrink-0 bg-lab-line/80" />
+        <div
+          role="tablist"
+          className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           <BottomPanelTabButton
             panel="timeline"
             activePanel={activePanel}
@@ -614,16 +617,17 @@ const TimelineHeader = memo(function TimelineHeader({
           </BottomPanelTabButton>
         </div>
       </div>
-      <div className="flex items-center gap-2 text-xs text-lab-muted">
+      <div className="flex min-w-0 shrink-[3] items-center gap-2 text-xs text-lab-muted">
         {source === "live" ? (
           <LiveCadenceBadge locale={locale} status={liveCadence} />
-        ) : null}
-        <span>
-          {t(locale, "timeline.sourceStatus", {
-            source: sourceLabel(locale, source),
-            status: statusLabel(locale, status),
-          })}
-        </span>
+        ) : (
+          <span className="min-w-0 truncate whitespace-nowrap">
+            {t(locale, "timeline.sourceStatus", {
+              source: sourceLabel(locale, source),
+              status: statusLabel(locale, status),
+            })}
+          </span>
+        )}
       </div>
     </PanelHeader>
   )
@@ -652,7 +656,7 @@ function LiveCadenceBadge({
 
   return (
     <span
-      className={`rounded border px-2 py-0.5 font-mono tabular-nums ${
+      className={`shrink-0 whitespace-nowrap rounded border px-2 py-0.5 font-mono tabular-nums ${
         status.degraded
           ? "border-lab-warn/60 bg-lab-warn/10 text-lab-warn"
           : "border-lab-line bg-lab-panel2/70 text-lab-muted"
@@ -1186,7 +1190,7 @@ function LatticeProxyPanel({
         <div className="mb-2 text-xs font-semibold text-lab-text">
           {t(locale, "panel.latticeProxy")}
         </div>
-        <EmptyState label={t(locale, "stability.missing")} />
+        <EmptyState label={t(locale, "lattice.emptyHint")} />
       </div>
     )
   }

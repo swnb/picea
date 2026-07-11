@@ -1312,16 +1312,19 @@ function drawTrajectoryOverlay(
     ctx.fillStyle = "rgba(15, 17, 20, 0.8)";
     ctx.strokeStyle = "rgba(130, 139, 150, 0.4)";
     ctx.lineWidth = 1;
-    const width = 220;
+    const label = emptyTrajectoryLabel(labels, overlay.emptyState);
+    ctx.font = "12px Inter, ui-sans-serif, system-ui";
+    // Keep the hint below the top-left HUD strip so it never sits under the
+    // DOM canvas controls anchored to the top-right corner.
+    const width = Math.min(camera.width - 24, ctx.measureText(label).width + 24);
     const height = 34;
-    const left = Math.max(12, camera.width - width - 16);
-    const top = 14;
+    const left = 12;
+    const top = 44;
     roundRect(ctx, left, top, width, height, 6);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#cfd4db";
-    ctx.font = "12px Inter, ui-sans-serif, system-ui";
-    ctx.fillText(emptyTrajectoryLabel(labels, overlay.emptyState), left + 12, top + 21);
+    ctx.fillText(label, left + 12, top + 21);
     ctx.restore();
   }
 }

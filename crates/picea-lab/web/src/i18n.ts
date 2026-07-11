@@ -198,6 +198,10 @@ const enMessages = {
   "timeline.liveCadence": "live {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadenceDegraded": "slow frame {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadencePending": "live measuring",
+  "timeline.liveSummaryNotHydrated":
+    "Live summary frames have not been hydrated into full snapshots yet.",
+  "lattice.emptyHint":
+    "The current scene has no lattice proxy. Run a scenario from the lattice-proxy group to populate this panel.",
   "diagnostics.empty": "No exported diagnostics for this frame.",
   "diagnostics.exported": "exported diagnostics",
   "diagnostics.performance": "performance",
@@ -678,6 +682,9 @@ const zhMessages: Record<MessageKey, string> = {
   "timeline.liveCadence": "live {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadenceDegraded": "慢帧 {actual}/{target} fps · {stepMs}ms",
   "timeline.liveCadencePending": "live 测量中",
+  "timeline.liveSummaryNotHydrated": "实时摘要帧尚未回填为完整快照。",
+  "lattice.emptyHint":
+    "当前场景没有格点代理。运行「格点代理」分组下的场景后,此面板才会有数据。",
   "diagnostics.empty": "当前帧没有导出的诊断事实。",
   "diagnostics.exported": "导出诊断",
   "diagnostics.performance": "性能",

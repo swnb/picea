@@ -39,7 +39,7 @@ canvas {
 
 @layer components {
   .tab-trigger {
-    @apply inline-flex h-7 items-center rounded-md px-2.5 text-xs font-medium text-lab-muted outline-none transition-colors hover:bg-white/[0.07] hover:text-lab-text data-[state=active]:bg-lab-accent/15 data-[state=active]:text-lab-text;
+    @apply inline-flex h-7 shrink-0 items-center whitespace-nowrap rounded-md px-2.5 text-xs font-medium text-lab-muted outline-none transition-colors hover:bg-white/[0.07] hover:text-lab-text data-[state=active]:bg-lab-accent/15 data-[state=active]:text-lab-text;
   }
 
   [data-radix-select-viewport] {
