@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "picea-lab-web",
+      "runtimeExecutable": "just",
+      "runtimeArgs": ["picea-lab-web"],
+      "port": 5173
+    }
+  ]
+}

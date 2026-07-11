@@ -172,3 +172,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 .playwright-cli
+
+# Claude Code local state
+.claude/worktrees/
+.claude/settings.local.json
