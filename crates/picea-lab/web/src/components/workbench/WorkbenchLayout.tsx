@@ -301,6 +301,7 @@ export function WorkbenchLayout({
                 selected={selectedEntity}
                 layers={layers}
                 trajectorySettings={trajectorySettings}
+                trajectoryOverlay={trajectoryOverlay}
                 labels={canvasLabels}
                 latticeSummary={latticeSummary}
                 offlineWatermark={offlineWatermark}

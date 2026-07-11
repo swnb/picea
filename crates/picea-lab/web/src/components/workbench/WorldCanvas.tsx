@@ -24,11 +24,7 @@ import type {
 import { profileMeasure, profileStart } from "../../profile";
 import { Button } from "../ui/button";
 import { Tooltip } from "../ui/radix";
-import {
-  buildTrajectoryOverlay,
-  type CcdTrajectoryTrail,
-  type TrajectoryOverlay,
-} from "./trajectory";
+import type { CcdTrajectoryTrail, TrajectoryOverlay } from "./trajectory";
 import type {
   CanvasDebugView,
   LatticeProxyEdge,
@@ -45,6 +41,7 @@ type WorldCanvasProps = {
   selected: SelectedEntity | null;
   layers: LayerState;
   trajectorySettings: TrajectorySettings;
+  trajectoryOverlay: TrajectoryOverlay;
   latticeSummary: LatticeProxySummary;
   offlineWatermark: string | null;
   grabEnabled: boolean;
@@ -130,6 +127,7 @@ export function WorldCanvas({
   selected,
   layers,
   trajectorySettings,
+  trajectoryOverlay,
   latticeSummary,
   offlineWatermark,
   grabEnabled,
@@ -168,11 +166,6 @@ export function WorldCanvas({
       height: size.height,
     }),
     [canvasCameraState, fitCamera, size],
-  );
-
-  const trajectoryOverlay = useMemo(
-    () => buildTrajectoryOverlay(frames, frameIndex, selected, trajectorySettings),
-    [frameIndex, frames, selected, trajectorySettings],
   );
 
   function cancelCameraAnimation() {

@@ -56,6 +56,10 @@ const toolbarSource = fs.readFileSync(
   new URL("../src/components/workbench/Toolbar.tsx", import.meta.url),
   "utf8",
 );
+const worldCanvasSource = fs.readFileSync(
+  new URL("../src/components/workbench/WorldCanvas.tsx", import.meta.url),
+  "utf8",
+);
 
 assert.doesNotMatch(
   appSource,
@@ -1353,6 +1357,16 @@ assert.match(
   appSource,
   /<WorldCanvas[\s\S]*frame=\{currentFrame\}/,
   "World canvas should render the current frame fallback so an empty live buffer clears stale canvas pixels.",
+);
+assert.doesNotMatch(
+  worldCanvasSource,
+  /buildTrajectoryOverlay\(/,
+  "World canvas should consume the App-derived trajectory overlay instead of rebuilding it from the absolute frame index, which desyncs trails after live buffer trimming.",
+);
+assert.match(
+  workbenchLayoutSource,
+  /<WorldCanvas[\s\S]*?trajectoryOverlay=\{trajectoryOverlay\}[\s\S]*?\/>/,
+  "Workbench layout should pass the shared trajectory overlay down to the world canvas so canvas and timeline render the same derived facts.",
 );
 assert.match(
   appSource,
