@@ -1972,6 +1972,11 @@ export function App() {
         session_epoch: sessionEpoch,
       })
       setActiveGrab(result.grab)
+      // Pointer moves that raced the create request are parked in
+      // pendingGrabTarget; sync the ref and flush now instead of waiting
+      // for the next move event.
+      activeGrabRef.current = result.grab
+      void flushGrabTarget()
     } catch (error) {
       pushLogs(
         log("warn", t(locale, "log.grabFailed", { message: messageOf(error) })),
