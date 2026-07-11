@@ -385,3 +385,18 @@ Subagent 执行计划：
 - 意外与发现：M28 文档与 live code step ordering 存在不一致；计划以 live code 为权威并安排 phase-order 合同锁。
 - 风险 / 后续：deformable 只能作为 RFC/design gate；query/selection contract 是 public compatibility gate。
 - 下一步：复跑 V0 文档验证；必要时运行 targeted smoke。
+
+### 2026-07-11 - Spike：步进重排（velocity-first + CCD 前置）
+
+- 状态：spike 完成，**收口**；未合入 main，结论固化待正式化（关联 E1 堆叠稳定性 / E5 solver ordering）。
+- 分支：`spike/step-reorder-integrate-after-solve`；worktree `.claude/worktrees/step-reorder-spike`；2 commit（`ca339f7` variant A 先解速度后积分；`a51e801` scheme G' 预测性 CCD keeps traces in-step）。
+- 假设：`integrate→solve` 顺序是塔倾覆（塔身不 sleep 的 integrate-then-correct 穿透极限环）的疑似根因。
+- 重排后 step 顺序：速度积分 → CCD `pose_clamp`（用 `dt` 预测推进快速物体到 time-of-impact）→ 关节求解 → 接触碰撞+求解 → 位置积分（用解出的速度）→ sleep。对比 E5 既定权威顺序（`joint solve -> CCD -> contact phases -> ... -> sleep`），本 spike 把速度积分提到最前、位置积分挪到接触之后，CCD 从"回看 `previous pose`"改为"用 `dt` 预测"，`StepContext.previous_body_poses` 字段随之删除。
+- 结论（假设证实）：塔 6/6 sleep、倾角 0.21°（此前数度倾覆）；`physics_realism_acceptance` 红锁 17→2、`picea-lab` 6→1（scheme G' 修掉 14 个）。核心门全绿：core lib 103、`world_step_review_regressions` 12、`core_model_world` 18、clippy 净、`artifact_run` 主体 35 绿。
+- 代价（剩 3 red，同一根因）：velocity-first 下 contact 阶段看到未做位置积分的 pose（CCD 只预测推进被判定穿隧的快速物体），慢速接触检测 / warm-start 滞后一步。
+  - `sleeping_body_wakes_on_contact_solver_impact`（`physics_realism_acceptance.rs:2717`）：10m/s 子弹撞击单步内无 `ContactStarted/Persisted` 事实，冲击响应滞后一步。
+  - `warm_start_cache_transfers_tangent_impulse_across_small_tangential_slip`（`:1172`）：`Hit`→`DroppedPointDrift`，重排偏移了接触点相对锚点的 drift 判定基点，sub-threshold slip 的 warm-start 缓存被误丢。
+  - `matrix_stack_artifacts_capture_nxm_grid_stack_facts`（`artifact_run.rs:4283`）：`source_row_continuity_candidate` 计数为 0，帧间接触不连续的下游后果。
+- 裁决：**不校准**这 3 个锁。#2/#3 指向 velocity-first 引入的接触连续性退化（warm-start 命中率下降、帧间接触断裂），校锁会掩盖真实代价并反噬堆叠收敛。
+- 正式化前置（留给 E1/E5 执行）：① 让 contact 阶段在 velocity-first 下看到预测位置——把 CCD 预测推进从"仅穿隧物体"扩到所有接近中的接触，或 narrowphase 前做一次预积分快照——消除滞后并清掉 3 red；② spike 基线落后于 main（缺 `909e386` grab 修复、trajectoryOverlay、vite bump），合入前必须 rebase，否则回退已 push 修复；③ 先补 phase-order / 接触检测时点 acceptance 锁定义新语义，再实现（遵循 E5 先锁后写）。
+- 风险 / 后续：改 core 接触检测时点是写路径深层契约改动，属高风险门，需按 vNext 正规流程（先锁、spec 认可、bounded worker）推进，不在遗留收尾范围。
