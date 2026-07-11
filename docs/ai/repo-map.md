@@ -91,6 +91,8 @@
 - `docs/ai/doc-catalog.yaml`：文档和关键代码索引
 - `docs/public-beta.md`：M30 public beta surface、迁移说明、示例和最终验收矩阵
 - `docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`：当前生产化 milestone 边界、M11-M22 完成状态、M23-M30 计划 gate 和 Post-M30 follow-up
+- `docs/design/2026-06-17-physics-realism-vnext-architecture.md`：物理真实感 vNext 七方向架构包，覆盖 stack/contact、material/damping、CCD、complex shape、joints、observability、deformable RFC 边界，以及 “路线 -> ScenarioId -> 参数面板 -> lab-web 展示面 -> 验收入口” 能力展示矩阵
+- `docs/plans/2026-06-17-physics-realism-vnext-milestones.md`：物理真实感 vNext 执行计划、subagent 分派边界、E4 direct-concave query gate、E6/V8 lab-web/browser 能力展示验收
 - `docs/design/physics-engine-upgrade-technical-plan.md`：Post-M20 baseline、M21 public query 和 M22 authoring boundary 之后的系统升级设计方向
 - `docs/design/matrix-stack-stability-optimization-design.md` 与 `docs/design/matrix-stack-stability-acceptance.md`：matrix stack 稳定性优化顺序和验收窗口
 - `docs/design/dense-pressure-position-row-architecture.md`：dense pressure / pseudo-position / position-row 已落地架构记录
