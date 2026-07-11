@@ -1631,3 +1631,20 @@ assert.match(
   /grabMoveInFlight[\s\S]*pendingGrabTarget/,
   "Grab target updates must coalesce to the latest pointer position with a single in-flight request.",
 );
+
+// --- Grab settings contract ---
+assert.match(
+  appSource,
+  /const \[grabSettings, setGrabSettings\] = useState<GrabSettings>/,
+  "Grab mode and spring strength must be user-adjustable state, not hardcoded constants.",
+);
+assert.match(
+  runSettingsSource,
+  /"run\.grabMode"/,
+  "Run settings should expose the grab mode selector with localized labels.",
+);
+assert.match(
+  runSettingsSource,
+  /min=\{2\}[\s\S]{0,220}max=\{420\}/,
+  "Grab spring strength slider should span the scene-calibrated stiffness range (2..420).",
+);

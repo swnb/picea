@@ -11,6 +11,7 @@ import {
 import type {
   ActiveGrabRecord,
   FrameRecord,
+  GrabSettings,
   PerfArtifact,
   ScenarioParameterValue,
   ScenarioDescriptor,
@@ -94,6 +95,8 @@ export function WorkbenchLayout({
   logs,
   frameCount,
   setFrameCount,
+  grabSettings,
+  setGrabSettings,
   sceneParamDraft,
   defaultSceneParams,
   runningSceneParams,
@@ -168,6 +171,8 @@ export function WorkbenchLayout({
   logs: WorkbenchLog[]
   frameCount: number
   setFrameCount: (value: number) => void
+  grabSettings: GrabSettings
+  setGrabSettings: (value: GrabSettings) => void
   sceneParamDraft: Record<string, ScenarioParameterValue>
   defaultSceneParams: Record<string, ScenarioParameterValue>
   runningSceneParams: Record<string, ScenarioParameterValue>
@@ -376,6 +381,8 @@ export function WorkbenchLayout({
               scenario={scenario}
               frameCount={frameCount}
               setFrameCount={setFrameCount}
+              grabSettings={grabSettings}
+              setGrabSettings={setGrabSettings}
               runMode={runMode}
               setRunMode={onRunModeChange}
               source={source}

@@ -4,6 +4,8 @@ import { Input } from "../ui/input"
 import { PanelHeader, PanelTitle } from "../ui/panel"
 import { Checkbox, Select } from "../ui/radix"
 import type {
+  GrabMode,
+  GrabSettings,
   ScenarioDescriptor,
   ScenarioParameterValue,
 } from "../../types"
@@ -19,6 +21,8 @@ export function RunSettingsPanel({
   setFrameCount,
   runMode,
   setRunMode,
+  grabSettings,
+  setGrabSettings,
   source,
   sessionId,
   status,
@@ -49,6 +53,8 @@ export function RunSettingsPanel({
   setFrameCount: (value: number) => void
   runMode: RunMode
   setRunMode: (value: RunMode) => void
+  grabSettings: GrabSettings
+  setGrabSettings: (value: GrabSettings) => void
   source: SourceKind
   sessionId: string | null
   status: StatusKind
@@ -116,6 +122,41 @@ export function RunSettingsPanel({
                     label: t(locale, "run.modeLive"),
                   },
                 ]}
+              />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-xs text-lab-muted">
+                {t(locale, "run.grabMode")}
+              </span>
+              <Select
+                value={grabSettings.mode}
+                onValueChange={(value) =>
+                  setGrabSettings({ ...grabSettings, mode: value as GrabMode })
+                }
+                ariaLabel={t(locale, "run.grabMode")}
+                items={[
+                  { value: "spring", label: t(locale, "run.grabModeSpring") },
+                  { value: "direct", label: t(locale, "run.grabModeDirect") },
+                ]}
+              />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-xs text-lab-muted">
+                {t(locale, "run.grabStiffness")}
+              </span>
+              <Input
+                type="number"
+                min={2}
+                max={420}
+                step={1}
+                value={grabSettings.stiffness}
+                onChange={(event) =>
+                  setGrabSettings({
+                    ...grabSettings,
+                    stiffness: Number(event.target.value) || 40,
+                  })
+                }
+                aria-label={t(locale, "run.grabStiffness")}
               />
             </label>
             <div className="grid gap-1.5">

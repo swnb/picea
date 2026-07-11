@@ -589,6 +589,8 @@ export type ScenarioDescriptor = {
 
 export type GrabMode = "spring" | "direct";
 
+export type GrabSettings = { mode: GrabMode; stiffness: number };
+
 export type ActiveGrabRecord = {
   id: string;
   body_handle: number;

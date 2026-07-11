@@ -306,6 +306,10 @@ for (const locale of supportedLocales) {
   assert.equal(typeof messages[locale]["perturbation.noProvenance"], "string");
   assert.equal(typeof messages[locale]["log.grabFailed"], "string");
   assert.equal(typeof messages[locale]["log.grabReleaseFailed"], "string");
+  assert.equal(typeof messages[locale]["run.grabMode"], "string");
+  assert.equal(typeof messages[locale]["run.grabModeSpring"], "string");
+  assert.equal(typeof messages[locale]["run.grabModeDirect"], "string");
+  assert.equal(typeof messages[locale]["run.grabStiffness"], "string");
 }
 assert.equal(t("zh-CN", "timeline.frameAt", { frame: 8 }), "第 8 帧");
 assert.equal(t("en-US", "timeline.frameAt", { frame: 8 }), "frame 8");

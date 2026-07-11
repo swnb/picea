@@ -69,6 +69,7 @@ import type {
   FrameDiagnostics,
   FrameRecord,
   GrabMode,
+  GrabSettings,
   LiveFrameAuthority,
   LiveFrameSummary,
   PerfArtifact,
@@ -697,7 +698,10 @@ export function App() {
   const liveCadenceSlowFrameStreakRef = useRef(0)
   const perturbationRequestTokenRef = useRef(0)
   const initialRunTriggeredRef = useRef(false)
-  const grabSettings = { mode: "spring" as GrabMode, stiffness: 40 }
+  const [grabSettings, setGrabSettings] = useState<GrabSettings>({
+    mode: "spring",
+    stiffness: 40,
+  })
   const [activeGrab, setActiveGrab] = useState<ActiveGrabRecord | null>(null)
   const activeGrabRef = useRef<ActiveGrabRecord | null>(null)
   const grabMoveInFlight = useRef(false)
@@ -1969,6 +1973,7 @@ export function App() {
         grab_point: [point.x, point.y],
         mode: grabSettings.mode,
         stiffness: grabSettings.stiffness,
+        damping: Math.max(0.5, grabSettings.stiffness * 0.05),
         session_epoch: sessionEpoch,
       })
       setActiveGrab(result.grab)
@@ -2493,6 +2498,8 @@ export function App() {
       logs={logs}
       frameCount={frameCount}
       setFrameCount={setFrameCount}
+      grabSettings={grabSettings}
+      setGrabSettings={setGrabSettings}
       sceneParamDraft={sceneParamDraft}
       defaultSceneParams={defaultSceneParams}
       runningSceneParams={runningSceneParams}
