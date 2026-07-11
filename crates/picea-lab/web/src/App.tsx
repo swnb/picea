@@ -706,6 +706,7 @@ export function App() {
   const activeGrabRef = useRef<ActiveGrabRecord | null>(null)
   const grabMoveInFlight = useRef(false)
   const pendingGrabTarget = useRef<Vec2 | null>(null)
+  const grabReleaseRequested = useRef(false)
 
   const retainedFrameStart = frames[0]?.frame_index ?? 0
   const retainedFrameEndExclusive = retainedFrameStart + frames.length
@@ -1967,6 +1968,7 @@ export function App() {
     if (status === "paused") {
       void handleControl("play")
     }
+    grabReleaseRequested.current = false
     try {
       const result = await createGrab(sessionId, {
         body_handle: bodyHandle,
@@ -1976,6 +1978,19 @@ export function App() {
         damping: Math.max(0.5, grabSettings.stiffness * 0.05),
         session_epoch: sessionEpoch,
       })
+      if (grabReleaseRequested.current) {
+        // The pointer already lifted while the create round-trip was in
+        // flight; release the fresh grab instead of resurrecting it.
+        grabReleaseRequested.current = false
+        try {
+          await releaseGrab(sessionId, result.grab.id)
+        } catch (error) {
+          pushLogs(
+            log("warn", t(locale, "log.grabReleaseFailed", { message: messageOf(error) })),
+          )
+        }
+        return
+      }
       setActiveGrab(result.grab)
       // Pointer moves that raced the create request are parked in
       // pendingGrabTarget; sync the ref and flush now instead of waiting
@@ -2022,12 +2037,15 @@ export function App() {
   }
 
   async function handleGrabEnd() {
+    grabReleaseRequested.current = true
     const grab = activeGrabRef.current
     setActiveGrab(null)
+    activeGrabRef.current = null
     pendingGrabTarget.current = null
     if (!grab || !sessionId) {
       return
     }
+    grabReleaseRequested.current = false
     try {
       await releaseGrab(sessionId, grab.id)
     } catch (error) {

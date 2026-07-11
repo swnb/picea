@@ -1370,6 +1370,16 @@ assert.match(
 );
 assert.match(
   appSource,
+  /async function handleGrabEnd\(\) \{\n\s*grabReleaseRequested\.current = true/,
+  "Grab end must park a release request before checking the active grab, so a pointer-up that races the create round-trip is not silently dropped.",
+);
+assert.match(
+  appSource,
+  /await createGrab\([\s\S]*?if \(grabReleaseRequested\.current\) \{[\s\S]*?releaseGrab\(sessionId, result\.grab\.id\)/,
+  "Grab create must honor a release requested while the create round-trip was in flight, so a quick click cannot leave an orphaned spring joint.",
+);
+assert.match(
+  appSource,
   /FrameDiagnostics/,
   "Workbench should expose frame diagnostics from exported report/stats/events facts.",
 );
