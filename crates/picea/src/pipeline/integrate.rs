@@ -6,16 +6,27 @@ use crate::{
     world::World,
 };
 
-pub(crate) fn run_integration_phase(
+pub(crate) fn run_velocity_integration_phase(
     world: &mut World,
     config: &StepConfig,
     numeric_warnings: &mut Vec<NumericsWarningEvent>,
 ) {
-    world.integrate_body_motion(config, numeric_warnings);
+    world.integrate_body_velocities(config, numeric_warnings);
+}
+
+pub(crate) fn run_position_integration_phase(
+    world: &mut World,
+    config: &StepConfig,
+    numeric_warnings: &mut Vec<NumericsWarningEvent>,
+) {
+    world.integrate_body_positions(config, numeric_warnings);
 }
 
 impl World {
-    pub(crate) fn integrate_body_motion(
+    // Spike variant A: gravity and damping land in velocities before the
+    // contact solver runs, so resting contacts can absorb the gravity impulse
+    // instead of converting it into penetration + position correction.
+    pub(crate) fn integrate_body_velocities(
         &mut self,
         config: &StepConfig,
         numeric_warnings: &mut Vec<NumericsWarningEvent>,
@@ -28,7 +39,7 @@ impl World {
                 .body_record_mut(handle)
                 .expect("live body handles must resolve during step");
             match record.body_type {
-                BodyType::Static => {
+                BodyType::Static | BodyType::Kinematic => {
                     record.sleeping = false;
                     record.sleep_idle_time = 0.0;
                 }
@@ -46,16 +57,8 @@ impl World {
                         * (1.0 - record.linear_damping * config.dt).max(0.0);
                     let angular_velocity = record.angular_velocity
                         * (1.0 - record.angular_damping * config.dt).max(0.0);
-                    let pose = translated_pose(
-                        record.pose,
-                        linear_velocity * config.dt,
-                        angular_velocity * config.dt,
-                    );
 
-                    if !is_finite_vector(linear_velocity)
-                        || !angular_velocity.is_finite()
-                        || !is_finite_pose(pose)
-                    {
+                    if !is_finite_vector(linear_velocity) || !angular_velocity.is_finite() {
                         numeric_warnings.push(NumericsWarningEvent {
                             phase: "integrate".into(),
                             detail: "body_state".into(),
@@ -68,11 +71,45 @@ impl World {
 
                     record.linear_velocity = linear_velocity;
                     record.angular_velocity = angular_velocity;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn integrate_body_positions(
+        &mut self,
+        config: &StepConfig,
+        numeric_warnings: &mut Vec<NumericsWarningEvent>,
+    ) {
+        let body_handles = self.bodies().collect::<Vec<_>>();
+        for handle in body_handles {
+            let record = self
+                .body_record_mut(handle)
+                .expect("live body handles must resolve during step");
+            match record.body_type {
+                BodyType::Static => {}
+                BodyType::Dynamic => {
+                    if record.sleeping {
+                        continue;
+                    }
+                    let pose = translated_pose(
+                        record.pose,
+                        record.linear_velocity * config.dt,
+                        record.angular_velocity * config.dt,
+                    );
+                    if !is_finite_pose(pose) {
+                        numeric_warnings.push(NumericsWarningEvent {
+                            phase: "integrate".into(),
+                            detail: "body_state".into(),
+                        });
+                        record.linear_velocity = Vector::default();
+                        record.angular_velocity = 0.0;
+                        record.sleep_idle_time = 0.0;
+                        continue;
+                    }
                     record.pose = pose;
                 }
                 BodyType::Kinematic => {
-                    record.sleeping = false;
-                    record.sleep_idle_time = 0.0;
                     let pose = translated_pose(
                         record.pose,
                         record.linear_velocity * config.dt,
