@@ -129,13 +129,42 @@ impl World {
         }
     }
 
+    pub(crate) fn apply_single_body_point_impulse(
+        &mut self,
+        body: BodyHandle,
+        anchor_from_center: Vector,
+        impulse: Vector,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
+    ) {
+        let Ok(record) = self.body_record(body) else {
+            return;
+        };
+        let mass = record.mass_properties;
+        // Picea's positive angular velocity is clockwise in screen space, so
+        // the impulse torque uses the same negative cross-product sign as the
+        // contact solver.
+        let linear_delta = impulse * mass.inverse_mass;
+        let angular_delta = -anchor_from_center.cross(impulse) * mass.inverse_inertia;
+        self.apply_single_body_velocity_change(body, linear_delta, angular_delta, wake_reasons);
+    }
+
     fn apply_single_body_velocity_delta(
         &mut self,
         body: BodyHandle,
         delta: Vector,
         wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     ) {
-        if delta.length() <= f32::EPSILON {
+        self.apply_single_body_velocity_change(body, delta, 0.0, wake_reasons);
+    }
+
+    fn apply_single_body_velocity_change(
+        &mut self,
+        body: BodyHandle,
+        linear_delta: Vector,
+        angular_delta: FloatNum,
+        wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
+    ) {
+        if linear_delta.length() <= f32::EPSILON && angular_delta.abs() <= f32::EPSILON {
             return;
         }
         let record = self
@@ -145,7 +174,8 @@ impl World {
             return;
         }
         let was_sleeping = record.sleeping;
-        record.linear_velocity += delta;
+        record.linear_velocity += linear_delta;
+        record.angular_velocity += angular_delta;
         record.sleeping = false;
         record.sleep_idle_time = 0.0;
         if was_sleeping {

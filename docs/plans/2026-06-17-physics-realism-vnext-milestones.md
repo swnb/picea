@@ -400,3 +400,45 @@ Subagent 执行计划：
 - 裁决：**不校准**这 3 个锁。#2/#3 指向 velocity-first 引入的接触连续性退化（warm-start 命中率下降、帧间接触断裂），校锁会掩盖真实代价并反噬堆叠收敛。
 - 正式化前置（留给 E1/E5 执行）：① 让 contact 阶段在 velocity-first 下看到预测位置——把 CCD 预测推进从"仅穿隧物体"扩到所有接近中的接触，或 narrowphase 前做一次预积分快照——消除滞后并清掉 3 red；② spike 基线落后于 main（缺 `909e386` grab 修复、trajectoryOverlay、vite bump），合入前必须 rebase，否则回退已 push 修复；③ 先补 phase-order / 接触检测时点 acceptance 锁定义新语义，再实现（遵循 E5 先锁后写）。
 - 风险 / 后续：改 core 接触检测时点是写路径深层契约改动，属高风险门，需按 vNext 正规流程（先锁、spec 认可、bounded worker）推进，不在遗留收尾范围。
+
+### 2026-07-12 - E2a：grab / WorldAnchor damping 语义
+
+#### 成功标准
+
+- 状态：**已验证（仅 handoff §2 / E2 joint damping 子切片；整个 E2 未完成）**。
+- `WorldAnchorJointDesc.damping` 在必跑 joint phase 中消费真实锚点点速度 `v + ω × r`，以 `inverse_mass + inverse_inertia * cross(r, axis)^2` 为有效逆质量施加点冲量，并用 `clamp(damping * dt, 0, 1)` 防止过阻尼翻向注入能量；零/近零约束轴跳过本帧 damping。
+- 不改变 public API、step phase order、Distance joint 行为或 lab grab 默认参数；Commit：none，本轮不提交。
+
+#### 检查结果
+
+- TDD RED 第一轮：精确锁 exit 101，`zero_damping_peak=6`、`high_damping_peak=6`，证明字段未被 solver 消费。
+- TDD RED 第二轮：`world_anchor_damping` filter exit 101；偏心锚点的 zero/high 均为 `5.9925013`，零长度 x case expected `6` got `0`，精确公式 characterization 为 1 passed。修订后的 spec/code review 均无 High/Medium；唯一 Low 是 non-zero local COM 尚无直接测试锁。
+- Final verifier（`HEAD 5c8542e`）9/9 exit 0：
+  1. `rtk proxy cargo fmt --all --check` -> pass，empty output。
+  2. `rtk proxy cargo test -p picea --test physics_realism_acceptance damping -- --nocapture` -> 4 passed，0 failed，61 filtered。
+  3. `rtk proxy cargo test -p picea --test world_step_review_regressions joint -- --nocapture` -> 4 passed，0 failed，8 filtered。
+  4. `rtk proxy cargo test -p picea --lib` -> 103 passed，0 failed，1 ignored。
+  5. `rtk proxy cargo test -p picea --tests` -> aggregate 231 passed，0 failed，1 ignored。
+  6. `rtk proxy cargo test -p picea-lab --test server_routes` -> 20 passed，0 failed。
+  7. `rtk proxy cargo clippy -p picea --all-targets` -> pass，无 warning/error output。
+  8. `rtk proxy just picea-lab-web-check` -> `test:dev-server` / `dev-server-contract.mjs` pass。
+  9. `rtk proxy git diff --check` -> pass，empty output。
+- Public surface / workspace hygiene：`git diff -- crates/picea/src/lib.rs` 为空；验证未新增 Git-visible files。
+- Browser live 面（`http://127.0.0.1:5173/?picea-profile=1`）：source badge 为实时会话；牛顿摆 spring/direct 各拖一次，spring 下摆球离开队列后仍受绳/碰撞约束，direct 下出现虚线指示且球跟随；两次 console 均 0 warnings/errors。
+- Browser artifact 面：切换“生成产物并回放”与 `matrix_stack 8x6` 后产物生成成功；尝试拖动后仍为 frame 0、joint 0、state hash `66a1082f4f691367`，证明回放未被交互改写；console 0。
+- Browser offline 面：停止 API 后 reload，source badge 显示演示回放并出现“离线演示数据 · 非真实模拟”水印；console 0。Browser 已 finalized，`rtk proxy just picea-lab-web-stop` exit 0，输出 `stopped`。
+
+#### 复跑方式
+
+- Core 行为与回归：按上方 final verifier 1-7、9 顺序复跑；其中 `physics_realism_acceptance damping` 同时覆盖峰值、偏心锚点点速度、clamp/切向保持和零轴无偏置。
+- Browser：运行 Web dev server，打开 `http://127.0.0.1:5173/?picea-profile=1`，依次复跑 live spring/direct 拖拽、artifact `matrix_stack 8x6` 不可变性、停 API 后 offline 水印，记录 source badge、frame/joint/state hash 与 console；最后执行 `rtk proxy just picea-lab-web-check` 和 `rtk proxy just picea-lab-web-stop`。
+
+#### 范围外
+
+- body damping、`DistanceJointDesc.damping`、grab 参数/手感调优、step-reorder 正式化均未进入本子切片；它们仍按 E2 或各自 milestone 单独推进。
+
+#### 残余风险
+
+- non-zero `local_center_of_mass` 已走 `pose.transform_point(mass_properties.local_center_of_mass)` 源码路径，但尚无直接行为锁。
+- WorldAnchor 的固定目标没有速度事实，当前无法表达 moving target 的相对点速度。
+- damping 是每步一次的非 warm-start impulse；长窗口高刚度/复杂 joint 网络仍需后续稳定性证据。

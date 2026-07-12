@@ -2600,6 +2600,268 @@ fn step_broadphase_counters_report_traversal_and_prune_work() {
 }
 
 #[test]
+fn joint_damping_reduces_peak_radial_speed_vs_zero_damping() {
+    fn peak_post_step_radial_speed(damping: f32) -> f32 {
+        let mut world = no_gravity_world();
+        let body = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            2.0,
+            0.0,
+            Vector::new(6.0, 0.0),
+        );
+        attach_shape(
+            &mut world,
+            body,
+            SharedShape::rect(1.0, 1.0),
+            Material::default(),
+        );
+        world
+            .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                body,
+                local_anchor: Point::default(),
+                world_anchor: Point::default(),
+                stiffness: 4.0,
+                damping,
+                ..WorldAnchorJointDesc::default()
+            }))
+            .expect("world-anchor joint should be created");
+
+        let mut pipeline = SimulationPipeline::new(StepConfig {
+            dt: DT,
+            joint_velocity_projection: false,
+            ..StepConfig::default()
+        });
+        let mut peak = 0.0_f32;
+        for _ in 0..12 {
+            pipeline.step(&mut world);
+            let position = body_position(&world, body);
+            let radial_axis = Vector::new(-position.x(), -position.y()).normalized_or_zero();
+            assert!(
+                radial_axis.length() > f32::EPSILON,
+                "body anchor should remain separated from the fixed world anchor"
+            );
+            let radial_speed = body_velocity(&world, body).dot(radial_axis).abs();
+            assert!(radial_speed.is_finite(), "radial speed must stay finite");
+            peak = peak.max(radial_speed);
+        }
+        peak
+    }
+
+    let zero_damping_peak = peak_post_step_radial_speed(0.0);
+    let high_damping_peak = peak_post_step_radial_speed(30.0);
+
+    assert!(
+        high_damping_peak < zero_damping_peak * 0.75,
+        "high world-anchor damping should materially reduce post-step radial speed: \
+         zero_damping_peak={zero_damping_peak}, high_damping_peak={high_damping_peak}"
+    );
+}
+
+#[test]
+fn world_anchor_damping_reduces_offset_anchor_radial_speed_from_rotation() {
+    fn post_step_anchor_radial_speed(damping: f32) -> f32 {
+        let mut world = no_gravity_world();
+        let body = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                angular_velocity: 6.0,
+                can_sleep: false,
+                ..BodyDesc::default()
+            })
+            .expect("rotating body should be created");
+        attach_shape(
+            &mut world,
+            body,
+            SharedShape::rect(2.0, 2.0),
+            Material::default(),
+        );
+        let local_anchor = Point::new(1.0, 0.0);
+        let world_anchor = Point::new(1.0, 0.0);
+        world
+            .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                body,
+                local_anchor,
+                world_anchor,
+                stiffness: 0.0,
+                damping,
+                ..WorldAnchorJointDesc::default()
+            }))
+            .expect("world-anchor joint should be created");
+
+        let mut pipeline = SimulationPipeline::new(StepConfig {
+            dt: DT,
+            joint_velocity_projection: false,
+            ..StepConfig::default()
+        });
+        pipeline.step(&mut world);
+
+        let view = world.try_body(body).expect("body should still exist");
+        let pose = view.pose();
+        let anchor = pose.transform_point(local_anchor);
+        let offset = anchor - pose.point();
+        // Picea uses clockwise-positive angular velocity in screen space.
+        let anchor_velocity = view.linear_velocity()
+            + Vector::new(
+                view.angular_velocity() * offset.y(),
+                -view.angular_velocity() * offset.x(),
+            );
+        let axis = (world_anchor - anchor).normalized_or_zero();
+        assert!(
+            axis.length() > f32::EPSILON,
+            "integration should separate the rotating local anchor from its fixed target"
+        );
+        let radial_speed = anchor_velocity.dot(axis).abs();
+        assert!(radial_speed.is_finite(), "anchor speed must stay finite");
+        radial_speed
+    }
+
+    let zero_damping_speed = post_step_anchor_radial_speed(0.0);
+    let high_damping_speed = post_step_anchor_radial_speed(30.0);
+
+    assert!(
+        high_damping_speed < zero_damping_speed * 0.75,
+        "high damping should reduce radial point velocity at an offset anchor: \
+         zero_damping_speed={zero_damping_speed}, high_damping_speed={high_damping_speed}"
+    );
+}
+
+#[test]
+fn world_anchor_damping_uses_clamped_per_step_strength_and_preserves_tangent() {
+    fn post_step_velocity(damping: f32) -> (Vector, Vector) {
+        let initial_velocity = Vector::new(6.0, 3.0);
+        let mut world = no_gravity_world();
+        let body = create_body(&mut world, BodyType::Dynamic, 2.0, 0.0, initial_velocity);
+        attach_shape(
+            &mut world,
+            body,
+            SharedShape::rect(1.0, 1.0),
+            Material::default(),
+        );
+        let world_anchor = Point::new(0.0, initial_velocity.y() * DT);
+        world
+            .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                body,
+                world_anchor,
+                stiffness: 0.0,
+                damping,
+                ..WorldAnchorJointDesc::default()
+            }))
+            .expect("world-anchor joint should be created");
+
+        let mut pipeline = SimulationPipeline::new(StepConfig {
+            dt: DT,
+            joint_velocity_projection: false,
+            ..StepConfig::default()
+        });
+        pipeline.step(&mut world);
+
+        let axis = (world_anchor
+            - world
+                .try_body(body)
+                .expect("body should still exist")
+                .pose()
+                .point())
+        .normalized_or_zero();
+        assert!(axis.length() > f32::EPSILON);
+        (body_velocity(&world, body), axis)
+    }
+
+    fn assert_near(actual: f32, expected: f32, label: &str) {
+        let tolerance = 1.0e-5;
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{label}: expected {expected}, got {actual}"
+        );
+    }
+
+    let (zero_velocity, axis) = post_step_velocity(0.0);
+    let (half_velocity, half_axis) = post_step_velocity(30.0);
+    let (clamped_velocity, clamped_axis) = post_step_velocity(120.0);
+    let tangent = axis.perp();
+    let zero_radial = zero_velocity.dot(axis);
+    let zero_tangent = zero_velocity.dot(tangent);
+
+    assert_near(zero_radial, -6.0, "zero damping radial velocity");
+    assert_near(zero_tangent, 3.0, "zero damping tangent velocity");
+    assert_near(
+        half_velocity.dot(half_axis),
+        zero_radial * (1.0 - (30.0 * DT).clamp(0.0, 1.0)),
+        "damping=30 radial velocity",
+    );
+    assert_near(
+        half_velocity.dot(half_axis.perp()),
+        zero_tangent,
+        "damping=30 tangent velocity",
+    );
+    assert_near(
+        clamped_velocity.dot(clamped_axis),
+        0.0,
+        "clamped damping radial velocity",
+    );
+    assert_near(
+        clamped_velocity.dot(clamped_axis.perp()),
+        zero_tangent,
+        "clamped damping tangent velocity",
+    );
+}
+
+#[test]
+fn world_anchor_damping_at_zero_length_has_no_axis_bias() {
+    fn post_step_velocity(initial_velocity: Vector) -> Vector {
+        let mut world = no_gravity_world();
+        let body = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            -initial_velocity.x() * DT,
+            -initial_velocity.y() * DT,
+            initial_velocity,
+        );
+        attach_shape(
+            &mut world,
+            body,
+            SharedShape::rect(1.0, 1.0),
+            Material::default(),
+        );
+        world
+            .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                body,
+                stiffness: 0.0,
+                damping: 120.0,
+                ..WorldAnchorJointDesc::default()
+            }))
+            .expect("world-anchor joint should be created");
+
+        let mut pipeline = SimulationPipeline::new(StepConfig {
+            dt: DT,
+            joint_velocity_projection: false,
+            ..StepConfig::default()
+        });
+        pipeline.step(&mut world);
+
+        let position = body_position(&world, body);
+        assert!(
+            position.length() <= 1.0e-6,
+            "integration should place the local anchor exactly on the world anchor"
+        );
+        body_velocity(&world, body)
+    }
+
+    let x_velocity = Vector::new(6.0, 0.0);
+    let y_velocity = Vector::new(0.0, 6.0);
+    assert_eq!(
+        post_step_velocity(x_velocity),
+        x_velocity,
+        "a coincident anchor has no x-axis damping direction"
+    );
+    assert_eq!(
+        post_step_velocity(y_velocity),
+        y_velocity,
+        "a coincident anchor has no y-axis damping direction"
+    );
+}
+
+#[test]
 fn jointed_active_island_reports_joint_rows_without_contact_rows() {
     let mut world = no_gravity_world();
     let left = world
