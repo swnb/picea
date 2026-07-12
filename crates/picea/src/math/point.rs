@@ -5,7 +5,7 @@ use std::{
     ops::{Add, AddAssign, Sub, SubAssign},
 };
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Point {
     pub(crate) x: FloatNum,
     pub(crate) y: FloatNum,
@@ -14,13 +14,6 @@ pub struct Point {
 impl Display for Point {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!("{{ x: {}, y: {} }}", self.x, self.y))
-    }
-}
-
-impl PartialEq for Point {
-    fn eq(&self, other: &Self) -> bool {
-        (self.x() - other.x()).abs() < FloatNum::EPSILON
-            && (self.y() - other.y()).abs() < FloatNum::EPSILON
     }
 }
 
@@ -38,6 +31,23 @@ impl Point {
     #[inline]
     pub fn y(&self) -> FloatNum {
         self.y
+    }
+
+    /// Compares coordinates with an explicit inclusive absolute tolerance.
+    ///
+    /// `PartialEq` remains ordinary float equality so value comparisons retain
+    /// its symmetry and transitivity contract. Geometry algorithms that
+    /// intentionally tolerate rounding error must opt in through this method.
+    /// Non-finite or negative tolerances are rejected; equal infinities and
+    /// signed zero remain equal, while any coordinate containing NaN is unequal.
+    #[inline]
+    pub fn abs_diff_eq(&self, other: Self, max_abs_diff: FloatNum) -> bool {
+        if !max_abs_diff.is_finite() || max_abs_diff < 0.0 {
+            return false;
+        }
+
+        (self.x == other.x || (self.x - other.x).abs() <= max_abs_diff)
+            && (self.y == other.y || (self.y - other.y).abs() <= max_abs_diff)
     }
 }
 

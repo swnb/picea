@@ -563,3 +563,82 @@ Subagent 执行计划：
 - live session 的完整 diagnostics summary 仍未 hydrated；web 明确展示 missing，artifact/headless 路径仍是详细诊断权威。
 - Web production bundle 当前主 chunk 约 `587.45 kB`，Vite 给出大于 500 kB 的既有性能建议；不影响本轮 correctness/E2E，但后续可单独做 code-splitting。
 - 普通非 CCD contact 只比较 solver-start 与固定步末 predicted pose；需要完整 sweep 的高速凸体仍由既有 CCD 路径负责，旋转/曲线中途特征覆盖未在本项扩展。
+
+### 2026-07-13 - §3：Point / Vector 相等性契约
+
+#### 决策与归属
+
+- 状态：**已验证（handoff §3 / vNext equality contract 子切片）**。
+- 归属：handoff §3 的 vNext 跨切面正确性切片；不扩张为 E1-E6 的新物理能力，shared acceptance 归入 V8。
+- `Point` / `Vector` 的 `PartialEq` 改为标准逐分量 `f32 ==`。这恢复 `PartialEq` 对称、传递的标准契约，但仍保留浮点的部分等价语义：`NaN != NaN`，因此不实现 `Eq`。
+- 新增显式 `pub fn abs_diff_eq(&self, other: Self, max_abs_diff: FloatNum) -> bool` 方法，供几何算法或测试在确实需要绝对误差容限时调用；名称明确该方法不包含相对误差或 ULP 语义。
+- 容器身份与几何近似判等分离。当前不为 `Point` / `Vector` 实现 `Hash`、`Ord` 或公开 key wrapper；内部缓存若需要身份 key，继续采用局部的 `to_bits()` 位精确包装。
+
+#### 成功标准
+
+- 小于 `f32::EPSILON` 但位值不同的有限分量不再通过 `==`；相等关系不再出现旧 epsilon 窗口导致的非传递链。
+- 标准浮点边界有行为锁：同号无穷值相等、`+0.0 == -0.0`、任何含 NaN 的点/向量不与自身相等。
+- `abs_diff_eq` 逐分量使用有限、非负的绝对容差并包含边界（`difference <= abs_tolerance`）；负值、NaN、正无穷容差返回 `false`。
+- `abs_diff_eq` 的每个分量先接受标准精确相等，再检查绝对差，因此同号无穷值和符号零可在合法容差下与另一分量的近似比较组合；含 NaN 的值始终返回 `false`。
+- `crates/picea/src/lib.rs` 的 prelude re-export 零变更；不新增依赖，不实现 `Eq` / `Hash`，不改接触、solver、step order 或 lab 行为。
+
+#### TDD 与实现边界
+
+1. RED-A：先锁定 sub-epsilon 有限差异必须 `!=`，在旧 fuzzy `PartialEq` 上看到目标断言失败。
+2. GREEN-A：仅把 `Point` / `Vector` 的 `PartialEq` 改为标准分量相等。
+3. RED-B：再加入 `abs_diff_eq` public 行为锁，先看到缺少方法的编译失败。
+4. GREEN-B：仅实现上述绝对容差契约，并补充解释相等身份与几何近似必须分离的必要注释。
+5. 用户已批准迁移两处已知的旧 fuzzy 断言：`collider.rs` 的 sub-epsilon 几何接近前置条件改用 `abs_diff_eq`，但位精确缓存失效主断言必须保留；`math_algebra_regressions.rs` 的旋转近似断言改用 `abs_diff_eq`，且不得放宽原 `f32::EPSILON` 容差。若出现这两处之外的既有 fuzzy 依赖，仍须停止并上报。
+
+文件范围：
+
+- `crates/picea/src/math/point.rs`
+- `crates/picea/src/math/vector.rs`
+- `crates/picea/src/collider.rs`（仅迁移已批准的缓存测试前置断言与过时注释）
+- `crates/picea/tests/math_algebra_regressions.rs`
+- 本进度记录
+
+明确非目标：
+
+- `Eq`、`Hash`、`Ord`、公开容器 key wrapper。
+- 相对误差、ULP、尺度自适应近似比较。
+- 修改 `crates/picea/src/lib.rs`、其他 public 类型或几何/solver 算法调用点；`collider.rs` 只允许上述测试与注释迁移。
+
+#### 验证门
+
+- `rtk proxy cargo test -p picea --test math_algebra_regressions`
+- `rtk proxy cargo test -p picea geometry_cache_rejects_sub_epsilon_translation_change --lib`
+- `rtk proxy cargo test -p picea --lib math`
+- `rtk proxy cargo test -p picea --test math_api_compile_fail`
+- `rtk proxy cargo test -p picea --lib`
+- `rtk proxy cargo test -p picea --tests`
+- `rtk proxy cargo test --workspace --all-targets`
+- `rtk proxy cargo test -p picea --examples --no-run`
+- `rtk proxy cargo clippy --workspace --all-targets`
+- `rtk proxy cargo fmt --all --check`
+- `rtk proxy git diff --check`
+- `rtk proxy git diff --exit-code -- crates/picea/src/lib.rs`
+- `rtk proxy git diff --exit-code main...HEAD -- crates/picea/src/lib.rs`
+
+#### 残余风险
+
+- 这是 public trait 语义变更；仓库外调用方若把 `==` 当几何近似比较，需要迁移到显式 `abs_diff_eq` 或自己的尺度相关容差策略。
+- 绝对容差对极大或极小尺度不一定合适；本切片刻意不替调用方选择相对误差或 ULP 策略。
+- `Pose` 等包含 `Point` / `Vector` 的派生 `PartialEq` 类型会继承新语义；例如 CCD 的 start-pose 比较现在会对 sub-epsilon 有限位移重算起始顶点。该方向更保守，但尚无专门的 CCD 行为锁。
+
+#### 检查结果
+
+- RED-A：`rtk proxy cargo test -p picea --test math_algebra_regressions point_and_vector_use_standard_float_equality -- --exact` -> exit 101；旧 fuzzy `PartialEq` 把 `0.0` 与 `0.75 * f32::EPSILON` 判等，目标 `assert_ne!` 失败。GREEN-A 同命令 -> 1 passed。
+- RED-B：加入 public `abs_diff_eq` 合同后，`rtk proxy cargo test -p picea --test math_algebra_regressions` -> exit 101，17 个预期 `E0599`（方法尚不存在）。GREEN-B -> 3 passed。
+- reviewer 首轮发现 whole-value infinity fast path 的 Medium：`(INF, finite)` 与 `(INF, nearby finite)` 会因 `INF - INF = NaN` 假阴性。补 Point / Vector mixed-infinity 行为锁后 exact filter 先 exit 101，再改为逐分量精确相等或绝对差判断；复审 High / Medium / Low 均无 actionable finding。
+- 已批准迁移的两处旧断言保持原意：旋转锁仍使用 `f32::EPSILON`；geometry cache 锁改为显式几何近似前置条件，同时保留标准值不等、位模式不等和 cache stale 主断言。
+- Targeted：math algebra 3 passed；geometry cache 1 passed；lib math 4 passed；math API trybuild harness 1 passed、3 个 UI case 通过。
+- Core / workspace：picea lib 103 passed、1 ignored；picea tests 合计 233 passed、1 ignored；workspace all-targets 327 passed、6 ignored，9 个 benchmark scenario 成功；picea-lab 82 passed、5 ignored；examples 与 bench `--no-run` 编译通过。
+- Hygiene / compatibility：workspace all-targets clippy 无 warning；fmt、YAML、`git diff --check` 通过；`crates/picea/src/lib.rs` 的 unstaged、staged、相对 main 三层 diff 均为空。
+- Web / end-to-end consumer：新 worktree 首轮因未安装 TypeScript 依赖失败；`rtk proxy npm --prefix crates/picea-lab/web ci` 安装 lockfile 依赖后，UI / i18n / profile contracts、production build、`rtk proxy just picea-lab-web-check` dev-server contract 全部通过。构建成功转换 1680 modules；仅有单 chunk 超过 500 kB 的既有非阻塞 warning。依赖与构建产物均未污染 Git status。
+
+#### 最终范围
+
+- 代码 / 测试：`point.rs`、`vector.rs`、`collider.rs`、`math_algebra_regressions.rs`。
+- 文档：本进度记录。
+- 未修改 `lib.rs` prelude、Cargo manifests、依赖、solver、step order 或 lab 行为；未实现 `Eq` / `Hash` / `Ord`。

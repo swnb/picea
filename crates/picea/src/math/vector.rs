@@ -5,7 +5,7 @@ use std::{
     ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
 };
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Vector {
     pub(super) x: FloatNum,
     pub(super) y: FloatNum,
@@ -14,13 +14,6 @@ pub struct Vector {
 impl Display for Vector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!("{{ x: {}, y: {} }}", self.x, self.y))
-    }
-}
-
-impl PartialEq for Vector {
-    fn eq(&self, other: &Self) -> bool {
-        (self.x() - other.x()).abs() < FloatNum::EPSILON
-            && (self.y() - other.y()).abs() < FloatNum::EPSILON
     }
 }
 
@@ -38,6 +31,23 @@ impl Vector {
     #[inline]
     pub fn y(&self) -> FloatNum {
         self.y
+    }
+
+    /// Compares components with an explicit inclusive absolute tolerance.
+    ///
+    /// `PartialEq` remains ordinary float equality so value comparisons retain
+    /// its symmetry and transitivity contract. Geometry algorithms that
+    /// intentionally tolerate rounding error must opt in through this method.
+    /// Non-finite or negative tolerances are rejected; equal infinities and
+    /// signed zero remain equal, while any component containing NaN is unequal.
+    #[inline]
+    pub fn abs_diff_eq(&self, other: Self, max_abs_diff: FloatNum) -> bool {
+        if !max_abs_diff.is_finite() || max_abs_diff < 0.0 {
+            return false;
+        }
+
+        (self.x == other.x || (self.x - other.x).abs() <= max_abs_diff)
+            && (self.y == other.y || (self.y - other.y).abs() <= max_abs_diff)
     }
 
     #[inline]

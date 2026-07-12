@@ -874,9 +874,9 @@ struct DerivedGeometryCache {
     world_vertices: Option<Vec<Point>>,
 }
 
-/// Bit-exact pose equality for cache freshness. `Pose`'s `PartialEq` compares
-/// translation through `Vector`'s epsilon-fuzzy `eq`, so a sub-epsilon pose
-/// change would falsely reuse stale geometry; compare the raw float bits here.
+/// Bit-exact pose identity for cache freshness. Value equality intentionally
+/// treats signed zero as equal, while this cache keeps every raw pose
+/// representation change observable, so freshness compares the float bits.
 fn pose_bits_equal(a: Pose, b: Pose) -> bool {
     a.translation().x().to_bits() == b.translation().x().to_bits()
         && a.translation().y().to_bits() == b.translation().y().to_bits()
@@ -973,12 +973,19 @@ mod tests {
         use crate::math::FloatNum;
 
         let pose0 = Pose::from_xy_angle(0.0, 0.0, 0.0);
-        // A translation delta strictly below one epsilon: fuzzy-equal under
-        // Vector's PartialEq, yet a distinct bit pattern.
+        // A translation delta strictly below one epsilon is geometrically near,
+        // yet remains a distinct value and bit pattern for cache identity.
         let pose1 = Pose::from_xy_angle(FloatNum::EPSILON / 2.0, 0.0, 0.0);
         assert!(
-            pose0.translation() == pose1.translation(),
-            "poses must be epsilon-equal to exercise the fuzzy-compare hazard",
+            pose0
+                .translation()
+                .abs_diff_eq(pose1.translation(), FloatNum::EPSILON),
+            "poses must be explicitly near within the geometric tolerance",
+        );
+        assert_ne!(
+            pose0.translation(),
+            pose1.translation(),
+            "standard value equality must observe the finite translation change",
         );
         assert_ne!(
             pose0.translation().x().to_bits(),
