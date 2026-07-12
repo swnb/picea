@@ -79,6 +79,8 @@ struct ContactSolverRow {
     friction: FloatNum,
     reduction_reason: ContactReductionReason,
     support_friction_impulse: FloatNum,
+    speculative_velocity_target: FloatNum,
+    restitution_candidate_bias: FloatNum,
     restitution_bias: FloatNum,
     position_bias: FloatNum,
     initial_normal_speed: FloatNum,
@@ -89,6 +91,7 @@ struct ContactSolverRow {
     tangent_impulse_clamped: bool,
     restitution_velocity_threshold: FloatNum,
     restitution_applied: bool,
+    base_normal_solve_executed: bool,
     resting_shallow_support: bool,
 }
 
@@ -487,6 +490,7 @@ pub(crate) fn resolve_contacts(
         contact.tangent_impulse_clamped = false;
         contact.restitution_velocity_threshold = 0.0;
         contact.restitution_applied = false;
+        contact.base_normal_solve_executed = false;
     }
 
     let (mut batches, mut stats) =
@@ -523,6 +527,12 @@ pub(crate) fn resolve_contacts(
                 solve_tangent_impulse(&mut solver_bodies, &mut batch.rows[row_index]);
             }
         }
+        // Restitution is intentionally a second pass: speculative rows must first
+        // prove a positive non-penetration impulse before they are allowed to
+        // convert the saved pre-solve approach speed into bounce.
+        for row in &mut batch.rows {
+            solve_restitution_impulse(&mut solver_bodies, row);
+        }
         stabilize_resting_contact_graph(batch, &mut solver_bodies, config);
 
         for row in &batch.rows {
@@ -547,6 +557,7 @@ pub(crate) fn resolve_contacts(
             contact.tangent_impulse_clamped = row.tangent_impulse_clamped;
             contact.restitution_velocity_threshold = row.restitution_velocity_threshold;
             contact.restitution_applied = row.restitution_applied;
+            contact.base_normal_solve_executed = row.base_normal_solve_executed;
         }
         record_contact_impulse_wakes_for_rows(world, contacts, &batch.rows, wake_reasons);
         write_solver_velocities(world, &batch.body_slots, &solver_bodies, wake_reasons);
@@ -791,9 +802,9 @@ fn contact_solver_row(
     let relative_normal_speed = initial_velocity.dot(normal);
     let relative_tangent_speed = initial_velocity.dot(tangent);
     let restitution_threshold = config.restitution_velocity_threshold;
-    let restitution_applied =
+    let restitution_candidate =
         -relative_normal_speed > restitution_threshold && contact.material.restitution > 0.0;
-    let restitution_bias = if restitution_applied {
+    let restitution_candidate_bias = if restitution_candidate {
         contact.material.restitution.clamp(0.0, 1.0) * -relative_normal_speed
     } else {
         0.0
@@ -803,13 +814,18 @@ fn contact_solver_row(
         body_b,
         contact.depth,
         relative_normal_speed,
-        restitution_applied,
+        restitution_candidate,
         contact.material.friction,
     );
     // Penetration velocity bias gives resting overlap a support impulse during the
     // velocity solve, so Coulomb friction has a real normal budget to clamp against.
     let position_bias = if relative_normal_speed.abs() <= 1.0e-4 {
         (contact.depth - POSITION_CORRECTION_SLOP).max(0.0) * CONTACT_VELOCITY_BIAS / config.dt
+    } else {
+        0.0
+    };
+    let speculative_velocity_target = if config.dt > 0.0 && contact.signed_separation.is_finite() {
+        -(contact.signed_separation - POSITION_CORRECTION_SLOP).max(0.0) / config.dt
     } else {
         0.0
     };
@@ -843,7 +859,9 @@ fn contact_solver_row(
         friction,
         reduction_reason: contact.reduction_reason,
         support_friction_impulse,
-        restitution_bias,
+        speculative_velocity_target,
+        restitution_candidate_bias,
+        restitution_bias: 0.0,
         position_bias,
         initial_normal_speed: relative_normal_speed,
         initial_tangent_speed: relative_tangent_speed,
@@ -853,7 +871,8 @@ fn contact_solver_row(
         tangent_impulse_clamped: (tangent_impulse - contact.warm_start_tangent_impulse).abs()
             > FloatNum::EPSILON,
         restitution_velocity_threshold: restitution_threshold,
-        restitution_applied,
+        restitution_applied: false,
+        base_normal_solve_executed: false,
         resting_shallow_support,
     })
 }
@@ -1489,8 +1508,8 @@ fn solve_normal_impulse_pair_rows(
         relative_contact_velocity(body_a, body_b, first.anchor_a, first.anchor_b).dot(first.normal);
     let vn2 = relative_contact_velocity(body_a, body_b, second.anchor_a, second.anchor_b)
         .dot(second.normal);
-    let bias1 = first.restitution_bias + first.position_bias;
-    let bias2 = second.restitution_bias + second.position_bias;
+    let bias1 = first.position_bias + first.speculative_velocity_target;
+    let bias2 = second.position_bias + second.speculative_velocity_target;
     let old1 = first.normal_impulse;
     let old2 = second.normal_impulse;
     let rhs1 = bias1 - vn1 + k11 * old1 + k12 * old2;
@@ -1563,6 +1582,8 @@ fn apply_normal_pair_solution(
     impulse1: FloatNum,
     impulse2: FloatNum,
 ) {
+    first.base_normal_solve_executed = true;
+    second.base_normal_solve_executed = true;
     let delta1 = impulse1 - first.normal_impulse;
     let delta2 = impulse2 - second.normal_impulse;
     first.normal_impulse = impulse1.max(0.0);
@@ -1578,16 +1599,43 @@ fn solve_normal_impulse(bodies: &mut [SolverBody], row: &mut ContactSolverRow) {
     let Some((body_a, body_b)) = solver_pair(bodies, row) else {
         return;
     };
+    row.base_normal_solve_executed = true;
     let normal_speed =
         relative_contact_velocity(body_a, body_b, row.anchor_a, row.anchor_b).dot(row.normal);
     // Accumulated impulses are clamped, not per-iteration deltas. This lets a row
     // give impulse back on later iterations without ever pulling bodies together.
     let previous = row.normal_impulse;
-    let candidate =
-        previous - (normal_speed - row.restitution_bias - row.position_bias) * row.normal_mass;
+    let velocity_target = row.position_bias + row.speculative_velocity_target;
+    let candidate = previous - (normal_speed - velocity_target) * row.normal_mass;
     row.normal_impulse = candidate.max(0.0);
     row.normal_impulse_clamped |= candidate < 0.0;
     let delta = row.normal_impulse - previous;
+    apply_solver_impulse(bodies, row, row.normal * delta);
+}
+
+fn solve_restitution_impulse(bodies: &mut [SolverBody], row: &mut ContactSolverRow) {
+    if row.normal_mass <= 0.0
+        || !row.base_normal_solve_executed
+        || row.normal_impulse <= FloatNum::EPSILON
+        || row.restitution_candidate_bias <= 0.0
+    {
+        return;
+    }
+    let Some((body_a, body_b)) = solver_pair(bodies, row) else {
+        return;
+    };
+    let normal_speed =
+        relative_contact_velocity(body_a, body_b, row.anchor_a, row.anchor_b).dot(row.normal);
+    let previous = row.normal_impulse;
+    let candidate = previous - (normal_speed - row.restitution_candidate_bias) * row.normal_mass;
+    let next = candidate.max(previous);
+    let delta = next - previous;
+    if delta <= FloatNum::EPSILON {
+        return;
+    }
+    row.normal_impulse = next;
+    row.restitution_bias = row.restitution_candidate_bias;
+    row.restitution_applied = true;
     apply_solver_impulse(bodies, row, row.normal * delta);
 }
 
@@ -1718,6 +1766,8 @@ mod tests {
             friction: 0.2,
             reduction_reason: ContactReductionReason::Clipped,
             support_friction_impulse: 0.0,
+            speculative_velocity_target: 0.0,
+            restitution_candidate_bias: 0.0,
             restitution_bias: 0.0,
             position_bias,
             initial_normal_speed: 0.0,
@@ -1728,8 +1778,40 @@ mod tests {
             tangent_impulse_clamped: false,
             restitution_velocity_threshold: 1.0,
             restitution_applied: false,
+            base_normal_solve_executed: false,
             resting_shallow_support: false,
         }
+    }
+
+    #[test]
+    fn restitution_pass_requires_base_normal_solve_execution() {
+        let mut row = block_solve_row(0, 0.0, 0.0);
+        row.normal_impulse = 0.25;
+        row.restitution_candidate_bias = 1.0;
+        let mut bodies = vec![
+            SolverBody {
+                dynamic: true,
+                inverse_mass: 1.0,
+                inverse_inertia: 0.0,
+                center: Point::default(),
+                linear_velocity: Vector::default(),
+                angular_velocity: 0.0,
+            },
+            SolverBody {
+                dynamic: false,
+                inverse_mass: 0.0,
+                inverse_inertia: 0.0,
+                center: Point::default(),
+                linear_velocity: Vector::default(),
+                angular_velocity: 0.0,
+            },
+        ];
+
+        solve_restitution_impulse(&mut bodies, &mut row);
+
+        assert_eq!(row.normal_impulse, 0.25);
+        assert!(!row.restitution_applied);
+        assert_eq!(row.restitution_bias, 0.0);
     }
 
     #[test]

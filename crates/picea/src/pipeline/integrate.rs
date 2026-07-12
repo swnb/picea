@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    body::BodyType,
+    body::{BodyType, Pose},
     events::NumericsWarningEvent,
     handles::BodyHandle,
     math::{vector::Vector, FloatNum},
@@ -24,6 +24,41 @@ pub(crate) fn run_position_integration_phase(
     skip_bodies: &BTreeSet<BodyHandle>,
 ) {
     world.integrate_body_positions(config, numeric_warnings, skip_bodies);
+}
+
+pub(crate) fn preintegrated_body_poses(
+    world: &World,
+    dt: FloatNum,
+    ccd_clamped_bodies: &BTreeSet<BodyHandle>,
+) -> BTreeMap<BodyHandle, Pose> {
+    world
+        .bodies()
+        .filter_map(|handle| {
+            let record = world.body_record(handle).ok()?;
+            let current = record.pose;
+            let should_predict = !ccd_clamped_bodies.contains(&handle)
+                && match record.body_type {
+                    BodyType::Static => false,
+                    BodyType::Dynamic => !record.sleeping,
+                    BodyType::Kinematic => true,
+                };
+            let predicted = should_predict.then(|| {
+                translated_pose(
+                    current,
+                    record.linear_velocity * dt,
+                    record.angular_velocity * dt,
+                )
+            });
+            // Contact discovery is advisory: invalid motion must fall back to the
+            // authoritative pose instead of injecting non-finite broadphase bounds.
+            Some((
+                handle,
+                predicted
+                    .filter(|pose| is_finite_pose(*pose))
+                    .unwrap_or(current),
+            ))
+        })
+        .collect()
 }
 
 impl World {

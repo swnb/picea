@@ -30,10 +30,32 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
     let joint_solver_stats = crate::pipeline::joints::solve_joint_phase(
         world,
         config.dt,
+        &step.pose_clamp.clamped_bodies,
         &mut step.wake_reasons,
         &mut step.numeric_warnings,
     );
     step.record_solver_stats(joint_solver_stats);
+    let predicted_body_poses = crate::pipeline::integrate::preintegrated_body_poses(
+        world,
+        config.dt,
+        &step.pose_clamp.clamped_bodies,
+    );
+    let pending_contacts = crate::pipeline::contacts::run_contact_solve_phase(
+        world,
+        config,
+        &mut step.wake_reasons,
+        &step.pose_clamp.traces,
+        &predicted_body_poses,
+    );
+    if config.joint_velocity_projection {
+        crate::pipeline::joints::solve_joint_velocity_phase(world, &mut step.wake_reasons);
+    }
+    crate::pipeline::integrate::run_position_integration_phase(
+        world,
+        config,
+        &mut step.numeric_warnings,
+        &step.pose_clamp.clamped_bodies,
+    );
     let (
         contact_events,
         contact_count,
@@ -41,15 +63,7 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         broadphase_stats,
         warm_start_stats,
         contact_solver_stats,
-    ) = crate::pipeline::contacts::run_contact_phases(
-        world,
-        config,
-        &mut step.wake_reasons,
-        &step.pose_clamp.traces,
-    );
-    if config.joint_velocity_projection {
-        crate::pipeline::joints::solve_joint_velocity_phase(world, &mut step.wake_reasons);
-    }
+    ) = crate::pipeline::contacts::finalize_contact_phases(world, pending_contacts);
     step.record_contacts(
         contact_events,
         contact_count,
@@ -57,12 +71,6 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         broadphase_stats,
         warm_start_stats,
         contact_solver_stats,
-    );
-    crate::pipeline::integrate::run_position_integration_phase(
-        world,
-        config,
-        &mut step.numeric_warnings,
-        &step.pose_clamp.clamped_bodies,
     );
     let (sleep_events, sleep_transition_count, active_body_count) =
         crate::pipeline::sleep::refresh_sleep_phase(

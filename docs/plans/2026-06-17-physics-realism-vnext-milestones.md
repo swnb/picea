@@ -442,3 +442,124 @@ Subagent 执行计划：
 - non-zero `local_center_of_mass` 已走 `pose.transform_point(mass_properties.local_center_of_mass)` 源码路径，但尚无直接行为锁。
 - WorldAnchor 的固定目标没有速度事实，当前无法表达 moving target 的相对点速度。
 - damping 是每步一次的非 warm-start impulse；长窗口高刚度/复杂 joint 网络仍需后续稳定性证据。
+
+### 2026-07-12 - E1/E5 step-reorder 正式化：A2 设计门
+
+#### 状态
+
+- **实现、复审与完整 E2E 已完成；等待本地收口提交**。
+- 本节是 E1/E5 step-reorder 正式化的 living spec；实现不得越过下述内部语义、范围和 RED/验收门。
+
+#### 已验证根因与被否决的简单 WIP
+
+- velocity-first 顺序下，普通 contact 阶段读取尚未位置积分的旧 pose；只有命中 CCD clamp 的物体被提前推进，因此非 CCD 的同帧接近接触、sleeping impact、warm-start 连续性都会滞后一帧。
+- 简单 predicted-pose WIP 虽能提前发现接触，却混用了未来 manifold depth、未来 COM/lever arm、帧初 position-correction depth 与最终 active cache/event geometry，时点不一致。
+- 该 WIP 下 `matrix_stack_artifacts_capture_nxm_grid_stack_facts` 仍红：`max_penetration_depth = 0.103906676 > 0.041646`；reviewer 判定为 High correctness finding。不得以调阈值、改断言或把预测 penetration 当作最终事实收口。
+
+#### 业内一手参考与采用点
+
+- Box2D manual（speculative contacts、contact/hit event 语义）：<https://box2d.org/documentation/md_simulation.html>。采用点：允许正 separation 的 speculative contact 进入 solver；公开 hit 事实应以已确认的求解冲量/最终接触事实为依据，而不是把未来 overlap 直接冒充当前 penetration。
+- Box2D `contact_solver.c`：<https://github.com/erincatto/box2d/blob/main/src/contact_solver.c>。采用点：`s > 0` 时以 `velocityBias = s / h` 表达 speculative separation 的速度目标；Picea 采用相同的“由 separation/dt 产生速度偏置”原则，并按本引擎法线符号约定写成下述 target normal speed。
+- PhysX speculative CCD：<https://nvidia-omniverse.github.io/PhysX/physx/5.4.0/docs/AdvancedCollisionDetection.html#speculative-ccd>。采用点：通过 motion-inflated contact offset 发现未来候选，再交给 solver 约束；同时接受其警告——offset 过大会产生不必要约束，legacy SAT 路径还可能出现伪影，因此 Picea 不扩大为无界 contact offset，也不借此修改 broadphase/narrowphase/CCD 契约。
+
+#### 已批准的 A2 内部语义
+
+- predicted manifold **只用于发现 future feature**，不直接作为当前或最终 penetration 事实。
+- contact discovery 必须保留 solver-start authoritative pose 下的 current overlap，并在其上叠加 predicted future features；禁止只看 predicted pose，否则正在分离但帧初仍重叠的既有 contact 会被提前丢失。允许在 `contacts.rs` 内部以 current/predicted AABB 的并集喂给现有 broadphase，再对 current/predicted manifolds 做受控合并并按 contact feature 去重；不得修改 `broadphase.rs`。
+- 对 predicted manifold point `p`、法线 `n`、预测深度 `d_pred`，构造两个 surface witness：`p_a = p - n * d_pred / 2`、`p_b = p + n * d_pred / 2`。Picea 的 `n` 指向 body A，因此 `s = dot(p_a - p_b, n) = -d_pred`，与“重叠为负”的约定一致。分别把 witness 转为各自 predicted collider local 坐标，再映回 solver-start 的 authoritative collider pose。
+- 在 solver-start 时点计算 signed separation：`s = dot(p_a - p_b, n)`；约定分离为正、重叠为负。solver point、lever arm 与 COM 全部使用该当前时点的 authoritative pose，禁止混入未来 COM/lever arm。
+- speculative normal 速度目标为 `-(s - POSITION_CORRECTION_SLOP).max(0) / dt`；由 reconstructed witnesses 得到的 signed separation 只供 velocity row 使用。residual position correction 必须由 solver-start authoritative current narrowphase 明确确认的真实 overlap/depth 提供，predicted-only pair 一律使用 `0`，避免在物体旋转或 contact feature 切换时因冻结 normal/witness 产生假穿透和错误位姿修正。
+- restitution 采用两阶段：基础 non-penetration/speculative solve 不混入 restitution，并保存 pre-solve approach speed；仅当基础行累计产生正 normal impulse，且同时达到 restitution threshold 与 material 条件时，第二阶段才施加 restitution，并更新既有 telemetry。未产生法向冲量的预测点不得反弹。
+- 最终位置积分后，如 final authoritative narrowphase 确认真实 overlap，则 final manifold 是公开 feature identity 与 geometry 的唯一权威：必须按 final points 重建 key、`feature_id`、normal、`reduction_reason` 与 point。solver impulse/telemetry 从 source rows 确定性一对一映射：先全局保留并消费所有 exact feature 对，再对剩余 final points 按 normal-compatible、最近 point/witness、稳定 key tie-break 的顺序 fallback；禁止逐 final point 贪心时让较早 non-exact point 抢走后续 exact source。每个 source 最多消费一次，每个 final feature 只输出一次，禁止保留 unmatched predicted events。
+- 对一对一匹配到 source solver row 的 observation，`ContactEvent.depth` 必须保留 solver-start authoritative position-input depth，不能被 final manifold depth 覆盖；dense position-row 既有行为锁依赖此语义。只有 unmatched final point 使用 final depth；confirmed speculative 且 final 无 overlap 时公开 depth 固定为 `0`。
+- solver-start 的 `anchor_a` / `anchor_b`、fixed local witnesses 与 source depth 是本帧 transient solver/telemetry 事实；final authoritative manifold 负责跨帧 identity handoff。`ContactRecord` 必须缓存 final feature 对应的 collider-local witnesses，不能把 source witness 与 final feature key 混写。该裁决由既有 small-tangential-slip 行为锁证实：缓存 source witness 会把上一帧求解后的真实位移重复计入下一帧 drift（`0.1875 + 0.08 = 0.2675`），而 final witness 只比较新增的 `0.08`。公开 event 仍不暴露这些内部字段。
+- warm-start drift 必须在每个 collider 自己的 local frame 内比较：world normal 分别逆旋转到 A/B local frame 后，再按既有逐侧 `max` 计算 normal/tangent drift；禁止把 local witness delta 直接与 world normal 点乘，也禁止用两侧相减抵消共同漂移。
+- final authoritative narrowphase 无 overlap 时，任何非 sensor source row 只有在本帧实际执行过 base normal solve、且最终累计 normal impulse 为正时，才视为 confirmed solver interaction；current/predicted discovery origin 都通过同一门，不作排他条件。此时使用 final pose 投影后的 source collider-local witnesses 定稿公开 point/cache anchor，公开 depth 固定为 `0`，并保留本帧真实 solver telemetry；下一步若没有 current/predicted contact，再自然发出 `ContactEnded`。禁止以旧 warm-start impulse、row 存在或 predicted feature 存在替代本帧 base solve 事实。
+- restitution second pass 同样必须以本帧 base normal solve 已执行且最终累计 normal impulse 为正为门；`velocity_iterations = 0` 时不得用旧 warm-start impulse 触发 restitution 或 confirmed lifecycle。
+- final feature 无 exact source feature 时，normal-compatible nearest-source remap 还必须通过现有 `PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD` 几何信任门；超限视为 unmatched final，solver telemetry/impulse 归零，禁止把远处旧 row 映射到新拓扑。
+- `picea-lab` 的 feature-churn 诊断必须区分时点：`WarmStartCacheReason::MissFeatureId` 与 `source_row_continuity_*` 描述 solver-start source row；由公开 final point 重算的 collider-local drift 只能命名并解释为 final-geometry identity continuity，不能反推本帧 prepare 阶段存在 warm fallback。原 `close_local_anchor_count == 0` 将这两个时点混为一谈，已由 frame 9 的样本证伪（prepare 无 `< 0.01` 候选，但 final drift 为 `0.002294`）。用户已批准移除该等零断言并把指标重命名为 `final_close_local_anchor_count`；solver-start 连续性仍由既有 `source_row_continuity_candidate/reason` 断言负责，所有物理阈值与其余 matrix gates 保持不变。
+- 不新增 public field/event；上述 witness、separation 与时点信息只允许作为 core 内部实现细节。
+
+#### Picea 特有兼容约束
+
+- 既有 `sleeping_body_wakes_on_contact_solver_impact` 锁要求同帧产生 `ContactStarted` 或 `ContactPersisted`；因此 confirmed speculative constraint 保留 contact lifecycle，不把事件整体延迟到下一帧。
+- 小 slop 允许最终物体停在接触面前；此时公开 depth 必须为 `0`，不能输出预测 penetration。
+- warm-start tangential drift 保持既有逐侧 `max` 判据；禁止改成 `(drift_a - drift_b)` 以抵消共同漂移来放宽 cache。final feature 重建后仍由既有 warm-start 行为锁裁决是否命中。
+- `matrix_stack_artifacts_capture_nxm_grid_stack_facts` 的现有 RED 是 finalization 数据完整性缺陷的 acceptance gate，禁止修改断言。
+- rebase 后完整 `physics_realism_acceptance` 已证明 3 条既有 WorldAnchor damping 锁全红：旧 main 在 position integration 后执行 joint，而 velocity-first 分支在 final position integration 前执行 joint。兼容修复仅允许让 WorldAnchor damping 的 axis/lever arm 按 post-velocity predicted endpoint 评估，并保持既有 public damping 语义与断言；不得改变 Distance joint、阈值或 API。
+
+#### TDD RED 与既有行为锁
+
+新增并先证明以下 3 条 RED：
+
+1. 默认 `position_iterations` 下，speculative-only constraint 不产生 position correction。
+2. contact event geometry 与最终 authoritative circles 的 pose/表面一致，不能沿用预测 point/depth。
+3. 第二步 warm-start/active cache 不因 solver-start、predicted、final 三个时点漂移而 drop。
+
+同时保留现有新 phase-order 锁 `velocity_first_contact_uses_preintegrated_pose_before_final_position_integration`，并保留以下 3 条既有红锁：
+
+- `sleeping_body_wakes_on_contact_solver_impact`
+- `warm_start_cache_transfers_tangent_impulse_across_small_tangential_slip`
+- `matrix_stack_artifacts_capture_nxm_grid_stack_facts`
+
+禁止删除、放宽或改写上述既有断言；若实现要求改变断言，必须重新进入 spec/user gate。
+
+#### 文件范围与禁区
+
+- 允许修改：`crates/picea/src/pipeline/integrate.rs`、`crates/picea/src/pipeline/step.rs`、`crates/picea/src/pipeline/contacts.rs`、`crates/picea/src/pipeline/joints.rs`、`crates/picea/src/solver/contact.rs`、`crates/picea/src/world/contact_state.rs`、`crates/picea/tests/physics_realism_acceptance.rs`、`crates/picea-lab/tests/artifact_run.rs`，以及本计划文档。`contact_state.rs` 仅限 `pub(crate)` final local-witness cache 字段；`artifact_run.rs` 仅限上述 final/solver-start 诊断时点纠正；`joints.rs` 仅限上述 WorldAnchor damping predicted-endpoint 兼容修复。
+- 禁止修改：`crates/picea/src/lib.rs` 与任何 public API；`broadphase`、`narrowphase`、`ccd`。禁止修改 Distance joint、阈值或 API。
+- 禁止通过调整阈值、校准 artifact 或放宽测试断言消除红灯。
+
+#### Targeted 验收门
+
+以下命令全部必须使用 `rtk proxy`，且 targeted/review 闭环完成后才能进入完整 E2E：
+
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance velocity_first_contact_uses_preintegrated_pose_before_final_position_integration -- --exact --nocapture`
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance sleeping_body_wakes_on_contact_solver_impact -- --exact --nocapture`
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance warm_start_cache_transfers_tangent_impulse_across_small_tangential_slip -- --exact --nocapture`
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance world_anchor_damping_reduces_offset_anchor_radial_speed_from_rotation -- --exact --nocapture`
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance world_anchor_damping_uses_clamped_per_step_strength_and_preserves_tangent -- --exact --nocapture`
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance world_anchor_damping_at_zero_length_has_no_axis_bias -- --exact --nocapture`
+- `rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_artifacts_capture_nxm_grid_stack_facts -- --exact --nocapture`
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance`
+- `rtk proxy cargo test -p picea --lib`
+- `rtk proxy cargo clippy -p picea --all-targets`
+- `rtk proxy git diff --check`
+
+完整 workspace、lab/web 与 browser E2E 仅在上述 targeted gates 和 reviewer 闭环后执行。
+
+#### 成功标准
+
+- velocity-first 顺序下，普通非 CCD 接触能在同帧使用 preintegrated pose 发现并先解速度，再以已解速度完成最终位置积分。
+- speculative manifold 只发现 future feature；velocity row 使用 fixed local witnesses / signed separation，residual position correction 不消费 predicted depth，restitution 只在本帧 base normal solve 已执行且累计正冲量后进入第二阶段。
+- final authoritative manifold 负责公开 geometry 与跨帧 cache identity；source telemetry 全局 exact 优先、fallback 受既有 local-witness 信任门约束且一对一消费。
+- WorldAnchor damping 在新顺序下仍按 post-velocity predicted endpoint 消费点速度；不改 Distance joint、public API、既有物理阈值。
+- targeted、workspace/lab/web、真实浏览器 live session 全部通过，reviewer 无 High/Medium/Low finding。
+
+#### 检查结果
+
+- Targeted：`physics_realism_acceptance` 70/70；core lib 109 passed / 1 个既有 ignore；matrix exact 通过，最大穿透 `0.026379`、warm-start final `154/0/0`、48 个动态体 sleeping、无 ejection；picea all-targets Clippy 无 warning；fmt/diff/public API 边界通过。
+- Review：两轮 correctness review 发现并闭环 final-cache 时点、local basis、confirmed lifecycle、nonexact remap、全局 exact reservation、零迭代旧 warm impulse 等问题；最终 release-candidate review 无 High、Medium 或必要 Low。
+- 完整 Rust/lab：`cargo test --workspace --all-targets` 共 336 passed / 6 ignored / 0 failed，9 个 Criterion target Success；workspace check 与 Clippy 全绿无 warning；bench no-run 生成 2 个 executable；server routes 20/20；artifact 27 passed / 5 ignored。
+- Web：在 lockfile `npm ci` 后，production build、UI contract、i18n 全部 exit 0；安装审计为 0 vulnerabilities。
+- Browser：真实 Rust API + Vite live session 成功创建；暂停/单步从 step 1290 到 1291；WorldAnchor 场景持续运行并导出 1 个 joint；软弹簧拖拽把动态箱体实际拉离地面并稳定响应；8x6 matrix 画布显示 49 个 body（1 static + 48 dynamic）且全部动态体进入 sleeping；console 无 warning/error。live diagnostics 对缺失 facts 明确显示“缺失”，未伪造零来源事实。
+
+#### 复跑方式
+
+- Core/targeted：依次运行本节 Targeted 验收门；矩阵详细报告使用 `rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_artifacts_capture_nxm_grid_stack_facts -- --exact --nocapture`。
+- 完整 Rust/lab：`rtk proxy cargo test --workspace --all-targets`、`rtk proxy cargo check --workspace --all-targets`、`rtk proxy cargo clippy --workspace --all-targets`、`rtk proxy cargo bench -p picea --no-run`。
+- Web：在 `crates/picea-lab/web` 先执行 `rtk proxy npm ci`，再运行 `rtk proxy npm run build`、`rtk proxy npm run test:ui-contract`、`rtk proxy npm run test:i18n`。
+- Browser：启动 `rtk proxy cargo run -p picea-lab -- serve --bind 127.0.0.1:18080`，再以 `VITE_PICEA_LAB_API_BASE=http://127.0.0.1:18080 rtk proxy npm run dev -- --host 127.0.0.1 --port 5173` 启动 web；验收 live 落箱暂停/单步、WorldAnchor、soft-spring grab 和 matrix 8x6 sleeping 画面，并检查 console。
+
+#### 范围外
+
+- 未修改 public prelude/events schema、broadphase、narrowphase、CCD 或 Distance joint；未调整既有 warm-start、position-correction、matrix stability 阈值。
+- §3 fuzzy `PartialEq`、revolute joint、narrowphase ignore、其余 vNext design gate 未进入本项；按交接顺序应在各自 spec/public API 门重新确认。
+- grab stiffness/damping/max-speed 的主观手感调参不在 correctness 修复内；本轮只证明 damping 已接线并通过行为锁与 live soft-spring interaction。
+
+#### 残余风险
+
+- `stacked_rectangles_keep_feature_id_when_sat_reference_face_swaps` 仍是仓库既有 `#[ignore]` 设计红锁；本轮通过 persistent cache/final identity 处理运行时连续性，没有越权 canonicalize narrowphase feature。
+- live session 的完整 diagnostics summary 仍未 hydrated；web 明确展示 missing，artifact/headless 路径仍是详细诊断权威。
+- Web production bundle 当前主 chunk 约 `587.45 kB`，Vite 给出大于 500 kB 的既有性能建议；不影响本轮 correctness/E2E，但后续可单独做 code-splitting。
+- 普通非 CCD contact 只比较 solver-start 与固定步末 predicted pose；需要完整 sweep 的高速凸体仍由既有 CCD 路径负责，旋转/曲线中途特征覆盖未在本项扩展。

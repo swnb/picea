@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     events::{NumericsWarningEvent, SleepTransitionReason},
@@ -31,6 +31,7 @@ enum JointSolverRow {
 pub(crate) fn solve_joint_phase(
     world: &mut World,
     dt: FloatNum,
+    ccd_clamped_bodies: &BTreeSet<BodyHandle>,
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     numeric_warnings: &mut Vec<NumericsWarningEvent>,
 ) -> SolverStepStats {
@@ -40,7 +41,13 @@ pub(crate) fn solve_joint_phase(
         wake_reasons,
     );
     let (batches, stats) = joint_solve_batches(world, &islands);
-    world.apply_joint_constraints(dt, batches, wake_reasons, numeric_warnings);
+    world.apply_joint_constraints(
+        dt,
+        ccd_clamped_bodies,
+        batches,
+        wake_reasons,
+        numeric_warnings,
+    );
     stats
 }
 
@@ -61,6 +68,7 @@ impl World {
     fn apply_joint_constraints(
         &mut self,
         dt: FloatNum,
+        ccd_clamped_bodies: &BTreeSet<BodyHandle>,
         batches: Vec<JointSolveBatch>,
         wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
         numeric_warnings: &mut Vec<NumericsWarningEvent>,
@@ -112,10 +120,12 @@ impl World {
                     }
                     JointSolverRow::WorldAnchor { desc, body_slot } => {
                         let body = batch.body_slots[body_slot];
-                        let pose = self
-                            .body_record(body)
-                            .expect("joint endpoint must stay live during step")
-                            .pose;
+                        let pose = self.world_anchor_solver_pose(
+                            body,
+                            dt,
+                            ccd_clamped_bodies,
+                            numeric_warnings,
+                        );
                         let anchor = pose.transform_point(desc.local_anchor);
                         let axis_to_world_anchor = desc.world_anchor - anchor;
                         let correction = axis_to_world_anchor * desc.stiffness.max(0.0) * dt;
@@ -134,10 +144,20 @@ impl World {
 
                         let damping_strength = (desc.damping * dt).clamp(0.0, 1.0);
                         if damping_strength > 0.0 {
+                            // Position correction changes the authoritative pose, so rebuild
+                            // the post-velocity view before evaluating damping. CCD-clamped
+                            // bodies already sit at their time of impact and must not be
+                            // advanced a second time.
+                            let damping_pose = self.world_anchor_solver_pose(
+                                body,
+                                dt,
+                                ccd_clamped_bodies,
+                                numeric_warnings,
+                            );
                             let record = self
                                 .body_record(body)
                                 .expect("joint endpoint must stay live during step");
-                            let damping_anchor = record.pose.transform_point(desc.local_anchor);
+                            let damping_anchor = damping_pose.transform_point(desc.local_anchor);
                             let axis = (desc.world_anchor - damping_anchor).normalized_or_zero();
                             // A coincident anchor has no physical constraint axis. Unlike the
                             // positional row's deterministic fallback, damping must skip this
@@ -145,8 +165,7 @@ impl World {
                             if axis.length() <= f32::EPSILON {
                                 continue;
                             }
-                            let world_center_of_mass = record
-                                .pose
+                            let world_center_of_mass = damping_pose
                                 .transform_point(record.mass_properties.local_center_of_mass);
                             let anchor_from_center = damping_anchor - world_center_of_mass;
                             // Positive angular velocity is clockwise in Picea screen space, so
@@ -190,6 +209,41 @@ impl World {
                     }
                 }
             }
+        }
+    }
+
+    fn world_anchor_solver_pose(
+        &self,
+        body: BodyHandle,
+        dt: FloatNum,
+        ccd_clamped_bodies: &BTreeSet<BodyHandle>,
+        numeric_warnings: &mut Vec<NumericsWarningEvent>,
+    ) -> crate::body::Pose {
+        let record = self
+            .body_record(body)
+            .expect("joint endpoint must stay live during step");
+        let current = record.pose;
+        if ccd_clamped_bodies.contains(&body) {
+            return current;
+        }
+
+        // WorldAnchor solves before final position integration in the
+        // velocity-first pipeline. Evaluate its geometry at the endpoint that
+        // this body's current velocities would reach, matching the later pose
+        // integration without mutating authoritative state early.
+        let predicted = crate::pipeline::integrate::translated_pose(
+            current,
+            record.linear_velocity * dt,
+            record.angular_velocity * dt,
+        );
+        if crate::pipeline::integrate::is_finite_pose(predicted) {
+            predicted
+        } else {
+            numeric_warnings.push(NumericsWarningEvent {
+                phase: "joint_solve".into(),
+                detail: "world_anchor_joint_prediction".into(),
+            });
+            current
         }
     }
 

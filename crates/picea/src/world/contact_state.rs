@@ -44,8 +44,8 @@ impl ContactKey {
 #[derive(Clone, Debug)]
 pub(crate) struct ContactRecord {
     pub(crate) contact: ContactEvent,
-    pub(crate) anchor_a: crate::math::vector::Vector,
-    pub(crate) anchor_b: crate::math::vector::Vector,
+    pub(crate) witness_a_local: crate::math::point::Point,
+    pub(crate) witness_b_local: crate::math::point::Point,
     pub(crate) normal_impulse: FloatNum,
     pub(crate) tangent_impulse: FloatNum,
 }

@@ -12,7 +12,10 @@ use crate::{
     pipeline::{
         broadphase::{BroadphaseStats, ColliderProxy},
         island::SolverStepStats,
-        narrowphase::{contact_from_shapes_with_cached_vertices, decode_feature_id},
+        narrowphase::{
+            contact_from_shapes_with_cached_vertices, decode_feature_id, ContactManifoldGeometry,
+            ContactPointGeometry,
+        },
         StepConfig,
     },
     world::{
@@ -36,9 +39,14 @@ pub(crate) struct ContactObservation {
     pub(crate) collider_b: ColliderHandle,
     pub(crate) anchor_a: Vector,
     pub(crate) anchor_b: Vector,
+    pub(crate) witness_a_local: Point,
+    pub(crate) witness_b_local: Point,
+    pub(crate) normal_a_local: Vector,
+    pub(crate) normal_b_local: Vector,
     pub(crate) point: Point,
     pub(crate) normal: Vector,
     pub(crate) depth: FloatNum,
+    pub(crate) signed_separation: FloatNum,
     pub(crate) feature_id: crate::handles::ContactFeatureId,
     pub(crate) reduction_reason: ContactReductionReason,
     pub(crate) is_sensor: bool,
@@ -69,6 +77,7 @@ pub(crate) struct ContactObservation {
     pub(crate) tangent_impulse_clamped: bool,
     pub(crate) restitution_velocity_threshold: FloatNum,
     pub(crate) restitution_applied: bool,
+    pub(crate) base_normal_solve_executed: bool,
     pub(crate) generic_convex_trace: Option<GenericConvexTrace>,
     pub(crate) ccd_trace: Option<CcdTrace>,
 }
@@ -81,26 +90,29 @@ struct ColliderSnapshot {
     world_pose: Pose,
     aabb: ShapeAabb,
     convex_vertices: Option<Vec<Point>>,
+    current_world_pose: Pose,
+    current_aabb: ShapeAabb,
+    current_convex_vertices: Option<Vec<Point>>,
     material: Material,
     filter: CollisionFilter,
     is_sensor: bool,
 }
 
-pub(crate) fn run_contact_phases(
+pub(crate) struct PendingContactPhases {
+    observations: Vec<ContactObservation>,
+    previous_contacts: BTreeMap<ContactKey, ContactRecord>,
+    broadphase_stats: BroadphaseStats,
+    solver_stats: SolverStepStats,
+}
+
+pub(crate) fn run_contact_solve_phase(
     world: &mut World,
     config: &StepConfig,
     wake_reasons: &mut BTreeMap<BodyHandle, SleepTransitionReason>,
     ccd_traces: &[CcdTrace],
-) -> (
-    Vec<WorldEvent>,
-    usize,
-    usize,
-    BroadphaseStats,
-    WarmStartStats,
-    SolverStepStats,
-) {
-    let mut contacts = world.collect_contact_observations(ccd_traces);
-    let broadphase_stats = contacts.broadphase_stats;
+    predicted_body_poses: &BTreeMap<BodyHandle, Pose>,
+) -> PendingContactPhases {
+    let mut contacts = world.collect_contact_observations(ccd_traces, predicted_body_poses);
     let previous_contacts = world.take_active_contacts();
     world.prepare_contact_warm_start(&mut contacts.observations, &previous_contacts);
     let solver_stats = crate::solver::contact::resolve_contacts(
@@ -109,15 +121,35 @@ pub(crate) fn run_contact_phases(
         config,
         wake_reasons,
     );
+    PendingContactPhases {
+        observations: contacts.observations,
+        previous_contacts,
+        broadphase_stats: contacts.broadphase_stats,
+        solver_stats,
+    }
+}
+
+pub(crate) fn finalize_contact_phases(
+    world: &mut World,
+    mut pending: PendingContactPhases,
+) -> (
+    Vec<WorldEvent>,
+    usize,
+    usize,
+    BroadphaseStats,
+    WarmStartStats,
+    SolverStepStats,
+) {
+    world.finalize_contact_observations(&mut pending.observations);
     let (events, contact_count, manifold_count, warm_start_stats) =
-        world.refresh_contact_events(contacts.observations, previous_contacts);
+        world.refresh_contact_events(pending.observations, pending.previous_contacts);
     (
         events,
         contact_count,
         manifold_count,
-        broadphase_stats,
+        pending.broadphase_stats,
         warm_start_stats,
-        solver_stats,
+        pending.solver_stats,
     )
 }
 
@@ -130,14 +162,17 @@ impl World {
     fn collect_contact_observations(
         &mut self,
         ccd_traces: &[CcdTrace],
+        predicted_body_poses: &BTreeMap<BodyHandle, Pose>,
     ) -> ContactPhaseObservations {
         let ccd_traces = ccd_trace_map(ccd_traces);
-        let colliders = self.live_collider_snapshots();
+        let colliders = self.live_collider_snapshots(predicted_body_poses);
         let proxies = colliders
             .iter()
             .map(|collider| ColliderProxy {
                 handle: collider.handle,
-                aabb: collider.aabb,
+                // Preserve solver-start overlap while widening discovery just
+                // enough to include the pose reached by this fixed step.
+                aabb: union_aabb(collider.current_aabb, collider.aabb),
             })
             .collect::<Vec<_>>();
         let mut broadphase = self.update_broadphase(&proxies);
@@ -154,7 +189,17 @@ impl World {
                 broadphase.stats.filter_drop_count += 1;
                 continue;
             }
-            let Some(contact) = contact_from_shapes_with_cached_vertices(
+            let current_contact = contact_from_shapes_with_cached_vertices(
+                &collider_a.shape,
+                collider_a.current_world_pose,
+                collider_a.current_aabb,
+                collider_a.current_convex_vertices.as_deref(),
+                &collider_b.shape,
+                collider_b.current_world_pose,
+                collider_b.current_aabb,
+                collider_b.current_convex_vertices.as_deref(),
+            );
+            let predicted_contact = contact_from_shapes_with_cached_vertices(
                 &collider_a.shape,
                 collider_a.world_pose,
                 collider_a.aabb,
@@ -163,10 +208,11 @@ impl World {
                 collider_b.world_pose,
                 collider_b.aabb,
                 collider_b.convex_vertices.as_deref(),
-            ) else {
+            );
+            if current_contact.is_none() && predicted_contact.is_none() {
                 broadphase.stats.narrowphase_drop_count += 1;
                 continue;
-            };
+            }
 
             let (
                 ordered_a,
@@ -175,7 +221,8 @@ impl World {
                 ordered_body_b,
                 ordered_pose_a,
                 ordered_pose_b,
-                ordered_normal,
+                ordered_current_pose_a,
+                ordered_current_pose_b,
             ) = if collider_a.handle <= collider_b.handle {
                 (
                     collider_a.handle,
@@ -184,7 +231,8 @@ impl World {
                     collider_b.body,
                     collider_a.world_pose,
                     collider_b.world_pose,
-                    contact.normal,
+                    collider_a.current_world_pose,
+                    collider_b.current_world_pose,
                 )
             } else {
                 (
@@ -194,31 +242,72 @@ impl World {
                     collider_a.body,
                     collider_b.world_pose,
                     collider_a.world_pose,
-                    -contact.normal,
+                    collider_b.current_world_pose,
+                    collider_a.current_world_pose,
                 )
             };
 
-            for point in contact.points {
-                let pair_key = ContactPairKey::new(ordered_a, ordered_b);
-                observations.push(contact_observation_from_point(
-                    ordered_a,
-                    ordered_b,
-                    ordered_body_a,
-                    ordered_body_b,
-                    ordered_pose_a,
-                    ordered_pose_b,
-                    point.point,
-                    ordered_normal,
-                    point.depth,
-                    point.feature_id,
-                    contact.reduction_reason,
-                    collider_a.is_sensor || collider_b.is_sensor,
-                    combine_materials(collider_a.material, collider_b.material),
-                    contact.generic_convex_trace,
-                    ccd_traces.get(&(ordered_a, ordered_b)).copied(),
-                    pair_key,
-                ));
+            let mut pair_observations = BTreeMap::new();
+            for (contact, predicted) in current_contact
+                .iter()
+                .map(|contact| (contact, false))
+                .chain(predicted_contact.iter().map(|contact| (contact, true)))
+            {
+                let normal = if collider_a.handle <= collider_b.handle {
+                    contact.normal
+                } else {
+                    -contact.normal
+                };
+                for point in &contact.points {
+                    let key = ContactKey::new(ordered_a, ordered_b, point.feature_id);
+                    // A real solver-start feature owns the row. Predicted geometry
+                    // only contributes features not already confirmed at that time.
+                    if predicted && pair_observations.contains_key(&key) {
+                        continue;
+                    }
+                    let current_depth = current_contact
+                        .as_ref()
+                        .and_then(|current| {
+                            current
+                                .points
+                                .iter()
+                                .find(|candidate| candidate.feature_id == point.feature_id)
+                        })
+                        .map(|point| point.depth)
+                        .unwrap_or(0.0);
+                    let observation = contact_observation_from_point(
+                        ordered_a,
+                        ordered_b,
+                        ordered_body_a,
+                        ordered_body_b,
+                        if predicted {
+                            ordered_pose_a
+                        } else {
+                            ordered_current_pose_a
+                        },
+                        if predicted {
+                            ordered_pose_b
+                        } else {
+                            ordered_current_pose_b
+                        },
+                        ordered_current_pose_a,
+                        ordered_current_pose_b,
+                        point.point,
+                        normal,
+                        point.depth,
+                        current_depth,
+                        point.feature_id,
+                        contact.reduction_reason,
+                        collider_a.is_sensor || collider_b.is_sensor,
+                        combine_materials(collider_a.material, collider_b.material),
+                        contact.generic_convex_trace,
+                        ccd_traces.get(&(ordered_a, ordered_b)).copied(),
+                        ContactPairKey::new(ordered_a, ordered_b),
+                    );
+                    pair_observations.insert(key, observation);
+                }
             }
+            observations.extend(pair_observations.into_values());
         }
 
         ContactPhaseObservations {
@@ -333,8 +422,8 @@ impl World {
                 contact.key,
                 ContactRecord {
                     contact: event,
-                    anchor_a: contact.anchor_a,
-                    anchor_b: contact.anchor_b,
+                    witness_a_local: contact.witness_a_local,
+                    witness_b_local: contact.witness_b_local,
                     normal_impulse: contact.normal_impulse,
                     tangent_impulse: contact.tangent_impulse,
                 },
@@ -356,12 +445,157 @@ impl World {
         (events, contact_count, manifold_count, warm_start_stats)
     }
 
-    fn live_collider_snapshots(&self) -> Vec<ColliderSnapshot> {
+    fn finalize_contact_observations(&self, contacts: &mut Vec<ContactObservation>) {
+        let mut pairs = BTreeMap::<ContactPairKey, Vec<ContactObservation>>::new();
+        for contact in std::mem::take(contacts) {
+            pairs.entry(contact.pair_key).or_default().push(contact);
+        }
+
+        for sources in pairs.values_mut() {
+            sources.sort_by_key(|contact| contact.key);
+            let Some(prototype) = sources.first().cloned() else {
+                continue;
+            };
+            let Some((pose_a, pose_b)) = self.contact_collider_poses(&prototype) else {
+                continue;
+            };
+
+            if let Some(manifold) = self.final_contact_manifold(&prototype) {
+                let mut available_sources = sources
+                    .drain(..)
+                    .map(Some)
+                    .collect::<Vec<Option<ContactObservation>>>();
+                let final_points = manifold
+                    .points
+                    .into_iter()
+                    .map(|point| (point.feature_id, point))
+                    .collect::<BTreeMap<_, _>>()
+                    .into_values()
+                    .collect::<Vec<_>>();
+                let matched_sources = reserve_final_sources(
+                    &mut available_sources,
+                    pose_a,
+                    pose_b,
+                    manifold.normal,
+                    &final_points,
+                );
+                for (point, matched_source) in final_points.into_iter().zip(matched_sources) {
+                    let source_trust_frame = matched_source
+                        .as_ref()
+                        .map(|source| (source.depth, source.anchor_a, source.anchor_b));
+                    let mut contact = matched_source.unwrap_or_else(|| {
+                        contact_observation_from_point(
+                            prototype.collider_a,
+                            prototype.collider_b,
+                            prototype.body_a,
+                            prototype.body_b,
+                            pose_a,
+                            pose_b,
+                            pose_a,
+                            pose_b,
+                            point.point,
+                            manifold.normal,
+                            point.depth,
+                            point.depth,
+                            point.feature_id,
+                            manifold.reduction_reason,
+                            prototype.is_sensor,
+                            prototype.material,
+                            manifold.generic_convex_trace,
+                            prototype.ccd_trace,
+                            prototype.pair_key,
+                        )
+                    });
+                    apply_final_manifold_geometry(
+                        &mut contact,
+                        pose_a,
+                        pose_b,
+                        manifold.normal,
+                        point,
+                        manifold.reduction_reason,
+                        manifold.generic_convex_trace,
+                    );
+                    if let Some((depth, anchor_a, anchor_b)) = source_trust_frame {
+                        // Position correction and warm-start trust are evaluated
+                        // at solver start. Final geometry owns cache identity and
+                        // local witnesses, but must not move the current row inputs.
+                        contact.depth = depth;
+                        contact.anchor_a = anchor_a;
+                        contact.anchor_b = anchor_b;
+                    }
+                    contacts.push(contact);
+                }
+            } else {
+                for mut contact in sources.drain(..) {
+                    if !confirmed_solver_interaction(&contact) {
+                        continue;
+                    }
+                    let witness_a = pose_a.transform_point(contact.witness_a_local);
+                    let witness_b = pose_b.transform_point(contact.witness_b_local);
+                    let signed_separation = (witness_a - witness_b).dot(contact.normal);
+                    if !signed_separation.is_finite() {
+                        continue;
+                    }
+                    contact.point = midpoint(witness_a, witness_b);
+                    contact.signed_separation = signed_separation;
+                    contact.depth = 0.0;
+                    contact.normal_a_local = contact.normal.rotated(-pose_a.angle());
+                    contact.normal_b_local = contact.normal.rotated(-pose_b.angle());
+                    contacts.push(contact);
+                }
+            }
+        }
+        contacts.sort_by_key(|contact| contact.key);
+    }
+
+    fn contact_collider_poses(&self, contact: &ContactObservation) -> Option<(Pose, Pose)> {
+        let collider_a = self.collider_record(contact.collider_a).ok()?;
+        let collider_b = self.collider_record(contact.collider_b).ok()?;
+        let body_a = self.body_record(collider_a.body).ok()?;
+        let body_b = self.body_record(collider_b.body).ok()?;
+        Some((
+            collider_a.world_pose(body_a.pose),
+            collider_b.world_pose(body_b.pose),
+        ))
+    }
+
+    fn final_contact_manifold(
+        &self,
+        contact: &ContactObservation,
+    ) -> Option<ContactManifoldGeometry> {
+        let collider_a = self.collider_record(contact.collider_a).ok()?;
+        let collider_b = self.collider_record(contact.collider_b).ok()?;
+        let body_a = self.body_record(collider_a.body).ok()?;
+        let body_b = self.body_record(collider_b.body).ok()?;
+        let geometry_a = collider_a.derived_geometry(body_a.pose);
+        let geometry_b = collider_b.derived_geometry(body_b.pose);
+        contact_from_shapes_with_cached_vertices(
+            &collider_a.shape,
+            collider_a.world_pose(body_a.pose),
+            geometry_a.aabb,
+            geometry_a.convex_vertices.as_deref(),
+            &collider_b.shape,
+            collider_b.world_pose(body_b.pose),
+            geometry_b.aabb,
+            geometry_b.convex_vertices.as_deref(),
+        )
+    }
+
+    fn live_collider_snapshots(
+        &self,
+        predicted_body_poses: &BTreeMap<BodyHandle, Pose>,
+    ) -> Vec<ColliderSnapshot> {
         self.collider_records()
             .filter_map(|(handle, record)| {
                 let body = self.body_record(record.body).ok()?;
-                let world_pose = body.pose.compose(record.local_pose);
-                let geometry = record.derived_geometry(body.pose);
+                let predicted_body_pose = predicted_body_poses
+                    .get(&record.body)
+                    .copied()
+                    .unwrap_or(body.pose);
+                let world_pose = predicted_body_pose.compose(record.local_pose);
+                let geometry = record.derived_geometry(predicted_body_pose);
+                let current_world_pose = body.pose.compose(record.local_pose);
+                let current_geometry = record.derived_geometry(body.pose);
                 Some(ColliderSnapshot {
                     handle,
                     body: record.body,
@@ -369,6 +603,9 @@ impl World {
                     world_pose,
                     aabb: geometry.aabb,
                     convex_vertices: geometry.convex_vertices,
+                    current_world_pose,
+                    current_aabb: current_geometry.aabb,
+                    current_convex_vertices: current_geometry.convex_vertices,
                     material: record.material,
                     filter: record.filter,
                     is_sensor: record.is_sensor,
@@ -384,11 +621,14 @@ fn contact_observation_from_point(
     ordered_b: ColliderHandle,
     ordered_body_a: BodyHandle,
     ordered_body_b: BodyHandle,
-    ordered_pose_a: Pose,
-    ordered_pose_b: Pose,
+    source_pose_a: Pose,
+    source_pose_b: Pose,
+    current_pose_a: Pose,
+    current_pose_b: Pose,
     point: Point,
     normal: Vector,
-    depth: FloatNum,
+    source_depth: FloatNum,
+    current_depth: FloatNum,
     feature_id: crate::handles::ContactFeatureId,
     reduction_reason: ContactReductionReason,
     is_sensor: bool,
@@ -397,6 +637,13 @@ fn contact_observation_from_point(
     ccd_trace: Option<CcdTrace>,
     pair_key: ContactPairKey,
 ) -> ContactObservation {
+    let half_depth = normal * (source_depth * 0.5);
+    let witness_a_local = source_pose_a.inverse_transform_point(point - half_depth);
+    let witness_b_local = source_pose_b.inverse_transform_point(point + half_depth);
+    let witness_a = current_pose_a.transform_point(witness_a_local);
+    let witness_b = current_pose_b.transform_point(witness_b_local);
+    let current_point = midpoint(witness_a, witness_b);
+    let signed_separation = (witness_a - witness_b).dot(normal);
     ContactObservation {
         key: ContactKey::new(ordered_a, ordered_b, feature_id),
         pair_key,
@@ -404,11 +651,16 @@ fn contact_observation_from_point(
         body_b: ordered_body_b,
         collider_a: ordered_a,
         collider_b: ordered_b,
-        anchor_a: point - ordered_pose_a.point(),
-        anchor_b: point - ordered_pose_b.point(),
-        point,
+        anchor_a: current_point - current_pose_a.point(),
+        anchor_b: current_point - current_pose_b.point(),
+        witness_a_local,
+        witness_b_local,
+        normal_a_local: normal.rotated(-current_pose_a.angle()),
+        normal_b_local: normal.rotated(-current_pose_b.angle()),
+        point: current_point,
         normal,
-        depth,
+        depth: current_depth,
+        signed_separation,
         feature_id,
         reduction_reason,
         is_sensor,
@@ -439,8 +691,153 @@ fn contact_observation_from_point(
         tangent_impulse_clamped: false,
         restitution_velocity_threshold: 0.0,
         restitution_applied: false,
+        base_normal_solve_executed: false,
         generic_convex_trace,
         ccd_trace,
+    }
+}
+
+fn midpoint(a: Point, b: Point) -> Point {
+    Point::from((Vector::from(a) + Vector::from(b)) * 0.5)
+}
+
+fn confirmed_solver_interaction(contact: &ContactObservation) -> bool {
+    !contact.is_sensor
+        && contact.base_normal_solve_executed
+        && contact.normal_impulse.is_finite()
+        && contact.normal_impulse > FloatNum::EPSILON
+}
+
+fn final_source_match(
+    sources: &[Option<ContactObservation>],
+    pose_a: Pose,
+    pose_b: Pose,
+    final_normal: Vector,
+    final_point: ContactPointGeometry,
+) -> Option<usize> {
+    if let Some((index, _)) = sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.as_ref().map(|source| (index, source)))
+        .filter(|(_, source)| source.feature_id == final_point.feature_id)
+        .min_by_key(|(_, source)| source.key)
+    {
+        return Some(index);
+    }
+
+    let final_normal = final_normal.normalized_or_zero();
+    if final_normal.length() <= FloatNum::EPSILON {
+        return None;
+    }
+    let half_depth = final_normal * (final_point.depth * 0.5);
+    let final_witness_a = final_point.point - half_depth;
+    let final_witness_b = final_point.point + half_depth;
+    let final_witness_a_local = pose_a.inverse_transform_point(final_witness_a);
+    let final_witness_b_local = pose_b.inverse_transform_point(final_witness_b);
+    sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.as_ref().map(|source| (index, source)))
+        .filter_map(|(index, source)| {
+            let source_normal = source.normal.normalized_or_zero();
+            if source_normal.length() <= FloatNum::EPSILON
+                || source_normal.dot(final_normal) < WARM_START_NORMAL_DOT_THRESHOLD
+            {
+                return None;
+            }
+            let local_witness_drift = (source.witness_a_local - final_witness_a_local)
+                .length()
+                .max((source.witness_b_local - final_witness_b_local).length());
+            if !local_witness_drift.is_finite()
+                || local_witness_drift > PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD
+            {
+                return None;
+            }
+            let source_witness_a = pose_a.transform_point(source.witness_a_local);
+            let source_witness_b = pose_b.transform_point(source.witness_b_local);
+            let source_point = midpoint(source_witness_a, source_witness_b);
+            let distance = (source_point - final_point.point).length()
+                + (source_witness_a - final_witness_a).length()
+                + (source_witness_b - final_witness_b).length();
+            distance
+                .is_finite()
+                .then_some((index, source.key, distance))
+        })
+        .min_by(|(_, lhs_key, lhs_distance), (_, rhs_key, rhs_distance)| {
+            lhs_distance
+                .total_cmp(rhs_distance)
+                .then_with(|| lhs_key.cmp(rhs_key))
+        })
+        .map(|(index, _, _)| index)
+}
+
+fn reserve_final_sources(
+    sources: &mut [Option<ContactObservation>],
+    pose_a: Pose,
+    pose_b: Pose,
+    final_normal: Vector,
+    final_points: &[ContactPointGeometry],
+) -> Vec<Option<ContactObservation>> {
+    let mut matched = (0..final_points.len()).map(|_| None).collect::<Vec<_>>();
+
+    // Exact identities are reserved globally before any distance fallback so
+    // an earlier feature cannot steal a source row owned by a later feature.
+    for (point_index, point) in final_points.iter().enumerate() {
+        let exact_index = sources
+            .iter()
+            .enumerate()
+            .filter_map(|(index, source)| source.as_ref().map(|source| (index, source)))
+            .filter(|(_, source)| source.feature_id == point.feature_id)
+            .min_by_key(|(_, source)| source.key)
+            .map(|(index, _)| index);
+        if let Some(index) = exact_index {
+            matched[point_index] = sources[index].take();
+        }
+    }
+
+    for (point_index, point) in final_points.iter().enumerate() {
+        if matched[point_index].is_some() {
+            continue;
+        }
+        if let Some(index) = final_source_match(sources, pose_a, pose_b, final_normal, *point) {
+            matched[point_index] = sources[index].take();
+        }
+    }
+    matched
+}
+
+fn apply_final_manifold_geometry(
+    contact: &mut ContactObservation,
+    pose_a: Pose,
+    pose_b: Pose,
+    normal: Vector,
+    point: ContactPointGeometry,
+    reduction_reason: ContactReductionReason,
+    generic_convex_trace: Option<GenericConvexTrace>,
+) {
+    let half_depth = normal * (point.depth * 0.5);
+    let witness_a = point.point - half_depth;
+    let witness_b = point.point + half_depth;
+    contact.key = ContactKey::new(contact.collider_a, contact.collider_b, point.feature_id);
+    contact.feature_id = point.feature_id;
+    contact.normal = normal;
+    contact.point = point.point;
+    contact.depth = point.depth;
+    contact.witness_a_local = pose_a.inverse_transform_point(witness_a);
+    contact.witness_b_local = pose_b.inverse_transform_point(witness_b);
+    contact.normal_a_local = normal.rotated(-pose_a.angle());
+    contact.normal_b_local = normal.rotated(-pose_b.angle());
+    contact.signed_separation = (witness_a - witness_b).dot(normal);
+    contact.anchor_a = point.point - pose_a.point();
+    contact.anchor_b = point.point - pose_b.point();
+    contact.reduction_reason = reduction_reason;
+    contact.generic_convex_trace = generic_convex_trace;
+}
+
+fn union_aabb(a: ShapeAabb, b: ShapeAabb) -> ShapeAabb {
+    ShapeAabb {
+        min: Point::new(a.min.x().min(b.min.x()), a.min.y().min(b.min.y())),
+        max: Point::new(a.max.x().max(b.max.x()), a.max.y().max(b.max.y())),
     }
 }
 
@@ -532,8 +929,8 @@ fn persistent_manifold_lifecycle_candidate(
         return false;
     }
 
-    let drift_a = contact.anchor_a - previous.anchor_a;
-    let drift_b = contact.anchor_b - previous.anchor_b;
+    let drift_a = contact.witness_a_local - previous.witness_a_local;
+    let drift_b = contact.witness_b_local - previous.witness_b_local;
     let local_anchor_drift = drift_a.length().max(drift_b.length());
 
     local_anchor_drift.is_finite()
@@ -683,8 +1080,8 @@ fn contact_event(
 }
 
 fn contact_anchor_drift(previous: &ContactRecord, contact: &ContactObservation) -> FloatNum {
-    let drift_a = contact.anchor_a - previous.anchor_a;
-    let drift_b = contact.anchor_b - previous.anchor_b;
+    let drift_a = contact.witness_a_local - previous.witness_a_local;
+    let drift_b = contact.witness_b_local - previous.witness_b_local;
     drift_a.length().max(drift_b.length())
 }
 
@@ -765,11 +1162,15 @@ fn warm_start_transfer(
 
     let previous_normal = previous.contact.normal.normalized_or_zero();
     let current_normal = contact.normal.normalized_or_zero();
+    let current_normal_a_local = contact.normal_a_local.normalized_or_zero();
+    let current_normal_b_local = contact.normal_b_local.normalized_or_zero();
     // Normal mismatch means the old impulse would push along the wrong
     // constraint row. Feature ids alone are not enough after a normal flip.
     if previous_normal.length() <= FloatNum::EPSILON
         || current_normal.length() <= FloatNum::EPSILON
         || previous_normal.dot(current_normal) < WARM_START_NORMAL_DOT_THRESHOLD
+        || current_normal_a_local.length() <= FloatNum::EPSILON
+        || current_normal_b_local.length() <= FloatNum::EPSILON
     {
         return warm_start_transfer_result(WarmStartCacheReason::DroppedNormalMismatch, 0.0, 0.0);
     }
@@ -777,14 +1178,18 @@ fn warm_start_transfer(
     // Feature ids are local geometric names, not raw world-space guarantees.
     // Compare contact anchors relative to both colliders so a pair translating
     // together keeps its cache, while contact movement on either shape drops it.
-    let drift_a = contact.anchor_a - previous.anchor_a;
-    let drift_b = contact.anchor_b - previous.anchor_b;
+    let drift_a = contact.witness_a_local - previous.witness_a_local;
+    let drift_b = contact.witness_b_local - previous.witness_b_local;
     let normal_drift = drift_a
-        .dot(current_normal)
+        .dot(current_normal_a_local)
         .abs()
-        .max(drift_b.dot(current_normal).abs());
-    let tangent = current_normal.perp().normalized_or_zero();
-    let tangential_drift = drift_a.dot(tangent).abs().max(drift_b.dot(tangent).abs());
+        .max(drift_b.dot(current_normal_b_local).abs());
+    let tangent_a_local = current_normal_a_local.perp().normalized_or_zero();
+    let tangent_b_local = current_normal_b_local.perp().normalized_or_zero();
+    let tangential_drift = drift_a
+        .dot(tangent_a_local)
+        .abs()
+        .max(drift_b.dot(tangent_b_local).abs());
     let drift = drift_a.length().max(drift_b.length());
     let anchor_drift = WarmStartTransfer {
         anchor_drift: drift,
@@ -934,9 +1339,14 @@ mod tests {
             collider_b,
             anchor_a: Vector::new(0.25, 0.0),
             anchor_b: Vector::new(-0.25, 0.0),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
+            normal_a_local: Vector::new(1.0, 0.0),
+            normal_b_local: Vector::new(1.0, 0.0),
             point: Point::new(0.0, 0.0),
             normal: Vector::new(1.0, 0.0),
             depth: 0.01,
+            signed_separation: -0.01,
             feature_id,
             reduction_reason: ContactReductionReason::Clipped,
             is_sensor: false,
@@ -967,6 +1377,7 @@ mod tests {
             tangent_impulse_clamped: false,
             restitution_velocity_threshold: 0.0,
             restitution_applied: false,
+            base_normal_solve_executed: false,
             generic_convex_trace: None,
             ccd_trace: None,
         }
@@ -978,8 +1389,8 @@ mod tests {
         let current_feature = test_feature(0x0100_1003, 1);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
-            anchor_a: Vector::new(0.25, 0.0),
-            anchor_b: Vector::new(-0.25, 0.0),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
             tangent_impulse: 0.05,
         };
@@ -1000,6 +1411,163 @@ mod tests {
     }
 
     #[test]
+    fn same_feature_index_warm_start_uses_local_witnesses_across_rigid_rotation() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_1003, 1);
+        let previous_record = ContactRecord {
+            contact: test_contact_event(previous_feature),
+            witness_a_local: Point::new(2.0, 0.0),
+            witness_b_local: Point::new(-2.0, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut contact = test_contact_observation(current_feature);
+        let angle: FloatNum = 0.1;
+        contact.normal = Vector::new(angle.cos(), angle.sin());
+        contact.anchor_a = Vector::new(2.0, 0.0).rotated(angle);
+        contact.anchor_b = Vector::new(-2.0, 0.0).rotated(angle);
+        contact.witness_a_local = Point::new(2.0, 0.0);
+        contact.witness_b_local = Point::new(-2.0, 0.0);
+        let mut contacts = vec![contact];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(contacts[0].warm_start_reason, WarmStartCacheReason::Hit);
+        assert_eq!(contacts[0].warm_start_normal_impulse, 0.25);
+        assert_eq!(contacts[0].warm_start_tangent_impulse, 0.05);
+    }
+
+    #[test]
+    fn warm_start_projects_local_witness_drift_in_each_collider_basis() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_1003, 1);
+        let previous_record = ContactRecord {
+            contact: test_contact_event(previous_feature),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
+            normal_impulse: 0.25,
+            tangent_impulse: 0.05,
+        };
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let local_delta = Vector::new(0.09, 0.04);
+        let mut contact = test_contact_observation(current_feature);
+        contact.witness_a_local += local_delta;
+        contact.witness_b_local += local_delta;
+        contact.normal_a_local = Vector::new(0.0, 1.0);
+        contact.normal_b_local = Vector::new(0.0, 1.0);
+        let mut contacts = vec![contact];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(contacts[0].warm_start_reason, WarmStartCacheReason::Hit);
+    }
+
+    #[test]
+    fn confirmed_solver_interaction_requires_finite_positive_non_sensor_impulse() {
+        let mut contact = test_contact_observation(test_feature(0x0100_1003, 0));
+        contact.normal_impulse = 0.25;
+        assert!(!confirmed_solver_interaction(&contact));
+
+        contact.base_normal_solve_executed = true;
+        assert!(confirmed_solver_interaction(&contact));
+
+        contact.normal_impulse = 0.0;
+        assert!(!confirmed_solver_interaction(&contact));
+
+        let zero_impulse_from_any_discovery_origin = contact.clone();
+        assert!(!confirmed_solver_interaction(
+            &zero_impulse_from_any_discovery_origin
+        ));
+
+        contact.normal_impulse = FloatNum::NAN;
+        assert!(!confirmed_solver_interaction(&contact));
+
+        contact.normal_impulse = 0.25;
+        contact.is_sensor = true;
+        assert!(!confirmed_solver_interaction(&contact));
+    }
+
+    #[test]
+    fn final_source_match_rejects_non_exact_distant_local_witnesses() {
+        let mut source = test_contact_observation(test_feature(0x0100_1003, 0));
+        source.witness_a_local = Point::new(1.0, 0.0);
+        source.witness_b_local = Point::new(-1.0, 0.0);
+        let final_point = ContactPointGeometry {
+            point: Point::new(0.0, 0.0),
+            depth: 0.01,
+            feature_id: test_feature(0x0100_1004, 0),
+        };
+
+        let matched = final_source_match(
+            &[Some(source)],
+            Pose::default(),
+            Pose::default(),
+            Vector::new(1.0, 0.0),
+            final_point,
+        );
+
+        assert_eq!(matched, None);
+    }
+
+    #[test]
+    fn final_source_reservation_preserves_later_exact_match() {
+        let small_feature = test_feature(0x0100_1001, 0);
+        let fallback_feature = test_feature(0x0100_1002, 0);
+        let large_feature = test_feature(0x0100_1003, 0);
+        let mut exact_large = test_contact_observation(large_feature);
+        exact_large.witness_a_local = Point::new(0.005, 0.0);
+        exact_large.witness_b_local = Point::new(0.015, 0.0);
+        exact_large.normal_impulse = 2.0;
+        let mut fallback_small = test_contact_observation(fallback_feature);
+        fallback_small.witness_a_local = Point::new(0.045, 0.0);
+        fallback_small.witness_b_local = Point::new(0.055, 0.0);
+        fallback_small.normal_impulse = 1.0;
+        let mut sources = vec![Some(fallback_small), Some(exact_large)];
+        sources.sort_by_key(|source| source.as_ref().map(|source| source.key));
+        let final_points = [
+            ContactPointGeometry {
+                point: Point::new(0.0, 0.0),
+                depth: 0.01,
+                feature_id: small_feature,
+            },
+            ContactPointGeometry {
+                point: Point::new(0.2, 0.0),
+                depth: 0.01,
+                feature_id: large_feature,
+            },
+        ];
+
+        let matched = reserve_final_sources(
+            &mut sources,
+            Pose::default(),
+            Pose::default(),
+            Vector::new(1.0, 0.0),
+            &final_points,
+        );
+
+        assert_eq!(
+            matched[0].as_ref().map(|source| source.normal_impulse),
+            Some(1.0)
+        );
+        assert_eq!(
+            matched[1].as_ref().map(|source| source.normal_impulse),
+            Some(2.0)
+        );
+        assert!(sources.iter().all(Option::is_none));
+    }
+
+    #[test]
     fn warm_start_fallback_survives_clip_manifold_point_count_oscillation() {
         // A settling two-point clipped manifold can drop to one point for a
         // frame (reduction reason Clipped -> SinglePoint) and come back. The
@@ -1009,8 +1577,8 @@ mod tests {
         let current_feature = test_feature(0x0100_1003, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
-            anchor_a: Vector::new(0.25, 0.0),
-            anchor_b: Vector::new(-0.25, 0.0),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
             tangent_impulse: 0.05,
         };
@@ -1036,8 +1604,8 @@ mod tests {
         let current_feature = test_feature(0x0100_1004, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
-            anchor_a: Vector::new(0.25, 0.0),
-            anchor_b: Vector::new(-0.25, 0.0),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
             tangent_impulse: 0.05,
         };
@@ -1077,8 +1645,8 @@ mod tests {
         let current_feature = test_feature(0x0100_3001, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
-            anchor_a: Vector::new(0.25, 0.0),
-            anchor_b: Vector::new(-0.25, 0.0),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
             tangent_impulse: 0.05,
         };
@@ -1120,8 +1688,8 @@ mod tests {
         let current_feature = test_feature(0x0100_3001, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
-            anchor_a: Vector::new(0.25, 0.0),
-            anchor_b: Vector::new(-0.25, 0.0),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
             tangent_impulse: 0.05,
         };
@@ -1153,8 +1721,8 @@ mod tests {
         let previous_manifold_id = previous_event.manifold_id;
         let previous_record = ContactRecord {
             contact: previous_event,
-            anchor_a: Vector::new(0.25, 0.0),
-            anchor_b: Vector::new(-0.25, 0.0),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
             tangent_impulse: 0.05,
         };
@@ -1194,8 +1762,8 @@ mod tests {
         let current_feature = test_feature(0x0100_1004, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
-            anchor_a: Vector::new(0.25, 0.0),
-            anchor_b: Vector::new(-0.25, 0.0),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
             tangent_impulse: 0.05,
         };
@@ -1205,7 +1773,7 @@ mod tests {
             previous_record,
         );
         let mut contact = test_contact_observation(current_feature);
-        contact.anchor_a = Vector::new(0.75, 0.0);
+        contact.witness_a_local = Point::new(0.75, 0.0);
         let mut contacts = vec![contact];
         let world = World::new(WorldDesc::default());
 
@@ -1238,8 +1806,8 @@ mod tests {
         previous_event.collider_b = test_collider(4);
         let previous_record = ContactRecord {
             contact: previous_event,
-            anchor_a: Vector::new(0.25, 0.0),
-            anchor_b: Vector::new(-0.25, 0.0),
+            witness_a_local: Point::new(0.25, 0.0),
+            witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
             tangent_impulse: 0.05,
         };

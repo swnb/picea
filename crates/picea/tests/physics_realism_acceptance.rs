@@ -744,6 +744,58 @@ fn solver_impulse_facts_zero_when_warm_start_hit_has_no_solvable_row() {
 }
 
 #[test]
+fn zero_velocity_iterations_cannot_restitute_or_confirm_warm_started_contact() {
+    let mut world = no_gravity_world();
+    let moving = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -0.975,
+        0.0,
+        Vector::new(12.0, 0.0),
+    );
+    let wall = create_body(&mut world, BodyType::Static, 0.975, 0.0, Vector::default());
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.5,
+    };
+    attach_shape(&mut world, moving, SharedShape::circle(1.0), material);
+    attach_shape(&mut world, wall, SharedShape::circle(1.0), material);
+
+    let first = step_world(&mut world, 1);
+    assert!(
+        active_contact_events(&first)
+            .iter()
+            .any(|contact| contact.solver_normal_impulse > 0.0),
+        "fixture must establish a positive warm-start cache"
+    );
+
+    world
+        .apply_body_patch(
+            moving,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(-0.975, 0.0, 0.0)),
+                linear_velocity: Some(Vector::new(12.0, 0.0)),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("second step should reuse the same contact feature");
+    let separated_report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 0,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let separated_contacts = active_contact_events(&separated_report);
+    assert!(
+        separated_contacts.is_empty(),
+        "final-separated contact must not survive solely because a cached impulse was applied: {separated_contacts:?}"
+    );
+}
+
+#[test]
 fn warm_start_cache_drops_cached_impulse_when_normal_orientation_flips() {
     let mut world = no_gravity_world();
     let moving = create_body(
@@ -2910,6 +2962,215 @@ fn jointed_active_island_reports_joint_rows_without_contact_rows() {
         snapshot.stats.contact_row_count,
         report.stats.contact_row_count
     );
+}
+
+#[test]
+fn velocity_first_contact_uses_preintegrated_pose_before_final_position_integration() {
+    let mut world = no_gravity_world();
+    let target = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let mover = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.1,
+        0.0,
+        Vector::new(12.0, 0.0),
+    );
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    // A static circle deliberately avoids the static-convex CCD clamp path. The
+    // ordinary contact phase must still detect the overlap at the mover's
+    // preintegrated pose without committing that pose to authoritative state.
+    attach_shape(&mut world, target, SharedShape::circle(0.5), material);
+    attach_shape(&mut world, mover, SharedShape::circle(0.5), material);
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 10,
+            position_iterations: 0,
+            ..fixed_step_config()
+        },
+        1,
+    );
+
+    assert!(
+        report.events.iter().any(|event| matches!(
+            event,
+            WorldEvent::ContactStarted(_) | WorldEvent::ContactPersisted(_)
+        )),
+        "velocity-first contact generation must see the ordinary body's preintegrated pose in the same frame"
+    );
+    let solved_velocity = body_velocity(&world, mover).x();
+    assert!(
+        solved_velocity < 6.0,
+        "contact velocity solve must substantially reduce the incoming speed before final position integration; vx={solved_velocity}"
+    );
+    let final_x = body_position(&world, mover).x();
+    assert!(
+        final_x < -1.0,
+        "final position must integrate the solved velocity instead of advancing to the unsolved x=-0.9 pose; x={final_x}"
+    );
+}
+
+#[test]
+fn speculative_contact_does_not_apply_predicted_depth_as_position_correction() {
+    let mut world = no_gravity_world();
+    let target = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let mover = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.1,
+        0.0,
+        Vector::new(12.0, 0.0),
+    );
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    // Circle versus circle bypasses the static-convex CCD clamp, isolating the
+    // speculative contact path while the authoritative poses remain separated.
+    attach_shape(&mut world, target, SharedShape::circle(0.5), material);
+    attach_shape(&mut world, mover, SharedShape::circle(0.5), material);
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 0,
+            position_iterations: 1,
+            ..fixed_step_config()
+        },
+        1,
+    );
+
+    assert!(
+        report.stats.contact_row_count > 0,
+        "the predicted overlap should still construct a speculative velocity row"
+    );
+    assert_eq!(
+        report.stats.position_correction_input_contact_count, 0,
+        "predicted overlap depth must not enter authoritative residual position correction"
+    );
+    assert_eq!(
+        report.stats.position_correction_body_count, 0,
+        "separated authoritative poses must not be translated by residual correction"
+    );
+    assert!(
+        report.stats.position_correction_total_translation.abs() <= 1.0e-6,
+        "speculative depth must not move authoritative poses; stats={:?}",
+        report.stats
+    );
+}
+
+#[test]
+fn contact_event_geometry_matches_final_authoritative_circle_poses() {
+    let mut world = no_gravity_world();
+    let target = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let mover = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.1,
+        0.0,
+        Vector::new(12.0, 0.0),
+    );
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    // Circle versus circle bypasses the static-convex CCD clamp, so exported
+    // geometry can be checked against the poses committed after the solve.
+    attach_shape(&mut world, target, SharedShape::circle(0.5), material);
+    attach_shape(&mut world, mover, SharedShape::circle(0.5), material);
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            velocity_iterations: 10,
+            position_iterations: 0,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .next()
+        .expect("the speculative velocity constraint should finalize one contact event");
+    let center_a = body_position(&world, contact.body_a);
+    let center_b = body_position(&world, contact.body_b);
+    let offset_to_a = center_a - center_b;
+    let distance = offset_to_a.length();
+    let expected_normal = offset_to_a / distance;
+    let point_on_a = center_a - expected_normal * 0.5;
+    let point_on_b = center_b + expected_normal * 0.5;
+    let expected_point = Point::from((point_on_a + point_on_b) * 0.5);
+    let expected_depth = (1.0 - distance).max(0.0);
+
+    assert!(contact.depth.is_finite());
+    assert!(contact.point.x().is_finite() && contact.point.y().is_finite());
+    assert!(contact.normal.x().is_finite() && contact.normal.y().is_finite());
+    assert!(
+        (contact.depth - expected_depth).abs() <= 1.0e-5,
+        "event depth must describe final authoritative circle poses: contact={contact:?}, expected_depth={expected_depth}"
+    );
+    assert!(
+        (contact.point - expected_point).length() <= 1.0e-5,
+        "event point must be the midpoint of final authoritative surface points: contact={contact:?}, expected_point={expected_point:?}"
+    );
+    assert!(
+        (contact.normal - expected_normal).length() <= 1.0e-5,
+        "event normal must point toward body A in final authoritative geometry: contact={contact:?}, expected_normal={expected_normal:?}"
+    );
+}
+
+#[test]
+fn finalized_speculative_contact_cache_preserves_next_step_warm_start() {
+    let mut world = no_gravity_world();
+    let target = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let mover = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.1,
+        0.0,
+        Vector::new(12.0, 0.0),
+    );
+    let material = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    // Circle versus circle bypasses the static-convex CCD clamp, making the
+    // second frame exercise the cache finalized from a speculative first hit.
+    attach_shape(&mut world, target, SharedShape::circle(0.5), material);
+    attach_shape(&mut world, mover, SharedShape::circle(0.5), material);
+    let mut pipeline = SimulationPipeline::new(StepConfig {
+        velocity_iterations: 10,
+        position_iterations: 0,
+        ..fixed_step_config()
+    });
+
+    let first = pipeline.step(&mut world);
+    let first_contact = active_contact_events(&first)
+        .into_iter()
+        .next()
+        .expect("the first predicted hit should finalize a contact");
+    assert!(
+        first_contact.solver_normal_impulse > 0.0,
+        "the first frame must cache a solved normal impulse: {first_contact:?}"
+    );
+
+    let second = pipeline.step(&mut world);
+    let second_contact = second
+        .events
+        .iter()
+        .find_map(|event| match event {
+            WorldEvent::ContactPersisted(contact) => Some(*contact),
+            _ => None,
+        })
+        .expect("the finalized first-frame contact should persist on the next step");
+
+    assert_eq!(second_contact.contact_id, first_contact.contact_id);
+    assert_eq!(second_contact.manifold_id, first_contact.manifold_id);
+    assert_eq!(second_contact.warm_start_reason, WarmStartCacheReason::Hit);
+    assert_eq!(second.stats.warm_start_drop_count, 0);
 }
 
 #[test]
