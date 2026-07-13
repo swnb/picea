@@ -123,11 +123,6 @@ impl World {
     ) {
         let body_handles = self.bodies().collect::<Vec<_>>();
         for handle in body_handles {
-            // Predictive CCD already advanced these bodies to their impact plane
-            // this step; integrating them again would push them past it.
-            if skip_bodies.contains(&handle) {
-                continue;
-            }
             let record = self
                 .body_record_mut(handle)
                 .expect("live body handles must resolve during step");
@@ -137,9 +132,16 @@ impl World {
                     if record.sleeping {
                         continue;
                     }
+                    // Predictive CCD already applied this step's linear advance to
+                    // clamped bodies, but angular motion still needs its full step.
+                    let translation = if skip_bodies.contains(&handle) {
+                        Vector::default()
+                    } else {
+                        record.linear_velocity * config.dt
+                    };
                     let pose = translated_pose(
                         record.pose,
-                        record.linear_velocity * config.dt,
+                        translation,
                         record.angular_velocity * config.dt,
                     );
                     if !is_finite_pose(pose) {

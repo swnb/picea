@@ -3430,6 +3430,43 @@ fn ccd_fast_small_body_does_not_tunnel_through_thin_wall() {
     assert_fast_small_body_does_not_tunnel_through_thin_wall();
 }
 
+#[test]
+fn ccd_clamped_dynamic_circle_preserves_full_step_angular_integration() {
+    let mut world = no_gravity_world();
+    let wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let angular_velocity = 6.0;
+    let spinner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            linear_velocity: Vector::new(200.0, 0.0),
+            angular_velocity,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("spinning body should be created");
+    let frictionless = Material {
+        friction: 0.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, wall, SharedShape::rect(0.1, 10.0), frictionless);
+    attach_shape(&mut world, spinner, SharedShape::circle(0.05), frictionless);
+
+    let report = step_world(&mut world, 1);
+    let spinner = world
+        .try_body(spinner)
+        .expect("spinning body should still exist");
+    let angle = spinner.pose().angle();
+    let expected_angle = angular_velocity * DT;
+
+    assert_eq!(report.stats.ccd_clamp_count, 1);
+    assert!(
+        (angle - expected_angle).abs() < 1.0e-4,
+        "CCD-clamped body should retain full-step angular integration; angle={angle}, expected_angle={expected_angle}, angular_velocity={}",
+        spinner.angular_velocity()
+    );
+}
+
 fn assert_fast_small_body_does_not_tunnel_through_thin_wall() {
     // Physical behavior: CCD should sweep fast bodies between poses and stop at the first time
     // of impact instead of relying only on the final sampled pose after integration.
