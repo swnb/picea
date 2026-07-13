@@ -44,7 +44,13 @@ Profiles：architecture-heavy, api-contract, ui-browser
 ### Hygiene 与剩余边界
 
 - Git-visible 仅三份 docs；playwright、`target`、`dist`、`node_modules` 均不 visible；`crates/picea/src/lib.rs` 相对 `247fbda` zero diff。
-- 本任务未开始 handoff §4/§5/§6。E1 其余 contact/sleep、E2 的 body damping 与 `DistanceJointDesc.damping`、E5 的 chain/bridge diagnostics，以及 E3/E4/E6/D7/V8/C9 仍未整体完成；下文范围外与残余风险继续有效。
+- 截至本次 §1-§3 integration closeout，handoff §4/§5/§6 尚未开始；当前 §4 仅进入下述 S4-D 设计复审。E1 其余 contact/sleep、E2 的 body damping 与 `DistanceJointDesc.damping`、E5 的 chain/bridge diagnostics，以及 E3/E4/E6/D7/V8/C9 仍未整体完成；下文范围外与残余风险继续有效。
+
+### Handoff §4 addendum（执行中）
+
+- Handoff §4 由独立 living spec `docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md` 路由；其 `S4-*` 前缀不重命名、替代或推进本计划 E4 complex-shape milestone。
+- 用户已明确批准 raw SAT feature 保持 final-geometry 语义，并由 history-aware `ContactId` / `ManifoldId` 双射保证跨 reference/incident swap persistence；该裁决 supersede handoff 的 raw-id 字面目标。
+- 用户已批准把 shape/local-pose geometry revision invalidation 纳入 S4。当前只处于 S4-D 复审，尚未提交设计、RED tests 或 production implementation。
 
 ## 目标
 
