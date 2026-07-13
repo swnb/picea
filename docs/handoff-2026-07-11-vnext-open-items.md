@@ -1,5 +1,16 @@
 # 交接：picea vNext 未完成项（2026-07-11）
 
+## 最新 closeout 状态（本次集成）
+
+- 当前集成分支为 `feat/vnext-s1-s3-integration`，integration base 为 `main=247fbda`；文档提交前 source HEAD=`b1f1515`，本区块随后由 docs closeout commit 承载。现场事实仍以当前 `git status` 和提交历史为准。
+- §1 velocity-first + CCD 前置正式化已完成实现、复审及 Rust/lab/web/真实浏览器 E2E，并通过 `44931fe` 进入当前集成分支。
+- §2 的 `WorldAnchorJointDesc.damping` 语义 bug 已完成正确性修复、复审及 E2E，提交 `247fbda` 已在当前分支祖先中；grab 主观手感调参、body damping、`DistanceJointDesc.damping` 仍未做。
+- §3 Point/Vector equality contract 已完成实现、RED/GREEN、复审及端到端消费者验收，并通过 `5b9ba37` 进入当前集成分支。
+- 组合验收已完成：targeted 12/12、full 15/15、Web contracts/build 与真实浏览器 online/offline 路径均通过；服务已全部停止，Git hygiene 与 `lib.rs` zero-diff 边界通过。
+- 首轮 reviewer 的 1 个 Medium（CCD-clamped body 丢失整步角度积分）已由行为锁和最小修复 `b1f1515` 闭环，复审无 High/Medium；保留 Low：artifact final-geometry candidate 命名可能被误读为 solver-start eligibility，仅作为诊断解释风险保留。
+- 本次仅完成 handoff §1-§3 集成 closeout，不代表整个 E1/E2/E5、V8、E6 或 C9 完成；§4 narrowphase `#[ignore]`、§5 revolute joint、§6 其余独立 design gate 仍开放，范围与风险没有因本次集成而缩小。
+- 下方正文是 `HEAD=2178902` 时的历史交接快照，不删除也不改写其证据；发生状态冲突时，以本区块和当前 Git 事实为准。
+
 > 面向接手的 agent（codex）。这份文档自包含：读完即可上手。所有 `file:line` 已在 `HEAD=2178902`（branch `main`，与 `origin/main` 同步）核实。
 
 ## 0. 先读什么 / 工作纪律（不可跳过）

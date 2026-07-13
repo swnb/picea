@@ -2,18 +2,49 @@
 
 状态：已批准
 计划文档：docs/plans/2026-06-17-physics-realism-vnext-milestones.md
-最后更新：2026-06-17
+最后更新：2026-07-13
 工作目录：/Users/asyncrustacean/projects/picea
-工作区状态：创建前 clean；`main...origin/main`，`HEAD=ac2941d`；执行时以 live `git status` 为准
+工作区状态：计划创建前 clean；本次集成从 `main=247fbda` 建立 `feat/vnext-s1-s3-integration`；文档提交前 source HEAD=`b1f1515`，本区块随 docs closeout commit 落地；执行时仍以 live `git status` 为准
 计划重量：heavy
 Goal 协调：planning/execution goal active；用户已明确预授权 Plan Gate
-提交策略：不提交
+提交策略：源实现提交已进入本次集成分支；本区块由后续独立 docs closeout commit 承载
 执行策略：完整计划预授权后连续执行；遇高风险门、现实冲突、验证阻塞时停
 高风险门：Public API/compatibility break；`SharedShape::ConcavePolygon` hard reject；`Material` public schema；deformable public surface；删除/迁移/部署
 SpecFlow：不使用
 Change root：none
 Profiles：architecture-heavy, api-contract, ui-browser
-完成状态：D0/V0 已验证；execution milestones 未实现；AI 路由已同步；已归档 no；可发布 no
+完成状态：D0/V0 已验证；handoff §1 velocity-first 正式化、§2 WorldAnchor damping 正确性子切片、§3 Point/Vector equality contract 已实现、复审并完成对应 Rust/lab/web/browser 端到端验收；这不代表整个 E1/E2/E5 或其余执行里程碑已完成；AI 路由已同步；已归档 no；可发布 no
+
+## 本次集成收尾
+
+### 范围与提交链
+
+- 本次只收口 handoff §1-§3：§1 velocity-first 正式化、§2 WorldAnchor damping 正确性子切片、§3 Point/Vector equality contract；不代表整个 E1/E2/E5、V8、E6 或 C9 完成。
+- integration base 为 `main=247fbda`；source history 包含 `a83e3d9`、`e7d906f`、正式化提交 `44931fe`，以及 equality cherry-pick `5b9ba37`；reviewer 修复提交为 `b1f1515`。
+- 文档提交前 source HEAD=`b1f1515`；本区块随 docs closeout commit 落地，避免把提交前 source HEAD 误写为最终文档 HEAD。
+
+### Reviewer 闭环
+
+- 首轮 reviewer 有 1 个 Medium：`integrate_body_positions` 对 CCD-clamped body 整体跳过 final position phase，而 predictive CCD 只提前推进平移，导致命中帧丢失整步角度积分。
+- 行为锁 `ccd_clamped_dynamic_circle_preserves_full_step_angular_integration` 先 RED：exit `101`，`angle=0`，`expected_angle=0.10000001`；最小修复只跳过 clamped dynamic body 的二次线性平移，保留 `angular_velocity * dt` 与既有 invalid-pose containment，随后 exact test 为 `1 passed`。
+- 复审无 High/Medium。保留 1 个 Low：`artifact_run` 的 final-geometry candidate 诊断命名可能被误读为 solver-start eligibility；这是诊断解释风险，本任务不扩 scope 修改。
+
+### Rust 与 Lab 验收
+
+- Targeted 12/12 均 exit `0`：physics `71 passed / 0 failed`；artifact `27 passed / 5 ignored`；math algebra `3 passed`；geometry cache `1 passed`；math lib `4 passed`；math compile-fail harness `1 passed`；picea lib `109 passed / 1 ignored`；server routes `20 passed`；Clippy clean；`crates/picea/src/lib.rs` zero diff。
+- Full 15/15 均 exit `0`：workspace `339 passed / 6 ignored / 0 failed`；trybuild 38 个内部 case 均通过；Criterion 9 个 scenario 均 Success；picea-lab aggregate `82 passed / 5 ignored`；workspace check/Clippy、examples no-run 与 bench no-run 均通过。
+
+### Web 与浏览器验收
+
+- `npm ci` added 188 packages、audited 189 packages、0 vulnerabilities；UI contract、i18n、profile、production build 与 `just picea-lab-web-check` 均通过。Vite 只有既有的非阻塞 `>500 kB` chunk warning。
+- 真实 API `http://127.0.0.1:8080` / Web `http://127.0.0.1:5173`：pause/single-step 从 715 到 716；WorldAnchor live 运行超过 5486 step，保持 1 dynamic / 1 joint；soft-spring pointer drag 将物体从原点拉到约 `(2.9, -1.3)`，拖拽时出现第二个 grab WorldAnchor joint，释放后正确回收。
+- Matrix full frame 1345 / step 1346 显示 1 static + 48 dynamic、48 sleeping / 0 awake、max linear/angular 均为 0、outside floor 为 0；artifact header 的 mode/source 均为“生成产物并回放”。
+- clean unusable-API fallback session 显示“演示回放”和唯一“离线演示数据 · 非真实模拟”watermark；已验收 online/offline sessions 的 console 均为 0 error / 0 warning。所有 browser sessions、API 和 Web 服务均已停止。
+
+### Hygiene 与剩余边界
+
+- Git-visible 仅三份 docs；playwright、`target`、`dist`、`node_modules` 均不 visible；`crates/picea/src/lib.rs` 相对 `247fbda` zero diff。
+- 本任务未开始 handoff §4/§5/§6。E1 其余 contact/sleep、E2 的 body damping 与 `DistanceJointDesc.damping`、E5 的 chain/bridge diagnostics，以及 E3/E4/E6/D7/V8/C9 仍未整体完成；下文范围外与残余风险继续有效。
 
 ## 目标
 
@@ -63,7 +94,7 @@ Profiles：architecture-heavy, api-contract, ui-browser
 - explorer：已运行。7 个方向均已返回；deformable 结论为 RFC/design gate，不进入本轮 production implementation。
 - architecture design：已产出：`docs/design/2026-06-17-physics-realism-vnext-architecture.md`。
 - 关键证据：`docs/ai/repo-map.md`、`docs/ai/index.md`、`docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`、`docs/design/*stability*`、`docs/design/deformable-body-roadmap.md`、`crates/picea/tests/physics_realism_acceptance.rs`、`crates/picea-lab/tests/artifact_run.rs`、`crates/picea-lab/tests/server_routes.rs`。
-- 主要未知：fresh full workspace tests 是否全绿；browser automation 是否可用；future deformable V1 representation 仍需 RFC 冻结。
+- 剩余未知与开放边界：future deformable V1 representation 仍需 RFC 冻结；handoff §4/§5/§6 与其余未完成 milestone 仍须各自进入设计、实现和验收门。
 
 ## 架构设计输入
 
@@ -82,11 +113,11 @@ Profiles：architecture-heavy, api-contract, ui-browser
 | --- | --- | --- | --- | --- | --- |
 | D0 | 设计 | 已完成 | 产出本架构设计和计划 | 全部 | main + explorer |
 | V0 | 验证 | 已完成 | 跑当前基线和 doc routing 检查 | 全部 | verifier |
-| E1 | 执行 | 计划中 | 堆叠/接触稳定性 acceptance-as-code 与最小实现 | contact lifecycle / position-row / sleep | worker gpt-5.4 |
-| E2 | 执行 | 计划中 | 材质/阻尼语义债，先兑现 joint damping | material / joint damping | worker gpt-5.4 |
+| E1 | 执行 | 部分完成（§1 已完成） | 堆叠/接触稳定性 acceptance-as-code 与最小实现 | contact lifecycle / position-row / sleep | worker gpt-5.4 |
+| E2 | 执行 | 部分完成（§2 子切片已完成） | 材质/阻尼语义债，先兑现 joint damping | material / joint damping | worker gpt-5.4 |
 | E3 | 执行 | 计划中 | CCD dynamic circle -> stationary dynamic convex target | CCD trace | worker gpt-5.4 |
 | E4 | 执行 | 计划中 | compound/concave provenance 与 boundary evidence | complex shape | worker gpt-5.4 |
-| E5 | 执行 | 计划中 | joint ordering 合同锁与 chain/bridge diagnostics | joint / solver ordering | worker gpt-5.4 |
+| E5 | 执行 | 部分完成（§1 已完成） | joint ordering 合同锁与 chain/bridge diagnostics | joint / solver ordering | worker gpt-5.4 |
 | E6 | 执行 | 计划中 | lab/live/browser evidence hardening | observability | worker gpt-5.4 |
 | D7 | 设计 | 计划中 | deformable / PBD RFC gate | deformable | explorer/reviewer |
 | V8 | 验证 | 计划中 | 全路线 regression + review | 全部 | verifier，然后 reviewer |
@@ -137,7 +168,7 @@ Subagent 执行计划：
 ### E1：堆叠与接触稳定性
 
 类型：执行
-状态：计划中
+状态：部分完成；handoff §1 velocity-first 正式化切片已完成，E1 其余范围仍开放
 来源设计：D0
 
 目标：围绕 contact lifecycle、position-row eligibility、dense pressure、sleep convergence 补行为锁和最小实现。
@@ -164,16 +195,16 @@ Subagent 执行计划：
 ### E2：材质、摩擦、反弹与阻尼
 
 类型：执行
-状态：计划中
+状态：部分完成；handoff §2 WorldAnchor damping 正确性子切片已完成，整个 E2 未完成
 来源设计：D0
 
-目标：先保护已有 body damping 行为，再兑现已有 `joint.damping` 语义；不先扩 `Material`。
+目标：已兑现 `WorldAnchorJointDesc.damping` 语义；后续仍需保护 body damping 行为并单独处理 Distance joint damping，不先扩 `Material`。
 
 执行输入：
 - `Material` 不新增字段。
 - `restitution > 1` 只记录/测试当前 clamp 语义，不改 validation。
 - `linear_damping` / `angular_damping` 是 body 既有行为，E2 至少补 regression 或确认已有 gate 覆盖。
-- `joint.damping` 优先进入 joint solver 或明确文档化不支持；推荐实现。
+- `WorldAnchorJointDesc.damping` 已进入 joint solver；`DistanceJointDesc.damping` 仍未实现，必须作为独立子切片推进。
 
 验收检查：
 - 新增或确认 `body_damping_reduces_linear_and_angular_velocity` 等价行为锁。
@@ -237,15 +268,15 @@ Subagent 执行计划：
 ### E5：关节、约束与 solver ordering
 
 类型：执行
-状态：计划中
+状态：部分完成；handoff §1 solver-ordering 正式化切片已完成，E5 其余范围仍开放
 来源设计：D0
 
 目标：锁定当前真实 step 顺序，补 joint damping/chain/bridge diagnostics，不合并 row stream。
 
 执行输入：
-- 当前代码顺序权威：joint solve -> CCD -> contact phases -> optional joint velocity projection -> sleep。
+- 当前代码顺序权威：速度积分 -> CCD `pose_clamp` -> joint solve -> current/predicted contact discovery 与 velocity solve -> optional joint velocity projection -> 最终位置积分 -> final authoritative contact finalize -> sleep。
 - M28 文档若不一致，应同步文档而不是按旧文档改代码。
-- `joint_velocity_projection` 是 contact phases 之后、sleep 之前的可选阶段；E5 reviewer 必须审查它没有被遗漏或提前。
+- `joint_velocity_projection` 是 contact velocity solve 之后、最终位置积分之前的可选阶段；E5 reviewer 必须审查它没有被遗漏或提前。
 - 不允许把 contact rows 和 joint rows 合并成单一 public/diagnostic stream。
 
 验收检查：
@@ -384,22 +415,22 @@ Subagent 执行计划：
   - `rtk proxy cargo test -p picea-lab --test artifact_run stack_artifacts_capture_lab_frame_diagnostics_with_marker_sources -- --exact` -> 1 passed。
 - 意外与发现：M28 文档与 live code step ordering 存在不一致；计划以 live code 为权威并安排 phase-order 合同锁。
 - 风险 / 后续：deformable 只能作为 RFC/design gate；query/selection contract 是 public compatibility gate。
-- 下一步：复跑 V0 文档验证；必要时运行 targeted smoke。
+- 当时下一步：复跑 V0 文档验证；必要时运行 targeted smoke。
 
 ### 2026-07-11 - Spike：步进重排（velocity-first + CCD 前置）
 
-- 状态：spike 完成，**收口**；未合入 main，结论固化待正式化（关联 E1 堆叠稳定性 / E5 solver ordering）。
+- 状态：历史 spike 已完成并收口；其结论随后完成正式化，正式实现现已通过 `44931fe` 进入当前集成分支（关联 E1 堆叠稳定性 / E5 solver ordering）。
 - 分支：`spike/step-reorder-integrate-after-solve`；worktree `.claude/worktrees/step-reorder-spike`；2 commit（`ca339f7` variant A 先解速度后积分；`a51e801` scheme G' 预测性 CCD keeps traces in-step）。
 - 假设：`integrate→solve` 顺序是塔倾覆（塔身不 sleep 的 integrate-then-correct 穿透极限环）的疑似根因。
-- 重排后 step 顺序：速度积分 → CCD `pose_clamp`（用 `dt` 预测推进快速物体到 time-of-impact）→ 关节求解 → 接触碰撞+求解 → 位置积分（用解出的速度）→ sleep。对比 E5 既定权威顺序（`joint solve -> CCD -> contact phases -> ... -> sleep`），本 spike 把速度积分提到最前、位置积分挪到接触之后，CCD 从"回看 `previous pose`"改为"用 `dt` 预测"，`StepContext.previous_body_poses` 字段随之删除。
+- 重排后 step 顺序：速度积分 → CCD `pose_clamp`（用 `dt` 预测推进快速物体到 time-of-impact）→ 关节求解 → 接触碰撞+求解 → 位置积分（用解出的速度）→ sleep。对比当时 E5 文档记录的旧顺序（`joint solve -> CCD -> contact phases -> ... -> sleep`），本 spike 把速度积分提到最前、位置积分挪到接触之后，CCD 从"回看 `previous pose`"改为"用 `dt` 预测"，`StepContext.previous_body_poses` 字段随之删除。
 - 结论（假设证实）：塔 6/6 sleep、倾角 0.21°（此前数度倾覆）；`physics_realism_acceptance` 红锁 17→2、`picea-lab` 6→1（scheme G' 修掉 14 个）。核心门全绿：core lib 103、`world_step_review_regressions` 12、`core_model_world` 18、clippy 净、`artifact_run` 主体 35 绿。
 - 代价（剩 3 red，同一根因）：velocity-first 下 contact 阶段看到未做位置积分的 pose（CCD 只预测推进被判定穿隧的快速物体），慢速接触检测 / warm-start 滞后一步。
   - `sleeping_body_wakes_on_contact_solver_impact`（`physics_realism_acceptance.rs:2717`）：10m/s 子弹撞击单步内无 `ContactStarted/Persisted` 事实，冲击响应滞后一步。
   - `warm_start_cache_transfers_tangent_impulse_across_small_tangential_slip`（`:1172`）：`Hit`→`DroppedPointDrift`，重排偏移了接触点相对锚点的 drift 判定基点，sub-threshold slip 的 warm-start 缓存被误丢。
   - `matrix_stack_artifacts_capture_nxm_grid_stack_facts`（`artifact_run.rs:4283`）：`source_row_continuity_candidate` 计数为 0，帧间接触不连续的下游后果。
 - 裁决：**不校准**这 3 个锁。#2/#3 指向 velocity-first 引入的接触连续性退化（warm-start 命中率下降、帧间接触断裂），校锁会掩盖真实代价并反噬堆叠收敛。
-- 正式化前置（留给 E1/E5 执行）：① 让 contact 阶段在 velocity-first 下看到预测位置——把 CCD 预测推进从"仅穿隧物体"扩到所有接近中的接触，或 narrowphase 前做一次预积分快照——消除滞后并清掉 3 red；② spike 基线落后于 main（缺 `909e386` grab 修复、trajectoryOverlay、vite bump），合入前必须 rebase，否则回退已 push 修复；③ 先补 phase-order / 接触检测时点 acceptance 锁定义新语义，再实现（遵循 E5 先锁后写）。
-- 风险 / 后续：改 core 接触检测时点是写路径深层契约改动，属高风险门，需按 vNext 正规流程（先锁、spec 认可、bounded worker）推进，不在遗留收尾范围。
+- 正式化前置（E1/E5 已按此闭环）：① 让 contact 阶段在 velocity-first 下看到预测位置，消除滞后并清掉 3 red；② 在当前 main 基线上保留 `909e386` grab 修复、trajectoryOverlay 与 vite bump；③ 先补 phase-order / 接触检测时点 acceptance 锁定义新语义，再实现（遵循 E5 先锁后写）。具体采用的 A2 语义和验收证据见下方 living spec。
+- 历史风险裁决：改 core 接触检测时点属于写路径深层契约改动；正式化已按 vNext 正规流程完成，未继续扩张到下方范围外项，剩余风险仍以 A2 记录为准。
 
 ### 2026-07-12 - E2a：grab / WorldAnchor damping 语义
 
@@ -407,7 +438,7 @@ Subagent 执行计划：
 
 - 状态：**已验证（仅 handoff §2 / E2 joint damping 子切片；整个 E2 未完成）**。
 - `WorldAnchorJointDesc.damping` 在必跑 joint phase 中消费真实锚点点速度 `v + ω × r`，以 `inverse_mass + inverse_inertia * cross(r, axis)^2` 为有效逆质量施加点冲量，并用 `clamp(damping * dt, 0, 1)` 防止过阻尼翻向注入能量；零/近零约束轴跳过本帧 damping。
-- 不改变 public API、step phase order、Distance joint 行为或 lab grab 默认参数；Commit：none，本轮不提交。
+- 不改变 public API、step phase order、Distance joint 行为或 lab grab 默认参数；实现提交为 `247fbda`，现为当前集成分支祖先。
 
 #### 检查结果
 
@@ -435,7 +466,7 @@ Subagent 执行计划：
 
 #### 范围外
 
-- body damping、`DistanceJointDesc.damping`、grab 参数/手感调优、step-reorder 正式化均未进入本子切片；它们仍按 E2 或各自 milestone 单独推进。
+- body damping、`DistanceJointDesc.damping`、grab 参数/手感调优仍未进入本子切片，继续按 E2 单独推进；step-reorder 正式化未进入本子切片，但已随后作为独立 §1 切片完成。
 
 #### 残余风险
 
@@ -447,7 +478,7 @@ Subagent 执行计划：
 
 #### 状态
 
-- **实现、复审与完整 E2E 已完成；等待本地收口提交**。
+- **实现、复审与完整 E2E 已完成；实现提交 `44931fe` 已进入当前集成分支**。
 - 本节是 E1/E5 step-reorder 正式化的 living spec；实现不得越过下述内部语义、范围和 RED/验收门。
 
 #### 已验证根因与被否决的简单 WIP
@@ -554,7 +585,7 @@ Subagent 执行计划：
 #### 范围外
 
 - 未修改 public prelude/events schema、broadphase、narrowphase、CCD 或 Distance joint；未调整既有 warm-start、position-correction、matrix stability 阈值。
-- §3 fuzzy `PartialEq`、revolute joint、narrowphase ignore、其余 vNext design gate 未进入本项；按交接顺序应在各自 spec/public API 门重新确认。
+- §3 fuzzy `PartialEq`、revolute joint、narrowphase ignore、其余 vNext design gate 未进入本项；其中 §3 已随后作为独立 equality contract 切片完成，其他项仍需在各自 spec/public API 门重新确认。
 - grab stiffness/damping/max-speed 的主观手感调参不在 correctness 修复内；本轮只证明 damping 已接线并通过行为锁与 live soft-spring interaction。
 
 #### 残余风险
@@ -568,7 +599,7 @@ Subagent 执行计划：
 
 #### 决策与归属
 
-- 状态：**已验证（handoff §3 / vNext equality contract 子切片）**。
+- 状态：**已验证并完成复审与端到端验收（handoff §3 / vNext equality contract 子切片）**；实现已通过 `5b9ba37` 进入当前集成分支。
 - 归属：handoff §3 的 vNext 跨切面正确性切片；不扩张为 E1-E6 的新物理能力，shared acceptance 归入 V8。
 - `Point` / `Vector` 的 `PartialEq` 改为标准逐分量 `f32 ==`。这恢复 `PartialEq` 对称、传递的标准契约，但仍保留浮点的部分等价语义：`NaN != NaN`，因此不实现 `Eq`。
 - 新增显式 `pub fn abs_diff_eq(&self, other: Self, max_abs_diff: FloatNum) -> bool` 方法，供几何算法或测试在确实需要绝对误差容限时调用；名称明确该方法不包含相对误差或 ULP 语义。

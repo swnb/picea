@@ -91,6 +91,8 @@ recompute physics in the browser.
 - Use deterministic counters and targeted tests before reading benchmark timing
   as a regression signal. The beta performance policy starts at baseline/warn
   mode, not hard-fail mode.
+- `Point` / `Vector` 的 `==` 现在采用标准逐分量 `f32` `PartialEq`；需要近似几何比较时，改用显式 `abs_diff_eq`。
+- `Point` / `Vector` 未实现 `Eq` / `Hash`；容器身份需要独立的 key 策略，不应复用近似几何判等。
 
 ## Beta Verification Matrix
 
