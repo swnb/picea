@@ -1,6 +1,6 @@
 # vNext Handoff §4 SAT Manifold Persistence Milestone
 
-状态：S4-D `6045bd2`、S4-RED `c4298ae`、S4-ORACLE-D `4a0c865`、S4-ORACLE-RED `4a32ddb` 已提交；S4-ORACLE-EVIDENCE under review
+状态：S4-D `6045bd2`、S4-RED `c4298ae`、S4-ORACLE-D `4a0c865`、S4-ORACLE-RED `4a32ddb`、S4-ORACLE-EVIDENCE `cca2475` 已提交；S4-ORACLE-REPLACE under review
 日期：2026-07-13
 基线：`main=origin/main=9427a17`
 设计：`docs/design/2026-07-13-sat-manifold-persistence-design.md`
@@ -609,3 +609,25 @@ Living spec的聚合命令`rtk proxy cargo test -p picea --test physics_realism_
 - Baseline的3个final-unabsorbed和3个unexpected属于独立统计域，未建立key一一对应关系。
 - Artifact midpoint projection不等价于core private surface witnesses；A02/O02继续拥有core双侧identity合同。
 - O05 symmetric-edge行为锁仍RED；S4-IMPL必须修复。
+
+### 2026-07-13 - S4-ORACLE-REPLACE working-side receipt
+
+- Replacement只修改`matrix_stack_artifacts_capture_nxm_grid_stack_facts`中的旧`edge_swap_candidate_count == 0` assertion span；改为调用同一次`run.frames`的固定O01 attribution helper，并断言两套守恒、final/source正向非真空、final-unabsorbed/unexpected/theft为0且exact predecessor非真空。
+- `rtk proxy ruby crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb c4298ae replace-one-oracle ec463132197639a58bf7b1287dcdb8d9c91059839d263d149a23530ed643a0df`：exit0。Approved replacement SHA-256为`ec463132197639a58bf7b1287dcdb8d9c91059839d263d149a23530ed643a0df`；完整test item的attributes/signature/prefix/suffix逐字冻结。
+- Working O01 desired exit0：`59=46 final-attributed + 13 source-boundary + 0 unexpected`、`46=46 attributed + 0 unabsorbed`、exact predecessors25431/theft0。
+- Working O03 exit0，disk sample仍为frame7 `ContactId(24)`/`ManifoldId(13)`。
+- Working matrix180由旧counter RED转为exit0；max penetration/sum`0.027232/0.927301`、无ejection、quiet speed0、0 awake/48 sleeping，其他既有断言与阈值未改。
+- O05仍为预期exit101，且唯一失败为symmetric raw edge输出`PersistentEdgeSwap/EdgeSwap`；留给S4-IMPL。
+- `rustfmt --check`与`git diff --check`green。5份frozen implementation hash仍为`bf408ea3dd8c4cc93f57f20c3b0949fbb9a18f9e60308f5ea2f154251869ba95`。
+- 当前仅完成working-side验证；clean baseline +同一replacement patch的intentional RED、aligned1200/forced600及最终replacement commit gate仍待独立verifier。
+
+### 2026-07-13 - S4-ORACLE-REPLACE dual verifier receipt
+
+- Replacement cached binary patch SHA-256：`50cb9dd5110e21e2f6613a6a7810d0e5354f073a8037d747674eff879749cbf6`；artifact file两侧hash均为`6cb678a15df4d4bff099173b4648886e8855f609`。
+- Baseline为clean`cca2475` +同一replacement patch，5份production零diff；working为`cca2475` +同一replacement +固定`bf408ea3...ba95` implementation patch。
+- Source-freeze `replace-one-oracle`两侧均exit0，approved replacement digest为`ec463132197639a58bf7b1287dcdb8d9c91059839d263d149a23530ed643a0df`。
+- O01 partition两侧exit0。Baseline desired与replacement matrix均为预期exit101：`105=93+9+3`、`96=93+3`、exact predecessors25450/theft0；working O01与matrix180均exit0：`59=46+13+0`、`46=46+0`、exact predecessors25431/theft0。
+- O02补充exact verifier：clean baseline与working均exit0、各1 passed / 0 failed。O03两侧exit0；O05两侧保持同一symmetric intentional RED。Aligned1200、forced600与两个compile no-run两侧均exit0。
+- Matrix180/forced600 baseline penetration max/sum`0.028555/0.799082`，working`0.027232/0.927301`；aligned两侧`0.003365/0.054014`。全部无ejection、quiet speed0并全部sleeping。
+- Baseline的3个final-unabsorbed与3个unexpected仍只分别表示各自分类计数，不主张相同transition keys。
+- Supervisor已reverse同一replacement patch并clean remove临时baseline worktree。Replacement仍待最终test/code与scope reviewer确认后提交。

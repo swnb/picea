@@ -5608,9 +5608,44 @@ fn matrix_stack_artifacts_capture_nxm_grid_stack_facts() {
         report.feature_churn_trace.edge_swap_transition_count > 0,
         "E4b lifecycle diagnostics should identify feature churn that swaps reference/incident edges; report={report:?}"
     );
+    assert_matrix_shape_and_local_pose_signatures_are_stable(&run);
+    assert_raw_finite_and_artifact_projections(&run);
+    let attribution = edge_swap_attribution_report(&run.frames);
     assert_eq!(
-        report.feature_churn_trace.edge_swap_candidate_count, 0,
-        "contact identity fix: edge-swap churn with compatible reduction, shape, normal, point, and local anchors must be absorbed by the persistent edge-swap path instead of remaining a miss; report={report:?}"
+        attribution.final_candidate_total,
+        attribution.final_attributed + attribution.final_unabsorbed,
+        "every selected final edge-swap candidate must be classified exactly once; attribution={attribution:?}"
+    );
+    assert_eq!(
+        attribution.reported_persistent_edge_swap_total,
+        attribution.final_attributed
+            + attribution.source_boundary_evidence
+            + attribution.unexpected,
+        "every reported persistent edge swap must be final-attributed, source-boundary evidence, or unexpected; attribution={attribution:?}"
+    );
+    assert!(
+        attribution.final_attributed > 0,
+        "matrix acceptance must exercise final-attributed edge swaps; attribution={attribution:?}"
+    );
+    assert!(
+        attribution.source_boundary_evidence > 0,
+        "matrix acceptance must exercise source-boundary edge-swap evidence; attribution={attribution:?}"
+    );
+    assert_eq!(
+        attribution.final_unabsorbed, 0,
+        "all selected final edge-swap candidates must retain their lifecycle identity; attribution={attribution:?}"
+    );
+    assert_eq!(
+        attribution.unexpected, 0,
+        "all reported persistent edge swaps must satisfy final or source-boundary attribution; attribution={attribution:?}"
+    );
+    assert!(
+        attribution.exact_predecessor_total > 0,
+        "matrix acceptance must exercise non-vacuous exact predecessors; attribution={attribution:?}"
+    );
+    assert_eq!(
+        attribution.exact_theft, 0,
+        "fallback matching must not steal an exact predecessor; attribution={attribution:?}"
     );
     assert!(
         report

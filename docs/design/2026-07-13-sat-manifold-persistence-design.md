@@ -1,6 +1,6 @@
 # SAT Manifold Persistence Design
 
-状态：S4-D `6045bd2`、S4-RED `c4298ae`、S4-ORACLE-D `4a0c865`、S4-ORACLE-RED `4a32ddb` 已提交；S4-ORACLE-EVIDENCE 待复审
+状态：S4-D `6045bd2`、S4-RED `c4298ae`、S4-ORACLE-D `4a0c865`、S4-ORACLE-RED `4a32ddb`、S4-ORACLE-EVIDENCE `cca2475` 已提交；S4-ORACLE-REPLACE under review
 日期：2026-07-13
 基线：`main=9427a17`
 执行计划：`docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md`
