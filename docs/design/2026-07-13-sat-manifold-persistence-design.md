@@ -1,6 +1,6 @@
 # SAT Manifold Persistence Design
 
-状态：S4-D committed at 6045bd2
+状态：S4-D `6045bd2` 与 S4-RED `c4298ae` 已提交；S4-IMPL 因 A14 diagnostic oracle 冲突暂停；S4-ORACLE-D 待复审
 日期：2026-07-13
 基线：`main=9427a17`
 执行计划：`docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md`
@@ -259,6 +259,24 @@ after final geometry refresh:
 
 原因：逐边最近贪心不保证完整双射；当前 per-pair规模小，枚举成本有明确上界。
 
+### ADR-S4-4：warm provenance 与 final lifecycle attribution 分离
+
+选择：artifact diagnostics 分别报告 solver-start warm miss、final lifecycle 已吸收 edge-swap candidate 和未吸收 candidate，不再用一个 `edge_swap_candidate_count` 同时代表三者。
+
+原因：warm/source-row 在 solver 前消费 current/predicted observations；lifecycle 在位置积分和 final manifold refresh 后运行。`MissFeatureId + PersistentEdgeSwap` 是合法组合，表示 solver-start 没有可安全复用的 previous impulse，但 final geometry仍能一一对应到持久 contact identity。
+
+旧 matrix `edge_swap_candidate_count == 0` 在 S4-ORACLE-RED 期间保持原样。以下替代锁先在working tree写成test-only diff，经reviewer批准并由verifier把同一patch双跑于`c4298ae` baseline和working implementation；通过后才提交固定test commit `T`。随后S4-ORACLE-EVIDENCE复跑并经spec/code review通过，才允许把该含糊断言替换为更强的absorbed/unabsorbed assertions：
+
+- Conservative candidate edge完全独立于warm/lifecycle输出：同ordered pair、clip-family compatible、非symmetric raw edge role swap、normal dot `>=0.98`、双侧final local witness drift `<=0.25`、全部输入finite。先按full raw feature exact-hard预留，再在residual graph做最大基数一对一；不得用每点最近邻重复消费previous point。
+- `candidate_total == absorbed + unabsorbed`。Absorbed candidate必须同时满足`ContactPersisted` event variant、`PersistentEdgeSwap` reason、oracle匹配的previous/current `ContactId`相同且每帧只用一次、`ManifoldId`相同；任何一项不满足都归unabsorbed，不能从分类中漏掉。
+- Unabsorbed candidate数量必须为0；`Started`、`Unknown`、错误`ExactFeature`、错误IDs或错误previous映射都算unabsorbed。
+- Exact theft按实际输出ID检测：存在geometry-compatible full exact predecessor时，current必须继承该predecessor的`ContactId`；不得由oracle自己的exact reservation构造性地产生0。
+- Candidate若 `warm_start_reason != Hit`，warm normal/tangent impulses必须为0；所有drift/impulse必须finite。
+- 独立真实SAT和artifact传播锁必须证明至少一个非exact role swap被正确标记，避免通过“全部不匹配”让unabsorbed计数真空为0。
+- Matrix180、aligned1200、forced600现有penetration、速度、sleep、support/ejection阈值逐行不变。
+
+O01的attribution report仅为`artifact_run.rs` test-local struct/helper，不增加artifact/public schema。Finite gate读取未sanitize的`FrameRecord.events`，再与snapshot和实际落盘`frames.jsonl`投影交叉核对；不能只读会把non-finite scalar归零的sanitized snapshot。O03必须从落盘artifact反序列化，不能只检查内存`RunResult`。
+
 ## Acceptance Scenarios
 
 | ID | 场景 | Binary success bar | 证据 owner |
@@ -278,6 +296,11 @@ after final geometry refresh:
 | A13 | history-only separation | final无overlap且无confirmed interaction时不被history伪造；既有confirmed depth-0语义保持 | contact finalization locks |
 | A14 | matrix regression | matrix180、aligned1200、forced E4 600全部无ejection/runaway且既有阈值不变 | picea-lab artifact |
 | A15 | 4x4/unrelated-pair scale | 4 current x 4 previous枚举确定且候选评估只与当前pair有关，不随全局unrelated previous contacts线性放大 | contacts unit |
+| O01 | matrix edge-swap attribution | conservative candidates按一对一ID归因为absorbed/unabsorbed；exact theft单独报告 | picea-lab artifact test |
+| O02 | 真实SAT lifecycle reason | raw role swap且无full exact predecessor时，双点保持ids并明确`PersistentEdgeSwap` | physics integration |
+| O03 | artifact propagation | core persisted event/debug/artifact至少传播一个稳定`PersistentEdgeSwap`，ids一一连续 | picea-lab artifact test |
+| O04 | A14 preservation | 三条matrix命令与所有既有数值/稳定性断言原样保留 | diff audit + existing artifact tests |
+| O05 | symmetric-edge negative | `reference_edge == incident_edge`不得作为role swap或source-row EdgeSwap | physics integration |
 
 ## 风险矩阵
 
@@ -289,6 +312,7 @@ after final geometry refresh:
 | public reason误标 | Medium | same-index不用于lifecycle；只澄清MissFeatureId注释 | 外部用户可能需阅读新说明 |
 | candidate enumeration成本 | Medium | pair-scoped；当前4x4小图；规模锁 | 未来多点manifold需重评 |
 | raw feature仍churn被误读 | Low | events同时暴露lifecycle reason/ContactId | artifact命名仍有既有解释风险 |
+| warm/lifecycle诊断混淆 | High | O01-O05先RED归因，再用absorbed/unabsorbed替换含糊counter | lab-derived heuristic仍不拥有core physics truth |
 
 ## 里程碑交接合同
 
@@ -299,6 +323,7 @@ after final geometry refresh:
 | revision invalidation | Geometry revision与事务 | worker | A07-A09 | contacts/world/physics |
 | lifecycle边界 | Consumer/sensor policy | worker | A10-A13 | physics integration |
 | 稳定性无回归 | Acceptance A14 | verifier | 全部hard gates green | command receipts |
+| diagnostic oracle归因 | ADR-S4-4 / O01-O05 | artifact worker + reviewers | 新旧实现归因、真实SAT/artifact正向锁、symmetric negative、原数值门零改动 | dual-baseline receipts |
 | scope/API | 目标与非目标 | spec/code reviewers | `lib.rs`/solver/public schema无行为diff | base-relative git diff |
 
 S4-D review 通过只表示设计可执行，不授权省略 RED、code review 或 verifier receipt。

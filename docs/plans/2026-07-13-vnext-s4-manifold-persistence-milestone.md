@@ -1,6 +1,6 @@
 # vNext Handoff §4 SAT Manifold Persistence Milestone
 
-状态：S4-D committed at 6045bd2; S4-RED under review
+状态：S4-D `6045bd2`、S4-RED `c4298ae` 已提交；S4-IMPL 因 A14 diagnostic oracle 冲突暂停；用户已授权 S4-ORACLE-D
 日期：2026-07-13
 基线：`main=origin/main=9427a17`
 设计：`docs/design/2026-07-13-sat-manifold-persistence-design.md`
@@ -52,6 +52,7 @@ exit 101; 0 passed / 1 failed; feature ids 16785408 != 16777218
 - 每个实现行为先存在 committed acceptance artifact，并观察当前实现 RED，再写 production code。
 - 每个 commit 前必须先完成对应 spec/code review；High/Medium 必须闭环，并由 verifier 给出该节点要求的真实命令结果。
 - 不删除、放宽或改阈值来让测试通过。旧 raw equality 的强度迁移为 history-aware 双点对应 equality，并新增 raw role-swap characterization。
+- S4-ORACLE-RED提交前，既有`edge_swap_candidate_count == 0`与全部matrix数值断言保持原样。只有更强attribution locks先提交、双基线证据与review闭环后，才允许用absorbed/unabsorbed assertions替换含糊counter；这不授权删除任何penetration/速度/sleep/support/ejection门。
 - 不 push；用户本轮只明确授权 commit。
 
 ## 已确认决策与安全假设
@@ -70,6 +71,10 @@ Safe assumptions：
 | --- | --- | --- | --- | --- |
 | S4-D | architecture、living spec、routing、父计划addendum | `crates/**` | YAML parse；`git diff --check`；`git diff --exit-code -- crates` | spec + architecture reviewer无High/Medium；docs verifier green |
 | S4-RED | 一次性提交全部acceptance-as-code、ignored test迁移和RED receipt | production implementation、SAT/clip production code | 下方“RED commands”逐条运行；至少A02-A09中的当前缺口稳定RED，既有边界锁可保持green | test reviewer无High/Medium；verifier确认预期RED/green分类；commit tests + plan receipt |
+| S4-ORACLE-D | A14 diagnostic attribution delta与冻结边界 | artifact test或production改动 | docs diff/YAML/scope | architecture + spec reviewer无High/Medium；docs verifier green后单独commit |
+| S4-ORACLE-RED | O01-O05 attribution、真实SAT、artifact传播、A14 preservation与symmetric-edge locks | 修改旧A14断言；修改core implementation | 新测试逐exact；旧A14三门原样；pre-commit同一test patch双跑 | test reviewer + verifier + spec reviewer通过后单独commit |
+| S4-ORACLE-EVIDENCE | 固定test commit `T`后复跑baseline/working并提交receipt | 修改tests/oracle/core | clean `T`与`T`+固定implementation patch双跑；hash/scope核对 | verifier + spec reviewer通过后docs-only commit |
+| S4-ORACLE-REPLACE | 用已批准absorbed/unabsorbed assertions替换唯一含糊counter | 修改matrix数值门、core implementation | O01-O05 + 三条A14；source freeze只允许该语义替换 | test/code reviewer + verifier green/expected RED后单独commit |
 | S4-IMPL | private revision、pair grouping、residual最大基数reservation、三个consumer policy | solver/public schema/阈值、narrowphase production code | 下方“Targeted green commands”全部exit0 | spec reviewer + code reviewer无High/Medium；targeted verifier green |
 | S4-V | full Rust/lab/matrix/scope acceptance | §5/§6/web功能扩展 | 下方“Full verification”全部exit0 | verifier receipt；reviewer复核最终diff无High/Medium |
 | S4-C | living spec/父计划/handoff closeout与残余风险 | 新行为 | YAML、diff、base-relative scope、status | docs reviewer + verifier green后commit closeout |
@@ -144,6 +149,8 @@ S4-RED receipt按下表逐项填写，不能用一个filter结果代替分类：
 
 ## S4-IMPL 最小实现
 
+当前冻结：working implementation已使A03-A13/A15 green，但matrix180的旧`edge_swap_candidate_count == 0`失败为19。S4-ORACLE-RED验收和spec裁决前，不修改或提交这5份working implementation文件。
+
 允许修改：
 
 - `crates/picea/src/collider.rs`：private revision `u64` + crate-private getter。
@@ -172,10 +179,178 @@ rtk proxy cargo test -p picea --lib pipeline::narrowphase::tests::stacked_rectan
 rtk proxy cargo test -p picea --lib pipeline::narrowphase::tests -- --nocapture
 rtk proxy cargo test -p picea --lib pipeline::contacts::tests -- --nocapture
 rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_ -- --nocapture
+rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_sat_role_swap_reports_persistent_edge_swap -- --exact --nocapture
+rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_symmetric_edge_index_is_not_role_swap -- --exact --nocapture
 rtk proxy cargo test -p picea --test physics_realism_acceptance sat_edge_swap_candidate_persists_lifecycle_without_auto_warm_start_impulse -- --exact --nocapture
 rtk proxy cargo test -p picea --test physics_realism_acceptance warm_start_cache -- --nocapture
 rtk proxy cargo test -p picea --test physics_realism_acceptance stack_4 -- --nocapture
+rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_edge_swap_attribution_partitions_every_candidate -- --exact --nocapture
+rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_edge_swap_attribution_has_no_unabsorbed_or_exact_theft -- --exact --nocapture
+rtk proxy cargo test -p picea-lab --test artifact_run artifact_records_persistent_edge_swap_with_stable_ids -- --exact --nocapture
+rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_artifacts_capture_nxm_grid_stack_facts -- --exact --nocapture
+rtk proxy cargo test -p picea-lab --test artifact_run aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock -- --exact --nocapture
+rtk proxy env PICEA_MATRIX_STACK_E4_ACCEPTANCE=1 cargo test -p picea-lab --test artifact_run matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed -- --ignored --exact --nocapture
 ```
+
+## S4-ORACLE Gate
+
+### S4-ORACLE-D docs gate
+
+```text
+rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
+rtk proxy git diff --check
+rtk proxy git diff --name-only c4298ae -- docs/design/2026-07-13-sat-manifold-persistence-design.md docs/plans/2026-06-17-physics-realism-vnext-milestones.md docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md
+rtk proxy ruby -rdigest -e 'paths=%w[crates/picea/src/collider.rs crates/picea/src/debug.rs crates/picea/src/events.rs crates/picea/src/pipeline/contacts.rs crates/picea/src/world/contact_state.rs]; patch=IO.popen(["rtk","proxy","git","diff","--binary","c4298ae","--",*paths], &:read); puts Digest::SHA256.hexdigest(patch)'
+rtk proxy git diff --cached --exit-code
+rtk proxy git status --short --branch
+rtk proxy git add -- docs/design/2026-07-13-sat-manifold-persistence-design.md docs/plans/2026-06-17-physics-realism-vnext-milestones.md docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md
+rtk proxy ruby -e 'expected=%w[docs/design/2026-07-13-sat-manifold-persistence-design.md docs/plans/2026-06-17-physics-realism-vnext-milestones.md docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md].sort; actual=IO.popen(["rtk","proxy","git","diff","--cached","--name-only"], &:read).lines.map(&:strip).reject(&:empty?).sort; abort "staged scope mismatch: #{actual.inspect}" unless actual == expected; puts "oracle docs staged scope ok"'
+rtk proxy git diff --cached --check
+rtk proxy git diff --cached --exit-code -- crates
+rtk proxy ruby -rdigest -e 'expected="bf408ea3dd8c4cc93f57f20c3b0949fbb9a18f9e60308f5ea2f154251869ba95"; paths=%w[crates/picea/src/collider.rs crates/picea/src/debug.rs crates/picea/src/events.rs crates/picea/src/pipeline/contacts.rs crates/picea/src/world/contact_state.rs]; patch=IO.popen(["rtk","proxy","git","diff","--binary","c4298ae","--",*paths], &:read); actual=Digest::SHA256.hexdigest(patch); abort "frozen implementation changed: #{actual}" unless actual == expected; puts actual'
+```
+
+本节点只stage三份docs。上述cached-name与hash gate只在commit前运行；commit后使用下列命令验证新commit本身的三文件allowlist，并再次复算5份frozen implementation hash。Verifier不执行stage步骤；由supervisor在review/verifier通过后按固定allowlist stage、commit并复核。
+
+```text
+rtk proxy ruby -e 'expected=%w[docs/design/2026-07-13-sat-manifold-persistence-design.md docs/plans/2026-06-17-physics-realism-vnext-milestones.md docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md].sort; actual=IO.popen(["rtk","proxy","git","diff-tree","--no-commit-id","--name-only","-r","HEAD"], &:read).lines.map(&:strip).reject(&:empty?).sort; abort "commit scope mismatch: #{actual.inspect}" unless actual == expected; puts "oracle docs commit scope ok"'
+rtk proxy ruby -rdigest -e 'expected="bf408ea3dd8c4cc93f57f20c3b0949fbb9a18f9e60308f5ea2f154251869ba95"; paths=%w[crates/picea/src/collider.rs crates/picea/src/debug.rs crates/picea/src/events.rs crates/picea/src/pipeline/contacts.rs crates/picea/src/world/contact_state.rs]; patch=IO.popen(["rtk","proxy","git","diff","--binary","c4298ae","--",*paths], &:read); actual=Digest::SHA256.hexdigest(patch); abort "frozen implementation changed: #{actual}" unless actual == expected; puts actual'
+```
+
+### O01 Matrix attribution
+
+新test必须保留旧matrix test不变。Candidate edge完全独立于warm/lifecycle输出：同ordered pair、clip-family compatible、非symmetric raw edge role swap、normal dot `>=0.98`、双侧final local witness drift `<=0.25`、全部输入finite。Oracle先预留full raw feature exact，再在residual graph做最大基数一对一。`candidate_total`只表示最终选中的residual matching数量，不是candidate graph edge数量。
+
+Matrix fixture在整个run内不得发生shape/local-pose patch；test必须从artifact collider shape/local-pose signature逐帧验证该前提，不满足则fail-closed。只有此前提成立时，artifact缺少private geometry revision才不影响O01归因；该oracle不得泛化到可编辑geometry场景。
+
+分类合同：
+
+- `candidate_total == absorbed + unabsorbed`，不允许candidate从分类漏出。
+- Absorbed必须同时满足`ContactPersisted` event、`PersistentEdgeSwap` reason、oracle对应的previous/current `ContactId`相同且一对一、`ManifoldId`相同。
+- 任何`Started`、`Unknown`、错误`ExactFeature`、错误IDs或错误previous映射都归unabsorbed。
+- Exact theft按实际输出ID检测：存在geometry-compatible full exact predecessor时，current必须继承该predecessor `ContactId`；不能由oracle的reservation构造性地产生0。
+- 未sanitize的`FrameRecord.events`负责finite/impulse gate；snapshot和落盘artifact只做投影交叉核对。Non-hit candidate warm impulses必须为0。
+
+Exact tests：
+
+```text
+rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_edge_swap_attribution_partitions_every_candidate -- --exact --nocapture
+rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_edge_swap_attribution_has_no_unabsorbed_or_exact_theft -- --exact --nocapture
+```
+
+第一条结构性partition/finite test在baseline与working都必须green。第二条是evidence test：pre-commit verifier必须记录两边exact theft/absorbed/unabsorbed实际值；其结果由S4-ORACLE-EVIDENCE spec gate裁决，不能在RED test commit前改旧counter或core。
+
+### O02/O03 Positive propagation
+
+- Core integration exact：`manifold_persistence_sat_role_swap_reports_persistent_edge_swap`。
+- Lab artifact exact：`artifact_records_persistent_edge_swap_with_stable_ids`。
+- 两者都必须证明raw role swap、无full exact predecessor、stable `ContactId`/`ManifoldId`、明确`PersistentEdgeSwap`，不是只数全局enum。
+
+```text
+rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_sat_role_swap_reports_persistent_edge_swap -- --exact --nocapture
+rtk proxy cargo test -p picea-lab --test artifact_run artifact_records_persistent_edge_swap_with_stable_ids -- --exact --nocapture
+```
+
+两条在baseline与working均预期green；O03必须反序列化实际落盘`frames.jsonl`或`debug_render.json`，不得只检查内存`RunResult`。
+
+### O05 Symmetric-edge negative lock
+
+`reference_edge == incident_edge`不是role swap。S4-ORACLE-RED在冻结5文件之外的`physics_realism_acceptance.rs`提交真实rectangle behavior lock：通过固定相对旋转令reference/incident edge index相同，再制造point-slot变化。Test必须先断言两帧full feature不同、raw feature index相同、decode后`reference_edge == incident_edge`、point slot改变且第二帧`warm_start_reason == MissFeatureId`；这些非真空前置全部满足后，才断言lifecycle非`PersistentEdgeSwap`且source-row reason非`EdgeSwap`。S4-IMPL必须修复后才能green：
+
+```text
+rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_symmetric_edge_index_is_not_role_swap -- --exact --nocapture
+```
+
+### O04 Preservation
+
+在S4-ORACLE-RED commit中，以下旧命令和断言保持原样并运行：
+
+```text
+rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_artifacts_capture_nxm_grid_stack_facts -- --exact --nocapture
+rtk proxy cargo test -p picea-lab --test artifact_run aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock -- --exact --nocapture
+rtk proxy env PICEA_MATRIX_STACK_E4_ACCEPTANCE=1 cargo test -p picea-lab --test artifact_run matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed -- --ignored --exact --nocapture
+```
+
+Reviewer必须逐行证明O01/O03只增加测试/helper，旧matrix数值断言零删除、零阈值变化。
+
+S4-ORACLE-RED新增`crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb`，结构化抽取上述三条既有test函数并与`c4298ae` blob逐字比较：
+
+```text
+rtk proxy ruby crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb c4298ae exact
+```
+
+该命令在S4-ORACLE-RED必须green；S4-ORACLE-REPLACE使用`replace-one-oracle`模式，只允许替换旧`edge_swap_candidate_count == 0`语义断言，其他函数内容和阈值仍逐字相同。
+
+### Dual-baseline evidence
+
+S4-ORACLE-RED commit前，test reviewer先批准test-only diff。Supervisor按allowlist stage tests/tool、计算patch与frozen implementation hashes、创建temporary clean `c4298ae` worktree并应用同一cached patch。Verifier只读检查两侧hash/status并运行O01-O05和三条A14，不执行`git add`、`git apply`、worktree create/remove。Verifier完成后由supervisor reverse同一patch、确认temporary worktree clean并remove；之后才允许commit tests。
+
+Pre-commit cached patch allowlist与应用配方：
+
+```text
+rtk proxy git diff --cached --exit-code
+rtk proxy git add -- crates/picea-lab/tests/artifact_run.rs crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb crates/picea/tests/physics_realism_acceptance.rs
+rtk proxy ruby -e 'expected=%w[crates/picea-lab/tests/artifact_run.rs crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb crates/picea/tests/physics_realism_acceptance.rs].sort; actual=IO.popen(["rtk","proxy","git","diff","--cached","--name-only"], &:read).lines.map(&:strip).reject(&:empty?).sort; abort "test patch scope mismatch: #{actual.inspect}" unless actual == expected; puts "oracle test patch scope ok"'
+rtk proxy ruby -rdigest -e 'paths=%w[crates/picea-lab/tests/artifact_run.rs crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb crates/picea/tests/physics_realism_acceptance.rs]; patch=IO.popen(["rtk","proxy","git","diff","--cached","--binary","--",*paths], &:read); abort "empty oracle test patch" if patch.empty?; puts Digest::SHA256.hexdigest(patch)'
+rtk proxy ruby -rdigest -e 'expected="bf408ea3dd8c4cc93f57f20c3b0949fbb9a18f9e60308f5ea2f154251869ba95"; paths=%w[crates/picea/src/collider.rs crates/picea/src/debug.rs crates/picea/src/events.rs crates/picea/src/pipeline/contacts.rs crates/picea/src/world/contact_state.rs]; patch=IO.popen(["rtk","proxy","git","diff","--binary","c4298ae","--",*paths], &:read); actual=Digest::SHA256.hexdigest(patch); abort "frozen implementation changed: #{actual}" unless actual == expected; puts actual'
+rtk proxy ruby -e 'path="/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode"; abort "missing approved temp parent" unless Dir.directory?(path); puts path'
+rtk proxy git worktree add --detach "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-baseline" c4298ae
+rtk proxy git diff --cached --binary -- crates/picea-lab/tests/artifact_run.rs crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb crates/picea/tests/physics_realism_acceptance.rs | rtk proxy git -C "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-baseline" apply --check -
+rtk proxy git diff --cached --binary -- crates/picea-lab/tests/artifact_run.rs crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb crates/picea/tests/physics_realism_acceptance.rs | rtk proxy git -C "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-baseline" apply -
+rtk proxy git -C "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-baseline" diff --exit-code c4298ae -- crates/picea/src/collider.rs crates/picea/src/debug.rs crates/picea/src/events.rs crates/picea/src/pipeline/contacts.rs crates/picea/src/world/contact_state.rs
+```
+
+Verifier在两侧分别运行exact commands时，baseline使用`rtk proxy env CARGO_TARGET_DIR="/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-target" cargo test --manifest-path "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-baseline/Cargo.toml" ...`；target不写入worktree。Verifier比较三份allowlist文件的`rtk proxy git hash-object`输出完全相同。测试后supervisor执行：
+
+```text
+rtk proxy git diff --cached --binary -- crates/picea-lab/tests/artifact_run.rs crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb crates/picea/tests/physics_realism_acceptance.rs | rtk proxy git -C "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-baseline" apply -R --check -
+rtk proxy git diff --cached --binary -- crates/picea-lab/tests/artifact_run.rs crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb crates/picea/tests/physics_realism_acceptance.rs | rtk proxy git -C "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-baseline" apply -R -
+rtk proxy git -C "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-baseline" status --short
+rtk proxy git worktree remove "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-baseline"
+```
+
+S4-ORACLE-RED commit得到固定hash `T` 后，S4-ORACLE-EVIDENCE再次验证：
+
+- `git diff --exit-code c4298ae..T -- crates/picea/src/collider.rs crates/picea/src/debug.rs crates/picea/src/events.rs crates/picea/src/pipeline/contacts.rs crates/picea/src/world/contact_state.rs`必须为0；即`T`只新增tests/tool/receipt，不含working implementation。
+- Clean baseline worktree checkout `T`；当前root也位于`T`但叠加同5份dirty implementation。
+- 记录5文件implementation patch SHA-256、两边test blob hashes、exact theft/absorbed/unabsorbed和三条A14结果。
+- Evidence receipt经verifier/spec reviewer通过后docs-only commit；此时仍不替换旧counter。
+
+Post-commit evidence recipe以实际`T`替换下列占位符。Supervisor负责worktree create/remove；verifier只读检查并运行测试：
+
+```text
+rtk proxy git diff --exit-code c4298ae..T -- crates/picea/src/collider.rs crates/picea/src/debug.rs crates/picea/src/events.rs crates/picea/src/pipeline/contacts.rs crates/picea/src/world/contact_state.rs
+rtk proxy git worktree add --detach "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-evidence" T
+rtk proxy ruby -rdigest -e 'expected="bf408ea3dd8c4cc93f57f20c3b0949fbb9a18f9e60308f5ea2f154251869ba95"; paths=%w[crates/picea/src/collider.rs crates/picea/src/debug.rs crates/picea/src/events.rs crates/picea/src/pipeline/contacts.rs crates/picea/src/world/contact_state.rs]; patch=IO.popen(["rtk","proxy","git","diff","--binary","T","--",*paths], &:read); actual=Digest::SHA256.hexdigest(patch); abort "implementation patch mismatch: #{actual}" unless actual == expected; puts actual'
+rtk proxy git diff --exit-code -- crates/picea-lab/tests/artifact_run.rs crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb crates/picea/tests/physics_realism_acceptance.rs
+```
+
+Clean evidence worktree使用`rtk proxy env CARGO_TARGET_DIR="/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-evidence-target" cargo test --manifest-path "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-evidence/Cargo.toml" ...`逐条运行；root使用同一`T` tests叠加固定implementation patch运行。两边记录`git rev-parse T:<test-path>`，三个blob hashes必须分别相同。Verifier结束后supervisor执行：
+
+```text
+rtk proxy git -C "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-evidence" status --short
+rtk proxy git worktree remove "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s4-oracle-evidence"
+```
+
+`status --short`必须无输出；否则禁止remove并先调查非target文件来源。Cargo target位于worktree外，不参与Git或清理门。
+
+双跑预期矩阵：
+
+| Command | `c4298ae` + test patch | working implementation + same patch |
+| --- | --- | --- |
+| O01 partition exact | exit 0 | exit 0 |
+| O01 desired zero exact | exit 101且唯一失败为`exact_theft > 0`，`unabsorbed`必须0；若实际不同立即停并amend spec | exit 0；`absorbed > 0`、`unabsorbed=0`、`exact_theft=0` |
+| O02 core positive exact | exit 0 | exit 0 |
+| O03 disk artifact positive exact | exit 0 | exit 0 |
+| O05 symmetric-edge negative exact | exit 101且唯一失败为symmetric edge误判 | exit 101且同一失败；S4-IMPL修复 |
+| Matrix180 existing exact | exit 0 | exit 101且唯一旧counter actual 19；所有数值稳定门先通过 |
+| Aligned1200 existing exact | exit 0 | exit 0 |
+| Forced600 existing exact | exit 0 | exit 0 |
+| Source freeze tool `exact` | exit 0 | exit 0；工具只比较test source，与dirty core无关 |
+
+任一compile error、unrelated panic、数值门失败或test blob/hash不一致均为S4-ORACLE-RED FAIL。
+
+只有S4-ORACLE-EVIDENCE证明新oracle完整且replacement语义获review批准，S4-ORACLE-REPLACE才可修改`artifact_run.rs`唯一含糊counter assertion。Replacement commit保留全部matrix数值门，允许baseline production对新的desired oracle保持intentional RED；随后S4-IMPL修symmetric-edge并让全部gates green。
 
 ## S4-V Full Verification
 
@@ -239,6 +414,10 @@ rtk proxy git status --short --branch
 
 - S4-D：`docs: design sat manifold persistence`
 - S4-RED：`test: lock manifold persistence matching`
+- S4-ORACLE-D：`docs: design manifold attribution oracle`
+- S4-ORACLE-RED：`test: attribute persistent manifold candidates`
+- S4-ORACLE-EVIDENCE：`docs: record manifold attribution evidence`
+- S4-ORACLE-REPLACE：`test: distinguish absorbed manifold candidates`
 - S4-IMPL：`fix: persist sat manifold point identity`
 - S4-C：`docs: close sat manifold persistence milestone`
 
@@ -325,7 +504,18 @@ Living spec的聚合命令`rtk proxy cargo test -p picea --test physics_realism_
 - A11 unit与真实pipeline integration均在baseline green，保留为2/1/2边界锁。
 - A10 same-index unit在当前`ContactRecord`尚无private sensor field时只能用previous event的`warm_start_reason`表达previous sensor fact；S4-IMPL必须迁移为private `ContactRecord::is_sensor`事实，不得继续反推。
 - Reviewer指出的public docs Low属于S4-IMPL；S4-RED没有修改`events.rs`/`debug.rs`，该Low明确留待implementation节点。
-- S4-RED reviewer re-check、verifier review和supervisor acceptance仍待后续只读节点；本worker未commit。
+- S4-RED worker当时未commit；后续reviewer/verifier/supervisor已在下述closeout闭环。
+
+### 2026-07-13 - S4-RED acceptance closeout
+
+- Test-quality与scope reviewer最终均无High/Medium/Low；独立verifier逐A复跑PASS。
+- S4-RED已提交为`c4298ae test: lock manifold persistence matching`。
+
+### 2026-07-13 - S4-IMPL A14 blocker / S4-ORACLE authorization
+
+- Working implementation使A03-A13/A15 exact green；matrix180稳定指标仍为48 sleeping / 0 awake、无ejection、quiet speed 0，但旧diagnostic counter从0变19，因此未提交。
+- 三位只读reviewer确认warm solver-start provenance与final lifecycle阶段独立；现有counter不是一对一lifecycle absorption oracle。另发现symmetric-edge predicate Medium，留在oracle归因后修复。
+- 用户明确授权新增S4-ORACLE强化链：先保持旧断言，提交O01-O05更强锁和双基线证据；只有spec/code review通过后才允许语义替换，全部数值稳定性阈值原样保留。
 
 ## 验收报告模板
 
