@@ -142,6 +142,16 @@ fn raw_feature_parts(feature_id: ContactFeatureId) -> (u32, u32) {
     (raw as u32, (raw >> 32) as u32)
 }
 
+fn decoded_raw_feature(feature_id: ContactFeatureId) -> (u32, u32, u32, u32) {
+    let (index, slot) = raw_feature_parts(feature_id);
+    (
+        (index >> 24) & 0xff,
+        (index >> 12) & 0xfff,
+        index & 0xfff,
+        slot,
+    )
+}
+
 fn contact_local_witnesses(contact: &ContactEvent, pose_a: Pose, pose_b: Pose) -> (Point, Point) {
     let half_depth = contact.normal * (contact.depth * 0.5);
     (
@@ -5204,5 +5214,185 @@ fn ccd_dynamic_convex_pair_skips_rotating_bodies() {
             .iter()
             .all(|contact| contact.ccd_trace.is_none()),
         "rotational CCD is outside the M19 translational slice"
+    );
+}
+
+#[test]
+fn manifold_persistence_sat_role_swap_reports_persistent_edge_swap() {
+    let mut world = no_gravity_world();
+    let lower = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let upper = create_body(&mut world, BodyType::Static, -0.25, 1.8, Vector::default());
+    attach_shape(
+        &mut world,
+        lower,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        upper,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let lower_pose = Pose::from_xy_angle(0.0, 0.0, -0.12);
+    let first_upper_pose = Pose::from_xy_angle(-0.25, 1.8, -0.17);
+    let second_upper_pose = Pose::from_xy_angle(-0.25, 1.8, -0.15);
+    world
+        .apply_body_patch(
+            lower,
+            BodyPatch {
+                pose: Some(lower_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("lower rectangle pose should be patched");
+    world
+        .apply_body_patch(
+            upper,
+            BodyPatch {
+                pose: Some(first_upper_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("first upper rectangle pose should be patched");
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    world
+        .apply_body_patch(
+            upper,
+            BodyPatch {
+                pose: Some(second_upper_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("upper rectangle should cross the SAT reference/incident role swap");
+    let second = pipeline.step(&mut world);
+    let first_contacts = active_contact_events(&first);
+    let second_contacts = active_contact_events(&second);
+
+    assert_eq!(first_contacts.len(), 2);
+    assert_eq!(second_contacts.len(), 2);
+    assert_eq!(
+        second
+            .events
+            .iter()
+            .filter(|event| matches!(event, WorldEvent::ContactPersisted(_)))
+            .count(),
+        2,
+        "both role-swapped points must use the persisted event variant"
+    );
+    assert!(second_contacts.iter().all(|current| {
+        first_contacts
+            .iter()
+            .all(|previous| previous.feature_id != current.feature_id)
+    }));
+    let correspondence = unique_two_point_local_witness_correspondence(
+        &first_contacts,
+        lower_pose,
+        first_upper_pose,
+        &second_contacts,
+        lower_pose,
+        second_upper_pose,
+    );
+    assert_ne!(first_contacts[0].contact_id, first_contacts[1].contact_id);
+    assert_ne!(second_contacts[0].contact_id, second_contacts[1].contact_id);
+    for (first_index, second_index) in correspondence {
+        let previous = first_contacts[first_index];
+        let current = second_contacts[second_index];
+        let (previous_kind, previous_reference, previous_incident, _) =
+            decoded_raw_feature(previous.feature_id);
+        let (current_kind, current_reference, current_incident, _) =
+            decoded_raw_feature(current.feature_id);
+        assert_ne!(previous.feature_id, current.feature_id);
+        assert_eq!(previous_kind, current_kind);
+        assert_eq!(previous_reference, current_incident);
+        assert_eq!(previous_incident, current_reference);
+        assert_ne!(previous_reference, previous_incident);
+        assert_eq!(current.contact_id, previous.contact_id);
+        assert_eq!(current.manifold_id, previous.manifold_id);
+        assert_eq!(
+            current.lifecycle_reason,
+            ContactLifecycleReason::PersistentEdgeSwap
+        );
+    }
+    assert_eq!(
+        second_contacts
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn manifold_persistence_symmetric_edge_index_is_not_role_swap() {
+    let mut world = no_gravity_world();
+    let lower = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let upper = create_body(&mut world, BodyType::Static, -0.2, 2.0, Vector::default());
+    attach_shape(
+        &mut world,
+        lower,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        upper,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let first_pose = Pose::from_xy_angle(-0.2, 2.0, std::f32::consts::PI - 0.22);
+    let second_pose = Pose::from_xy_angle(-0.2, 2.0, std::f32::consts::PI - 0.18);
+    world
+        .apply_body_patch(
+            upper,
+            BodyPatch {
+                pose: Some(first_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("first rectangle pose should be patched");
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = active_contact_events(&pipeline.step(&mut world));
+    world
+        .apply_body_patch(
+            upper,
+            BodyPatch {
+                pose: Some(second_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("second rectangle pose should be patched");
+    let second = active_contact_events(&pipeline.step(&mut world));
+
+    assert_eq!(first.len(), 1);
+    assert_eq!(second.len(), 1);
+    let previous = first[0];
+    let current = second[0];
+    let (previous_index, previous_slot) = raw_feature_parts(previous.feature_id);
+    let (current_index, current_slot) = raw_feature_parts(current.feature_id);
+    let (_, reference_edge, incident_edge, decoded_current_slot) =
+        decoded_raw_feature(current.feature_id);
+    assert_ne!(previous.feature_id, current.feature_id);
+    assert_eq!(previous_index, current_index);
+    assert_eq!(reference_edge, incident_edge);
+    assert_eq!(decoded_current_slot, current_slot);
+    assert_ne!(previous_slot, current_slot);
+    assert_eq!(
+        current.warm_start_reason,
+        WarmStartCacheReason::MissFeatureId
+    );
+    assert!(
+        current.lifecycle_reason != ContactLifecycleReason::PersistentEdgeSwap
+            && current.source_row_continuity_reason != SourceRowContinuityReason::EdgeSwap,
+        "a symmetric raw edge index with only a point-slot change is not a SAT role swap; previous={previous:?}, current={current:?}"
     );
 }

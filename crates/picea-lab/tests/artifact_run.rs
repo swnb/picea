@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::{
     collections::{BTreeMap, VecDeque},
     env, fs,
@@ -8,9 +9,11 @@ use picea::debug::DebugShape;
 use picea::events::{
     CcdTargetKind, ContactLifecycleReason, SourceRowContinuityReason, WarmStartCacheReason,
 };
+use picea::events::{ContactEvent, ContactReductionReason, WorldEvent};
 use picea::prelude::{
     BodyHandle, ColliderHandle, CollisionLayerPreset, DebugCollider, DebugContact, MaterialPreset,
 };
+use picea::prelude::{ContactFeatureId, ContactId, Point, Pose, Vector};
 use picea_lab::{
     instantiate_scene_fixture, run_scenario, ArtifactFile, ArtifactStore, DebugRenderArtifact,
     DebugRenderFrame, DiagnosticMarkerKind, DiagnosticSeverity, DiagnosticSource, FrameRecord,
@@ -3938,6 +3941,971 @@ fn matrix_stack_floor_x_bounds(run: &RunResult) -> Option<(f32, f32)> {
         })
 }
 
+#[derive(Clone, Copy)]
+struct OracleActiveContact<'a> {
+    persisted: bool,
+    event: &'a ContactEvent,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct OracleCandidateEdge {
+    previous_index: usize,
+    drift: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OracleFinalSatProjection {
+    FinalSatContact,
+    NoFinalSatManifold,
+    Unprovable,
+}
+
+type OracleTransitionKey = (usize, ContactId);
+
+#[derive(Debug, Default)]
+struct EdgeSwapAttributionReport {
+    final_candidate_total: usize,
+    final_attributed: usize,
+    final_unabsorbed: usize,
+    reported_persistent_edge_swap_total: usize,
+    source_boundary_evidence: usize,
+    unexpected: usize,
+    exact_theft: usize,
+    exact_predecessor_total: usize,
+    final_attributed_keys: BTreeSet<OracleTransitionKey>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MatrixColliderSignature {
+    body: BodyHandle,
+    serialized_authoring: String,
+}
+
+fn oracle_active_contacts(frame: &FrameRecord) -> Vec<OracleActiveContact<'_>> {
+    frame
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            WorldEvent::ContactStarted(event) => Some(OracleActiveContact {
+                persisted: false,
+                event,
+            }),
+            WorldEvent::ContactPersisted(event) => Some(OracleActiveContact {
+                persisted: true,
+                event,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn oracle_feature_raw(feature_id: ContactFeatureId) -> u64 {
+    serde_json::to_value(feature_id)
+        .expect("contact feature id should serialize")
+        .as_u64()
+        .expect("contact feature id should serialize as its raw integer")
+}
+
+fn oracle_decoded_feature(feature_id: ContactFeatureId) -> (u32, u32, u32, u32) {
+    let raw = oracle_feature_raw(feature_id);
+    let index = raw as u32;
+    (
+        (index >> 24) & 0xff,
+        (index >> 12) & 0xfff,
+        index & 0xfff,
+        (raw >> 32) as u32,
+    )
+}
+
+fn oracle_clip_family(reason: ContactReductionReason) -> bool {
+    matches!(
+        reason,
+        ContactReductionReason::SinglePoint
+            | ContactReductionReason::Clipped
+            | ContactReductionReason::DuplicateReduced
+    )
+}
+
+fn oracle_scalar_facts_are_finite(contact: &ContactEvent) -> bool {
+    let point_is_finite = |point: Point| point.x().is_finite() && point.y().is_finite();
+    let vector_is_finite = |vector: Vector| vector.x().is_finite() && vector.y().is_finite();
+    point_is_finite(contact.point)
+        && vector_is_finite(contact.normal)
+        && [
+            contact.depth,
+            contact.warm_start_anchor_drift,
+            contact.warm_start_normal_anchor_drift,
+            contact.warm_start_tangent_anchor_drift,
+            contact.warm_start_normal_impulse,
+            contact.warm_start_tangent_impulse,
+            contact.solver_normal_impulse,
+            contact.solver_tangent_impulse,
+            contact.solver_initial_normal_speed,
+            contact.solver_initial_tangent_speed,
+            contact.solver_final_normal_speed,
+            contact.solver_final_tangent_speed,
+            contact.solver_position_bias,
+            contact.solver_restitution_bias,
+            contact.solver_support_friction_impulse,
+            contact.solver_position_correction_depth,
+            contact.solver_position_correction_body_a_translation,
+            contact.solver_position_correction_body_b_translation,
+            contact.solver_normal_impulse_delta,
+            contact.solver_tangent_impulse_delta,
+            contact.restitution_velocity_threshold,
+        ]
+        .into_iter()
+        .all(f32::is_finite)
+        && contact.ccd_trace.as_ref().is_none_or(|trace| {
+            point_is_finite(trace.swept_start)
+                && point_is_finite(trace.swept_end)
+                && point_is_finite(trace.target_swept_start)
+                && point_is_finite(trace.target_swept_end)
+                && point_is_finite(trace.toi_point)
+                && [
+                    trace.toi,
+                    trace.advancement,
+                    trace.clamp,
+                    trace.target_clamp,
+                    trace.slop,
+                ]
+                .into_iter()
+                .all(f32::is_finite)
+        })
+}
+
+fn oracle_non_hit_warm_impulses_are_zero(contact: &ContactEvent) -> bool {
+    contact.warm_start_reason.is_hit()
+        || (contact.warm_start_normal_impulse == 0.0 && contact.warm_start_tangent_impulse == 0.0)
+}
+
+fn oracle_final_sat_projection(
+    frame: &FrameRecord,
+    contact: &ContactEvent,
+) -> OracleFinalSatProjection {
+    let Some(collider_a) = collider_by_handle(frame, contact.collider_a) else {
+        return OracleFinalSatProjection::Unprovable;
+    };
+    let Some(collider_b) = collider_by_handle(frame, contact.collider_b) else {
+        return OracleFinalSatProjection::Unprovable;
+    };
+    let transform_is_finite = |collider: &DebugCollider| {
+        collider.local_transform.translation.x().is_finite()
+            && collider.local_transform.translation.y().is_finite()
+            && collider.local_transform.rotation.is_finite()
+            && collider.world_transform.translation.x().is_finite()
+            && collider.world_transform.translation.y().is_finite()
+            && collider.world_transform.rotation.is_finite()
+    };
+    if collider_a.is_sensor
+        || collider_b.is_sensor
+        || !transform_is_finite(collider_a)
+        || !transform_is_finite(collider_b)
+    {
+        return OracleFinalSatProjection::Unprovable;
+    }
+    let DebugShape::Polygon {
+        vertices: polygon_a,
+    } = &collider_a.shape
+    else {
+        return OracleFinalSatProjection::Unprovable;
+    };
+    let DebugShape::Polygon {
+        vertices: polygon_b,
+    } = &collider_b.shape
+    else {
+        return OracleFinalSatProjection::Unprovable;
+    };
+    if polygon_a.len() < 3
+        || polygon_b.len() < 3
+        || polygon_a
+            .iter()
+            .chain(polygon_b)
+            .any(|point| !point.x().is_finite() || !point.y().is_finite())
+    {
+        return OracleFinalSatProjection::Unprovable;
+    }
+
+    let mut axes = Vec::with_capacity(polygon_a.len() + polygon_b.len());
+    for polygon in [polygon_a.as_slice(), polygon_b.as_slice()] {
+        for (start, end) in polygon
+            .iter()
+            .zip(polygon.iter().cycle().skip(1))
+            .take(polygon.len())
+        {
+            let edge = *end - *start;
+            let edge_length = edge.length();
+            if !edge.x().is_finite()
+                || !edge.y().is_finite()
+                || !edge_length.is_finite()
+                || edge_length <= f32::EPSILON
+            {
+                return OracleFinalSatProjection::Unprovable;
+            }
+            let axis = edge.perp() / edge_length;
+            if !axis.x().is_finite() || !axis.y().is_finite() {
+                return OracleFinalSatProjection::Unprovable;
+            }
+            axes.push(axis);
+        }
+    }
+
+    let project = |polygon: &[Point], axis: Vector| {
+        polygon
+            .iter()
+            .try_fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), point| {
+                let projection = Vector::from(*point).dot(axis);
+                projection
+                    .is_finite()
+                    .then_some((min.min(projection), max.max(projection)))
+            })
+    };
+    let mut separated = false;
+    for axis in axes {
+        let Some((min_a, max_a)) = project(polygon_a, axis) else {
+            return OracleFinalSatProjection::Unprovable;
+        };
+        let Some((min_b, max_b)) = project(polygon_b, axis) else {
+            return OracleFinalSatProjection::Unprovable;
+        };
+        let depth = max_a.min(max_b) - min_a.max(min_b);
+        if !depth.is_finite() {
+            return OracleFinalSatProjection::Unprovable;
+        }
+        separated |= depth <= 1.0e-4;
+    }
+    if separated {
+        OracleFinalSatProjection::NoFinalSatManifold
+    } else {
+        OracleFinalSatProjection::FinalSatContact
+    }
+}
+
+fn oracle_source_endpoint(frame: &FrameRecord, contact: &ContactEvent) -> bool {
+    oracle_final_sat_projection(frame, contact) == OracleFinalSatProjection::NoFinalSatManifold
+        && oracle_scalar_facts_are_finite(contact)
+        && contact.depth == 0.0
+        && contact.solver_normal_impulse > f32::EPSILON
+}
+
+fn oracle_source_boundary_endpoint_is_admissible(
+    frame: &FrameRecord,
+    contact: &ContactEvent,
+) -> bool {
+    oracle_final_sat_projection(frame, contact) == OracleFinalSatProjection::FinalSatContact
+        || oracle_source_endpoint(frame, contact)
+}
+
+fn oracle_local_midpoint_anchors(
+    frame: &FrameRecord,
+    contact: &ContactEvent,
+) -> Option<[Vector; 2]> {
+    let collider_a = collider_by_handle(frame, contact.collider_a)?;
+    let collider_b = collider_by_handle(frame, contact.collider_b)?;
+    let local_a = Vector::from(contact.point - collider_a.world_transform.translation)
+        .rotated(-collider_a.world_transform.rotation);
+    let local_b = Vector::from(contact.point - collider_b.world_transform.translation)
+        .rotated(-collider_b.world_transform.rotation);
+    Some([local_a, local_b])
+}
+
+fn oracle_non_symmetric_role_swap(previous: &ContactEvent, current: &ContactEvent) -> bool {
+    let (previous_kind, previous_reference, previous_incident, _) =
+        oracle_decoded_feature(previous.feature_id);
+    let (current_kind, current_reference, current_incident, _) =
+        oracle_decoded_feature(current.feature_id);
+    previous.feature_id != current.feature_id
+        && previous_kind == current_kind
+        && previous_reference == current_incident
+        && previous_incident == current_reference
+        && previous_reference != previous_incident
+}
+
+fn oracle_edge_swap_candidate(
+    previous_frame: &FrameRecord,
+    current_frame: &FrameRecord,
+    previous: &ContactEvent,
+    current: &ContactEvent,
+) -> Option<f32> {
+    if previous.collider_a != current.collider_a
+        || previous.collider_b != current.collider_b
+        || !oracle_clip_family(previous.reduction_reason)
+        || !oracle_clip_family(current.reduction_reason)
+        || !oracle_scalar_facts_are_finite(previous)
+        || !oracle_scalar_facts_are_finite(current)
+        || !oracle_non_hit_warm_impulses_are_zero(previous)
+        || !oracle_non_hit_warm_impulses_are_zero(current)
+        || oracle_final_sat_projection(previous_frame, previous)
+            != OracleFinalSatProjection::FinalSatContact
+        || oracle_final_sat_projection(current_frame, current)
+            != OracleFinalSatProjection::FinalSatContact
+        || !oracle_non_symmetric_role_swap(previous, current)
+    {
+        return None;
+    }
+    let previous_normal = previous.normal.normalized_or_zero();
+    let current_normal = current.normal.normalized_or_zero();
+    if previous_normal.length() <= f32::EPSILON
+        || current_normal.length() <= f32::EPSILON
+        || previous_normal.dot(current_normal) < 0.98
+    {
+        return None;
+    }
+    // Artifact events expose the final midpoint, not the private pair of
+    // surface witnesses. This is an independent artifact-observable midpoint
+    // projection and makes no subset or equivalence claim about core matching.
+    let previous_anchors = oracle_local_midpoint_anchors(previous_frame, previous)?;
+    let current_anchors = oracle_local_midpoint_anchors(current_frame, current)?;
+    let drift = (current_anchors[0] - previous_anchors[0])
+        .length()
+        .max((current_anchors[1] - previous_anchors[1]).length());
+    (drift.is_finite() && drift <= 0.25).then_some(drift)
+}
+
+fn oracle_matching_is_better(
+    candidate: &[Option<OracleCandidateEdge>],
+    incumbent: &[Option<OracleCandidateEdge>],
+) -> bool {
+    let cardinality = |matching: &[Option<OracleCandidateEdge>]| {
+        matching.iter().filter(|edge| edge.is_some()).count()
+    };
+    let candidate_cardinality = cardinality(candidate);
+    let incumbent_cardinality = cardinality(incumbent);
+    if candidate_cardinality != incumbent_cardinality {
+        return candidate_cardinality > incumbent_cardinality;
+    }
+    let drift_score = |matching: &[Option<OracleCandidateEdge>]| {
+        matching
+            .iter()
+            .flatten()
+            .fold((0.0_f32, 0.0_f32), |(max_drift, total_drift), edge| {
+                (max_drift.max(edge.drift), total_drift + edge.drift)
+            })
+    };
+    let candidate_drift = drift_score(candidate);
+    let incumbent_drift = drift_score(incumbent);
+    if candidate_drift.0.total_cmp(&incumbent_drift.0).is_ne() {
+        return candidate_drift.0 < incumbent_drift.0;
+    }
+    if candidate_drift.1.total_cmp(&incumbent_drift.1).is_ne() {
+        return candidate_drift.1 < incumbent_drift.1;
+    }
+    let mapping = |matching: &[Option<OracleCandidateEdge>]| {
+        matching
+            .iter()
+            .enumerate()
+            .filter_map(|(current_index, edge)| {
+                edge.map(|edge| (current_index, edge.previous_index))
+            })
+            .collect::<Vec<_>>()
+    };
+    mapping(candidate) < mapping(incumbent)
+}
+
+fn enumerate_oracle_matchings(
+    position: usize,
+    candidate_graph: &[Vec<OracleCandidateEdge>],
+    previous_used: &mut [bool],
+    assignments: &mut [Option<OracleCandidateEdge>],
+    best: &mut Option<Vec<Option<OracleCandidateEdge>>>,
+) {
+    if position == candidate_graph.len() {
+        if best
+            .as_ref()
+            .is_none_or(|incumbent| oracle_matching_is_better(assignments, incumbent))
+        {
+            *best = Some(assignments.to_vec());
+        }
+        return;
+    }
+    assignments[position] = None;
+    enumerate_oracle_matchings(
+        position + 1,
+        candidate_graph,
+        previous_used,
+        assignments,
+        best,
+    );
+    for edge in candidate_graph[position].iter().copied() {
+        if previous_used[edge.previous_index] {
+            continue;
+        }
+        previous_used[edge.previous_index] = true;
+        assignments[position] = Some(edge);
+        enumerate_oracle_matchings(
+            position + 1,
+            candidate_graph,
+            previous_used,
+            assignments,
+            best,
+        );
+        previous_used[edge.previous_index] = false;
+    }
+}
+
+fn matrix_rect_local_vertices(width: f32, height: f32) -> [Point; 4] {
+    let half_width = width.abs() * 0.5;
+    let half_height = height.abs() * 0.5;
+    [
+        Point::new(-half_width, -half_height),
+        Point::new(half_width, -half_height),
+        Point::new(half_width, half_height),
+        Point::new(-half_width, half_height),
+    ]
+}
+
+fn matrix_serialized_shape_descriptor(
+    kind: &str,
+    half_extents: [f32; 2],
+    ordered_vertices: &[Point],
+) -> String {
+    let mut descriptor = BTreeMap::<&str, serde_json::Value>::new();
+    descriptor.insert("kind", json!(kind));
+    descriptor.insert(
+        "half_extents_bits",
+        json!([half_extents[0].to_bits(), half_extents[1].to_bits()]),
+    );
+    descriptor.insert(
+        "ordered_vertices_bits",
+        json!(ordered_vertices
+            .iter()
+            .map(|point| [point.x().to_bits(), point.y().to_bits()])
+            .collect::<Vec<_>>()),
+    );
+    serde_json::to_string(&descriptor).expect("matrix shape descriptor should serialize")
+}
+
+fn assert_matrix_signature_detects_small_patch_and_same_edge_length_deformation() {
+    let width = 0.42_f32;
+    let height = 0.42_f32;
+    let base_vertices = matrix_rect_local_vertices(width, height);
+    let base =
+        matrix_serialized_shape_descriptor("rect", [width * 0.5, height * 0.5], &base_vertices);
+    let patched_width = width + 0.0005;
+    let patched = matrix_serialized_shape_descriptor(
+        "rect",
+        [patched_width * 0.5, height * 0.5],
+        &matrix_rect_local_vertices(patched_width, height),
+    );
+    assert_ne!(
+        base, patched,
+        "raw-bit authoring signature must detect a sub-0.001 shape patch"
+    );
+
+    let shear_angle = 0.2_f32;
+    let side = Vector::new(height * shear_angle.cos(), height * shear_angle.sin());
+    let origin = Vector::new(-width * 0.5, 0.0) - side * 0.5;
+    let same_edge_lengths = [
+        Point::from(origin),
+        Point::from(origin + Vector::new(width, 0.0)),
+        Point::from(origin + Vector::new(width, 0.0) + side),
+        Point::from(origin + side),
+    ];
+    assert!(((same_edge_lengths[1] - same_edge_lengths[0]).length() - width).abs() <= 1.0e-6);
+    assert!(((same_edge_lengths[3] - same_edge_lengths[0]).length() - height).abs() <= 1.0e-6);
+    let deformed = matrix_serialized_shape_descriptor(
+        "convex_polygon",
+        [width * 0.5, height * 0.5],
+        &same_edge_lengths,
+    );
+    assert_ne!(
+        base, deformed,
+        "ordered raw vertices must distinguish a same-edge-length deformation"
+    );
+}
+
+fn matrix_scene_f32(run: &RunResult, key: &str) -> f32 {
+    run.manifest.effective_runtime_config.scene_params[key]
+        .as_f64()
+        .unwrap_or_else(|| panic!("matrix scene param {key} must be numeric")) as f32
+}
+
+fn assert_matrix_shape_and_local_pose_signatures_are_stable(run: &RunResult) {
+    assert_eq!(run.manifest.scenario_id, ScenarioId::MatrixStack);
+    assert_eq!(
+        run.manifest.effective_runtime_config.substeps_per_frame, 1,
+        "O01 is scoped to the fresh offline MatrixStack run path"
+    );
+    assert_eq!(
+        run.manifest.effective_runtime_config.scene_params["layout"],
+        json!("staggered")
+    );
+    assert!(run
+        .frames
+        .iter()
+        .all(|frame| frame.compound_provenance.is_empty()
+            && frame.perturbation_provenance.is_empty()));
+    assert_matrix_signature_detects_small_patch_and_same_edge_length_deformation();
+
+    let columns = run.manifest.effective_runtime_config.scene_params["columns"]
+        .as_u64()
+        .expect("matrix columns should be an unsigned integer") as usize;
+    let rows = run.manifest.effective_runtime_config.scene_params["rows"]
+        .as_u64()
+        .expect("matrix rows should be an unsigned integer") as usize;
+    let box_width = matrix_scene_f32(run, "box_width");
+    let box_height = matrix_scene_f32(run, "box_height");
+    let gap_x = matrix_scene_f32(run, "gap_x");
+    let floor_width = box_width + (columns.saturating_sub(1) as f32 * (box_width + gap_x)) + 2.0;
+    let floor_height = 0.45_f32;
+
+    let signatures = |frame: &FrameRecord| {
+        assert_eq!(frame.snapshot.colliders.len(), columns * rows + 1);
+        frame
+            .snapshot
+            .colliders
+            .iter()
+            .map(|collider| {
+                assert!(
+                    collider.local_transform.translation.x().is_finite()
+                        && collider.local_transform.translation.y().is_finite()
+                        && collider.local_transform.rotation.is_finite()
+                        && collider.world_transform.translation.x().is_finite()
+                        && collider.world_transform.translation.y().is_finite()
+                        && collider.world_transform.rotation.is_finite(),
+                    "matrix collider transforms must stay finite; frame={}, collider={collider:?}",
+                    frame.frame_index
+                );
+                let body_type = frame
+                    .snapshot
+                    .bodies
+                    .iter()
+                    .find(|body| body.handle == collider.body)
+                    .expect("matrix collider body must exist")
+                    .body_type;
+                let (width, height) = match body_type {
+                    picea::prelude::BodyType::Static => (floor_width, floor_height),
+                    picea::prelude::BodyType::Dynamic => (box_width, box_height),
+                    picea::prelude::BodyType::Kinematic => {
+                        panic!("MatrixStack must not contain a kinematic collider")
+                    }
+                };
+                let local_vertices = matrix_rect_local_vertices(width, height);
+                let DebugShape::Polygon { vertices } = &collider.shape else {
+                    panic!("MatrixStack authoring contract requires rectangle polygons")
+                };
+                let world_pose = Pose::from_xy_angle(
+                    collider.world_transform.translation.x(),
+                    collider.world_transform.translation.y(),
+                    collider.world_transform.rotation,
+                );
+                let expected_world_vertices = local_vertices
+                    .iter()
+                    .map(|point| world_pose.transform_point(*point))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    vertices, &expected_world_vertices,
+                    "ordered world vertices must exactly project the fresh authoring descriptor; frame={}, collider={:?}",
+                    frame.frame_index, collider.handle
+                );
+                let local_pose_bits = [
+                    collider.local_transform.translation.x().to_bits(),
+                    collider.local_transform.translation.y().to_bits(),
+                    collider.local_transform.rotation.to_bits(),
+                ];
+                assert_eq!(
+                    local_pose_bits,
+                    [0.0_f32.to_bits(); 3],
+                    "fresh MatrixStack colliders must retain their exact authored local pose"
+                );
+                let shape = matrix_serialized_shape_descriptor(
+                    "rect",
+                    [width.abs() * 0.5, height.abs() * 0.5],
+                    &local_vertices,
+                );
+                let mut authoring = BTreeMap::<&str, serde_json::Value>::new();
+                authoring.insert("body", json!(collider.body));
+                authoring.insert("local_pose_bits", json!(local_pose_bits));
+                authoring.insert(
+                    "shape",
+                    serde_json::from_str(&shape)
+                        .expect("matrix shape descriptor should deserialize"),
+                );
+                (
+                    collider.handle,
+                    MatrixColliderSignature {
+                        body: collider.body,
+                        serialized_authoring: serde_json::to_string(&authoring)
+                            .expect("matrix authoring signature should serialize"),
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let first = run.frames.first().expect("matrix attribution needs frames");
+    let expected = signatures(first);
+    assert_eq!(expected.len(), first.snapshot.colliders.len());
+    for frame in run.frames.iter().skip(1) {
+        assert_eq!(
+            signatures(frame),
+            expected,
+            "O01 is valid only when every exact collider authoring signature is unchanged; frame={}",
+            frame.frame_index
+        );
+    }
+}
+
+fn assert_event_snapshot_projection(frame: &FrameRecord, contact: &ContactEvent) {
+    let projected = frame
+        .snapshot
+        .contacts
+        .iter()
+        .find(|candidate| candidate.id == contact.contact_id)
+        .expect("every raw active event must project to one snapshot contact");
+    assert_eq!(
+        projected.colliders,
+        [contact.collider_a, contact.collider_b]
+    );
+    assert_eq!(projected.feature_id, contact.feature_id);
+    assert_eq!(projected.point, contact.point);
+    assert_eq!(projected.normal, contact.normal);
+    assert_eq!(projected.depth, contact.depth);
+    assert_eq!(projected.reduction_reason, contact.reduction_reason);
+    assert_eq!(projected.warm_start_reason, contact.warm_start_reason);
+    assert_eq!(projected.normal_impulse, contact.warm_start_normal_impulse);
+    assert_eq!(
+        projected.tangent_impulse,
+        contact.warm_start_tangent_impulse
+    );
+    assert_eq!(
+        projected.solver_normal_impulse,
+        contact.solver_normal_impulse
+    );
+    assert_eq!(
+        projected.solver_tangent_impulse,
+        contact.solver_tangent_impulse
+    );
+    assert_eq!(projected.lifecycle_reason, contact.lifecycle_reason);
+    assert_eq!(
+        projected.source_row_continuity_reason,
+        contact.source_row_continuity_reason
+    );
+    let manifold = frame
+        .snapshot
+        .manifolds
+        .iter()
+        .find(|manifold| manifold.id == contact.manifold_id)
+        .expect("every raw active event must project to its snapshot manifold");
+    assert_eq!(manifold.colliders, [contact.collider_a, contact.collider_b]);
+    assert!(manifold.contact_ids.contains(&contact.contact_id));
+    assert!(manifold.points.iter().any(|point| {
+        point.contact_id == contact.contact_id
+            && point.feature_id == contact.feature_id
+            && point.point == contact.point
+            && point.depth == contact.depth
+    }));
+}
+
+fn read_disk_frames(run: &RunResult) -> Vec<FrameRecord> {
+    fs::read_to_string(run.path.join(ArtifactFile::Frames.file_name()))
+        .expect("frames.jsonl should be readable")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("disk frame should match FrameRecord"))
+        .collect()
+}
+
+fn assert_raw_finite_and_artifact_projections(run: &RunResult) {
+    let disk_frames = read_disk_frames(run);
+    assert_eq!(disk_frames.len(), run.frames.len());
+    for (frame, disk) in run.frames.iter().zip(&disk_frames) {
+        assert_eq!(frame.frame_index, disk.frame_index);
+        assert_eq!(frame.events, frame.report.events);
+        assert_eq!(disk.events, frame.events);
+        assert_eq!(disk.snapshot.contacts.len(), frame.snapshot.contacts.len());
+        assert_eq!(disk.snapshot.manifolds, frame.snapshot.manifolds);
+        assert_eq!(disk.snapshot.colliders, frame.snapshot.colliders);
+        for active in oracle_active_contacts(disk) {
+            assert_event_snapshot_projection(disk, active.event);
+        }
+        let active = oracle_active_contacts(frame);
+        assert_eq!(active.len(), frame.snapshot.contacts.len());
+        let mut contact_ids = BTreeSet::new();
+        for active in active {
+            let contact = active.event;
+            assert!(
+                contact_ids.insert(contact.contact_id),
+                "active ContactId values must be distinct within frame {}; duplicate={:?}",
+                frame.frame_index,
+                contact.contact_id
+            );
+            assert!(
+                oracle_scalar_facts_are_finite(contact),
+                "raw unsanitized event facts must be finite; frame={}, contact={contact:?}",
+                frame.frame_index
+            );
+            if !contact.warm_start_reason.is_hit() {
+                assert_eq!(contact.warm_start_normal_impulse, 0.0);
+                assert_eq!(contact.warm_start_tangent_impulse, 0.0);
+            }
+            assert_event_snapshot_projection(frame, contact);
+        }
+    }
+}
+
+fn oracle_final_endpoint_is_eligible(frame: &FrameRecord, contact: &ContactEvent) -> bool {
+    oracle_final_sat_projection(frame, contact) == OracleFinalSatProjection::FinalSatContact
+        && oracle_scalar_facts_are_finite(contact)
+        && oracle_non_hit_warm_impulses_are_zero(contact)
+}
+
+fn oracle_source_boundary_predecessor_key(
+    previous_frame: &FrameRecord,
+    current_frame: &FrameRecord,
+    current: &ContactEvent,
+) -> Option<OracleTransitionKey> {
+    if !oracle_source_boundary_endpoint_is_admissible(current_frame, current)
+        || !oracle_scalar_facts_are_finite(current)
+        || !oracle_non_hit_warm_impulses_are_zero(current)
+    {
+        return None;
+    }
+    let pair_previous = oracle_active_contacts(previous_frame)
+        .into_iter()
+        .filter(|previous| {
+            previous.event.collider_a == current.collider_a
+                && previous.event.collider_b == current.collider_b
+        })
+        .collect::<Vec<_>>();
+    if pair_previous
+        .iter()
+        .any(|previous| previous.event.feature_id == current.feature_id)
+    {
+        return None;
+    }
+    let same_identity = pair_previous
+        .iter()
+        .filter(|previous| {
+            previous.event.contact_id == current.contact_id
+                && previous.event.manifold_id == current.manifold_id
+        })
+        .collect::<Vec<_>>();
+    if same_identity.len() != 1 {
+        return None;
+    }
+    let previous = same_identity[0].event;
+    if !oracle_source_boundary_endpoint_is_admissible(previous_frame, previous)
+        || !oracle_scalar_facts_are_finite(previous)
+        || !oracle_non_hit_warm_impulses_are_zero(previous)
+        || !oracle_non_symmetric_role_swap(previous, current)
+        || !(oracle_source_endpoint(previous_frame, previous)
+            || oracle_source_endpoint(current_frame, current))
+    {
+        return None;
+    }
+    Some((previous_frame.frame_index, previous.contact_id))
+}
+
+fn edge_swap_attribution_report(frames: &[FrameRecord]) -> EdgeSwapAttributionReport {
+    let mut report = EdgeSwapAttributionReport::default();
+    let mut reported_transition_keys = BTreeSet::new();
+    let mut source_boundary_previous_keys = BTreeSet::new();
+    let mut source_boundary_current_keys = BTreeSet::new();
+    for adjacent in frames.windows(2) {
+        let [previous_frame, current_frame] = adjacent else {
+            unreachable!();
+        };
+        assert_eq!(current_frame.frame_index, previous_frame.frame_index + 1);
+        let mut previous_pairs =
+            BTreeMap::<[ColliderHandle; 2], Vec<OracleActiveContact<'_>>>::new();
+        for contact in oracle_active_contacts(previous_frame)
+            .into_iter()
+            .filter(|contact| oracle_final_endpoint_is_eligible(previous_frame, contact.event))
+        {
+            previous_pairs
+                .entry([contact.event.collider_a, contact.event.collider_b])
+                .or_default()
+                .push(contact);
+        }
+        let mut current_pairs =
+            BTreeMap::<[ColliderHandle; 2], Vec<OracleActiveContact<'_>>>::new();
+        for contact in oracle_active_contacts(current_frame)
+            .into_iter()
+            .filter(|contact| oracle_final_endpoint_is_eligible(current_frame, contact.event))
+        {
+            current_pairs
+                .entry([contact.event.collider_a, contact.event.collider_b])
+                .or_default()
+                .push(contact);
+        }
+
+        for (pair, mut current) in current_pairs {
+            let Some(previous) = previous_pairs.get_mut(&pair) else {
+                continue;
+            };
+            previous.sort_by_key(|contact| {
+                (
+                    oracle_feature_raw(contact.event.feature_id),
+                    contact.event.contact_id,
+                )
+            });
+            current.sort_by_key(|contact| {
+                (
+                    oracle_feature_raw(contact.event.feature_id),
+                    contact.event.contact_id,
+                )
+            });
+
+            for current_contact in &current {
+                let exact_predecessors = previous
+                    .iter()
+                    .filter(|previous_contact| {
+                        previous_contact.event.feature_id == current_contact.event.feature_id
+                    })
+                    .collect::<Vec<_>>();
+                assert!(
+                    exact_predecessors.len() <= 1,
+                    "full raw features must be distinct within one ordered pair"
+                );
+                if let Some(previous_contact) = exact_predecessors.first() {
+                    report.exact_predecessor_total += 1;
+                    if previous_contact.event.contact_id != current_contact.event.contact_id {
+                        report.exact_theft += 1;
+                    }
+                }
+            }
+
+            let mut previous_used = vec![false; previous.len()];
+            let mut current_exact = vec![false; current.len()];
+            for (current_index, current_contact) in current.iter().enumerate() {
+                if let Some(previous_index) =
+                    previous
+                        .iter()
+                        .enumerate()
+                        .find_map(|(previous_index, previous_contact)| {
+                            (!previous_used[previous_index]
+                                && previous_contact.event.feature_id
+                                    == current_contact.event.feature_id)
+                                .then_some(previous_index)
+                        })
+                {
+                    previous_used[previous_index] = true;
+                    current_exact[current_index] = true;
+                }
+            }
+
+            let residual_current = current_exact
+                .iter()
+                .enumerate()
+                .filter_map(|(index, exact)| (!exact).then_some(index))
+                .collect::<Vec<_>>();
+            let candidate_graph = residual_current
+                .iter()
+                .map(|current_index| {
+                    previous
+                        .iter()
+                        .enumerate()
+                        .filter(|(previous_index, _)| !previous_used[*previous_index])
+                        .filter_map(|(previous_index, previous_contact)| {
+                            oracle_edge_swap_candidate(
+                                previous_frame,
+                                current_frame,
+                                previous_contact.event,
+                                current[*current_index].event,
+                            )
+                            .map(|drift| OracleCandidateEdge {
+                                previous_index,
+                                drift,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            let mut assignments = vec![None; residual_current.len()];
+            let mut best = None;
+            enumerate_oracle_matchings(
+                0,
+                &candidate_graph,
+                &mut previous_used,
+                &mut assignments,
+                &mut best,
+            );
+            let best = best.expect("the empty residual matching is always legal");
+            let mut classified_previous_ids = BTreeSet::new();
+            for (residual_index, edge) in best.into_iter().enumerate() {
+                let Some(edge) = edge else {
+                    continue;
+                };
+                report.final_candidate_total += 1;
+                let previous_contact = previous[edge.previous_index].event;
+                let current_contact = current[residual_current[residual_index]];
+                assert_eq!(
+                    oracle_final_sat_projection(previous_frame, previous_contact),
+                    OracleFinalSatProjection::FinalSatContact
+                );
+                assert_eq!(
+                    oracle_final_sat_projection(current_frame, current_contact.event),
+                    OracleFinalSatProjection::FinalSatContact
+                );
+                let previous_used_once =
+                    classified_previous_ids.insert(previous_contact.contact_id);
+                let transition_key = (current_frame.frame_index, current_contact.event.contact_id);
+                let attributed = current_contact.persisted
+                    && current_contact.event.lifecycle_reason
+                        == ContactLifecycleReason::PersistentEdgeSwap
+                    && current_contact.event.contact_id == previous_contact.contact_id
+                    && current_contact.event.manifold_id == previous_contact.manifold_id
+                    && previous_used_once
+                    && !report.final_attributed_keys.contains(&transition_key);
+                if attributed {
+                    report.final_attributed += 1;
+                    assert!(report.final_attributed_keys.insert(transition_key));
+                } else {
+                    report.final_unabsorbed += 1;
+                }
+            }
+        }
+        for output in oracle_active_contacts(current_frame)
+            .into_iter()
+            .filter(|output| {
+                output.persisted
+                    && output.event.lifecycle_reason == ContactLifecycleReason::PersistentEdgeSwap
+            })
+        {
+            report.reported_persistent_edge_swap_total += 1;
+            let current_key = (current_frame.frame_index, output.event.contact_id);
+            if !reported_transition_keys.insert(current_key) {
+                report.unexpected += 1;
+                continue;
+            }
+            if report.final_attributed_keys.contains(&current_key) {
+                continue;
+            }
+            let source_boundary =
+                oracle_source_boundary_predecessor_key(previous_frame, current_frame, output.event)
+                    .is_some_and(|previous_key| {
+                        !source_boundary_previous_keys.contains(&previous_key)
+                            && !source_boundary_current_keys.contains(&current_key)
+                            && source_boundary_previous_keys.insert(previous_key)
+                            && source_boundary_current_keys.insert(current_key)
+                    });
+            if source_boundary {
+                report.source_boundary_evidence += 1;
+            } else {
+                report.unexpected += 1;
+            }
+        }
+    }
+    report
+}
+
+fn matrix_stack_edge_swap_attribution_report() -> EdgeSwapAttributionReport {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::MatrixStack,
+            frame_count: 180,
+            run_id: Some("s4-edge-swap-attribution".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("matrix attribution run should write artifacts");
+    assert_matrix_shape_and_local_pose_signatures_are_stable(&run);
+    assert_raw_finite_and_artifact_projections(&run);
+    edge_swap_attribution_report(&run.frames)
+}
+
 #[test]
 fn default_artifact_store_uses_workspace_target() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -4223,6 +5191,180 @@ fn stack_stability_tower_artifacts_capture_multi_body_stack_facts() {
             frame.stats.contact_row_count > 0 || frame.stats.solver_body_slot_count > 0
         }),
         "tower should carry solver-facing counts without modifying solver behavior"
+    );
+}
+
+#[test]
+fn matrix_stack_edge_swap_attribution_partitions_every_candidate() {
+    let report = matrix_stack_edge_swap_attribution_report();
+    println!(
+        "S4 O01 reported_total={} final_attributed={} source_boundary={} unexpected={} final_candidate_total={} final_unabsorbed={} exact_predecessor_total={} exact_theft={}",
+        report.reported_persistent_edge_swap_total,
+        report.final_attributed,
+        report.source_boundary_evidence,
+        report.unexpected,
+        report.final_candidate_total,
+        report.final_unabsorbed,
+        report.exact_predecessor_total,
+        report.exact_theft
+    );
+    assert_eq!(
+        report.final_candidate_total,
+        report.final_attributed + report.final_unabsorbed,
+        "every selected final candidate must be classified exactly once"
+    );
+    assert_eq!(
+        report.reported_persistent_edge_swap_total,
+        report.final_attributed + report.source_boundary_evidence + report.unexpected,
+        "every reported persisted edge-swap transition key must have exactly one class"
+    );
+    assert_eq!(report.final_attributed, report.final_attributed_keys.len());
+}
+
+#[test]
+fn matrix_stack_edge_swap_attribution_has_no_unabsorbed_or_exact_theft() {
+    let report = matrix_stack_edge_swap_attribution_report();
+    println!(
+        "S4 O01 desired reported_total={} final_attributed={} source_boundary={} unexpected={} final_candidate_total={} final_unabsorbed={} exact_predecessor_total={} exact_theft={}",
+        report.reported_persistent_edge_swap_total,
+        report.final_attributed,
+        report.source_boundary_evidence,
+        report.unexpected,
+        report.final_candidate_total,
+        report.final_unabsorbed,
+        report.exact_predecessor_total,
+        report.exact_theft
+    );
+    assert!(
+        report.final_attributed > 0,
+        "matrix attribution must observe at least one final-attributed edge swap; report={report:?}"
+    );
+    assert!(
+        report.source_boundary_evidence > 0,
+        "matrix attribution must preserve non-vacuous source-boundary evidence; report={report:?}"
+    );
+    assert_eq!(
+        report.final_unabsorbed, 0,
+        "every selected final candidate must be attributed; report={report:?}"
+    );
+    assert_eq!(
+        report.exact_theft, 0,
+        "actual output ids must preserve every full-feature exact predecessor; report={report:?}"
+    );
+    assert!(
+        report.exact_predecessor_total > 0,
+        "exact-theft attribution must exercise at least one exact predecessor; report={report:?}"
+    );
+    assert_eq!(
+        report.unexpected, 0,
+        "every reported edge-swap must be final-attributed or carry complete source-boundary evidence; report={report:?}"
+    );
+}
+
+#[test]
+fn artifact_records_persistent_edge_swap_with_stable_ids() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+    let run = run_scenario(
+        &store,
+        RunConfig {
+            scenario_id: ScenarioId::MatrixStack,
+            frame_count: 180,
+            run_id: Some("s4-persistent-edge-swap-disk".to_owned()),
+            ..RunConfig::default()
+        },
+    )
+    .expect("persistent edge-swap run should write artifacts");
+    let disk_frames = read_disk_frames(&run);
+    assert_eq!(disk_frames.len(), 180);
+    for frame in &disk_frames {
+        for active in oracle_active_contacts(frame) {
+            assert!(oracle_scalar_facts_are_finite(active.event));
+            if !active.event.warm_start_reason.is_hit() {
+                assert_eq!(active.event.warm_start_normal_impulse, 0.0);
+                assert_eq!(active.event.warm_start_tangent_impulse, 0.0);
+            }
+            assert_event_snapshot_projection(frame, active.event);
+        }
+    }
+    let attribution = edge_swap_attribution_report(&disk_frames);
+    assert_eq!(
+        attribution.final_candidate_total,
+        attribution.final_attributed + attribution.final_unabsorbed
+    );
+
+    let mut sample = None;
+    'frames: for adjacent in disk_frames.windows(2) {
+        let previous_frame = &adjacent[0];
+        let current_frame = &adjacent[1];
+        let previous_active = oracle_active_contacts(previous_frame)
+            .into_iter()
+            .filter(|previous| oracle_final_endpoint_is_eligible(previous_frame, previous.event))
+            .collect::<Vec<_>>();
+        for current in oracle_active_contacts(current_frame)
+            .into_iter()
+            .filter(|current| {
+                current.persisted
+                    && current.event.lifecycle_reason == ContactLifecycleReason::PersistentEdgeSwap
+                    && attribution
+                        .final_attributed_keys
+                        .contains(&(current_frame.frame_index, current.event.contact_id))
+            })
+        {
+            let pair_previous = previous_active
+                .iter()
+                .filter(|previous| {
+                    previous.event.collider_a == current.event.collider_a
+                        && previous.event.collider_b == current.event.collider_b
+                })
+                .collect::<Vec<_>>();
+            if pair_previous
+                .iter()
+                .any(|previous| previous.event.feature_id == current.event.feature_id)
+            {
+                continue;
+            }
+            let same_id = pair_previous
+                .iter()
+                .filter(|previous| previous.event.contact_id == current.event.contact_id)
+                .collect::<Vec<_>>();
+            if same_id.len() != 1 {
+                continue;
+            }
+            let previous = same_id[0].event;
+            if previous.manifold_id != current.event.manifold_id
+                || previous.feature_id == current.event.feature_id
+            {
+                continue;
+            }
+            let Some(local_midpoint_anchor_drift) =
+                oracle_edge_swap_candidate(previous_frame, current_frame, previous, current.event)
+            else {
+                continue;
+            };
+            assert_eq!(
+                oracle_final_sat_projection(previous_frame, previous),
+                OracleFinalSatProjection::FinalSatContact
+            );
+            assert_eq!(
+                oracle_final_sat_projection(current_frame, current.event),
+                OracleFinalSatProjection::FinalSatContact
+            );
+            sample = Some((
+                current_frame.frame_index,
+                oracle_feature_raw(previous.feature_id),
+                oracle_feature_raw(current.event.feature_id),
+                current.event.contact_id,
+                current.event.manifold_id,
+                local_midpoint_anchor_drift,
+            ));
+            break 'frames;
+        }
+    }
+    println!("S4 O03 disk persistent edge-swap sample={sample:?}");
+    assert!(
+        sample.is_some(),
+        "frames.jsonl must contain a non-exact raw role swap with one stable ContactId/ManifoldId predecessor"
     );
 }
 
