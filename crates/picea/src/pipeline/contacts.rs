@@ -29,6 +29,21 @@ const WARM_START_POINT_DRIFT_THRESHOLD: FloatNum = 0.05;
 const WARM_START_TANGENTIAL_DRIFT_THRESHOLD: FloatNum = 0.10;
 const PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD: FloatNum = 0.25;
 
+#[cfg(test)]
+std::thread_local! {
+    static LIFECYCLE_CANDIDATE_EVALUATION_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_lifecycle_candidate_evaluation_count() {
+    LIFECYCLE_CANDIDATE_EVALUATION_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn lifecycle_candidate_evaluation_count() -> usize {
+    LIFECYCLE_CANDIDATE_EVALUATION_COUNT.with(std::cell::Cell::get)
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ContactObservation {
     pub(crate) key: ContactKey,
@@ -904,6 +919,9 @@ fn persistent_manifold_lifecycle_candidate(
     previous: &ContactRecord,
     contact: &ContactObservation,
 ) -> bool {
+    #[cfg(test)]
+    LIFECYCLE_CANDIDATE_EVALUATION_COUNT.with(|count| count.set(count.get() + 1));
+
     // A settling clipped manifold may pass through a single-point frame while
     // the reference face swaps, so point-count oscillation must not disqualify
     // an otherwise compatible edge-swap candidate.
@@ -1265,8 +1283,11 @@ fn ordered_pair(a: ColliderHandle, b: ColliderHandle) -> (ColliderHandle, Collid
 mod tests {
     use super::*;
     use crate::{
+        body::{BodyDesc, BodyType},
+        collider::{ColliderDesc, ColliderPatch},
         events::{ContactLifecycleReason, SourceRowContinuityReason},
         handles::{ContactFeatureId, ContactId, ManifoldId},
+        pipeline::SimulationPipeline,
         world::WorldDesc,
     };
 
@@ -1381,6 +1402,749 @@ mod tests {
             generic_convex_trace: None,
             ccd_trace: None,
         }
+    }
+
+    fn test_contact_event_with_ids(
+        feature_id: ContactFeatureId,
+        contact_raw: u32,
+        manifold_raw: u32,
+    ) -> ContactEvent {
+        let mut event = test_contact_event(feature_id);
+        event.contact_id = ContactId::from_raw_parts(contact_raw, 0);
+        event.manifold_id = ManifoldId::from_raw_parts(manifold_raw, 0);
+        event
+    }
+
+    fn test_contact_record(
+        feature_id: ContactFeatureId,
+        contact_raw: u32,
+        manifold_raw: u32,
+        witness_x: FloatNum,
+        normal_impulse: FloatNum,
+        tangent_impulse: FloatNum,
+    ) -> ContactRecord {
+        ContactRecord {
+            contact: test_contact_event_with_ids(feature_id, contact_raw, manifold_raw),
+            witness_a_local: Point::new(witness_x, 0.0),
+            witness_b_local: Point::new(witness_x, 0.0),
+            normal_impulse,
+            tangent_impulse,
+        }
+    }
+
+    fn set_observation_witness(contact: &mut ContactObservation, witness_x: FloatNum) {
+        contact.witness_a_local = Point::new(witness_x, 0.0);
+        contact.witness_b_local = Point::new(witness_x, 0.0);
+    }
+
+    fn test_normal(degrees: FloatNum) -> Vector {
+        let radians = degrees.to_radians();
+        Vector::new(radians.cos(), radians.sin())
+    }
+
+    fn active_event_for_feature(
+        events: &[WorldEvent],
+        feature_id: ContactFeatureId,
+    ) -> (&ContactEvent, bool) {
+        events
+            .iter()
+            .find_map(|event| match event {
+                WorldEvent::ContactStarted(contact) if contact.feature_id == feature_id => {
+                    Some((contact, false))
+                }
+                WorldEvent::ContactPersisted(contact) if contact.feature_id == feature_id => {
+                    Some((contact, true))
+                }
+                _ => None,
+            })
+            .expect("active contact event should exist for the feature")
+    }
+
+    #[test]
+    fn lifecycle_reservation_keeps_later_exact_match() {
+        let previous_feature = test_feature(0x0100_1003, 1);
+        let fallback_feature = test_feature(0x0100_3001, 0);
+        let previous_record = test_contact_record(previous_feature, 41, 7, 0.0, 1.0, 0.25);
+        let previous_contact_id = previous_record.contact.contact_id;
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut fallback = test_contact_observation(fallback_feature);
+        set_observation_witness(&mut fallback, 0.01);
+        let exact = test_contact_observation(previous_feature);
+        let mut contacts = vec![exact, fallback];
+        contacts.sort_by_key(|contact| contact.key);
+        assert_eq!(contacts[0].feature_id, fallback_feature);
+        assert_eq!(contacts[1].feature_id, previous_feature);
+        let mut world = World::new(WorldDesc::default());
+
+        let (events, _, _, _) = world.refresh_contact_events(contacts, previous_contacts);
+
+        let (fallback_event, fallback_persisted) =
+            active_event_for_feature(&events, fallback_feature);
+        let (exact_event, exact_persisted) = active_event_for_feature(&events, previous_feature);
+        assert!(
+            !fallback_persisted,
+            "fallback may start but must not steal an exact reservation"
+        );
+        assert_ne!(fallback_event.contact_id, previous_contact_id);
+        assert!(
+            exact_persisted,
+            "the later full exact current point must stay persisted"
+        );
+        assert_eq!(exact_event.contact_id, previous_contact_id);
+        assert_eq!(
+            exact_event.lifecycle_reason,
+            ContactLifecycleReason::ExactFeature
+        );
+    }
+
+    #[test]
+    fn lifecycle_reservation_maximizes_edge_swap_cardinality() {
+        let previous_index = 0x0100_1003;
+        let current_index = 0x0100_3001;
+        let previous_features = [
+            test_feature(previous_index, 0),
+            test_feature(previous_index, 1),
+        ];
+        let current_features = [
+            test_feature(current_index, 2),
+            test_feature(current_index, 3),
+        ];
+        let mut p0 = test_contact_record(previous_features[0], 51, 8, 0.0, 1.0, 0.1);
+        let mut p1 = test_contact_record(previous_features[1], 52, 8, 0.03, 2.0, 0.2);
+        p0.contact.normal = test_normal(0.0);
+        p1.contact.normal = test_normal(10.0);
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_features[0]),
+            p0,
+        );
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_features[1]),
+            p1,
+        );
+        let mut c0 = test_contact_observation(current_features[0]);
+        let mut c1 = test_contact_observation(current_features[1]);
+        set_observation_witness(&mut c0, 0.01);
+        set_observation_witness(&mut c1, 0.03);
+        c0.normal = test_normal(5.0);
+        c1.normal = test_normal(-10.0);
+        let mut world = World::new(WorldDesc::default());
+
+        let (events, _, _, _) = world.refresh_contact_events(vec![c0, c1], previous_contacts);
+
+        let (c0_event, c0_persisted) = active_event_for_feature(&events, current_features[0]);
+        let (c1_event, c1_persisted) = active_event_for_feature(&events, current_features[1]);
+        assert!(
+            c0_persisted && c1_persisted,
+            "the eligible edge graph has cardinality two"
+        );
+        assert_eq!(c0_event.contact_id, ContactId::from_raw_parts(52, 0));
+        assert_eq!(c1_event.contact_id, ContactId::from_raw_parts(51, 0));
+    }
+
+    #[test]
+    fn warm_start_reservation_keeps_distinct_impulses_with_local_witnesses() {
+        let previous_index = 0x0100_1003;
+        let current_index = 0x0100_3001;
+        let previous_features = [
+            test_feature(previous_index, 0),
+            test_feature(previous_index, 1),
+        ];
+        let current_features = [
+            test_feature(current_index, 2),
+            test_feature(current_index, 3),
+        ];
+        let previous_records = [
+            test_contact_record(previous_features[0], 61, 9, 0.0, 1.0, 0.3),
+            test_contact_record(previous_features[1], 62, 9, 0.04, 2.0, 0.6),
+        ];
+        let mut previous_contacts = BTreeMap::new();
+        for (feature, record) in previous_features.into_iter().zip(previous_records) {
+            previous_contacts.insert(
+                ContactKey::new(test_collider(1), test_collider(2), feature),
+                record,
+            );
+        }
+        let mut c0 = test_contact_observation(current_features[0]);
+        let mut c1 = test_contact_observation(current_features[1]);
+        set_observation_witness(&mut c0, 0.01);
+        set_observation_witness(&mut c1, 0.015);
+        let mut contacts = vec![c0, c1];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert!(contacts
+            .iter()
+            .all(|contact| contact.warm_start_reason == WarmStartCacheReason::Hit));
+        assert_eq!(contacts[0].warm_start_normal_impulse, 1.0);
+        assert_eq!(contacts[1].warm_start_normal_impulse, 2.0);
+        assert_ne!(
+            contacts[0].warm_start_normal_impulse, contacts[1].warm_start_normal_impulse,
+            "one previous point must not feed both current rows"
+        );
+        assert!(contacts
+            .iter()
+            .all(|contact| contact.warm_start_tangent_impulse == 0.0));
+    }
+
+    #[test]
+    fn warm_start_reservation_maximizes_residual_cardinality_after_exact_matches() {
+        let exact_feature = test_feature(0x0200_2004, 0);
+        let exact_fallback_feature = test_feature(0x0200_4002, 1);
+        let exact_record = test_contact_record(exact_feature, 71, 10, 0.0, 30.0, 3.0);
+        let mut exact_previous = BTreeMap::new();
+        exact_previous.insert(
+            ContactKey::new(test_collider(1), test_collider(2), exact_feature),
+            exact_record,
+        );
+        let mut exact_fallback = test_contact_observation(exact_fallback_feature);
+        set_observation_witness(&mut exact_fallback, 0.01);
+        let mut exact_current = test_contact_observation(exact_feature);
+        set_observation_witness(&mut exact_current, 0.0);
+        let mut exact_contacts = vec![exact_fallback, exact_current];
+        let world = World::new(WorldDesc::default());
+        world.prepare_contact_warm_start(&mut exact_contacts, &exact_previous);
+        let exact_hard_ok = exact_contacts[0].warm_start_reason != WarmStartCacheReason::Hit
+            && exact_contacts[1].warm_start_reason == WarmStartCacheReason::Hit
+            && exact_contacts[1].warm_start_normal_impulse == 30.0;
+
+        let previous_index = 0x0100_1003;
+        let swapped_index = 0x0100_3001;
+        let p0_feature = test_feature(previous_index, 0);
+        let p1_feature = test_feature(swapped_index, 0);
+        let mut p0 = test_contact_record(p0_feature, 72, 10, 0.0, 10.0, 1.0);
+        let mut p1 = test_contact_record(p1_feature, 73, 10, 0.03, 20.0, 2.0);
+        p0.contact.normal = test_normal(0.0);
+        p1.contact.normal = test_normal(10.0);
+        let mut residual_previous = BTreeMap::new();
+        residual_previous.insert(
+            ContactKey::new(test_collider(1), test_collider(2), exact_feature),
+            test_contact_record(exact_feature, 71, 10, 0.0, 30.0, 3.0),
+        );
+        residual_previous.insert(
+            ContactKey::new(test_collider(1), test_collider(2), p0_feature),
+            p0,
+        );
+        residual_previous.insert(
+            ContactKey::new(test_collider(1), test_collider(2), p1_feature),
+            p1,
+        );
+        let mut c0 = test_contact_observation(test_feature(previous_index, 1));
+        let mut c1 = test_contact_observation(test_feature(swapped_index, 1));
+        set_observation_witness(&mut c0, 0.01);
+        set_observation_witness(&mut c1, 0.03);
+        c0.normal = test_normal(5.0);
+        c1.normal = test_normal(-10.0);
+        let mut residual_exact = test_contact_observation(exact_feature);
+        set_observation_witness(&mut residual_exact, 0.0);
+        let mut residual_contacts = vec![c0, c1, residual_exact];
+        world.prepare_contact_warm_start(&mut residual_contacts, &residual_previous);
+        let residual_ok = residual_contacts[0].warm_start_reason == WarmStartCacheReason::Hit
+            && residual_contacts[1].warm_start_reason == WarmStartCacheReason::Hit
+            && residual_contacts[0].warm_start_normal_impulse == 20.0
+            && residual_contacts[1].warm_start_normal_impulse == 10.0
+            && residual_contacts[0].warm_start_tangent_impulse == 0.0
+            && residual_contacts[1].warm_start_tangent_impulse == 0.0
+            && residual_contacts[2].warm_start_normal_impulse == 30.0;
+
+        assert!(
+            exact_hard_ok && residual_ok,
+            "exact must be reserved before residual matching, then residual cardinality must beat same-index preference; exact={:?}, residual={:?}",
+            exact_contacts
+                .iter()
+                .map(|contact| (
+                    contact.warm_start_reason,
+                    contact.warm_start_normal_impulse,
+                    contact.warm_start_tangent_impulse,
+                ))
+                .collect::<Vec<_>>(),
+            residual_contacts
+                .iter()
+                .map(|contact| (
+                    contact.warm_start_reason,
+                    contact.warm_start_normal_impulse,
+                    contact.warm_start_tangent_impulse,
+                ))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn source_row_reservation_does_not_reuse_previous_point() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let previous_record = test_contact_record(previous_feature, 81, 11, 0.0, 1.0, 0.1);
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut c0 = test_contact_observation(test_feature(0x0100_1004, 0));
+        let mut c1 = test_contact_observation(test_feature(0x0100_1005, 0));
+        set_observation_witness(&mut c0, 0.01);
+        set_observation_witness(&mut c1, 0.02);
+        let mut contacts = vec![c0, c1];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(
+            contacts
+                .iter()
+                .filter(|contact| contact.source_row_continuity_candidate)
+                .count(),
+            1,
+            "one previous point can authorize at most one current source row"
+        );
+        assert!(contacts[0].source_row_continuity_candidate);
+        assert!(!contacts[1].source_row_continuity_candidate);
+    }
+
+    #[test]
+    fn source_row_revision_is_rejected_before_solver_rows_are_built() {
+        let mut world = World::new(WorldDesc {
+            gravity: Vector::default(),
+            ..WorldDesc::default()
+        });
+        let body_a = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Static,
+                pose: Pose::default(),
+                ..BodyDesc::default()
+            })
+            .expect("first body should be created");
+        let body_b = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                pose: Pose::from_xy_angle(1.5, 0.0, 0.0),
+                can_sleep: false,
+                ..BodyDesc::default()
+            })
+            .expect("second body should be created");
+        world
+            .create_collider(
+                body_a,
+                ColliderDesc {
+                    shape: SharedShape::rect(2.0, 2.0),
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("first collider should be created");
+        let collider_b = world
+            .create_collider(
+                body_b,
+                ColliderDesc {
+                    shape: SharedShape::rect(2.0, 2.0),
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("second collider should be created");
+        let mut pipeline = SimulationPipeline::new(StepConfig {
+            position_iterations: 0,
+            ..StepConfig::default()
+        });
+        let first = pipeline.step(&mut world);
+        assert_eq!(first.stats.contact_count, 2);
+        assert!(
+            first.stats.contact_row_count > 0,
+            "dynamic/static fixture must build at least one solver row"
+        );
+        world
+            .apply_collider_patch(
+                collider_b,
+                ColliderPatch {
+                    shape: Some(SharedShape::rect(2.02, 2.0)),
+                    ..ColliderPatch::default()
+                },
+            )
+            .expect("geometry patch should succeed");
+
+        let predicted_body_poses = BTreeMap::new();
+        let mut contacts = world
+            .collect_contact_observations(&[], &predicted_body_poses)
+            .observations;
+        let previous_contacts = world.take_active_contacts();
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(contacts.len(), 2);
+        assert!(
+            contacts.iter().all(|contact| {
+                contact.warm_start_reason == WarmStartCacheReason::MissFeatureId
+                    && contact.warm_start_normal_impulse == 0.0
+                    && contact.warm_start_tangent_impulse == 0.0
+                    && contact.normal_impulse == 0.0
+                    && contact.tangent_impulse == 0.0
+                    && !contact.source_row_continuity_candidate
+                    && contact.source_row_continuity_reason != SourceRowContinuityReason::Candidate
+            }),
+            "geometry generation mismatch must be rejected in pre-solver contact facts; facts={:?}",
+            contacts
+                .iter()
+                .map(|contact| (
+                    contact.warm_start_reason,
+                    contact.source_row_continuity_candidate,
+                    contact.source_row_continuity_reason,
+                ))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn sensor_transition_same_index_does_not_persist_lifecycle() {
+        fn run(previous_sensor: bool, current_sensor: bool) -> ContactEvent {
+            let previous_feature = test_feature(0x0100_1003, 0);
+            let current_feature = test_feature(0x0100_1003, 1);
+            let mut previous_record = test_contact_record(previous_feature, 85, 14, 0.0, 1.0, 0.2);
+            previous_record.contact.warm_start_reason = if previous_sensor {
+                WarmStartCacheReason::SkippedSensor
+            } else {
+                WarmStartCacheReason::Hit
+            };
+            previous_record.contact.warm_start_normal_impulse = 0.0;
+            previous_record.contact.warm_start_tangent_impulse = 0.0;
+            let previous_contact_id = previous_record.contact.contact_id;
+            let previous_manifold_id = previous_record.contact.manifold_id;
+            let mut previous_contacts = BTreeMap::new();
+            previous_contacts.insert(
+                ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+                previous_record,
+            );
+            let mut current = test_contact_observation(current_feature);
+            set_observation_witness(&mut current, 0.01);
+            current.is_sensor = current_sensor;
+            let mut contacts = vec![current];
+            let mut world = World::new(WorldDesc::default());
+
+            world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+            let expected_warm_reason = if current_sensor {
+                WarmStartCacheReason::SkippedSensor
+            } else {
+                WarmStartCacheReason::MissFeatureId
+            };
+            assert_eq!(contacts[0].warm_start_reason, expected_warm_reason);
+            assert_eq!(contacts[0].warm_start_normal_impulse, 0.0);
+            assert_eq!(contacts[0].warm_start_tangent_impulse, 0.0);
+            let (events, _, _, _) = world.refresh_contact_events(contacts, previous_contacts);
+            let (event, persisted) = active_event_for_feature(&events, current_feature);
+            assert!(!persisted);
+            assert_eq!(event.lifecycle_reason, ContactLifecycleReason::Started);
+            assert_ne!(
+                event.lifecycle_reason,
+                ContactLifecycleReason::PersistentEdgeSwap
+            );
+            assert_ne!(event.lifecycle_reason, ContactLifecycleReason::ExactFeature);
+            assert_ne!(event.contact_id, previous_contact_id);
+            assert_eq!(event.manifold_id, previous_manifold_id);
+            *event
+        }
+
+        let solid_to_sensor = run(false, true);
+        let sensor_to_sensor = run(true, true);
+        let sensor_to_solid = run(true, false);
+        assert_eq!(
+            solid_to_sensor.warm_start_reason,
+            WarmStartCacheReason::SkippedSensor
+        );
+        assert_eq!(
+            sensor_to_sensor.warm_start_reason,
+            WarmStartCacheReason::SkippedSensor
+        );
+        assert_eq!(
+            sensor_to_solid.warm_start_reason,
+            WarmStartCacheReason::MissFeatureId
+        );
+    }
+
+    #[test]
+    fn manifold_persistence_two_to_one_to_two_preserves_only_surviving_point() {
+        let surviving_feature = test_feature(0x0100_1003, 0);
+        let returning_feature = test_feature(0x0100_1004, 0);
+        let mut surviving = test_contact_observation(surviving_feature);
+        let mut returning = test_contact_observation(returning_feature);
+        set_observation_witness(&mut surviving, -0.1);
+        set_observation_witness(&mut returning, 0.1);
+        surviving.normal_impulse = 1.0;
+        surviving.tangent_impulse = 0.1;
+        returning.normal_impulse = 2.0;
+        returning.tangent_impulse = 0.2;
+        let mut world = World::new(WorldDesc::default());
+
+        let (first_events, _, _, _) = world
+            .refresh_contact_events(vec![surviving.clone(), returning.clone()], BTreeMap::new());
+        let first_surviving = *active_event_for_feature(&first_events, surviving_feature).0;
+        let first_returning = *active_event_for_feature(&first_events, returning_feature).0;
+        let first_previous = world.take_active_contacts();
+
+        let mut second_contacts = vec![surviving.clone()];
+        world.prepare_contact_warm_start(&mut second_contacts, &first_previous);
+        let (second_events, _, _, _) =
+            world.refresh_contact_events(second_contacts, first_previous);
+        let second_surviving = *active_event_for_feature(&second_events, surviving_feature).0;
+        assert_eq!(second_surviving.contact_id, first_surviving.contact_id);
+        assert!(second_events.iter().any(|event| matches!(
+            event,
+            WorldEvent::ContactEnded(contact) if contact.contact_id == first_returning.contact_id
+        )));
+        let second_previous = world.take_active_contacts();
+        let surviving_record = second_previous
+            .get(&ContactKey::new(
+                test_collider(1),
+                test_collider(2),
+                surviving_feature,
+            ))
+            .expect("surviving local witness should remain active");
+        assert_eq!(surviving_record.witness_a_local, Point::new(-0.1, 0.0));
+        assert_eq!(surviving_record.witness_b_local, Point::new(-0.1, 0.0));
+
+        let mut third_contacts = vec![surviving, returning];
+        world.prepare_contact_warm_start(&mut third_contacts, &second_previous);
+        let returning_warm_start = third_contacts
+            .iter()
+            .find(|contact| contact.feature_id == returning_feature)
+            .expect("returning point should be present before lifecycle refresh");
+        assert_ne!(
+            returning_warm_start.warm_start_reason,
+            WarmStartCacheReason::Hit
+        );
+        assert_eq!(returning_warm_start.warm_start_normal_impulse, 0.0);
+        assert_eq!(returning_warm_start.warm_start_tangent_impulse, 0.0);
+        assert_eq!(returning_warm_start.normal_impulse, 0.0);
+        assert_eq!(returning_warm_start.tangent_impulse, 0.0);
+        let (third_events, _, _, _) = world.refresh_contact_events(third_contacts, second_previous);
+        let third_surviving = *active_event_for_feature(&third_events, surviving_feature).0;
+        let (third_returning, returning_persisted) =
+            active_event_for_feature(&third_events, returning_feature);
+
+        assert_eq!(third_surviving.contact_id, first_surviving.contact_id);
+        assert_eq!(third_surviving.manifold_id, first_surviving.manifold_id);
+        assert!(!returning_persisted);
+        assert_ne!(third_returning.contact_id, first_returning.contact_id);
+        assert_eq!(third_returning.manifold_id, first_surviving.manifold_id);
+        let third_active = world.take_active_contacts();
+        let returning_record = third_active
+            .get(&ContactKey::new(
+                test_collider(1),
+                test_collider(2),
+                returning_feature,
+            ))
+            .expect("returning point should become active with a fresh record");
+        assert_eq!(returning_record.witness_a_local, Point::new(0.1, 0.0));
+        assert_eq!(returning_record.witness_b_local, Point::new(0.1, 0.0));
+        assert_eq!(returning_record.normal_impulse, 0.0);
+        assert_eq!(returning_record.tangent_impulse, 0.0);
+    }
+
+    #[test]
+    fn manifold_persistence_history_only_separation_does_not_fabricate_contact() {
+        let mut base_world = World::new(WorldDesc {
+            gravity: Vector::default(),
+            ..WorldDesc::default()
+        });
+        let body_a = base_world
+            .create_body(BodyDesc {
+                body_type: BodyType::Static,
+                pose: Pose::default(),
+                ..BodyDesc::default()
+            })
+            .expect("first body should be created");
+        let body_b = base_world
+            .create_body(BodyDesc {
+                body_type: BodyType::Static,
+                pose: Pose::from_xy_angle(5.0, 0.0, 0.0),
+                ..BodyDesc::default()
+            })
+            .expect("second body should be created");
+        let collider_a = base_world
+            .create_collider(
+                body_a,
+                ColliderDesc {
+                    shape: SharedShape::rect(1.0, 1.0),
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("first collider should be created");
+        let collider_b = base_world
+            .create_collider(
+                body_b,
+                ColliderDesc {
+                    shape: SharedShape::rect(1.0, 1.0),
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("second collider should be created");
+        let feature = test_feature(0x0100_1003, 0);
+        let mut source = test_contact_observation(feature);
+        source.body_a = body_a;
+        source.body_b = body_b;
+        source.collider_a = collider_a;
+        source.collider_b = collider_b;
+        source.pair_key = ContactPairKey::new(collider_a, collider_b);
+        source.key = ContactKey::new(collider_a, collider_b, feature);
+        let previous_record = ContactRecord {
+            contact: ContactEvent {
+                body_a,
+                body_b,
+                collider_a,
+                collider_b,
+                ..test_contact_event_with_ids(feature, 91, 12)
+            },
+            witness_a_local: source.witness_a_local,
+            witness_b_local: source.witness_b_local,
+            normal_impulse: 1.0,
+            tangent_impulse: 0.0,
+        };
+        let mut previous = BTreeMap::new();
+        previous.insert(source.key, previous_record);
+
+        let mut separated_world = base_world.clone();
+        let mut unconfirmed = vec![source.clone()];
+        separated_world.finalize_contact_observations(&mut unconfirmed);
+        assert!(unconfirmed.is_empty());
+        let (ended_events, contact_count, _, _) =
+            separated_world.refresh_contact_events(unconfirmed, previous.clone());
+        assert_eq!(contact_count, 0);
+        assert!(matches!(
+            ended_events.as_slice(),
+            [WorldEvent::ContactEnded(_)]
+        ));
+
+        let mut confirmed_world = base_world;
+        let mut confirmed = source;
+        confirmed.base_normal_solve_executed = true;
+        confirmed.normal_impulse = 0.5;
+        let mut confirmed_contacts = vec![confirmed];
+        confirmed_world.finalize_contact_observations(&mut confirmed_contacts);
+        assert_eq!(confirmed_contacts.len(), 1);
+        assert_eq!(confirmed_contacts[0].depth, 0.0);
+        let (confirmed_events, confirmed_count, _, _) =
+            confirmed_world.refresh_contact_events(confirmed_contacts, previous);
+        assert_eq!(confirmed_count, 1);
+        assert!(matches!(
+            confirmed_events.as_slice(),
+            [WorldEvent::ContactPersisted(contact)] if contact.depth == 0.0
+        ));
+    }
+
+    #[test]
+    fn reservation_stays_pair_scoped_for_four_by_four_inputs_and_unrelated_pairs() {
+        fn run(
+            include_unrelated: bool,
+        ) -> (
+            Vec<(ContactFeatureId, ContactId, ContactLifecycleReason)>,
+            usize,
+        ) {
+            let previous_index = 0x0100_1003;
+            let current_index = 0x0100_3001;
+            let previous_features = [
+                test_feature(previous_index, 0),
+                test_feature(previous_index, 1),
+                test_feature(0x0200_2004, 0),
+                test_feature(0x0300_3005, 0),
+            ];
+            let current_features = [
+                test_feature(current_index, 2),
+                test_feature(current_index, 3),
+                previous_features[2],
+                previous_features[3],
+            ];
+            let mut p0 = test_contact_record(previous_features[0], 101, 13, 0.0, 1.0, 0.1);
+            let mut p1 = test_contact_record(previous_features[1], 102, 13, 0.03, 2.0, 0.2);
+            p0.contact.normal = test_normal(0.0);
+            p1.contact.normal = test_normal(10.0);
+            let mut previous = BTreeMap::new();
+            for (feature, record) in [
+                (previous_features[0], p0),
+                (previous_features[1], p1),
+                (
+                    previous_features[2],
+                    test_contact_record(previous_features[2], 103, 13, 0.1, 3.0, 0.3),
+                ),
+                (
+                    previous_features[3],
+                    test_contact_record(previous_features[3], 104, 13, 0.2, 4.0, 0.4),
+                ),
+            ] {
+                previous.insert(
+                    ContactKey::new(test_collider(1), test_collider(2), feature),
+                    record,
+                );
+            }
+            if include_unrelated {
+                for index in 0..32_u32 {
+                    let collider_a = test_collider(100 + index * 2);
+                    let collider_b = test_collider(101 + index * 2);
+                    let feature = test_feature(0x0400_4006 + index, 0);
+                    let mut record =
+                        test_contact_record(feature, 1000 + index, 100 + index, 0.0, 0.0, 0.0);
+                    record.contact.collider_a = collider_a;
+                    record.contact.collider_b = collider_b;
+                    previous.insert(ContactKey::new(collider_a, collider_b, feature), record);
+                }
+            }
+            let mut c0 = test_contact_observation(current_features[0]);
+            let mut c1 = test_contact_observation(current_features[1]);
+            let mut c2 = test_contact_observation(current_features[2]);
+            let mut c3 = test_contact_observation(current_features[3]);
+            set_observation_witness(&mut c0, 0.01);
+            set_observation_witness(&mut c1, 0.03);
+            set_observation_witness(&mut c2, 0.1);
+            set_observation_witness(&mut c3, 0.2);
+            c0.normal = test_normal(5.0);
+            c1.normal = test_normal(-10.0);
+            let mut world = World::new(WorldDesc::default());
+            reset_lifecycle_candidate_evaluation_count();
+            let (events, _, _, _) = world.refresh_contact_events(vec![c0, c1, c2, c3], previous);
+            let candidate_evaluation_count = lifecycle_candidate_evaluation_count();
+            let contacts = events
+                .into_iter()
+                .filter_map(|event| match event {
+                    WorldEvent::ContactStarted(contact) | WorldEvent::ContactPersisted(contact)
+                        if contact.collider_a == test_collider(1)
+                            && contact.collider_b == test_collider(2) =>
+                    {
+                        Some((
+                            contact.feature_id,
+                            contact.contact_id,
+                            contact.lifecycle_reason,
+                        ))
+                    }
+                    _ => None,
+                })
+                .collect();
+            (contacts, candidate_evaluation_count)
+        }
+
+        let (pair_only, base_candidate_evaluations) = run(false);
+        let (with_unrelated, unrelated_candidate_evaluations) = run(true);
+        assert!(
+            base_candidate_evaluations > 0 && base_candidate_evaluations <= 16,
+            "4x4 candidate-edge instrumentation must be non-vacuous and bounded; base_candidate_evaluations={base_candidate_evaluations}"
+        );
+        assert!(
+            unrelated_candidate_evaluations > 0,
+            "unrelated-pair run must exercise the same candidate-edge predicate"
+        );
+        let observable_same = with_unrelated == pair_only;
+        let four_distinct_persisted = pair_only.len() == 4
+            && pair_only
+                .iter()
+                .all(|(_, _, reason)| *reason != ContactLifecycleReason::Started)
+            && pair_only
+                .iter()
+                .map(|(_, contact_id, _)| *contact_id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                == 4;
+        assert!(
+            observable_same
+                && four_distinct_persisted
+                && base_candidate_evaluations == unrelated_candidate_evaluations,
+            "reservation must stay pair-scoped and one-to-one; observable_same={observable_same}, four_distinct_persisted={four_distinct_persisted}, base_candidate_evaluations={base_candidate_evaluations}, with_unrelated_candidate_evaluations={unrelated_candidate_evaluations}, pair_only={pair_only:?}, with_unrelated={with_unrelated:?}"
+        );
     }
 
     #[test]

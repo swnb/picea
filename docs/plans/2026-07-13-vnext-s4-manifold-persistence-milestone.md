@@ -1,6 +1,6 @@
 # vNext Handoff §4 SAT Manifold Persistence Milestone
 
-状态：Draft；用户决策已确认；等待 S4-D spec/architecture review
+状态：S4-D committed at 6045bd2; S4-RED under review
 日期：2026-07-13
 基线：`main=origin/main=9427a17`
 设计：`docs/design/2026-07-13-sat-manifold-persistence-design.md`
@@ -162,6 +162,7 @@ S4-RED receipt按下表逐项填写，不能用一个filter结果代替分类：
 - lifecycle same-index禁止；edge-swap仅solid->solid；
 - source-row revision mismatch必须non-candidate。
 - revision mismatch的Started events必须分配新ContactId与新ManifoldId。
+- S4-IMPL必须把A15的`#[cfg(test)]`increment迁到新matcher真实candidate-edge predicate；implementation reviewer必须拒绝旧函数遗留导致的`0 == 0`真空通过，并确认4x4 baseline count为`1..=16`且不随unrelated pairs增加。
 - public comments必须保留confirmed solver interaction的source-feature例外，并说明`ExactFeature`还要求geometry-compatible revisions。
 
 Targeted green commands：
@@ -257,6 +258,74 @@ rtk proxy git status --short --branch
 
 - Reject：发现互斥600 gates、greedy非最大双射、遗漏source-row、same-index public reason误标、revision/sensor/2->1->2/规模合同不完整。
 - 当前修订已改为maximum-cardinality三consumer设计；等待S4-D round 2。未commit，未进入S4-RED。
+
+### 2026-07-13 - S4-D D4 acceptance
+
+- D4 review：PASS；architecture/spec findings已闭环。
+- S4-D已提交为`6045bd2 docs: design sat manifold persistence`。
+- S4-RED进入test review；production implementation仍未开始。
+
+### 2026-07-13 - S4-RED review remediation worker receipt（未commit）
+
+#### 1. 成功标准
+
+在`HEAD=6045bd2`的production baseline上补强A01-A15 acceptance artifacts；所有新测试compile，RED只来自行为断言，A14三条baseline保持green，且除批准的纯`#[cfg(test)]`candidate counter外不包含production implementation。
+
+#### 2. 检查结果
+
+编译预检：
+
+- `rtk proxy cargo test -p picea --lib --no-run`：exit 0。
+- `rtk proxy cargo test -p picea --test physics_realism_acceptance --no-run`：exit 0。
+- `rtk proxy cargo check -p picea --lib`：exit 0；普通lib build不编译test-only counter storage/reset/read/increment路径。
+
+逐项结果：
+
+| Acceptance | Exact command / filter | Exit / count | Baseline与关键事实 |
+| --- | --- | --- | --- |
+| A01 | `rtk proxy cargo test -p picea --lib pipeline::narrowphase::tests::stacked_rectangles_expose_raw_feature_role_swap -- --exact --nocapture` | exit 0；1 passed / 0 failed | Green characterization；原fixture保留normal/local-drift门，raw feature index sets明确不同。 |
+| A02 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_sat_role_swap_preserves_both_contact_ids_by_local_anchor -- --exact --nocapture` | exit 0；1 passed / 0 failed | Baseline已green；两点均按唯一双侧local-witness对应保留各自`ContactId`和同一`ManifoldId`，raw index sets变化、第二帧slots distinct，且无warm `Hit`/impulse。 |
+| A03 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::lifecycle_reservation_keeps_later_exact_match -- --exact --nocapture` | exit 101；0 passed / 1 failed | RED；test先按完整`ContactKey`排序并确认fallback稳定排在exact前；fallback仍偷走later exact previous。 |
+| A04 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::lifecycle_reservation_maximizes_edge_swap_cardinality -- --exact --nocapture` | exit 101；0 passed / 1 failed | RED；缺边图只得到1个persisted，未实现期望cardinality 2。 |
+| A05 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::warm_start_reservation_keeps_distinct_impulses_with_local_witnesses -- --exact --nocapture` | exit 101；0 passed / 1 failed | RED；两个current都消费sentinel normal impulse `1.0`，第二点未得到对应previous的`2.0`；edge-swap tangent均为0。 |
+| A06 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::warm_start_reservation_maximizes_residual_cardinality_after_exact_matches -- --exact --nocapture` | exit 101；0 passed / 1 failed | RED；exact-hard子图同时输出`(Hit,30)`两次；residual子图输出normal impulses `[10,10,30]`而非`[20,10,30]`。 |
+| A07 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::source_row_reservation_does_not_reuse_previous_point -- --exact --nocapture`；`rtk proxy cargo test -p picea --lib pipeline::contacts::tests::source_row_revision_is_rejected_before_solver_rows_are_built -- --exact --nocapture` | 两条均exit 101；各0 passed / 1 failed | RED；duplicate test中两个current同时借同一previous；revision test使用dynamic/static真实row，首帧`contact_row_count > 0`前置断言通过；patch后直接调用`collect_contact_observations`、`take_active_contacts`、`prepare_contact_warm_start`，solver前两点仍为`(Hit,false,Candidate)`而非精确`MissFeatureId`。 |
+| A08 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_geometry_patch_invalidates_all_history_consumers -- --exact --nocapture` | exit 101；0 passed / 1 failed | RED；successful shape和valid local-pose patch均保持两点overlap，但两者都错误为`(ExactFeature,Hit,false,Candidate)`；期望`Started`、新contact/manifold ids、精确`MissFeatureId`、source false。 |
+| A09 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_world_commands_geometry_patch_is_atomic -- --exact --nocapture` | exit 101；0 passed / 1 failed | 初始contacts精确2点；rejected scratch transaction子场景green并保持old ids/history；successful `WorldCommand::PatchCollider`子场景RED，仍为两点`(ExactFeature,Hit,false,Candidate)`而非精确`MissFeatureId`。 |
+| A10 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_sensor_transitions_do_not_expand_edge_swap_identity -- --exact --nocapture`；`rtk proxy cargo test -p picea --lib pipeline::contacts::tests::sensor_transition_same_index_does_not_persist_lifecycle -- --exact --nocapture` | integration exit 101，0 passed / 1 failed；same-index unit exit 0，1 passed / 0 failed | solid->sensor与sensor->sensor edge-swap均`Started/SkippedSensor`并保留pair manifold；sensor->solid错误`PersistentEdgeSwap/MissFeatureId`并复用contact ids。exact solid->sensor为`ExactFeature/SkippedSensor`，exact sensor->solid为`ExactFeature/MissPreviousSensor`，exact sensor->sensor为`ExactFeature/SkippedSensor`，三者均保持contact/manifold ids。same-index solid->sensor、sensor->sensor、sensor->solid均green并锁`Started`/新contact id/非`PersistentEdgeSwap`或`ExactFeature`。所有case impulse为0。 |
+| A11 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::manifold_persistence_two_to_one_to_two_preserves_only_surviving_point -- --exact --nocapture`；`rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_two_to_one_to_two_preserves_only_surviving_point -- --exact --nocapture` | 两条均exit 0；各1 passed / 0 failed | Green boundary；unit以normal/tangent双sentinel锁住不复活；真实pipeline固定rectangle poses得到严格2/1/2，frame2为1 Persisted+1 Ended，frame3幸存继续、返回新`ContactId`、共享existing `ManifoldId`且warm normal/tangent为0。 |
+| A12 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_normalizes_geometric_a_b_order_with_revisions -- --exact --nocapture`；`rtk proxy cargo test -p picea --test physics_realism_acceptance warm_start_cache_uses_normalized_pair_identity_when_geometric_a_b_order_is_swapped -- --exact --nocapture` | 新锁exit 101，0 passed / 1 failed；existing锁exit 0，1 passed / 0 failed | 首次contact前分别给min/max ordered side制造不对称revision；两种fixture跨SAT role swap均保持IDs，随后分别patch min/max均未失效，错误输出两点`(PersistentEdgeSwap,MissFeatureId,false,EdgeSwap)`。existing normalized-pair保持green。 |
+| A13 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::manifold_persistence_history_only_separation_does_not_fabricate_contact -- --exact --nocapture` | exit 0；1 passed / 0 failed | Green boundary；unconfirmed history-only source变成Ended；既有positive finite base-solve interaction仍保留depth 0 persisted语义。 |
+| A14 | `rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_artifacts_capture_nxm_grid_stack_facts -- --exact --nocapture`；`rtk proxy cargo test -p picea-lab --test artifact_run aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock -- --exact --nocapture`；`rtk proxy env PICEA_MATRIX_STACK_E4_ACCEPTANCE=1 cargo test -p picea-lab --test artifact_run matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed -- --ignored --exact --nocapture` | 三条均exit 0；各1 passed / 0 failed | 全部green；matrix180为48 sleeping / 0 awake，aligned1200为12 / 0，forced600为48 / 0；三者均无floor ejection，quiet linear/angular speed均0。 |
+| A15 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::reservation_stays_pair_scoped_for_four_by_four_inputs_and_unrelated_pairs -- --exact --nocapture` | exit 101；0 passed / 1 failed | RED；baseline non-vacuous/bound门`7 > 0 && 7 <= 16`通过，with-unrelated non-vacuous门`71 > 0`通过；observable结果相同但4x4仍有1个`Started`，candidate evaluations从`7`增至`71`，直接锁住global scan。S4-IMPL必须将increment迁到新matcher真实candidate-edge predicate。 |
+
+Living spec的聚合命令`rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_ -- --nocapture`最终为exit 101，2 passed / 4 failed：A02/A11 integration green，A08/A09/A10/A12 RED。没有新test被`ignore`。
+
+格式与scope结果：
+
+- 最终`rtk proxy cargo fmt --all --check`：exit 0。
+- `rtk proxy git diff --check`：exit 0。
+- `rtk proxy git diff --exit-code 6045bd2 --`：exit 1，原因是五个批准文件存在未提交改动。
+- `rtk proxy git diff --name-only 6045bd2 --`：`crates/picea/src/pipeline/contacts.rs`、`crates/picea/src/pipeline/narrowphase.rs`、`crates/picea/tests/physics_realism_acceptance.rs`、S4 design、S4 living spec。
+- `rtk proxy git diff --exit-code 6045bd2 -- crates/picea/src/lib.rs crates/picea/src/solver crates/picea/src/events.rs crates/picea/src/debug.rs crates/picea/src/collider.rs crates/picea/src/world/contact_state.rs`：exit 0。
+- `contacts.rs`人工scope审计：现有`#[cfg(test)] mod tests`外只新增`#[cfg(test)]`thread-local counter、reset/read helper和candidate入口递增；非test返回值/排序无改动。`narrowphase.rs`改动仍只在现有tests module。
+- `rtk proxy git status --short --branch`：`feat/vnext-s4-manifold-persistence`上仅上述五个文件为unstaged modified。
+
+#### 3. 复跑方式
+
+逐条复跑上表每个exact command；聚合filter只作为附加证据，不替代A03-A15分类。编译性先用上方两个`--no-run`与release `cargo check`确认，格式与scope按本节点末尾Git gate复核。
+
+#### 4. 范围外
+
+本节点没有修改production返回值/排序、struct/enum/API/doc comment、solver、Cargo、阈值或既有assertion；唯一非test-module代码是批准的`#[cfg(test)]`thread-local counter及candidate入口递增。没有实现revision/matcher，没有修改matrix tests，也没有stage/commit/push/branch/fetch。
+
+#### 5. 残余风险
+
+- A02在baseline已green，保留为双点identity/raw-geometry边界锁；production缺口由A03-A10/A12/A15稳定RED证明。
+- A11 unit与真实pipeline integration均在baseline green，保留为2/1/2边界锁。
+- A10 same-index unit在当前`ContactRecord`尚无private sensor field时只能用previous event的`warm_start_reason`表达previous sensor fact；S4-IMPL必须迁移为private `ContactRecord::is_sensor`事实，不得继续反推。
+- Reviewer指出的public docs Low属于S4-IMPL；S4-RED没有修改`events.rs`/`debug.rs`，该Low明确留待implementation节点。
+- S4-RED reviewer re-check、verifier review和supervisor acceptance仍待后续只读节点；本worker未commit。
 
 ## 验收报告模板
 

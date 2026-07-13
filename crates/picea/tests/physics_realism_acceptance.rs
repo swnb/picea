@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use picea::events::CcdTargetKind;
 use picea::prelude::*;
 
@@ -130,6 +132,104 @@ fn active_contact_events(report: &StepReport) -> Vec<ContactEvent> {
             _ => None,
         })
         .collect()
+}
+
+fn raw_feature_parts(feature_id: ContactFeatureId) -> (u32, u32) {
+    let raw = serde_json::to_value(feature_id)
+        .expect("contact feature id should serialize")
+        .as_u64()
+        .expect("contact feature id should serialize as its raw integer");
+    (raw as u32, (raw >> 32) as u32)
+}
+
+fn contact_local_witnesses(contact: &ContactEvent, pose_a: Pose, pose_b: Pose) -> (Point, Point) {
+    let half_depth = contact.normal * (contact.depth * 0.5);
+    (
+        pose_a.inverse_transform_point(contact.point - half_depth),
+        pose_b.inverse_transform_point(contact.point + half_depth),
+    )
+}
+
+fn dual_local_witness_drift(
+    first: &ContactEvent,
+    first_pose_a: Pose,
+    first_pose_b: Pose,
+    second: &ContactEvent,
+    second_pose_a: Pose,
+    second_pose_b: Pose,
+) -> f32 {
+    let (first_a, first_b) = contact_local_witnesses(first, first_pose_a, first_pose_b);
+    let (second_a, second_b) = contact_local_witnesses(second, second_pose_a, second_pose_b);
+    (first_a - second_a)
+        .length()
+        .max((first_b - second_b).length())
+}
+
+fn unique_two_point_local_witness_correspondence(
+    first: &[ContactEvent],
+    first_pose_a: Pose,
+    first_pose_b: Pose,
+    second: &[ContactEvent],
+    second_pose_a: Pose,
+    second_pose_b: Pose,
+) -> [(usize, usize); 2] {
+    assert_eq!(first.len(), 2);
+    assert_eq!(second.len(), 2);
+    let direct_drifts = [
+        dual_local_witness_drift(
+            &first[0],
+            first_pose_a,
+            first_pose_b,
+            &second[0],
+            second_pose_a,
+            second_pose_b,
+        ),
+        dual_local_witness_drift(
+            &first[1],
+            first_pose_a,
+            first_pose_b,
+            &second[1],
+            second_pose_a,
+            second_pose_b,
+        ),
+    ];
+    let crossed_drifts = [
+        dual_local_witness_drift(
+            &first[0],
+            first_pose_a,
+            first_pose_b,
+            &second[1],
+            second_pose_a,
+            second_pose_b,
+        ),
+        dual_local_witness_drift(
+            &first[1],
+            first_pose_a,
+            first_pose_b,
+            &second[0],
+            second_pose_a,
+            second_pose_b,
+        ),
+    ];
+    let direct_score = (
+        direct_drifts.into_iter().fold(0.0_f32, f32::max),
+        direct_drifts.into_iter().sum::<f32>(),
+    );
+    let crossed_score = (
+        crossed_drifts.into_iter().fold(0.0_f32, f32::max),
+        crossed_drifts.into_iter().sum::<f32>(),
+    );
+    assert_ne!(
+        direct_score, crossed_score,
+        "the fixture must have a unique two-point local-witness correspondence"
+    );
+    if direct_score.0 < crossed_score.0
+        || (direct_score.0 == crossed_score.0 && direct_score.1 < crossed_score.1)
+    {
+        [(0, 0), (1, 1)]
+    } else {
+        [(0, 1), (1, 0)]
+    }
 }
 
 #[derive(Debug)]
@@ -1063,6 +1163,893 @@ fn sat_edge_swap_candidate_persists_lifecycle_without_auto_warm_start_impulse() 
         }),
         "first-stage persistent manifold identity must not automatically migrate solver impulse; second={second_contacts:?}"
     );
+}
+
+#[test]
+fn manifold_persistence_sat_role_swap_preserves_both_contact_ids_by_local_anchor() {
+    let mut world = no_gravity_world();
+    let lower = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let upper = create_body(&mut world, BodyType::Static, -0.25, 1.8, Vector::default());
+    let lower_collider = attach_shape(
+        &mut world,
+        lower,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let upper_collider = attach_shape(
+        &mut world,
+        upper,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let lower_pose = Pose::from_xy_angle(0.0, 0.0, -0.12);
+    let first_upper_pose = Pose::from_xy_angle(-0.25, 1.8, -0.17);
+    let second_upper_pose = Pose::from_xy_angle(-0.25, 1.8, -0.15);
+    world
+        .apply_body_patch(
+            lower,
+            BodyPatch {
+                pose: Some(lower_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("lower rectangle pose should be patched");
+    world
+        .apply_body_patch(
+            upper,
+            BodyPatch {
+                pose: Some(first_upper_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("upper rectangle pose should be patched");
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first = pipeline.step(&mut world);
+    world
+        .apply_body_patch(
+            upper,
+            BodyPatch {
+                pose: Some(second_upper_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("upper rectangle should cross the SAT reference/incident role swap");
+    let second = pipeline.step(&mut world);
+    let first_contacts = active_contact_events(&first);
+    let second_contacts = active_contact_events(&second);
+
+    assert_eq!(first_contacts.len(), 2);
+    assert_eq!(second_contacts.len(), 2);
+    assert!(first_contacts.iter().all(|contact| {
+        contact.collider_a == lower_collider.min(upper_collider)
+            && contact.collider_b == lower_collider.max(upper_collider)
+    }));
+    let correspondence = unique_two_point_local_witness_correspondence(
+        &first_contacts,
+        lower_pose,
+        first_upper_pose,
+        &second_contacts,
+        lower_pose,
+        second_upper_pose,
+    );
+    assert_ne!(first_contacts[0].contact_id, first_contacts[1].contact_id);
+    for (first_index, second_index) in correspondence {
+        let other_first_index = 1 - first_index;
+        assert_eq!(
+            second_contacts[second_index].contact_id, first_contacts[first_index].contact_id,
+            "each current point must inherit the id of its unique local-witness predecessor"
+        );
+        assert_eq!(
+            second_contacts[second_index].manifold_id,
+            first_contacts[first_index].manifold_id
+        );
+        assert_ne!(
+            second_contacts[second_index].contact_id, first_contacts[other_first_index].contact_id,
+            "left/right point identities must not interchange"
+        );
+    }
+    assert_eq!(
+        second_contacts
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        1
+    );
+    let first_feature_indices = first_contacts
+        .iter()
+        .map(|contact| raw_feature_parts(contact.feature_id).0)
+        .collect::<BTreeSet<_>>();
+    let second_feature_indices = second_contacts
+        .iter()
+        .map(|contact| raw_feature_parts(contact.feature_id).0)
+        .collect::<BTreeSet<_>>();
+    assert_ne!(first_feature_indices, second_feature_indices);
+    assert_eq!(
+        second_contacts
+            .iter()
+            .map(|contact| raw_feature_parts(contact.feature_id).1)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        2,
+        "the second frame must retain two distinct raw point slots from current geometry"
+    );
+    assert!(second_contacts.iter().all(|contact| {
+        contact.normal.dot(first_contacts[0].normal) > 0.999
+            && contact.warm_start_reason != WarmStartCacheReason::Hit
+            && contact.warm_start_normal_impulse == 0.0
+            && contact.warm_start_tangent_impulse == 0.0
+    }));
+}
+
+#[test]
+fn manifold_persistence_geometry_patch_invalidates_all_history_consumers() {
+    fn run_patch(patch: ColliderPatch) -> (Vec<ContactEvent>, Vec<ContactEvent>) {
+        let mut world = no_gravity_world();
+        let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+        let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+        attach_shape(
+            &mut world,
+            left,
+            SharedShape::rect(2.0, 2.0),
+            Material::default(),
+        );
+        let right_collider = attach_shape(
+            &mut world,
+            right,
+            SharedShape::rect(2.0, 2.0),
+            Material::default(),
+        );
+        let mut pipeline = SimulationPipeline::new(fixed_step_config());
+        let first = active_contact_events(&pipeline.step(&mut world));
+        world
+            .apply_collider_patch(right_collider, patch)
+            .expect("geometry patch should succeed");
+        let second = active_contact_events(&pipeline.step(&mut world));
+        (first, second)
+    }
+
+    let cases = [
+        (
+            "shape",
+            run_patch(ColliderPatch {
+                shape: Some(SharedShape::rect(2.02, 2.0)),
+                ..ColliderPatch::default()
+            }),
+        ),
+        (
+            "local_pose",
+            run_patch(ColliderPatch {
+                local_pose: Some(Pose::from_xy_angle(0.01, 0.0, 0.0)),
+                ..ColliderPatch::default()
+            }),
+        ),
+    ];
+    let mut results = Vec::new();
+    for (kind, (first_contacts, second_contacts)) in cases {
+        assert_eq!(first_contacts.len(), 2, "{kind} first frame");
+        assert_eq!(second_contacts.len(), 2, "{kind} second frame");
+        let first_contact_ids = first_contacts
+            .iter()
+            .map(|contact| contact.contact_id)
+            .collect::<BTreeSet<_>>();
+        let first_manifold_ids = first_contacts
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>();
+        let second_contact_ids = second_contacts
+            .iter()
+            .map(|contact| contact.contact_id)
+            .collect::<BTreeSet<_>>();
+        let second_manifold_ids = second_contacts
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>();
+        let accepted = second_manifold_ids.len() == 1
+            && first_contact_ids.is_disjoint(&second_contact_ids)
+            && first_manifold_ids.is_disjoint(&second_manifold_ids)
+            && second_contacts.iter().all(|contact| {
+                contact.lifecycle_reason == ContactLifecycleReason::Started
+                    && contact.warm_start_reason == WarmStartCacheReason::MissFeatureId
+                    && contact.warm_start_normal_impulse == 0.0
+                    && contact.warm_start_tangent_impulse == 0.0
+                    && !contact.source_row_continuity_candidate
+                    && contact.source_row_continuity_reason != SourceRowContinuityReason::Candidate
+            });
+        results.push((kind, accepted, second_contacts));
+    }
+    assert!(
+        results.iter().all(|(_, accepted, _)| *accepted),
+        "shape and local-pose revisions must invalidate every history consumer; results={:?}",
+        results
+            .iter()
+            .map(|(kind, accepted, contacts)| (
+                kind,
+                accepted,
+                contacts
+                    .iter()
+                    .map(|contact| (
+                        contact.lifecycle_reason,
+                        contact.warm_start_reason,
+                        contact.source_row_continuity_candidate,
+                        contact.source_row_continuity_reason,
+                    ))
+                    .collect::<Vec<_>>(),
+            ))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn manifold_persistence_world_commands_geometry_patch_is_atomic() {
+    let mut world = no_gravity_world();
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let right_collider = attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    let first = pipeline.step(&mut world);
+    let first_contacts = active_contact_events(&first);
+    assert_eq!(first_contacts.len(), 2);
+    assert!(!first_contacts.is_empty());
+    let first_contact_ids = first_contacts
+        .iter()
+        .map(|contact| contact.contact_id)
+        .collect::<BTreeSet<_>>();
+    let first_manifold_ids = first_contacts
+        .iter()
+        .map(|contact| contact.manifold_id)
+        .collect::<BTreeSet<_>>();
+
+    let error = world
+        .commands()
+        .apply([
+            WorldCommand::PatchCollider {
+                collider: right_collider,
+                patch: ColliderPatch {
+                    shape: Some(SharedShape::rect(2.02, 2.0)),
+                    ..ColliderPatch::default()
+                },
+            },
+            WorldCommand::PatchCollider {
+                collider: right_collider,
+                patch: ColliderPatch {
+                    local_pose: Some(Pose::from_xy_angle(f32::NAN, 0.0, 0.0)),
+                    ..ColliderPatch::default()
+                },
+            },
+        ])
+        .expect_err("invalid command must reject the scratch transaction");
+    assert_eq!(error.command_index, 1);
+    let after_rejection = pipeline.step(&mut world);
+    let after_rejection_contacts = active_contact_events(&after_rejection);
+    assert_eq!(
+        after_rejection_contacts
+            .iter()
+            .map(|contact| contact.contact_id)
+            .collect::<BTreeSet<_>>(),
+        first_contact_ids,
+        "a rejected scratch patch must leave contact history intact"
+    );
+    assert_eq!(
+        after_rejection_contacts
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>(),
+        first_manifold_ids
+    );
+    assert!(after_rejection_contacts.iter().all(|contact| {
+        contact.lifecycle_reason == ContactLifecycleReason::ExactFeature
+            && contact.warm_start_reason == WarmStartCacheReason::Hit
+    }));
+
+    world
+        .commands()
+        .apply_one(WorldCommand::PatchCollider {
+            collider: right_collider,
+            patch: ColliderPatch {
+                shape: Some(SharedShape::rect(2.02, 2.0)),
+                ..ColliderPatch::default()
+            },
+        })
+        .expect("valid geometry command should commit");
+    let after_commit = pipeline.step(&mut world);
+    let after_commit_contacts = active_contact_events(&after_commit);
+    assert_eq!(after_commit_contacts.len(), 2);
+    let committed_contact_ids = after_commit_contacts
+        .iter()
+        .map(|contact| contact.contact_id)
+        .collect::<BTreeSet<_>>();
+    let committed_manifold_ids = after_commit_contacts
+        .iter()
+        .map(|contact| contact.manifold_id)
+        .collect::<BTreeSet<_>>();
+    let lifecycle_invalidated = first_contact_ids.is_disjoint(&committed_contact_ids)
+        && first_manifold_ids.is_disjoint(&committed_manifold_ids)
+        && after_commit_contacts
+            .iter()
+            .all(|contact| contact.lifecycle_reason == ContactLifecycleReason::Started);
+    let warm_start_invalidated = after_commit_contacts.iter().all(|contact| {
+        contact.warm_start_reason == WarmStartCacheReason::MissFeatureId
+            && contact.warm_start_normal_impulse == 0.0
+            && contact.warm_start_tangent_impulse == 0.0
+    });
+    let source_row_invalidated = after_commit_contacts.iter().all(|contact| {
+        !contact.source_row_continuity_candidate
+            && contact.source_row_continuity_reason != SourceRowContinuityReason::Candidate
+    });
+    assert!(
+        lifecycle_invalidated && warm_start_invalidated && source_row_invalidated,
+        "committed geometry patch must invalidate all retained contact history; lifecycle={lifecycle_invalidated}, warm_start={warm_start_invalidated}, source_row={source_row_invalidated}, facts={:?}",
+        after_commit_contacts
+            .iter()
+            .map(|contact| (
+                contact.lifecycle_reason,
+                contact.warm_start_reason,
+                contact.source_row_continuity_candidate,
+                contact.source_row_continuity_reason,
+            ))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn manifold_persistence_sensor_transitions_do_not_expand_edge_swap_identity() {
+    fn role_swap_transition(
+        first_sensor: bool,
+        second_sensor: bool,
+    ) -> (Vec<ContactEvent>, Vec<ContactEvent>) {
+        let mut world = no_gravity_world();
+        let lower = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+        let upper = create_body(&mut world, BodyType::Static, -0.25, 1.8, Vector::default());
+        attach_shape(
+            &mut world,
+            lower,
+            SharedShape::rect(2.0, 2.0),
+            Material::default(),
+        );
+        let upper_collider = world
+            .create_collider(
+                upper,
+                ColliderDesc {
+                    shape: SharedShape::rect(2.0, 2.0),
+                    is_sensor: first_sensor,
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("upper collider should be created");
+        world
+            .apply_body_patch(
+                lower,
+                BodyPatch {
+                    pose: Some(Pose::from_xy_angle(0.0, 0.0, -0.12)),
+                    wake: true,
+                    ..BodyPatch::default()
+                },
+            )
+            .expect("lower pose should be patched");
+        world
+            .apply_body_patch(
+                upper,
+                BodyPatch {
+                    pose: Some(Pose::from_xy_angle(-0.25, 1.8, -0.17)),
+                    wake: true,
+                    ..BodyPatch::default()
+                },
+            )
+            .expect("first upper pose should be patched");
+        let mut pipeline = SimulationPipeline::new(fixed_step_config());
+        let first = pipeline.step(&mut world);
+        world
+            .apply_collider_patch(
+                upper_collider,
+                ColliderPatch {
+                    is_sensor: Some(second_sensor),
+                    ..ColliderPatch::default()
+                },
+            )
+            .expect("sensor transition should succeed");
+        world
+            .apply_body_patch(
+                upper,
+                BodyPatch {
+                    pose: Some(Pose::from_xy_angle(-0.25, 1.8, -0.15)),
+                    wake: true,
+                    ..BodyPatch::default()
+                },
+            )
+            .expect("second upper pose should be patched");
+        let second = pipeline.step(&mut world);
+        (
+            active_contact_events(&first),
+            active_contact_events(&second),
+        )
+    }
+
+    fn exact_transition(
+        first_sensor: bool,
+        second_sensor: bool,
+    ) -> (Vec<ContactEvent>, Vec<ContactEvent>) {
+        let mut world = no_gravity_world();
+        let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+        let right = create_body(&mut world, BodyType::Static, 1.5, 0.0, Vector::default());
+        attach_shape(
+            &mut world,
+            left,
+            SharedShape::circle(1.0),
+            Material::default(),
+        );
+        let right_collider = world
+            .create_collider(
+                right,
+                ColliderDesc {
+                    shape: SharedShape::circle(1.0),
+                    is_sensor: first_sensor,
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("exact-transition collider should be created");
+        let mut pipeline = SimulationPipeline::new(fixed_step_config());
+        let first = active_contact_events(&pipeline.step(&mut world));
+        world
+            .apply_collider_patch(
+                right_collider,
+                ColliderPatch {
+                    is_sensor: Some(second_sensor),
+                    ..ColliderPatch::default()
+                },
+            )
+            .expect("exact sensor transition should succeed");
+        let second = active_contact_events(&pipeline.step(&mut world));
+        (first, second)
+    }
+
+    let mut role_swap_results = Vec::new();
+    for (first_sensor, second_sensor) in [(false, true), (true, false), (true, true)] {
+        let (first, second) = role_swap_transition(first_sensor, second_sensor);
+        assert_eq!(first.len(), 2);
+        assert_eq!(second.len(), 2);
+        let old_ids = first
+            .iter()
+            .map(|contact| contact.contact_id)
+            .collect::<BTreeSet<_>>();
+        let current_ids = second
+            .iter()
+            .map(|contact| contact.contact_id)
+            .collect::<BTreeSet<_>>();
+        let old_manifold_ids = first
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>();
+        let current_manifold_ids = second
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>();
+        let expected_warm_reason = if second_sensor {
+            WarmStartCacheReason::SkippedSensor
+        } else {
+            WarmStartCacheReason::MissFeatureId
+        };
+        role_swap_results.push((
+            first_sensor,
+            second_sensor,
+            old_ids.is_disjoint(&current_ids)
+                && old_manifold_ids == current_manifold_ids
+                && second.iter().all(|contact| {
+                    contact.lifecycle_reason == ContactLifecycleReason::Started
+                        && contact.warm_start_reason == expected_warm_reason
+                        && contact.warm_start_normal_impulse == 0.0
+                        && contact.warm_start_tangent_impulse == 0.0
+                }),
+            second,
+        ));
+    }
+
+    let mut exact_results = Vec::new();
+    for (first_sensor, second_sensor, expected_warm_reason) in [
+        (false, true, WarmStartCacheReason::SkippedSensor),
+        (true, false, WarmStartCacheReason::MissPreviousSensor),
+        (true, true, WarmStartCacheReason::SkippedSensor),
+    ] {
+        let (first, second) = exact_transition(first_sensor, second_sensor);
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        exact_results.push((
+            first_sensor,
+            second_sensor,
+            second[0].contact_id == first[0].contact_id
+                && second[0].manifold_id == first[0].manifold_id
+                && second[0].lifecycle_reason == ContactLifecycleReason::ExactFeature
+                && second[0].warm_start_reason == expected_warm_reason
+                && second[0].warm_start_normal_impulse == 0.0
+                && second[0].warm_start_tangent_impulse == 0.0,
+            second[0],
+        ));
+    }
+    assert!(
+        role_swap_results
+            .iter()
+            .all(|(_, _, accepted, _)| *accepted)
+            && exact_results
+                .iter()
+                .all(|(_, _, accepted, _)| *accepted),
+        "sensor matrix must preserve exact identity without broadening edge-swap identity; edge={:?}, exact={:?}",
+        role_swap_results
+            .iter()
+            .map(|(first_sensor, second_sensor, accepted, contacts)| (
+                first_sensor,
+                second_sensor,
+                accepted,
+                contacts
+                    .iter()
+                    .map(|contact| (
+                        contact.lifecycle_reason,
+                        contact.warm_start_reason,
+                        contact.contact_id,
+                        contact.manifold_id,
+                    ))
+                    .collect::<Vec<_>>(),
+            ))
+            .collect::<Vec<_>>(),
+        exact_results
+            .iter()
+            .map(|(first_sensor, second_sensor, accepted, contact)| (
+                first_sensor,
+                second_sensor,
+                accepted,
+                contact.lifecycle_reason,
+                contact.warm_start_reason,
+                contact.contact_id,
+                contact.manifold_id,
+            ))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn manifold_persistence_normalizes_geometric_a_b_order_with_revisions() {
+    fn run_fixture(patched_is_min: bool) -> (bool, bool, Vec<ContactEvent>) {
+        let mut world = no_gravity_world();
+        let lower = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+        let upper = create_body(&mut world, BodyType::Static, -0.25, 1.8, Vector::default());
+        let (lower_collider, upper_collider) = if patched_is_min {
+            let upper_collider = attach_shape(
+                &mut world,
+                upper,
+                SharedShape::rect(2.0, 2.0),
+                Material::default(),
+            );
+            let lower_collider = attach_shape(
+                &mut world,
+                lower,
+                SharedShape::rect(2.0, 2.0),
+                Material::default(),
+            );
+            (lower_collider, upper_collider)
+        } else {
+            let lower_collider = attach_shape(
+                &mut world,
+                lower,
+                SharedShape::rect(2.0, 2.0),
+                Material::default(),
+            );
+            let upper_collider = attach_shape(
+                &mut world,
+                upper,
+                SharedShape::rect(2.0, 2.0),
+                Material::default(),
+            );
+            (lower_collider, upper_collider)
+        };
+        assert_eq!(
+            upper_collider == lower_collider.min(upper_collider),
+            patched_is_min
+        );
+        world
+            .apply_collider_patch(
+                upper_collider,
+                ColliderPatch {
+                    local_pose: Some(Pose::default()),
+                    ..ColliderPatch::default()
+                },
+            )
+            .expect("pre-contact revision patch should succeed");
+        let lower_pose = Pose::from_xy_angle(0.0, 0.0, -0.12);
+        let first_upper_pose = Pose::from_xy_angle(-0.25, 1.8, -0.17);
+        let second_upper_pose = Pose::from_xy_angle(-0.25, 1.8, -0.15);
+        world
+            .apply_body_patch(
+                lower,
+                BodyPatch {
+                    pose: Some(lower_pose),
+                    wake: true,
+                    ..BodyPatch::default()
+                },
+            )
+            .expect("lower pose should be patched");
+        world
+            .apply_body_patch(
+                upper,
+                BodyPatch {
+                    pose: Some(first_upper_pose),
+                    wake: true,
+                    ..BodyPatch::default()
+                },
+            )
+            .expect("first upper pose should be patched");
+        let mut pipeline = SimulationPipeline::new(fixed_step_config());
+        let first = active_contact_events(&pipeline.step(&mut world));
+        world
+            .apply_body_patch(
+                upper,
+                BodyPatch {
+                    pose: Some(second_upper_pose),
+                    wake: true,
+                    ..BodyPatch::default()
+                },
+            )
+            .expect("upper pose should cross the SAT role swap");
+        let second = active_contact_events(&pipeline.step(&mut world));
+        assert_eq!(first.len(), 2);
+        assert_eq!(second.len(), 2);
+        let (first_pose_a, first_pose_b, second_pose_a, second_pose_b) =
+            if lower_collider < upper_collider {
+                (lower_pose, first_upper_pose, lower_pose, second_upper_pose)
+            } else {
+                (first_upper_pose, lower_pose, second_upper_pose, lower_pose)
+            };
+        let correspondence = unique_two_point_local_witness_correspondence(
+            &first,
+            first_pose_a,
+            first_pose_b,
+            &second,
+            second_pose_a,
+            second_pose_b,
+        );
+        let role_swap_continuity = correspondence.iter().all(|(first_index, second_index)| {
+            second[*second_index].contact_id == first[*first_index].contact_id
+                && second[*second_index].manifold_id == first[*first_index].manifold_id
+        });
+
+        let previous_contact_ids = second
+            .iter()
+            .map(|contact| contact.contact_id)
+            .collect::<BTreeSet<_>>();
+        let previous_manifold_ids = second
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>();
+        world
+            .apply_collider_patch(
+                upper_collider,
+                ColliderPatch {
+                    local_pose: Some(Pose::from_xy_angle(0.01, 0.0, 0.0)),
+                    ..ColliderPatch::default()
+                },
+            )
+            .expect("post-continuity revision patch should succeed");
+        let after_patch = active_contact_events(&pipeline.step(&mut world));
+        assert_eq!(after_patch.len(), 2);
+        let current_contact_ids = after_patch
+            .iter()
+            .map(|contact| contact.contact_id)
+            .collect::<BTreeSet<_>>();
+        let current_manifold_ids = after_patch
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>();
+        let patch_invalidated = previous_contact_ids.is_disjoint(&current_contact_ids)
+            && previous_manifold_ids.is_disjoint(&current_manifold_ids)
+            && after_patch.iter().all(|contact| {
+                contact.lifecycle_reason == ContactLifecycleReason::Started
+                    && contact.warm_start_reason == WarmStartCacheReason::MissFeatureId
+                    && !contact.source_row_continuity_candidate
+                    && contact.source_row_continuity_reason != SourceRowContinuityReason::Candidate
+            });
+        (role_swap_continuity, patch_invalidated, after_patch)
+    }
+
+    let fixtures = [
+        ("patched_min", run_fixture(true)),
+        ("patched_max", run_fixture(false)),
+    ];
+    assert!(
+        fixtures
+            .iter()
+            .all(|(_, (continuity, invalidated, _))| *continuity && *invalidated),
+        "ordered revisions must survive SAT role swaps and invalidate either ordered side after patch; results={:?}",
+        fixtures
+            .iter()
+            .map(|(label, (continuity, invalidated, contacts))| (
+                label,
+                continuity,
+                invalidated,
+                contacts
+                    .iter()
+                    .map(|contact| (
+                        contact.lifecycle_reason,
+                        contact.warm_start_reason,
+                        contact.source_row_continuity_candidate,
+                        contact.source_row_continuity_reason,
+                    ))
+                    .collect::<Vec<_>>(),
+            ))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn manifold_persistence_two_to_one_to_two_preserves_only_surviving_point() {
+    let mut world = no_gravity_world();
+    let left = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let first_right_pose = Pose::from_xy_angle(1.7, 0.0, 0.0);
+    let single_right_pose = Pose::from_xy_angle(1.9, 0.0, 0.2);
+    let right = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: first_right_pose,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("right body should be created");
+    attach_shape(
+        &mut world,
+        left,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        right,
+        SharedShape::rect(2.0, 2.0),
+        Material::default(),
+    );
+    let left_pose = Pose::default();
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+
+    let first_report = pipeline.step(&mut world);
+    let first = active_contact_events(&first_report);
+    assert_eq!(first.len(), 2);
+    assert_eq!(
+        first
+            .iter()
+            .map(|contact| contact.manifold_id)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        1
+    );
+    world
+        .apply_body_patch(
+            right,
+            BodyPatch {
+                pose: Some(single_right_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("right body should move to the one-point pose");
+    let second_report = pipeline.step(&mut world);
+    let second = active_contact_events(&second_report);
+    assert_eq!(second.len(), 1);
+    assert_eq!(
+        second_report
+            .events
+            .iter()
+            .filter(|event| matches!(event, WorldEvent::ContactPersisted(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        second_report
+            .events
+            .iter()
+            .filter(|event| matches!(event, WorldEvent::ContactStarted(_)))
+            .count(),
+        0
+    );
+    let second_contact = second[0];
+    let first_drifts = first
+        .iter()
+        .map(|contact| {
+            dual_local_witness_drift(
+                contact,
+                left_pose,
+                first_right_pose,
+                &second_contact,
+                left_pose,
+                single_right_pose,
+            )
+        })
+        .collect::<Vec<_>>();
+    let surviving_first_index = if first_drifts[0] < first_drifts[1] {
+        0
+    } else {
+        1
+    };
+    assert_ne!(first_drifts[0], first_drifts[1]);
+    assert!(first_drifts[surviving_first_index] < 0.25);
+    let ended_first_index = 1 - surviving_first_index;
+    assert_eq!(
+        second_contact.contact_id,
+        first[surviving_first_index].contact_id
+    );
+    assert_eq!(
+        second_contact.manifold_id,
+        first[surviving_first_index].manifold_id
+    );
+    assert_eq!(
+        second_contact.lifecycle_reason,
+        ContactLifecycleReason::ExactFeature
+    );
+    let ended = second_report
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            WorldEvent::ContactEnded(contact) => Some(*contact),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ended.len(), 1);
+    assert_eq!(ended[0].contact_id, first[ended_first_index].contact_id);
+
+    world
+        .apply_body_patch(
+            right,
+            BodyPatch {
+                pose: Some(first_right_pose),
+                wake: true,
+                ..BodyPatch::default()
+            },
+        )
+        .expect("right body should return to the two-point pose");
+    let third_report = pipeline.step(&mut world);
+    let third = active_contact_events(&third_report);
+    assert_eq!(third.len(), 2);
+    let third_drifts = third
+        .iter()
+        .map(|contact| {
+            dual_local_witness_drift(
+                &second_contact,
+                left_pose,
+                single_right_pose,
+                contact,
+                left_pose,
+                first_right_pose,
+            )
+        })
+        .collect::<Vec<_>>();
+    let surviving_third_index = if third_drifts[0] < third_drifts[1] {
+        0
+    } else {
+        1
+    };
+    assert_ne!(third_drifts[0], third_drifts[1]);
+    let returning_third_index = 1 - surviving_third_index;
+    let surviving = third[surviving_third_index];
+    let returning = third[returning_third_index];
+    assert_eq!(surviving.contact_id, second_contact.contact_id);
+    assert_eq!(surviving.manifold_id, second_contact.manifold_id);
+    assert_ne!(returning.contact_id, first[ended_first_index].contact_id);
+    assert_ne!(returning.contact_id, surviving.contact_id);
+    assert_eq!(returning.manifold_id, surviving.manifold_id);
+    assert_eq!(returning.lifecycle_reason, ContactLifecycleReason::Started);
+    assert_ne!(returning.warm_start_reason, WarmStartCacheReason::Hit);
+    assert_eq!(returning.warm_start_normal_impulse, 0.0);
+    assert_eq!(returning.warm_start_tangent_impulse, 0.0);
 }
 
 #[test]

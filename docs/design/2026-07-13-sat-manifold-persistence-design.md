@@ -1,6 +1,6 @@
 # SAT Manifold Persistence Design
 
-状态：Draft，用户裁决已确认，等待 S4-D 独立复审
+状态：S4-D committed at 6045bd2
 日期：2026-07-13
 基线：`main=9427a17`
 执行计划：`docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md`
@@ -167,6 +167,10 @@ reserve_previous_matches(current_pair, previous_pair, policy)
 Exact-hard反例的预期相反：`c0-p0 exact, c0-p1 fallback, c1-p0 fallback` 时固定 `c0-p0`，即使全图 cardinality 因此只有1。Fallback不得通过“匹配更多”窃取明确属于 exact current point 的previous identity。
 
 当前每 pair 的 current source observations 和 previous active records 都可能达到4；复杂度目标为 `O(total_contacts log n + pairs * matchings(k))`，当前 `k <= 4`。不得随无关 pair数量退化为 current × global previous全扫描；4x4全候选规模锁必须覆盖实现的枚举上界。
+
+S4-RED允许在`persistent_manifold_lifecycle_candidate`入口使用仅`#[cfg(test)]`编译的thread-local evaluation counter，对比同一4x4 pair有无unrelated pairs时的candidate evaluation count。reset/read helper、storage和递增路径在非test build中必须完全不存在；该instrumentation不参与返回值、排序或production behavior。
+
+S4-IMPL必须把该`#[cfg(test)]`increment迁到新matcher实际使用的candidate-edge predicate；不能把increment遗留在被替换的旧函数上，让A15以`0 == 0`真空通过。Implementation reviewer必须确认4x4 baseline count保持`> 0`且`<= 16`，并与加入unrelated pairs后的count相等。
 
 ### Consumer policies
 
