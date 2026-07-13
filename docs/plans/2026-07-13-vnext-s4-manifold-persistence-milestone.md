@@ -1,6 +1,6 @@
 # vNext Handoff §4 SAT Manifold Persistence Milestone
 
-状态：S4-D `6045bd2`、S4-RED `c4298ae` 已提交；S4-IMPL 因 A14 diagnostic oracle 冲突暂停；用户已授权 S4-ORACLE-D
+状态：S4-D `6045bd2`、S4-RED `c4298ae`、S4-ORACLE-D `4a0c865`、S4-ORACLE-RED `4a32ddb` 已提交；S4-ORACLE-EVIDENCE under review
 日期：2026-07-13
 基线：`main=origin/main=9427a17`
 设计：`docs/design/2026-07-13-sat-manifold-persistence-design.md`
@@ -219,17 +219,19 @@ rtk proxy ruby -rdigest -e 'expected="bf408ea3dd8c4cc93f57f20c3b0949fbb9a18f9e60
 
 ### O01 Matrix attribution
 
-新test必须保留旧matrix test不变。Candidate edge完全独立于warm/lifecycle输出：同ordered pair、clip-family compatible、非symmetric raw edge role swap、normal dot `>=0.98`、双侧final local witness drift `<=0.25`、全部输入finite。Oracle先预留full raw feature exact，再在residual graph做最大基数一对一。`candidate_total`只表示最终选中的residual matching数量，不是candidate graph edge数量。
+新test必须保留旧matrix test不变。Final candidate edge完全独立于warm/lifecycle输出：同ordered pair、clip-family compatible、非symmetric raw edge role swap、normal dot `>=0.98`、双侧final midpoint local-anchor drift `<=0.25`、全部输入finite。Oracle先预留full raw feature exact，再在residual graph做最大基数一对一。`final_candidate_total`只表示最终选中的residual matching数量，不是candidate graph edge数量；该gate是独立的artifact-observable midpoint projection，不对core private surface witnesses主张subset或等价关系。
 
 Matrix fixture在整个run内不得发生shape/local-pose patch；test必须从artifact collider shape/local-pose signature逐帧验证该前提，不满足则fail-closed。只有此前提成立时，artifact缺少private geometry revision才不影响O01归因；该oracle不得泛化到可编辑geometry场景。
 
 分类合同：
 
-- `candidate_total == absorbed + unabsorbed`，不允许candidate从分类漏出。
-- Absorbed必须同时满足`ContactPersisted` event、`PersistentEdgeSwap` reason、oracle对应的previous/current `ContactId`相同且一对一、`ManifoldId`相同。
-- 任何`Started`、`Unknown`、错误`ExactFeature`、错误IDs或错误previous映射都归unabsorbed。
-- Exact theft按实际输出ID检测：存在geometry-compatible full exact predecessor时，current必须继承该predecessor `ContactId`；不能由oracle的reservation构造性地产生0。
-- 未sanitize的`FrameRecord.events`负责finite/impulse gate；snapshot和落盘artifact只做投影交叉核对。Non-hit candidate warm impulses必须为0。
+- `final_candidate_total == final_attributed + final_unabsorbed`；candidate不能从分类漏出。
+- `reported_persistent_edge_swap_total == final_attributed + source_boundary_evidence + unexpected`；三个output集合以`(frame, ContactId)`为key互斥。
+- Final-attributed必须同时满足`ContactPersisted` event、`PersistentEdgeSwap` reason、oracle对应的previous/current `ContactId`相同且一对一、`ManifoldId`相同。任何candidate错误都归final-unabsorbed。
+- Source-boundary evidence必须有同ordered pair唯一same-ID/same-manifold predecessor、full feature不同且无full-exact predecessor、非symmetric raw role swap，并且至少一端为fail-closed source projection：non-sensor、depth0、polygon SAT明确`Some(false)`、finite positive solver normal impulse。缺数据、unsupported/degenerate SAT或无法判定一律归unexpected。
+- 所有reported `PersistentEdgeSwap`不属于完整final-attributed或source-boundary evidence时都归unexpected；不能因source endpoint不是final geometry而从reverse completeness漏掉。
+- Exact theft按实际输出ID检测：存在final geometry-compatible full exact predecessor时，current必须继承该predecessor `ContactId`；不能由oracle的reservation构造性地产生0。
+- 未sanitize的`FrameRecord.events`负责finite/impulse gate；snapshot和落盘artifact只做投影交叉核对。Non-hit transition warm impulses必须为0。
 
 Exact tests：
 
@@ -238,7 +240,7 @@ rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_edge_swap_att
 rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_edge_swap_attribution_has_no_unabsorbed_or_exact_theft -- --exact --nocapture
 ```
 
-第一条结构性partition/finite test在baseline与working都必须green。第二条是evidence test：pre-commit verifier必须记录两边exact theft/absorbed/unabsorbed实际值；其结果由S4-ORACLE-EVIDENCE spec gate裁决，不能在RED test commit前改旧counter或core。
+第一条结构性双守恒/finite test在baseline与working都必须green。第二条是evidence test：要求final-attributed>0、source-boundary evidence>0、final-unabsorbed=0、unexpected=0、exact predecessor>0、exact theft=0；working当前目标为`59 reported = 46 final-attributed + 13 source-boundary + 0 unexpected`及`46 final candidates = 46 attributed + 0 unabsorbed`。Pre-commit verifier记录baseline/working实际值，其结果由S4-ORACLE-EVIDENCE spec gate裁决，不能在RED test commit前改旧counter或core。
 
 ### O02/O03 Positive propagation
 
@@ -339,7 +341,7 @@ rtk proxy git worktree remove "/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/
 | Command | `c4298ae` + test patch | working implementation + same patch |
 | --- | --- | --- |
 | O01 partition exact | exit 0 | exit 0 |
-| O01 desired zero exact | exit 101且唯一失败为`exact_theft > 0`，`unabsorbed`必须0；若实际不同立即停并amend spec | exit 0；`absorbed > 0`、`unabsorbed=0`、`exact_theft=0` |
+| O01 desired zero exact | exit 101：`105=93+9+3`、`96=93+3`、exact predecessor25450/theft0；唯一desired缺口为final-unabsorbed3与unexpected3 | exit 0：`59=46+13+0`、`46=46+0`、source-boundary>0、exact predecessor25431/theft0 |
 | O02 core positive exact | exit 0 | exit 0 |
 | O03 disk artifact positive exact | exit 0 | exit 0 |
 | O05 symmetric-edge negative exact | exit 101且唯一失败为symmetric edge误判 | exit 101且同一失败；S4-IMPL修复 |
@@ -526,3 +528,84 @@ Living spec的聚合命令`rtk proxy cargo test -p picea --test physics_realism_
 3. 复跑方式
 4. 范围外
 5. 残余风险
+
+### 2026-07-13 - S4-ORACLE-RED worker receipt（under review，未commit）
+
+#### 1. 成功标准
+
+在`HEAD=4a0c865`与固定5文件working implementation patch上，仅新增O01-O05 test-local oracle/behavior locks、matrix source freeze工具和本receipt；三条旧A14函数逐字冻结，不修改core、旧assertion、阈值、API或artifact schema。
+
+#### 2. Working-side检查结果
+
+| Gate | Exact command | Exit / count | 关键事实 |
+| --- | --- | --- | --- |
+| O01 partition | `rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_edge_swap_attribution_partitions_every_candidate -- --exact --nocapture` | exit 0；1 passed / 0 failed | amend后三分类实际为reported `59=46 final-attributed + 13 source-boundary + 0 unexpected`；final candidates `46=46 attributed + 0 unabsorbed`；`exact_predecessor_total=25431`、`exact_theft=0`。Raw events finite、non-Hit warm impulses为0，snapshot与落盘`frames.jsonl`投影一致。 |
+| O01 desired | `rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_edge_swap_attribution_has_no_unabsorbed_or_exact_theft -- --exact --nocapture` | exit 0；1 passed / 0 failed | `final_attributed=46 > 0`、`source_boundary_evidence=13 > 0`、`final_unabsorbed=0`、`unexpected=0`、exact predecessor非真空且theft为0。 |
+| O02 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_sat_role_swap_reports_persistent_edge_swap -- --exact --nocapture` | exit 0；1 passed / 0 failed | 真实2x2 rectangle fixture；两点无full exact predecessor，按双侧local witness一一保持`ContactId`/`ManifoldId`，第二帧均为`ContactPersisted + PersistentEdgeSwap`。 |
+| O03 | `rtk proxy cargo test -p picea-lab --test artifact_run artifact_records_persistent_edge_swap_with_stable_ids -- --exact --nocapture` | exit 0；1 passed / 0 failed | 从实际落盘`frames.jsonl`重反序列化；只从A类final-attributed key选择frame 7样本，raw feature `4311744514 -> 16785408`，稳定`ContactId(24)`/`ManifoldId(13)`且previous恰好一次；双侧local midpoint-anchor drift为`0.0021390484`。 |
+| O05 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_symmetric_edge_index_is_not_role_swap -- --exact --nocapture` | exit 101；0 passed / 1 failed，预期RED | 固定rectangle pose从`(-0.2, 2.0, PI-0.22)`到`(-0.2, 2.0, PI-0.18)`；full raw feature `4311752706 -> 16785410`，共同index `16785410`，decode为`kind=1, reference=2, incident=2`，slot `1 -> 0`，第二帧`MissFeatureId`；唯一最终缺口为当前仍输出`PersistentEdgeSwap/EdgeSwap`。 |
+| A14 matrix180 | `rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_artifacts_capture_nxm_grid_stack_facts -- --exact --nocapture` | exit 101；0 passed / 1 failed，预期旧counter RED | 唯一失败为冻结assertion `edge_swap_candidate_count` actual `19` vs expected `0`；此前数值门通过：max penetration `0.027232071`、quiet linear/angular `0/0`、无floor ejection、final `0 awake / 48 sleeping`。 |
+| A14 aligned1200 | `rtk proxy cargo test -p picea-lab --test artifact_run aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock -- --exact --nocapture` | exit 0；1 passed / 0 failed | max penetration `0.003365`、无floor ejection、final `0 awake / 12 sleeping`、quiet speed `0/0`。 |
+| A14 forced600 | `rtk proxy env PICEA_MATRIX_STACK_E4_ACCEPTANCE=1 cargo test -p picea-lab --test artifact_run matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed -- --ignored --exact --nocapture` | exit 0；1 passed / 0 failed | max penetration `0.027232`、无floor ejection、quiet speed `0/0`、final `0 awake / 48 sleeping`。 |
+| Source freeze | `rtk proxy ruby crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb c4298ae exact` | exit 0 | `s4 matrix source freeze exact ok`；缺少第三参数的`replace-one-oracle`验证为非0并报告必须提供approved replacement SHA-256。 |
+| Compile | 两个相关test target分别运行`--no-run` | 两条均exit 0 | 无warning。 |
+| Format | `rtk proxy rustfmt --edition 2021 --check crates/picea-lab/tests/artifact_run.rs crates/picea/tests/physics_realism_acceptance.rs` | exit 0 | 两份allowlisted Rust测试已格式化。 |
+| Workspace fmt observation | `rtk proxy cargo fmt --all --check` | exit 1 | 仅报告冻结`crates/picea/src/pipeline/contacts.rs` working patch的既有格式差异；为保持freeze未运行workspace写入式fmt。 |
+| Diff/staging | `rtk proxy git diff --check`；`rtk proxy git diff --cached --exit-code` | 两条均exit 0 | 无whitespace error，无staged内容。 |
+
+5份frozen implementation相对`c4298ae`的binary diff SHA-256复算为`bf408ea3dd8c4cc93f57f20c3b0949fbb9a18f9e60308f5ea2f154251869ba95`。
+
+#### 3. Review remediation
+
+- O01/O03不再用`event.depth`制造surface witness；只在排除confirmed-source transition后，把authoritative final `event.point`按相邻两帧各自两侧collider final pose逆变换，使用双侧local midpoint-anchor drift `<=0.25`。这是独立的artifact-observable midpoint projection，不对core private surface witnesses主张subset或等价关系。
+- Production source确认`base_normal_solve_executed`是private `ContactObservation`字段，未导出到`ContactEvent`。Test-local SAT projection使用`FinalSatContact / NoFinalSatManifold / Unprovable`三态；缺collider、sensor、unsupported shape、non-finite transform/vertex/projection或退化轴均为`Unprovable`。B类previous/current每个endpoint都必须分别满足`FinalSatContact || strict_source_endpoint`，并且至少一端是strict source；任何非strict的`NoFinalSatManifold`或`Unprovable`均归unexpected。
+- Reverse pass按`(current frame, ContactId)`互斥分类全部59个`ContactPersisted + PersistentEdgeSwap`：46个有完整selected final match的A类；13个有唯一same-ID/same-manifold predecessor、无full exact predecessor、非symmetric raw role swap、至少一端strict source endpoint且完整finite/warm gate的B类；其余归C类，当前为0。Source-boundary previous/current transition key分别一对一消费，不与A或C重叠。
+- MatrixStack由本test直接走fresh offline `run_scenario`且无compound/perturbation provenance；test-local authoring signature按manifest已知rect descriptor、原始有序local vertices与local pose `to_bits()`稳定JSON序列化，逐`ColliderHandle`逐帧完全相同，并精确重建每帧ordered world vertices。内建反例确认可区分`+0.0005`宽度patch与同边长shear deformation；O01不再使用旧lossy `shape_signature`。
+- Freeze tool先对comments/strings/raw strings做等长lexical mask，只抽取行首真实`fn NAME(`，向前包含连续attributes并向后brace-balance完整item。`exact`逐字比较；`replace-one-oracle`只接受base旧counter assertion的单span替换，要求approved replacement SHA-256且prefix/suffix逐字不变，并拒绝marker或任意真实`return`token。
+
+#### 4. 当前状态与范围外
+
+状态保持`S4-ORACLE-RED under review`。本worker没有创建subagent、stage、commit、push、fetch、branch或worktree；没有执行baseline双跑、supervisor acceptance或S4-ORACLE-REPLACE。O01/O02/O03 working green，O05仍是预期behavior RED，matrix180旧counter保持未改；未修改core或旧A14任何字符。
+
+### 2026-07-13 - S4-ORACLE-RED pre-commit dual-baseline receipt
+
+- Test/tool cached binary patch SHA-256：`1299a4c0082c174d4902260e9a1304831277a7c7bdd118b24c9325565435c0d8`；两侧三文件blob hashes逐项相同。
+- Baseline为detached `c4298ae` +同一cached patch；5份production相对`c4298ae`零diff。Working为`4a0c865` +同一tests +冻结implementation hash `bf408ea3dd8c4cc93f57f20c3b0949fbb9a18f9e60308f5ea2f154251869ba95`。
+- O01 partition两侧均exit0。Baseline desired按首次证据amend为intentional RED：reported `105=93 final-attributed + 9 source-boundary + 3 unexpected`；final candidates `96=93 attributed + 3 unabsorbed`；exact predecessors `25450`、theft0。Working desired exit0：`59=46+13+0`、`46=46+0`、exact predecessors `25431`、theft0。
+- O02/O03两侧均exit0；O03 baseline disk sample为frame8 `ContactId(33)`/`ManifoldId(20)`，working为frame7 `ContactId(24)`/`ManifoldId(13)`。
+- O05两侧均为预期exit101，只因symmetric edge仍输出`PersistentEdgeSwap/EdgeSwap`。
+- Matrix180 baseline exit0；working预期exit101且仅旧counter `19 != 0`，其余稳定门先通过。Aligned1200与forced600两侧均exit0、无ejection、quiet speed0且全部sleeping。
+- 两侧compile no-run与source-freeze exact均green。Verifier结论最初因baseline预期写成exact theft而FAIL；本次只amend预期为实际可复现的unabsorbed/unexpected证据，不修改tests、core或旧A14。
+- Supervisor已reverse同一cached patch并clean remove临时baseline worktree。S4-ORACLE-RED仍待spec reviewer按实际证据裁决、最终cached scope复核和commit。
+
+### 2026-07-13 - S4-ORACLE-EVIDENCE post-commit receipt
+
+#### 1. 成功标准
+
+在固定test commit `T=4a32ddb`与`T + bf408ea3...ba95` working implementation上复跑同一O01-O05/A14矩阵；tests/tool blobs完全相同，baseline production零diff，实际counts与pre-commit evidence精确一致，且不修改tests/oracle/core。
+
+#### 2. 检查结果
+
+- Clean evidence与root working HEAD均为`4a32ddbe79ecc7afd44a8d12b4ce1e8f1f44317b`。
+- `c4298ae..4a32ddb`的5份production文件零diff；root三份tests/tool相对`T`零diff。Blob hashes：artifact `cd26660035b720e7b3b956cd9bdc6fd93669ff45`、freeze tool `1f6dbbeb4c3d9e00f52e2a3c661c24c2670f122e`、physics acceptance `40a5240ded334c78d8899899c87094a99b62f22a`。
+- Working implementation binary patch SHA-256精确为`bf408ea3dd8c4cc93f57f20c3b0949fbb9a18f9e60308f5ea2f154251869ba95`。
+- O01 partition两侧exit0。Clean `T` desired为预期exit101：reported `105=93 final-attributed + 9 source-boundary + 3 unexpected`；final candidates `96=93 attributed + 3 unabsorbed`；exact predecessors `25450`、theft0。Working desired exit0：`59=46+13+0`、`46=46+0`、exact predecessors `25431`、theft0。两个baseline非零“3”只分别记录分类计数，不主张相同transition keys。
+- O02/O03两侧均exit0。O03 clean disk sample为frame8、`ContactId(33)`/`ManifoldId(20)`；working为frame7、`ContactId(24)`/`ManifoldId(13)`。
+- O05两侧均为预期exit101且仅symmetric edge误标；留给S4-IMPL。
+- Matrix180 clean exit0；working预期exit101且仅冻结旧counter `19 != 0`，其余稳定门先通过。Aligned1200与forced600两侧均exit0。
+- Matrix180/forced600 clean penetration max/sum `0.028555/0.799082`，working `0.027232/0.927301`；aligned两侧`0.003365/0.054014`。全部无ejection、quiet speed0，matrix/forced为0 awake/48 sleeping，aligned为0/12。
+- 两侧compile no-run与source-freeze exact均green。Evidence worktree最终clean并已由supervisor移除。
+
+#### 3. 复跑方式
+
+使用本计划Post-commit evidence recipe，以`T=4a32ddb`替换占位符；Cargo target置于批准temp目录，verifier只读运行，worktree create/remove由supervisor负责。
+
+#### 4. 范围外
+
+本节点未修改tests/oracle/core、旧A14 assertion、任何数值阈值或public schema；只追加design状态与本docs receipt。S4-ORACLE-REPLACE尚未开始。
+
+#### 5. 残余风险
+
+- Baseline的3个final-unabsorbed和3个unexpected属于独立统计域，未建立key一一对应关系。
+- Artifact midpoint projection不等价于core private surface witnesses；A02/O02继续拥有core双侧identity合同。
+- O05 symmetric-edge行为锁仍RED；S4-IMPL必须修复。

@@ -1,6 +1,6 @@
 # SAT Manifold Persistence Design
 
-状态：S4-D `6045bd2` 与 S4-RED `c4298ae` 已提交；S4-IMPL 因 A14 diagnostic oracle 冲突暂停；S4-ORACLE-D 待复审
+状态：S4-D `6045bd2`、S4-RED `c4298ae`、S4-ORACLE-D `4a0c865`、S4-ORACLE-RED `4a32ddb` 已提交；S4-ORACLE-EVIDENCE 待复审
 日期：2026-07-13
 基线：`main=9427a17`
 执行计划：`docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md`
@@ -267,15 +267,18 @@ after final geometry refresh:
 
 旧 matrix `edge_swap_candidate_count == 0` 在 S4-ORACLE-RED 期间保持原样。以下替代锁先在working tree写成test-only diff，经reviewer批准并由verifier把同一patch双跑于`c4298ae` baseline和working implementation；通过后才提交固定test commit `T`。随后S4-ORACLE-EVIDENCE复跑并经spec/code review通过，才允许把该含糊断言替换为更强的absorbed/unabsorbed assertions：
 
-- Conservative candidate edge完全独立于warm/lifecycle输出：同ordered pair、clip-family compatible、非symmetric raw edge role swap、normal dot `>=0.98`、双侧final local witness drift `<=0.25`、全部输入finite。先按full raw feature exact-hard预留，再在residual graph做最大基数一对一；不得用每点最近邻重复消费previous point。
-- `candidate_total == absorbed + unabsorbed`。Absorbed candidate必须同时满足`ContactPersisted` event variant、`PersistentEdgeSwap` reason、oracle匹配的previous/current `ContactId`相同且每帧只用一次、`ManifoldId`相同；任何一项不满足都归unabsorbed，不能从分类中漏掉。
-- Unabsorbed candidate数量必须为0；`Started`、`Unknown`、错误`ExactFeature`、错误IDs或错误previous映射都算unabsorbed。
+- Final candidate edge完全独立于warm/lifecycle输出：同ordered pair、clip-family compatible、非symmetric raw edge role swap、normal dot `>=0.98`、双侧final midpoint local-anchor drift `<=0.25`、全部输入finite。先按full raw feature exact-hard预留，再在residual graph做最大基数一对一；不得用每点最近邻重复消费previous point。该midpoint gate是独立的artifact-observable midpoint projection，不对core private surface-witness gate主张subset或等价关系；A02/O02继续拥有core双侧surface identity acceptance。
+- `final_candidate_total == final_attributed + final_unabsorbed`。Final-attributed candidate必须同时满足`ContactPersisted` event variant、`PersistentEdgeSwap` reason、oracle匹配的previous/current `ContactId`相同且每帧只用一次、`ManifoldId`相同；任何一项不满足都归final-unabsorbed。
+- 所有reported `ContactPersisted + PersistentEdgeSwap`必须再满足`reported_total == final_attributed + source_boundary_evidence + unexpected`，三类按`(frame, ContactId)` transition key互斥。任何不属于final-attributed或完整source-boundary evidence的输出都归unexpected。
+- Final-unabsorbed与unexpected数量都必须为0；`Started`、`Unknown`、错误`ExactFeature`、错误IDs或错误previous映射不能从分类中漏掉。
 - Exact theft按实际输出ID检测：存在geometry-compatible full exact predecessor时，current必须继承该predecessor的`ContactId`；不得由oracle自己的exact reservation构造性地产生0。
 - Candidate若 `warm_start_reason != Hit`，warm normal/tangent impulses必须为0；所有drift/impulse必须finite。
 - 独立真实SAT和artifact传播锁必须证明至少一个非exact role swap被正确标记，避免通过“全部不匹配”让unabsorbed计数真空为0。
 - Matrix180、aligned1200、forced600现有penetration、速度、sleep、support/ejection阈值逐行不变。
 
 O01的attribution report仅为`artifact_run.rs` test-local struct/helper，不增加artifact/public schema。Finite gate读取未sanitize的`FrameRecord.events`，再与snapshot和实际落盘`frames.jsonl`投影交叉核对；不能只读会把non-finite scalar归零的sanitized snapshot。O03必须从落盘artifact反序列化，不能只检查内存`RunResult`。
+
+Source-boundary evidence不是private `base_normal_solve_executed`真值的替代。每条必须有同ordered pair中唯一same-`ContactId`/same-`ManifoldId` predecessor、full feature不同且无full-exact predecessor、非symmetric raw role swap，并且previous/current至少一端满足fail-closed observable projection：non-sensor、`depth == 0`、polygon SAT明确`Some(false)`、finite positive solver normal impulse。缺collider、unsupported shape、退化轴或SAT无法判定都归unexpected。Source endpoint的feature/point/normal不能被描述为final manifold geometry。
 
 ## Acceptance Scenarios
 
