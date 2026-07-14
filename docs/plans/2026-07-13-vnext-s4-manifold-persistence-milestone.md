@@ -1,6 +1,6 @@
 # vNext Handoff §4 SAT Manifold Persistence Milestone
 
-状态：S4-D `6045bd2`、S4-RED `c4298ae`、S4-ORACLE-D `4a0c865`、S4-ORACLE-RED `4a32ddb`、S4-ORACLE-EVIDENCE `cca2475`、S4-ORACLE-REPLACE `d9d96b0` 已提交；S4-IMPL targeted accepted，commit pending
+状态：已完成并冻结；S4-IMPL `91698b3`、clippy remediation `57cdb19`，S4-V full verification PASS
 日期：2026-07-13
 基线：`main=origin/main=9427a17`
 设计：`docs/design/2026-07-13-sat-manifold-persistence-design.md`
@@ -726,3 +726,14 @@ Changed files：`crates/picea/src/collider.rs`、`crates/picea/src/world/contact
 - `cargo fmt --all --check`、`cargo check -p picea --lib`、source-freeze replacement、`git diff --check`全部exit0。
 - External tests/oracle、narrowphase、solver、`lib.rs`相对`d9d96b0`零diff；最终仅5core+2docs unstaged dirty，无untracked/staged。5core binary diff SHA-256为`3880f3c9a9625dbd67bfb0f22e42ff8e851525883c29e2650b9547d631517416`。
 - Code reviewer round3无High/Medium；保留A08/A09 nonzero revision scratch clone与old `ContactEnded`专项锁的Low residual，不阻塞S4-IMPL commit。
+
+### 2026-07-14 - S4-V full verification与closeout
+
+- S4-IMPL已提交为`91698b3 fix: persist sat manifold point identity`。首次S4-V运行到workspace clippy时发现唯一warning：`bool::then`闭包应改为`then_some`；虽然进程exit0，仍按warning-zero规则判FAIL并停止。
+- Remediation仅把无副作用的`then(|| match ...)`机械改为`then_some(match ...)`。独立code reviewer确认语义等价且无High/Medium/Low；contacts `31/31`、fmt、clippy与diff check先行green，随后提交为`57cdb19 chore: satisfy manifold matching clippy`。
+- 独立full verifier从头复跑PASS：fmt exit0；picea lib `128/128`；physics realism `79/79`；artifact `30 passed / 5 ignored`；workspace all-targets harness合计`369 passed / 5 ignored`，9个Criterion场景全部`Success`；clippy exit0且0 warnings；examples与workspace bench no-run均构建成功。
+- Matrix180为penetration max/sum`0.027232/0.927301`、0 awake/48 sleeping、quiet0/0、无ejection、hash`0efffe6f80f71d72`。Aligned1200为`0.003365/0.054014`、0/12、hash`34902715d547abc5`。Forced600为`0.027232/0.927301`、0/48、hash`9f5998a3db236c97`；后两者同样quiet0/0、无ejection。
+- Source-freeze replacement digest保持`ec463132197639a58bf7b1287dcdb8d9c91059839d263d149a23530ed643a0df`。`lib.rs`与整个solver相对`9427a17`零diff。
+- `9427a17..57cdb19`共16个批准路径：4个S4 tests/tool、5个core implementation、7个docs/routing/plans；无§5、solver、`lib.rs`、Cargo或public schema改动。S4-V结束时worktree clean。
+- 保留Low residual：A08/A09尚无nonzero revision scratch-clone与old `ContactEnded`专项锁；`u64` revision理论wrap；residual matcher未来超过当前每pair4点上界时需重新评估组合复杂度。以上均不阻塞S4 closeout。
+- S4-C只同步living spec、父计划、handoff与AI routing，不新增行为。Handoff §4至此完成；下一节点是§5 revolute joint public API gate，§6与damping/grab仍按既定顺序等待。

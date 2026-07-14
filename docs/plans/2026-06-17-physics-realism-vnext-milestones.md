@@ -2,9 +2,9 @@
 
 状态：已批准
 计划文档：docs/plans/2026-06-17-physics-realism-vnext-milestones.md
-最后更新：2026-07-13
+最后更新：2026-07-14
 工作目录：/Users/asyncrustacean/projects/picea
-工作区状态：计划创建前 clean；本次集成从 `main=247fbda` 建立 `feat/vnext-s1-s3-integration`；文档提交前 source HEAD=`b1f1515`，本区块随 docs closeout commit 落地；执行时仍以 live `git status` 为准
+工作区状态：§1-§3 integration记录保留历史base；§4 source HEAD=`57cdb19`，closeout由独立S4-C docs commit承载；执行时仍以live `git status`为准
 计划重量：heavy
 Goal 协调：planning/execution goal active；用户已明确预授权 Plan Gate
 提交策略：源实现提交已进入本次集成分支；本区块由后续独立 docs closeout commit 承载
@@ -44,13 +44,13 @@ Profiles：architecture-heavy, api-contract, ui-browser
 ### Hygiene 与剩余边界
 
 - Git-visible 仅三份 docs；playwright、`target`、`dist`、`node_modules` 均不 visible；`crates/picea/src/lib.rs` 相对 `247fbda` zero diff。
-- 截至本次 §1-§3 integration closeout，handoff §4/§5/§6 尚未开始；此后§4已按下述addendum进入独立S4执行，§5/§6仍未开始。E1其余contact/sleep、E2的body damping与`DistanceJointDesc.damping`、E5的chain/bridge diagnostics，以及E3/E4/E6/D7/V8/C9仍未整体完成；下文范围外与残余风险继续有效。
+- §1-§3 integration closeout与handoff §4均已完成；§4最终实现为`91698b3`，clippy remediation为`57cdb19`，full S4-V通过。§5/§6仍未开始。E1其余contact/sleep、E2的body damping与`DistanceJointDesc.damping`、E5的chain/bridge diagnostics，以及E3/E4/E6/D7/V8/C9仍未整体完成；下文范围外与残余风险继续有效。
 
-### Handoff §4 addendum（执行中）
+### Handoff §4 addendum（已完成）
 
 - Handoff §4 由独立 living spec `docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md` 路由；其 `S4-*` 前缀不重命名、替代或推进本计划 E4 complex-shape milestone。
 - 用户已明确批准 raw SAT feature 保持 final-geometry 语义，并由 history-aware `ContactId` / `ManifoldId` 双射保证跨 reference/incident swap persistence；该裁决 supersede handoff 的 raw-id 字面目标。
-- 用户已批准把shape/local-pose geometry revision invalidation纳入S4。S4-D=`6045bd2`、S4-RED=`c4298ae`已提交；working implementation因A14 diagnostic oracle冲突未提交，用户已授权先执行S4-ORACLE-D/RED/EVIDENCE/REPLACE强化链。
+- 用户已批准把shape/local-pose geometry revision invalidation纳入S4。设计、RED、oracle强化、implementation、full verification与closeout均已完成；提交链与完整证据以冻结living spec为准。最终core实现=`91698b3`，clippy remediation=`57cdb19`。
 
 ## 目标
 
@@ -100,7 +100,7 @@ Profiles：architecture-heavy, api-contract, ui-browser
 - explorer：已运行。7 个方向均已返回；deformable 结论为 RFC/design gate，不进入本轮 production implementation。
 - architecture design：已产出：`docs/design/2026-06-17-physics-realism-vnext-architecture.md`。
 - 关键证据：`docs/ai/repo-map.md`、`docs/ai/index.md`、`docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`、`docs/design/*stability*`、`docs/design/deformable-body-roadmap.md`、`crates/picea/tests/physics_realism_acceptance.rs`、`crates/picea-lab/tests/artifact_run.rs`、`crates/picea-lab/tests/server_routes.rs`。
-- 剩余未知与开放边界：future deformable V1 representation 仍需 RFC 冻结；handoff §4/§5/§6 与其余未完成 milestone 仍须各自进入设计、实现和验收门。
+- 剩余未知与开放边界：future deformable V1 representation 仍需 RFC 冻结；handoff §5/§6 与其余未完成 milestone 仍须各自进入设计、实现和验收门。§4已完成，不再作为开放项。
 
 ## 架构设计输入
 
@@ -591,12 +591,12 @@ Subagent 执行计划：
 #### 范围外
 
 - 未修改 public prelude/events schema、broadphase、narrowphase、CCD 或 Distance joint；未调整既有 warm-start、position-correction、matrix stability 阈值。
-- §3 fuzzy `PartialEq`、revolute joint、narrowphase ignore、其余 vNext design gate 未进入本项；其中 §3 已随后作为独立 equality contract 切片完成，其他项仍需在各自 spec/public API 门重新确认。
+- §3 fuzzy `PartialEq`、revolute joint、narrowphase ignore、其余 vNext design gate 未进入本项；其中§3与narrowphase ignore所属的handoff §4已随后按独立milestone完成，revolute joint与其他项仍需在各自spec/public API门重新确认。
 - grab stiffness/damping/max-speed 的主观手感调参不在 correctness 修复内；本轮只证明 damping 已接线并通过行为锁与 live soft-spring interaction。
 
 #### 残余风险
 
-- `stacked_rectangles_keep_feature_id_when_sat_reference_face_swaps` 仍是仓库既有 `#[ignore]` 设计红锁；本轮通过 persistent cache/final identity 处理运行时连续性，没有越权 canonicalize narrowphase feature。
+- 原`stacked_rectangles_keep_feature_id_when_sat_reference_face_swaps` ignored设计红锁已在handoff §4迁移为raw role-swap characterization；冻结实现通过history-aware identity处理运行时连续性，仍未canonicalize final narrowphase feature。
 - live session 的完整 diagnostics summary 仍未 hydrated；web 明确展示 missing，artifact/headless 路径仍是详细诊断权威。
 - Web production bundle 当前主 chunk 约 `587.45 kB`，Vite 给出大于 500 kB 的既有性能建议；不影响本轮 correctness/E2E，但后续可单独做 code-splitting。
 - 普通非 CCD contact 只比较 solver-start 与固定步末 predicted pose；需要完整 sweep 的高速凸体仍由既有 CCD 路径负责，旋转/曲线中途特征覆盖未在本项扩展。

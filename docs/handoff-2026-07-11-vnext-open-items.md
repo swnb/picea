@@ -2,14 +2,14 @@
 
 ## 最新 closeout 状态（本次集成）
 
-- 当前集成分支为 `feat/vnext-s1-s3-integration`，integration base 为 `main=247fbda`；文档提交前 source HEAD=`b1f1515`，本区块随后由 docs closeout commit 承载。现场事实仍以当前 `git status` 和提交历史为准。
+- 当前§4执行分支为`feat/vnext-s4-manifold-persistence`，base为`main=9427a17`；S4 source HEAD=`57cdb19`，本区块随后由S4-C docs closeout commit承载。现场事实仍以当前`git status`和提交历史为准。
 - §1 velocity-first + CCD 前置正式化已完成实现、复审及 Rust/lab/web/真实浏览器 E2E，并通过 `44931fe` 进入当前集成分支。
 - §2 的 `WorldAnchorJointDesc.damping` 语义 bug 已完成正确性修复、复审及 E2E，提交 `247fbda` 已在当前分支祖先中；grab 主观手感调参、body damping、`DistanceJointDesc.damping` 仍未做。
 - §3 Point/Vector equality contract 已完成实现、RED/GREEN、复审及端到端消费者验收，并通过 `5b9ba37` 进入当前集成分支。
 - 组合验收已完成：targeted 12/12、full 15/15、Web contracts/build 与真实浏览器 online/offline 路径均通过；服务已全部停止，Git hygiene 与 `lib.rs` zero-diff 边界通过。
 - 首轮 reviewer 的 1 个 Medium（CCD-clamped body 丢失整步角度积分）已由行为锁和最小修复 `b1f1515` 闭环，复审无 High/Medium；保留 Low：artifact final-geometry candidate 命名可能被误读为 solver-start eligibility，仅作为诊断解释风险保留。
-- 本次仅完成 handoff §1-§3 集成 closeout，不代表整个 E1/E2/E5、V8、E6 或 C9 完成；§4 narrowphase `#[ignore]`、§5 revolute joint、§6 其余独立 design gate 仍开放，范围与风险没有因本次集成而缩小。
-- 下方正文是 `HEAD=2178902` 时的历史交接快照，不删除也不改写其证据；发生状态冲突时，以本区块和当前 Git 事实为准。
+- Handoff §4 SAT manifold persistence已完成：实现`91698b3`、clippy remediation`57cdb19`，S4-V workspace/lab/matrix/scope全绿。整个E1/E2/E5、V8、E6或C9仍未因此完成；§5 revolute joint与§6其余独立design gate仍开放。
+- 下方正文主要是`HEAD=2178902`时的历史交接快照；仅§4和建议顺序按最新closeout加注，其余证据不改写。发生状态冲突时，以本区块、冻结S4 living spec和当前Git事实为准。
 
 > 面向接手的 agent（codex）。这份文档自包含：读完即可上手。所有 `file:line` 已在 `HEAD=2178902`（branch `main`，与 `origin/main` 同步）核实。
 
@@ -73,13 +73,11 @@
 
 ---
 
-## 4.【P3，依赖 manifold-persistence 设计】narrowphase `#[ignore]` 红锁
+## 4.【已完成】SAT manifold persistence / narrowphase红锁迁移
 
-- **测试**：`stacked_rectangles_keep_feature_id_when_sat_reference_face_swaps`，`crates/picea/src/pipeline/narrowphase.rs:1232`（`#[ignore]` 属性 :1231，文件内联 `mod tests`，非 `tests/` 集成测试）。全 `crates/picea/` 唯一的 `#[ignore]`。
-- **ignore 原因（逐字）**：`diagnostic red lock for future SAT manifold-persistence design; direct canonicalization regresses matrix_stack`。
-- **意图**：SAT reference/incident face 角色互换时，stacked rectangle 的 ordered-pair feature id 不应 churn（:1268-1272 feature_indices 相等断言）。
-- **姊妹通过测试**（同主题）：`single_end_clipped_incident_edge_keeps_distinct_point_feature_ids`，narrowphase.rs:1202。
-- **约束**：ignore 文案明说 direct canonicalization 会回归 `matrix_stack`——**不要直接强行 canonicalize**。这是 manifold-persistence 设计的一部分，需先有持久化设计再动。属探索性正题，非机械修复。
+- 旧ignored red已迁移为raw SAT role-swap characterization；没有直接canonicalize final geometry feature。
+- 跨帧identity由history-aware `ContactId`/`ManifoldId`、private geometry revision与pair-scoped exact-hard/residual maximum-cardinality matcher承担，warm/lifecycle/source-row分别一对一消费。
+- 实现与完整证据见`docs/design/2026-07-13-sat-manifold-persistence-design.md`和`docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md`；S4-V workspace/lab/matrix/scope均通过。
 
 ---
 
@@ -109,9 +107,9 @@
 
 ## 7. 建议动手顺序
 
-1. **grab `damping` 语义**（§2）——范围小、边界清晰、直接影响 live 手感，是最快能落地的正确性修复（先定语义再调参）。
-2. **step-reorder 正式化**（§1）——收益最大且有 spike 基础，但高风险门，需 vNext E1/E5 正规流程 + spec 认可；从"补接触检测时点 acceptance 锁"起步。
-3. **fuzzy PartialEq**（§3）——明确的正确性债，但需 spec 先定容器用法方向。
-4. revolute joint（§5）/ narrowphase ignore 锁（§4）/ 其余设计门（§6）——各自独立立项，按 vNext milestone 排期。
+1. **Revolute joint public API gate**（§5）——先确认`JointDesc`/`JointKind`/prelude surface，再写行为锁；未确认前不改public API。
+2. **其余独立design gates**（§6）——逐项立项，不合并为无边界重构。
+3. **Body/DistanceJoint damping与grab手感**——先兑现core语义，再做真实live browser手感验收。
+4. **Step-reorder后续**——仍属高风险E1/E5路线，必须沿独立spec与acceptance推进。
 
 每项动手前：`git status` 确认现场 → 读 `docs/ai/repo-map.md` 定位模块 owner → 补失败测试 → 最小实现 → 过 targeted gate。
