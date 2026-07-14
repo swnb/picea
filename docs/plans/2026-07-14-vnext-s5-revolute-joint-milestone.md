@@ -1,6 +1,6 @@
 # vNext Handoff §5 Revolute Joint Pin-only V1 Milestone
 
-状态：S5-D已commit（`eecbc331a36bfb694676c979bffb03f5a47202dd`）；S5-API-RED final reviewer=`0 High / 0 Medium / 0 Low`、independent verifier=`S5-API-RED VERIFIER PASS`，commit `PENDING`；API/solver未开始；Chrome `NOT RUN / BROWSER PENDING`
+状态：S5-D已commit（`eecbc331a36bfb694676c979bffb03f5a47202dd`）；S5-API-RED final reviewer=`0 High / 0 Medium / 0 Low`、independent verifier=`S5-API-RED VERIFIER PASS`，已commit（`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`）；S5-API scope spec/script sync已完成并reviewed，scope reviewer=`0 High / 0 Medium / 0 Low`且裁决`PASS`，independent re-verifier=`S5-API SCOPE RE-VERIFIER PASS`；首次independent scope verifier仅因living spec stale-status mismatch最终`FAIL`的历史保留；scope implementation gate已解除，implementation worker已完成且worker gates=`GREEN`；independent implementation reviewer首轮=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（顶部仍误报implementation未开始），第一次bounded remediation已完成；第一次复审=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（文档仍误报第一次状态修复未完成），第二次status-only bounded remediation已完成；最终独立复审=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-API VERIFIER PASS`；commit仍为`PENDING`；immutable Start HEAD=`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`；solver未开始；Chrome `NOT RUN / BROWSER PENDING`
 日期：2026-07-14
 基线：`feat/vnext-s5-revolute-joint@28867b5`
 设计：`docs/design/2026-07-14-revolute-joint-v1-design.md`
@@ -57,6 +57,13 @@ Profiles：architecture-heavy, api-contract, ui-browser
   `JointDesc`加`#[non_exhaustive]`后，`picea-lab`作为external crate的exhaustive
   consumers也必须迁移。Live `rg` 当前至少命中`scenario/scene_lattice.rs`与
   `scenario/fixture/tests.rs`。
+- committed external fixture
+  `crates/picea/tests/fixtures/revolute_public_api/src/lib.rs`从`picea_lab` crate root导入
+  `SceneRevoluteJointFixture`；live `crates/picea-lab/src/scenario/mod.rs`与
+  `crates/picea-lab/src/lib.rs`均通过显式`pub use`列表形成public re-export链。若S5-API
+  只修改`scenario/fixture.rs`，external fixture必然以`E0432`失败。因此这两个public
+  re-export文件是compiler-proven required paths，不适用external exhaustive consumer的
+  optional机制。
 
 ### User-frozen Decision
 
@@ -70,7 +77,7 @@ Profiles：architecture-heavy, api-contract, ui-browser
 - builtin capability 固定为 `ScenarioId::RevolutePendulum` / `revolute_pendulum`，不改变
   `ScenarioId` attribute policy。
 
-### S5-D plan decisions（review / verifier 已通过，commit 待完成）
+### S5-D plan decisions（review / verifier 已通过，已commit）
 
 - S5-API只做可编译checkpoint：`pipeline/island.rs`对Revolute显式skip，不创建
   `JointSolvePlanRow`/`JointSolverRow`，所以该checkpoint的revolute
@@ -133,7 +140,7 @@ S5-D -> S5-API-RED -> S5-API -> S5-BEHAVIOR-RED -> S5-SOLVER
 | --- | --- | --- | --- | --- |
 | S5-D | 本design、本文、parent、handoff、AI routing、design index | `crates/**`、tests、Cargo、Web | §5 docs gates | architecture/spec/routing review + docs verifier；`docs: design revolute joint milestone` |
 | S5-API-RED | external temp-crate fixture/public verifier、binary scope verifier、`world_step_review_regressions.rs` existing-kind lifecycle locks、本文 RED receipt | production/API implementation、workspace compile failure | §6 surface RED + six exact runtime wake RED + workspace compile GREEN | test/spec review + RED verifier；`test: lock revolute public api` |
-| S5-API | public/storage/lifecycle/debug/fixture/type skeleton；`pipeline/island.rs` explicit skip；external exhaustive compiler adapters与focused API tests | solve-plan/solver row/math、scenario、artifact/server UI behavior | §7 targeted + workspace compile green；row count 0 | API/lifecycle/compat reviewer + verifier；`feat: add revolute joint api` |
+| S5-API | public/storage/lifecycle/debug/fixture/type skeleton；`pipeline/island.rs` explicit skip；compiler-required lab public re-export链；external exhaustive compiler adapters；focused API tests；经review后由独立bounded worker一次性同步scope script required set | solve-plan/solver row/math、scenario、artifact/server UI behavior；implementation worker不得修改scope script逻辑 | §7 targeted + workspace compile green；row count 0；16-path binary scope | scope amendment reviewer先批准，scope-sync再独立执行；随后API/lifecycle/compat reviewer + verifier；`feat: add revolute joint api` |
 | S5-BEHAVIOR-RED | `physics_realism_acceptance.rs`、new `pipeline/joints/tests.rs`、`pipeline/joints.rs`唯一`#[cfg(test)] mod tests;`、本文 RED receipt | solver production code、lab/Web | §8 exact RED set + binary scope | test/spec review + RED verifier；`test: lock revolute joint behavior` |
 | S5-SOLVER | `pipeline/island.rs`、`pipeline/joints.rs`、minimal `solver/body_state.rs`、`pipeline.rs` public doc/config lock、必要 focused unit tests | stream merge/reorder、contact solver、lab/Web、StepConfig字段/default变化 | §9 targeted green | solver/code review + verifier；`feat: solve revolute point constraints` |
 | S5-LAB-RED | artifact/server/UI/i18n contract tests、本文 RED receipt | lab/Web production implementation、core solver | §10 exact RED set | test/spec review + RED verifier；`test: lock revolute lab contracts` |
@@ -153,6 +160,27 @@ ownership 补充：
   `pipeline/island.rs`必须对Revolute显式skip且不得创建任何row；执行前用`rtk proxy rg`
   查找所有external exhaustive consumers，当前至少迁移`scene_lattice.rs`与
   `fixture/tests.rs`，只允许wildcard/compat改动。该checkpoint用test锁定row count 0。
+  此外，`scenario/mod.rs`和lab crate-root `lib.rs`必须显式re-export
+  `SceneRevoluteJointFixture`；这是committed external fixture已经证明的public export链，
+  属于required implementation，不得归入compiler-discovered optional exhaustive adapters。
+- exact-16 scope reviewer已二元批准，bounded scope-sync worker已只在
+  `SCOPES["S5-API"][:required]`加入`scenario/mod.rs`、lab `lib.rs`和scope script自身。
+  已确认既有live `future-receipt-pending`断言与已冻结S5-API current receipt冲突；唯一允许的
+  state-transition exception已获review并由独立bounded worker执行：删除
+  `expect_contract_error("future-receipt-pending") { receipt_sha("S5-API") }`，替换为
+  `validate_cli_sha!("S5-API", "6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68")`和PASS tag
+  `S5_SCOPE_SELF_TEST=current-s5-api-receipt:PASS`。`PENDING`负向合同继续由既有synthetic
+  `parser-future-pending`与generic `pending`覆盖；禁止绑定`S5-BEHAVIOR-RED`或任何其他真实
+  future node。除上述唯一self-test state transition和已批准required三行外，parser、CLI、
+  helpers、milestone union、其他self-test逻辑必须zero-diff。首次independent scope verifier
+  技术门全PASS，仅因本文仍写未同步状态而最终`FAIL`；status remediation后independent
+  re-verifier=`S5-API SCOPE RE-VERIFIER PASS`，明确解除scope implementation gate。
+  S5-API implementation worker已完成且worker gates=`GREEN`；independent implementation reviewer
+  首轮=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（顶部仍误报implementation未开始），第一次bounded
+  remediation已完成；第一次复审=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（文档仍误报第一次状态修复未完成），
+  第二次status-only bounded remediation已完成；最终独立复审=`0 High / 0 Medium / 0 Low`、
+  裁决`PASS`；independent verifier=`S5-API VERIFIER PASS`；commit仍为`PENDING`。
+  implementation worker未继续修改scope script。
 - S5-BEHAVIOR-RED保留直接2x2/singular/sign unit contract。若采用
   `pipeline/joints/tests.rs`，`pipeline/joints.rs`除`#[cfg(test)] mod tests;`外production
   必须zero-diff；reviewer逐行确认。S5-SOLVER不得修改committed integration阈值/断言，
@@ -175,7 +203,7 @@ start HEAD；必须调用`rtk proxy git diff --name-only <start>`与
 | Node | Required paths | Explicit optional paths |
 | --- | --- | --- |
 | S5-API-RED | public verifier、scope verifier、fixture `Cargo.toml`/`src/lib.rs`/`src/bin/exhaustive.rs`、`crates/picea/tests/world_step_review_regressions.rs`、living spec receipt | 无 |
-| S5-API | `joint.rs`, `lib.rs`, `world/api.rs`, `recipe.rs`, `debug.rs`, `pipeline/island.rs`, `core_model_world.rs`, `world_step_review_regressions.rs`, lab `fixture.rs`, `fixture/tests.rs`, `scene_lattice.rs`, Web `types.ts`, living spec | compiler指出的其他external exhaustive consumer；加入前必须由reviewer确认只做wildcard/compat迁移 |
+| S5-API | `crates/picea/src/joint.rs`, `crates/picea/src/lib.rs`, `crates/picea/src/world/api.rs`, `crates/picea/src/recipe.rs`, `crates/picea/src/debug.rs`, `crates/picea/src/pipeline/island.rs`, `crates/picea/tests/core_model_world.rs`, `crates/picea/tests/world_step_review_regressions.rs`, `crates/picea-lab/src/scenario/fixture.rs`, `crates/picea-lab/src/scenario/fixture/tests.rs`, `crates/picea-lab/src/scenario/scene_lattice.rs`, `crates/picea-lab/web/src/types.ts`, `docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md`, `crates/picea-lab/src/scenario/mod.rs`, `crates/picea-lab/src/lib.rs`, `crates/picea/tests/verify_revolute_scope.rb`（exact 16） | compiler指出的其他external exhaustive consumer；加入前必须由reviewer确认只做wildcard/compat迁移。该optional机制不适用于`scenario/mod.rs`与lab `lib.rs`的public re-export；两者已是required |
 | S5-BEHAVIOR-RED | `pipeline/joints.rs`, new `pipeline/joints/tests.rs`, `physics_realism_acceptance.rs`, living spec | 无 |
 | S5-SOLVER | `pipeline.rs`, `pipeline/island.rs`, `pipeline/joints.rs`, `solver/body_state.rs`, living spec | `pipeline/joints/tests.rs`仅增强unit coverage，不得改integration阈值；`pipeline.rs`仅public doc与既有config lock |
 | S5-LAB-RED | `artifact_run.rs`, `server_routes.rs`, Web `ui-contract.mjs`, `i18n-contract.mjs`, living spec | fixture compatibility test file仅当API checkpoint尚未锁定对应case |
@@ -205,9 +233,18 @@ S5_NODE_START_HEAD="$(rtk proxy ruby -e 'node=ARGV.fetch(0); path="docs/plans/20
 `git diff-tree`复核commit paths。S5-V使用
 `milestone 28867b5c8eeae3ec290ad7dfd5f52cbf3ca69e80`模式对全部S5 commits/worktree做同样的required +
 explicit optional union audit，并拒绝任何git-visible temp/target/dist/log。Ignored artifacts
-不属于binary scope，按§12 filesystem hygiene单独分类。Scope script自身只允许在
-S5-API-RED提交；后续若compiler证据要求新增optional path，必须先更新living spec、
-由reviewer批准，再单独更新script，不能由implementation worker静默扩表。
+不属于binary scope，按§12 filesystem hygiene单独分类。Scope script的判定逻辑只允许在
+S5-API-RED实现。S5-API exact-16 required-set同步已完成；除此三行数据同步外，仅有一个
+已review并同步的self-test state-transition exception：删除live S5-API
+`future-receipt-pending`负向断言，改为固定current receipt
+`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`的
+`validate_cli_sha!("S5-API", "6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68")`正向断言，并输出
+`S5_SCOPE_SELF_TEST=current-s5-api-receipt:PASS`。既有synthetic
+`parser-future-pending`和generic `pending`必须保持zero-diff并继续覆盖`PENDING`负向合同；
+不得把替代断言绑定到`S5-BEHAVIOR-RED`或任何其他真实future node。parser、CLI、helpers、
+milestone union、其他self-test逻辑及required/optional判定均必须zero-diff。以后若compiler
+证据要求新增optional exhaustive consumer，仍必须先更新living spec、由reviewer批准，再
+单独更新script，不能由implementation worker静默扩表。public re-export缺口不得走optional机制。
 `self-test`必须对empty、short SHA、non-hex、unresolvable commit和receipt/argument mismatch
 逐项断言nonzero，再证明合法full SHA返回0。
 
@@ -314,12 +351,24 @@ S5-API-RED receipt：
 | Revolute lifecycle runtime | NOT RUN：baseline missing public surface；只能记录external surface RED | `NOT RUN`：positive fixture因public surface缺失不能执行；verifier稳定输出`S5_PUBLIC_API_RUNTIME=NOT_RUN`，未把surface RED冒充runtime wake RED |
 | Workspace all-target compile | GREEN：RED tests baseline-compilable | GREEN：`rtk proxy cargo check --workspace --all-targets` exit `0` |
 | Temp isolation | GREEN: repo无lock/target | GREEN：仅在批准root`/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s5-revolute-api`生成isolated `Cargo.lock/target`；repository fixture无local `Cargo.lock`/`target`且repo内无temp copy |
-| Binary node scope | GREEN: exact required set、无unexpected path；negative self-test非零 | GREEN：receipt parser只读取§16严格Markdown data rows并要求target node唯一；self-test证明正文/代码块node字符串不能覆盖真实row、duplicate row拒绝，并覆盖empty/PENDING/short/nonhex/unresolvable/noncommit/mismatch均拒绝且valid通过；current receipt-head输出immutable SHA，future S5-API明确`raw=PENDING`失败；node scope actual严格等于7 required paths，missing/unexpected均空；`git diff --check`与production/lab/Web/root Cargo zero-diff通过 |
+| Binary node scope | GREEN: exact required set、无unexpected path；negative self-test非零 | GREEN：receipt parser只读取§16严格Markdown data rows并要求target node唯一；self-test证明正文/代码块node字符串不能覆盖真实row、duplicate row拒绝，并覆盖empty/PENDING/short/nonhex/unresolvable/noncommit/mismatch均拒绝且valid通过；S5-API-RED验收时future S5-API为`raw=PENDING`并按合同失败；S5-API-RED commit后已将S5-API immutable Start HEAD固定为`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`；node scope actual严格等于7 required paths，missing/unexpected均空；`git diff --check`与production/lab/Web/root Cargo zero-diff通过 |
 | Independent review | PASS: 无未闭合finding | final independent reviewer=`0 High / 0 Medium / 0 Low`，裁决`PASS` |
 | Independent verification | PASS: 独立复跑完整RED gate | independent verifier=`S5-API-RED VERIFIER PASS`；public expect-red连续两次wrapper `0`/internal `101`且仅approved diagnostics，六条wake exact均`running 1 test`、正确sentinel、approved exit `101`；workspace/scope/temp/diff均GREEN，7-path exact；Revolute runtime与Chrome均`NOT RUN` |
-| Commit | PENDING: reviewer/verifier通过后由supervisor执行 | `PENDING`；未填写或伪造S5-API-RED commit hash，API/solver未开始 |
+| Commit | reviewer/verifier通过后由supervisor执行 | 已commit：`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`（`test: lock revolute public api`）；S5-API/solver implementation未开始 |
 
 ## 7. S5-API：public surface、lifecycle 与 authoring
+
+当前状态：scope spec/script sync已完成并reviewed，scope reviewer=`0 High / 0 Medium / 0 Low`、
+裁决`PASS`，independent re-verifier=`S5-API SCOPE RE-VERIFIER PASS`；首次independent scope
+verifier仅因living spec stale-status mismatch最终`FAIL`的历史保留。scope implementation gate
+已解除；implementation worker已完成批准实现，worker targeted/full/scope gates=`GREEN`；
+independent implementation reviewer首轮=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（顶部仍误报
+implementation未开始），第一次bounded remediation已完成；第一次复审=
+`0 High / 1 Medium / 0 Low`、裁决`FAIL`（文档仍误报第一次状态修复未完成），第二次status-only bounded
+remediation已完成；最终独立复审=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=
+`S5-API VERIFIER PASS`。immutable Start HEAD=
+`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`；S5-API commit `PENDING`；Chrome
+`NOT RUN / BROWSER PENDING`。implementation worker未修改scope script。
 
 最小实现必须严格匹配 design §7/§10：
 
@@ -340,6 +389,9 @@ S5-API-RED receipt：
 - worker开始前运行下列`rg`，并迁移所有live compiler指出的external exhaustive matches；
   当前至少`scenario/scene_lattice.rs`与`scenario/fixture/tests.rs`。迁移只加
   wildcard/compat分支，不改变existing scenario/test语义。
+- worker还必须完成`scenario/mod.rs` -> lab `lib.rs`的显式public re-export链，使committed
+  fixture能继续从`picea_lab` crate root导入`SceneRevoluteJointFixture`。这两处是required，
+  不是上述external exhaustive optional adapters。
 
 Targeted GREEN：
 
@@ -369,10 +421,114 @@ reviewer 必须重点检查 external source break 是否只限批准列表、str
 wrong-kind/stale/same-body/NaN失败原子性、`user_data`-only不wake、direct与scratch transaction
 语义一致、body cascade只wake surviving counterpart。Compat reviewer必须确认
 `pipeline/island.rs`只有explicit skip、没有row/math，external consumer改动只有
-wildcard/compat。Verifier还必须确认workspace compile、row count 0和
+wildcard/compat，并确认两个public re-export文件只扩展批准的fixture export chain。Scope
+reviewer必须先对本文exact 16 required set给出二元批准；scope-sync复核必须证明script只把
+这16条同步为S5-API required set。self-test exception reviewer还必须二元确认只删除live
+`future-receipt-pending`断言并换成固定S5-API current receipt的`validate_cli_sha!`与指定PASS
+tag，synthetic `parser-future-pending`、generic `pending`及其他self-test逻辑zero-diff，且未绑定
+任何其他真实future node。Verifier还必须确认workspace compile、
+row count 0、16-path binary scope和
 `git diff --exit-code -- Cargo.toml Cargo.lock`。六个lifecycle commands必须各自exit `0`、
 输出`running 1 test`和对应sentinel，并在适用case输出Distance/WorldAnchor/Revolute覆盖；
 任何zero-test都不是GREEN。
+
+### S5-API 验收报告（2026-07-14）
+
+**成功标准**：在exact-16批准范围内交付Revolute public/lifecycle/authoring API，保持solver
+row/math为零改动且Revolute `joint_row_count == 0`，并让targeted、full、scope与hygiene门全部
+GREEN。
+
+**检查结果**
+
+- Public/targeted surface：
+
+  ```text
+  rtk proxy ruby crates/picea/tests/verify_revolute_public_api.rb expect-green /var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s5-revolute-api
+  rtk proxy cargo test -p picea --test core_model_world revolute_joint_ -- --nocapture
+  rtk proxy cargo test -p picea --test core_model_world revolute_joint_api_checkpoint_has_no_solver_row -- --exact --nocapture
+  rtk proxy cargo test -p picea-lab scene_fixture_revolute -- --nocapture
+  ```
+
+  全部exit `0`。external verifier输出`S5_PUBLIC_API_POSITIVE_GREEN`与
+  `S5_PUBLIC_API_EXPECTED_GREEN`，六enum probe均只得到批准的non-exhaustive wildcard
+  `E0004`；core focused=`6 passed`；row-zero exact显示`running 1 test`与
+  `S5_API_CHECKPOINT:joint_count=1;joint_row_count=0`；fixture focused=`3 passed`，覆盖
+  roundtrip、core defaults与old-reader unknown-variant reject。
+
+- 六条lifecycle exact：
+
+  ```text
+  rtk proxy cargo test -p picea --test world_step_review_regressions joint_lifecycle_wake_create_contract -- --exact --nocapture
+  rtk proxy cargo test -p picea --test world_step_review_regressions joint_lifecycle_wake_constraint_patch_contract -- --exact --nocapture
+  rtk proxy cargo test -p picea --test world_step_review_regressions joint_lifecycle_wake_user_data_only_contract -- --exact --nocapture
+  rtk proxy cargo test -p picea --test world_step_review_regressions joint_lifecycle_wake_remove_contract -- --exact --nocapture
+  rtk proxy cargo test -p picea --test world_step_review_regressions joint_lifecycle_wake_body_cascade_contract -- --exact --nocapture
+  rtk proxy cargo test -p picea --test world_step_review_regressions joint_lifecycle_wake_rejected_transaction_contract -- --exact --nocapture
+  ```
+
+  六条均exit `0`、各自`running 1 test`并输出对应`S5_WAKE_CASE:*`。create/constraint
+  patch/user-data-only positive control/remove覆盖Distance、WorldAnchor、Revolute；cascade覆盖
+  Distance/Revolute surviving counterpart；rejected transaction证明scratch rejection零泄漏并
+  覆盖WorldAnchor/Revolute positive controls；empty/user-data-only patch不wake。
+
+- Full/build gates：
+
+  ```text
+  rtk proxy npm --prefix crates/picea-lab/web run build
+  rtk proxy cargo test -p picea --test core_model_world
+  rtk proxy cargo test -p picea --test world_step_review_regressions
+  rtk proxy cargo test -p picea-lab --lib
+  rtk proxy cargo check --workspace --all-targets
+  rtk proxy cargo fmt --all --check
+  ```
+
+  全部exit `0`；full suites分别`24 passed`、`18 passed`、`38 passed`；Web build完成且仅有
+  既有500 kB chunk warning；workspace all targets与fmt均GREEN。
+
+- Scope/hygiene gates：
+
+  ```text
+  rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb self-test
+  rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb S5-API 6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68
+  rtk proxy git diff --check
+  rtk proxy git diff --exit-code -- Cargo.toml Cargo.lock
+  rtk proxy git diff --cached --exit-code
+  rtk proxy git diff --exit-code 6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68 -- crates/picea/src/pipeline/joints.rs crates/picea/src/solver
+  rtk proxy git diff --unified=0 6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68 -- crates/picea/src/joint.rs crates/picea/src/debug.rs crates/picea/src/recipe.rs crates/picea-lab/src/scenario/fixture.rs | rg -xF '+#[non_exhaustive]' | awk 'END { print "S5_ENUM_NON_EXHAUSTIVE_ADDITIONS=" NR; exit NR == 6 ? 0 : 1 }'
+  find crates/picea/tests -maxdepth 3 \( -name Cargo.lock -o -name target -o -name '*.tmp' \) -print
+  ```
+
+  全部exit `0`；`S5_SCOPE_SELF_TEST_PASS`；actual严格等于16 paths且missing/unexpected为空；
+  `S5_SCOPE_PASS`；root Cargo、cached与solver paths均zero-diff；enum audit输出
+  `S5_ENUM_NON_EXHAUSTIVE_ADDITIONS=6`；repository fixture/temp搜索为空。`pipeline/island.rs`
+  相对Start HEAD只增加4行Revolute explicit skip/comment，不创建slot/row/math。
+
+- Independent review/verifier receipt：final independent reviewer=`0 High / 0 Medium / 0 Low`、
+  裁决`PASS`，前两轮Medium均已通过两次bounded status remediation闭环。independent verifier
+  首行=`S5-API VERIFIER PASS`，Start/HEAD均为
+  `6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`；独立串行复跑§7 mandatory全部exit `0`：
+  public positive GREEN且六enum均只有批准的`E0004`，public runtime=`2 passed`，core focused=
+  `6 passed`，row-zero为`running 1 test`并输出
+  `S5_API_CHECKPOINT:joint_count=1;joint_row_count=0`；六条lifecycle均各自`running 1 test`、
+  对应sentinel与批准kind覆盖；fixture=`3 passed`；Web PASS且仅有既有500 kB warning；full
+  core/world/lab=`24/18/38 passed`；workspace check、scope self-test/exact-16、fmt、diff、Cargo、
+  solver-zero-diff、cached/untracked与fixture/temp hygiene均PASS。首次public harness运行因verifier
+  与另一进程重叠使用固定temp root而出现一次`ENOENT`；停止重叠后串行执行同一命令及runtime
+  补跑均PASS，且期间源文件zero-diff，因此分类为verifier orchestration noise，不是产品失败。
+
+**复跑方式**：保留当前未暂存S5-API worktree，从
+`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`作为immutable Start HEAD，按上方四组命令顺序
+复跑；scope必须继续得到exact 16，row-zero必须继续输出指定checkpoint sentinel，六条lifecycle
+必须各自显示`running 1 test`与对应`S5_WAKE_CASE:*`。
+
+**范围外**：未实现或修改S5-BEHAVIOR-RED、S5-SOLVER row/math、`pipeline/joints.rs`、
+`solver/*`、scenario/artifact/server/UI behavior；未stage、commit、push；Chrome验收未在CLI执行，
+保持`NOT RUN / BROWSER PENDING`，由ChatGPT App在后续S5-LAB/S5-V节点按本文prompt验收。
+
+**残余风险**：S5-API commit仍为`PENDING`；Revolute当前被明确保留但不进入solver，行为能力
+必须等待后续独立S5-BEHAVIOR-RED/S5-SOLVER节点；六个`#[non_exhaustive]`是批准的external
+source break；Web build仍有既有500 kB chunk warning；Chrome仍为
+`NOT RUN / BROWSER PENDING`。
 
 ## 8. S5-BEHAVIOR-RED：runtime 行为锁
 
@@ -838,8 +994,8 @@ RED receipt额外记录 failure signature，并区分：
 | 日期 | Node | Start HEAD (full, immutable) | 状态 | Commit | Receipt / 备注 |
 | --- | --- | --- | --- | --- | --- |
 | 2026-07-14 | S5-D | `28867b5c8eeae3ec290ad7dfd5f52cbf3ca69e80` | 已commit | `eecbc331a36bfb694676c979bffb03f5a47202dd` | 第三轮reviewer=`0 High / 0 Medium / 1 Low`，允许进入verifier；independent docs verifier于`2026-07-14 17:16:23 CST`给出`S5-D VERIFIER PASS`；8-file scope/YAML/Mermaid/required terms/diff-check/crates/Cargo/Web zero-diff/cached empty均PASS；唯一Low留到S5-C；Chrome `NOT RUN / BROWSER PENDING`；implementation/API/solver未开始 |
-| 2026-07-14 | S5-API-RED | `eecbc331a36bfb694676c979bffb03f5a47202dd` | final reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-API-RED VERIFIER PASS`；commit `PENDING` | `PENDING` | 4M remediation complete；public expect-red连续两次wrapper `0`/internal `101`且仅approved diagnostics；六enum missing-variant分类与六条existing-kind lifecycle exact RED均有效，wake exact各自`running 1 test`、正确sentinel、approved exit `101`；workspace/scope/temp/diff GREEN，7-path exact；Revolute runtime `NOT RUN`；API/solver未开始；Chrome `NOT RUN / BROWSER PENDING` |
-| - | S5-API | `PENDING` | 未开始 | - | 不得写solver |
+| 2026-07-14 | S5-API-RED | `eecbc331a36bfb694676c979bffb03f5a47202dd` | final reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-API-RED VERIFIER PASS`；已commit | `6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68` | 4M remediation complete；public expect-red连续两次wrapper `0`/internal `101`且仅approved diagnostics；六enum missing-variant分类与六条existing-kind lifecycle exact RED均有效，wake exact各自`running 1 test`、正确sentinel、approved exit `101`；workspace/scope/temp/diff GREEN，7-path exact；Revolute runtime `NOT RUN`；API/solver未开始；Chrome `NOT RUN / BROWSER PENDING` |
+| 2026-07-14 | S5-API | `6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68` | scope reviewer/re-verifier已PASS；implementation worker完成；worker targeted/full/scope/hygiene gates=`GREEN`；independent implementation reviewer首轮=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（顶部仍误报implementation未开始），第一次bounded remediation已完成；第一次复审=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（文档仍误报第一次状态修复未完成），第二次status-only bounded remediation已完成；最终独立复审=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-API VERIFIER PASS`；Chrome `NOT RUN / BROWSER PENDING` | `PENDING` | exact-16内已实现Revolute public/lifecycle/authoring API、schema-v1 fixture/re-export/TS kind compatibility与island explicit skip；public positive GREEN+六enum仅批准`E0004`，runtime `2 passed`，core focused `6 passed`，row-zero为`running 1 test`+`joint_count=1;joint_row_count=0`，六条lifecycle各自`running 1 test`+sentinel/kind覆盖，fixture `3 passed`；full core/world/lab=`24/18/38 passed`，Web/workspace/fmt/scope self-test/exact-16/diff/Cargo/solver/cached/untracked/hygiene均PASS。首次public harness因重叠使用固定temp root出现一次`ENOENT`，串行同命令及runtime补跑PASS且源文件zero-diff，分类为verifier orchestration noise；solver、scenario behavior与Chrome未开始；未stage/commit/push；scope script保持implementation前approved diff，worker未修改 |
 | - | S5-BEHAVIOR-RED | `PENDING` | 未开始 | - | 必须单独提交runtime behavior locks |
 | - | S5-SOLVER | `PENDING` | 未开始 | - | 2x2 point constraint；streams不变 |
 | - | S5-LAB-RED | `PENDING` | 未开始 | - | 必须单独提交cross-layer contracts |

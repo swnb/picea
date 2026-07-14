@@ -458,11 +458,14 @@ impl DebugCollider {
 /// Stable joint kinds reflected in debug snapshots.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum DebugJointKind {
     /// A distance-preserving joint between two bodies.
     Distance,
     /// A body tied to a world-space anchor.
     WorldAnchor,
+    /// A pin-only pivot between two body-local anchors.
+    Revolute,
 }
 
 /// Read-only joint facts for external consumers.
@@ -1483,6 +1486,23 @@ fn debug_joint_from_view(world: &World, handle: JointHandle, desc: &JointDesc) -
                     .map(|body| transform_point(desc.local_anchor, body.pose()))
                     .unwrap_or(desc.local_anchor),
                 desc.world_anchor,
+            ],
+        },
+        JointDesc::Revolute(desc) => DebugJoint {
+            handle,
+            kind: DebugJointKind::Revolute,
+            bodies: vec![desc.body_a, desc.body_b],
+            anchors: vec![
+                world
+                    .body(desc.body_a)
+                    .ok()
+                    .map(|body| transform_point(desc.local_anchor_a, body.pose()))
+                    .unwrap_or(desc.local_anchor_a),
+                world
+                    .body(desc.body_b)
+                    .ok()
+                    .map(|body| transform_point(desc.local_anchor_b, body.pose()))
+                    .unwrap_or(desc.local_anchor_b),
             ],
         },
     }

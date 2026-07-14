@@ -23,7 +23,7 @@ pub use scenario::{
     CompoundProvenance, CompoundProvenancePiece, RunConfig, ScenarioDescriptor, ScenarioId,
     ScenarioOverrides, ScenarioParameterDescriptor, ScenarioParameterOption,
     ScenarioParameterValueType, ScenarioRuntimeConfig, SceneBodyFixture, SceneDistanceJointFixture,
-    SceneFixtureWorld, SceneJointFixture, SceneRecipeFixture, SceneShapeFixture,
-    SceneWorldAnchorJointFixture, SCENE_RECIPE_SCHEMA_VERSION,
+    SceneFixtureWorld, SceneJointFixture, SceneRecipeFixture, SceneRevoluteJointFixture,
+    SceneShapeFixture, SceneWorldAnchorJointFixture, SCENE_RECIPE_SCHEMA_VERSION,
 };
 pub use server::SessionStatus;

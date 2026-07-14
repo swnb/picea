@@ -12,7 +12,7 @@ use super::geometry::{
 ///
 /// Schema v1 covers the stable authoring layer for world flags, body placement,
 /// circle/rectangle assets, material/filter presets, and recipe-indexed
-/// distance/world-anchor joints. The fixture stays above low-level `World`
+/// distance/world-anchor/revolute joints. The fixture stays above low-level `World`
 /// commands: JSON is converted into a `WorldRecipe`, and the core command layer
 /// still owns handle resolution and validation paths.
 pub const SCENE_RECIPE_SCHEMA_VERSION: u32 = 1;
@@ -168,9 +168,11 @@ impl SceneBodyFixture {
 /// author explicitly overrides a field.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum SceneJointFixture {
     Distance(SceneDistanceJointFixture),
     WorldAnchor(SceneWorldAnchorJointFixture),
+    Revolute(SceneRevoluteJointFixture),
 }
 
 impl SceneJointFixture {
@@ -178,6 +180,7 @@ impl SceneJointFixture {
         match self {
             Self::Distance(joint) => joint.to_joint_bundle(),
             Self::WorldAnchor(joint) => joint.to_joint_bundle(),
+            Self::Revolute(joint) => joint.to_joint_bundle(),
         }
     }
 }
@@ -254,6 +257,39 @@ impl SceneWorldAnchorJointFixture {
         }
         JointBundle::WorldAnchor {
             body: self.body,
+            desc,
+        }
+    }
+}
+
+/// Schema-v1 authoring payload for a pin-only revolute joint.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneRevoluteJointFixture {
+    pub body_a: usize,
+    pub body_b: usize,
+    #[serde(default)]
+    pub local_anchor_a: Option<[f32; 2]>,
+    #[serde(default)]
+    pub local_anchor_b: Option<[f32; 2]>,
+    #[serde(default)]
+    pub user_data: Option<u64>,
+}
+
+impl SceneRevoluteJointFixture {
+    fn to_joint_bundle(&self) -> JointBundle {
+        let mut desc = RevoluteJointDesc::default();
+        if let Some(local_anchor_a) = self.local_anchor_a {
+            desc.local_anchor_a = point_from_array(local_anchor_a);
+        }
+        if let Some(local_anchor_b) = self.local_anchor_b {
+            desc.local_anchor_b = point_from_array(local_anchor_b);
+        }
+        if let Some(user_data) = self.user_data {
+            desc.user_data = user_data;
+        }
+        JointBundle::Revolute {
+            body_a: self.body_a,
+            body_b: self.body_b,
             desc,
         }
     }

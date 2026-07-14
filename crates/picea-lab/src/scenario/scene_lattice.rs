@@ -462,6 +462,7 @@ mod tests {
             {
                 JointDesc::Distance(_) => distance_joint_count += 1,
                 JointDesc::WorldAnchor(_) => world_anchor_joint_count += 1,
+                _ => {}
             }
         }
 
@@ -548,6 +549,7 @@ mod tests {
                 |handle| match world.joint(handle).expect("joint should resolve").desc() {
                     JointDesc::Distance(desc) => Some(desc.stiffness),
                     JointDesc::WorldAnchor(_) => None,
+                    _ => None,
                 },
             )
             .expect("lattice should include at least one distance joint")

@@ -1,11 +1,16 @@
 use picea::prelude::{
     BodyAsset, BodyBundle, BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderBundle, ColliderDesc,
     ColliderPatch, CollisionFilter, DistanceJointDesc, DistanceJointPatch, JointBundle, JointDesc,
-    JointPatch, Material, Pose, SharedShape, SimulationPipeline, StepConfig, ValidationError,
-    World, WorldAnchorJointDesc, WorldCommand, WorldCommandError, WorldCommandEvent,
-    WorldCommandKind, WorldDesc, WorldError, WorldRecipe,
+    JointPatch, Material, Point, Pose, RevoluteJointDesc, RevoluteJointPatch, SharedShape,
+    SimulationPipeline, SleepTransitionReason, StepConfig, ValidationError, World,
+    WorldAnchorJointDesc, WorldCommand, WorldCommandError, WorldCommandEvent, WorldCommandKind,
+    WorldDesc, WorldError, WorldEvent, WorldRecipe,
 };
-use picea::world::HandleError;
+use picea::{
+    debug::DebugJointKind,
+    joint::JointKind,
+    world::{HandleError, TopologyError},
+};
 
 const MASS_EPSILON: f32 = 1e-4;
 
@@ -229,6 +234,423 @@ fn world_accepts_distance_and_world_anchor_joint_descriptions() {
         world.joints().collect::<Vec<_>>(),
         vec![distance, world_anchor]
     );
+}
+
+#[test]
+fn revolute_joint_defaults_create_view_patch_and_debug_projection() {
+    let defaults = RevoluteJointDesc::default();
+    assert_eq!(defaults.body_a, BodyHandle::default());
+    assert_eq!(defaults.body_b, BodyHandle::default());
+    assert!(!defaults.body_a.is_valid());
+    assert!(!defaults.body_b.is_valid());
+    assert_eq!(defaults.local_anchor_a, Point::default());
+    assert_eq!(defaults.local_anchor_b, Point::default());
+    assert_eq!(defaults.user_data, 0);
+    assert_eq!(RevoluteJointPatch::default().local_anchor_a, None);
+    assert_eq!(RevoluteJointPatch::default().local_anchor_b, None);
+    assert_eq!(RevoluteJointPatch::default().user_data, None);
+
+    let mut world = World::new(WorldDesc::default());
+    let body_a = world
+        .create_body(BodyDesc {
+            pose: Pose::from_xy_angle(2.0, 3.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("body_a");
+    let body_b = world
+        .create_body(BodyDesc {
+            pose: Pose::from_xy_angle(-2.0, 1.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("body_b");
+    let joint = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a,
+            body_b,
+            local_anchor_a: Point::new(1.0, 0.0),
+            local_anchor_b: Point::new(0.0, 2.0),
+            user_data: 7,
+        }))
+        .expect("revolute joint");
+    assert_eq!(
+        world.joint(joint).expect("joint view").kind(),
+        JointKind::Revolute
+    );
+
+    world
+        .apply_joint_patch(
+            joint,
+            JointPatch::Revolute(RevoluteJointPatch {
+                local_anchor_a: Some(Point::new(0.5, -0.25)),
+                local_anchor_b: Some(Point::new(-0.5, 1.5)),
+                user_data: Some(9),
+            }),
+        )
+        .expect("revolute patch");
+    match world.joint(joint).expect("patched joint").desc() {
+        JointDesc::Revolute(desc) => {
+            assert_eq!(desc.local_anchor_a, Point::new(0.5, -0.25));
+            assert_eq!(desc.local_anchor_b, Point::new(-0.5, 1.5));
+            assert_eq!(desc.user_data, 9);
+        }
+        _ => panic!("expected revolute joint"),
+    }
+
+    let snapshot = world.debug_snapshot(&Default::default());
+    let debug_joint = snapshot
+        .joints
+        .iter()
+        .find(|candidate| candidate.handle == joint)
+        .expect("debug joint");
+    assert_eq!(debug_joint.kind, DebugJointKind::Revolute);
+    assert_eq!(debug_joint.bodies, vec![body_a, body_b]);
+    assert_eq!(
+        debug_joint.anchors,
+        vec![Point::new(2.5, 2.75), Point::new(-2.5, 2.5)]
+    );
+}
+
+#[test]
+fn revolute_joint_validation_failures_are_atomic() {
+    let mut world = World::new(WorldDesc {
+        gravity: Default::default(),
+        enable_sleep: true,
+    });
+    let body_a = world.create_body(BodyDesc::default()).expect("body_a");
+    let body_b = world.create_body(BodyDesc::default()).expect("body_b");
+    let before_create = world.revision();
+    let create_error = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a,
+            body_b,
+            local_anchor_b: Point::new(f32::INFINITY, 0.0),
+            ..RevoluteJointDesc::default()
+        }))
+        .expect_err("non-finite descriptor anchor must fail");
+    assert!(matches!(
+        create_error,
+        WorldError::Validation(ValidationError::JointDesc {
+            field: "local_anchor_b"
+        })
+    ));
+    assert_eq!(world.revision(), before_create);
+    assert_eq!(world.joints().count(), 0);
+
+    let joint = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a,
+            body_b,
+            local_anchor_a: Point::new(0.25, 0.5),
+            local_anchor_b: Point::new(-0.25, -0.5),
+            user_data: 11,
+        }))
+        .expect("valid revolute joint");
+    let _ = SimulationPipeline::new(StepConfig::default()).step(&mut world);
+    world
+        .apply_body_patch(
+            body_a,
+            BodyPatch {
+                sleeping: Some(true),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("sleep body_a");
+    world
+        .apply_body_patch(
+            body_b,
+            BodyPatch {
+                sleeping: Some(true),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("sleep body_b");
+    let before_patch = world.revision();
+    let before_desc = world.joint(joint).expect("joint").desc().clone();
+    let patch_error = world
+        .apply_joint_patch(
+            joint,
+            JointPatch::Revolute(RevoluteJointPatch {
+                local_anchor_a: Some(Point::new(3.0, 4.0)),
+                local_anchor_b: Some(Point::new(0.0, f32::NAN)),
+                user_data: Some(99),
+            }),
+        )
+        .expect_err("patch must validate all fields before mutation");
+    assert!(matches!(
+        patch_error,
+        WorldError::Validation(ValidationError::JointPatch {
+            field: "local_anchor_b"
+        })
+    ));
+    assert_eq!(world.revision(), before_patch);
+    assert_eq!(world.joint(joint).expect("joint").desc(), &before_desc);
+    assert!(world.body(body_a).expect("body_a").sleeping());
+    let events = SimulationPipeline::new(StepConfig::default())
+        .step(&mut world)
+        .events;
+    assert!(!events.iter().any(|event| {
+        matches!(
+            event,
+            WorldEvent::SleepChanged(sleep)
+                if sleep.body == body_a && sleep.reason == SleepTransitionReason::UserPatch
+        )
+    }));
+    assert!(world.body(body_a).expect("body_a").sleeping());
+}
+
+#[test]
+fn revolute_joint_rejects_same_stale_and_wrong_kind_handles() {
+    let mut world = World::new(WorldDesc::default());
+    let body_a = world.create_body(BodyDesc::default()).expect("body_a");
+    let body_b = world.create_body(BodyDesc::default()).expect("body_b");
+
+    let same_error = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a,
+            body_b: body_a,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect_err("same-body revolute must fail");
+    assert!(matches!(
+        same_error,
+        WorldError::Topology(TopologyError::SameBodyJointPair {
+            body,
+            kind: JointKind::Revolute
+        }) if body == body_a
+    ));
+
+    let missing_error = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a: BodyHandle::INVALID,
+            body_b,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect_err("foreign endpoint must fail");
+    assert!(matches!(
+        missing_error,
+        WorldError::Handle(HandleError::MissingBody { handle })
+            if handle == BodyHandle::INVALID
+    ));
+
+    let stale_body = world.create_body(BodyDesc::default()).expect("stale seed");
+    world.destroy_body(stale_body).expect("destroy stale seed");
+    let _replacement = world.create_body(BodyDesc::default()).expect("replacement");
+    let stale_error = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a: stale_body,
+            body_b,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect_err("stale endpoint must fail");
+    assert!(matches!(
+        stale_error,
+        WorldError::Handle(HandleError::StaleBody { handle }) if handle == stale_body
+    ));
+
+    let distance = world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a,
+            body_b,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("distance control");
+    let before_wrong_kind = world.revision();
+    let wrong_kind = world
+        .apply_joint_patch(
+            distance,
+            JointPatch::Revolute(RevoluteJointPatch {
+                local_anchor_a: Some(Point::new(1.0, 0.0)),
+                ..RevoluteJointPatch::default()
+            }),
+        )
+        .expect_err("wrong patch kind must fail");
+    assert!(matches!(
+        wrong_kind,
+        WorldError::Handle(HandleError::WrongJointKind {
+            handle,
+            expected: JointKind::Revolute,
+            actual: JointKind::Distance
+        }) if handle == distance
+    ));
+    assert_eq!(world.revision(), before_wrong_kind);
+
+    world
+        .destroy_joint(distance)
+        .expect("destroy distance control");
+    let stale_joint = world
+        .apply_joint_patch(
+            distance,
+            JointPatch::Distance(DistanceJointPatch::default()),
+        )
+        .expect_err("stale joint patch must fail");
+    assert!(matches!(
+        stale_joint,
+        WorldError::Handle(HandleError::StaleJoint { handle }) if handle == distance
+    ));
+}
+
+#[test]
+fn revolute_joint_recipe_preserves_fields_and_nested_error_paths() {
+    let bundle_default = JointBundle::revolute(0, 1);
+    assert!(matches!(
+        bundle_default,
+        JointBundle::Revolute { body_a: 0, body_b: 1, ref desc }
+            if desc.local_anchor_a == Point::default()
+                && desc.local_anchor_b == Point::default()
+                && desc.user_data == 0
+    ));
+
+    let result = WorldRecipe::new(WorldDesc::default())
+        .with_body(BodyBundle::static_body())
+        .with_body(BodyBundle::dynamic())
+        .with_joint(JointBundle::Revolute {
+            body_a: 1,
+            body_b: 0,
+            desc: RevoluteJointDesc {
+                local_anchor_a: Point::new(0.25, -0.5),
+                local_anchor_b: Point::new(-0.75, 1.25),
+                user_data: 42,
+                ..RevoluteJointDesc::default()
+            },
+        })
+        .instantiate()
+        .expect("revolute recipe");
+    let joint = result.created.joint_handles[0];
+    match result.world.joint(joint).expect("recipe joint").desc() {
+        JointDesc::Revolute(desc) => {
+            assert_eq!(desc.body_a, result.created.body_handles[1]);
+            assert_eq!(desc.body_b, result.created.body_handles[0]);
+            assert_eq!(desc.local_anchor_a, Point::new(0.25, -0.5));
+            assert_eq!(desc.local_anchor_b, Point::new(-0.75, 1.25));
+            assert_eq!(desc.user_data, 42);
+        }
+        _ => panic!("expected revolute recipe joint"),
+    }
+
+    let error = WorldRecipe::new(WorldDesc::default())
+        .with_body(BodyBundle::dynamic())
+        .with_joint(JointBundle::revolute(0, 2))
+        .instantiate_with_context()
+        .expect_err("invalid revolute recipe endpoint");
+    assert_eq!(error.path, "recipe.joints[0].desc.body_b");
+    assert!(matches!(
+        error.error.error,
+        WorldError::Handle(HandleError::MissingBody { .. })
+    ));
+}
+
+#[test]
+fn revolute_joint_awake_static_and_kinematic_endpoints_do_not_get_synthetic_wakes() {
+    let mut world = World::new(WorldDesc {
+        gravity: Default::default(),
+        enable_sleep: true,
+    });
+    let awake_dynamic = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            sleeping: false,
+            ..BodyDesc::default()
+        })
+        .expect("awake dynamic");
+    let static_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("static body");
+    let sleeping_kinematic = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Kinematic,
+            sleeping: true,
+            ..BodyDesc::default()
+        })
+        .expect("sleeping kinematic");
+    let dynamic_joint = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a: awake_dynamic,
+            body_b: static_body,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect("dynamic-static revolute");
+    let kinematic_joint = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a: sleeping_kinematic,
+            body_b: static_body,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect("kinematic-static revolute");
+    world
+        .apply_joint_patch(
+            dynamic_joint,
+            JointPatch::Revolute(RevoluteJointPatch {
+                local_anchor_a: Some(Point::new(0.5, 0.0)),
+                ..RevoluteJointPatch::default()
+            }),
+        )
+        .expect("dynamic joint patch");
+    world
+        .apply_joint_patch(
+            kinematic_joint,
+            JointPatch::Revolute(RevoluteJointPatch {
+                local_anchor_a: Some(Point::new(-0.5, 0.0)),
+                ..RevoluteJointPatch::default()
+            }),
+        )
+        .expect("kinematic joint patch");
+    world
+        .destroy_joint(dynamic_joint)
+        .expect("remove dynamic joint");
+    world
+        .destroy_joint(kinematic_joint)
+        .expect("remove kinematic joint");
+    assert!(world
+        .body(sleeping_kinematic)
+        .expect("kinematic before step")
+        .sleeping());
+
+    let events = SimulationPipeline::new(StepConfig::default())
+        .step(&mut world)
+        .events;
+    for body in [awake_dynamic, static_body, sleeping_kinematic] {
+        assert!(!events.iter().any(|event| {
+            matches!(
+                event,
+                WorldEvent::SleepChanged(sleep)
+                    if sleep.body == body && sleep.reason == SleepTransitionReason::UserPatch
+            )
+        }));
+    }
+    assert!(!world.body(awake_dynamic).expect("dynamic").sleeping());
+}
+
+#[test]
+fn revolute_joint_api_checkpoint_has_no_solver_row() {
+    let mut world = World::new(WorldDesc {
+        gravity: Default::default(),
+        enable_sleep: false,
+    });
+    let body_a = world.create_body(BodyDesc::default()).expect("body_a");
+    let body_b = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .expect("body_b");
+    world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a,
+            body_b,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect("revolute joint");
+
+    let report = SimulationPipeline::new(StepConfig::default()).step(&mut world);
+    println!(
+        "S5_API_CHECKPOINT:joint_count={};joint_row_count={}",
+        report.stats.joint_count, report.stats.joint_row_count
+    );
+    assert_eq!(report.stats.joint_count, 1);
+    assert_eq!(report.stats.joint_row_count, 0);
 }
 
 #[test]
@@ -841,7 +1263,7 @@ fn world_commands_cover_collider_joint_paths_and_step_after_batch() {
         .is_sensor());
     match world.joint(joint).expect("joint should resolve").desc() {
         JointDesc::Distance(desc) => assert_eq!(desc.rest_length, 3.0),
-        JointDesc::WorldAnchor(_) => panic!("expected distance joint"),
+        _ => panic!("expected distance joint"),
     }
 
     let destroyed = world

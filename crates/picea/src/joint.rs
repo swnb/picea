@@ -74,23 +74,59 @@ impl Default for WorldAnchorJointDesc {
     }
 }
 
+/// Descriptor for a pin-only joint between two body-local anchors.
+///
+/// The joint constrains the two anchors to the same world-space point while
+/// leaving the bodies' relative rotation unconstrained.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RevoluteJointDesc {
+    /// First joint body endpoint.
+    pub body_a: BodyHandle,
+    /// Second joint body endpoint.
+    pub body_b: BodyHandle,
+    /// Local pivot anchor on `body_a`.
+    pub local_anchor_a: Point,
+    /// Local pivot anchor on `body_b`.
+    pub local_anchor_b: Point,
+    /// User-owned opaque payload preserved by the core API.
+    pub user_data: u64,
+}
+
+impl Default for RevoluteJointDesc {
+    fn default() -> Self {
+        Self {
+            body_a: BodyHandle::default(),
+            body_b: BodyHandle::default(),
+            local_anchor_a: Point::default(),
+            local_anchor_b: Point::default(),
+            user_data: 0,
+        }
+    }
+}
+
 /// Stable joint kind used by read-only views and debug outputs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum JointKind {
     /// Distance-preserving body pair joint.
     Distance,
     /// Body-to-world anchor joint.
     WorldAnchor,
+    /// Pin-only body pair joint with free relative rotation.
+    Revolute,
 }
 
 /// Stable owned joint descriptor.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum JointDesc {
     /// Distance-preserving body pair joint.
     Distance(DistanceJointDesc),
     /// Body-to-world anchor joint.
     WorldAnchor(WorldAnchorJointDesc),
+    /// Pin-only body pair joint with free relative rotation.
+    Revolute(RevoluteJointDesc),
 }
 
 impl JointDesc {
@@ -99,6 +135,7 @@ impl JointDesc {
         match self {
             Self::Distance(_) => JointKind::Distance,
             Self::WorldAnchor(_) => JointKind::WorldAnchor,
+            Self::Revolute(_) => JointKind::Revolute,
         }
     }
 
@@ -106,6 +143,7 @@ impl JointDesc {
         match self {
             Self::Distance(desc) => desc.validate(),
             Self::WorldAnchor(desc) => desc.validate(),
+            Self::Revolute(desc) => desc.validate(),
         }
     }
 }
@@ -142,13 +180,27 @@ pub struct WorldAnchorJointPatch {
     pub user_data: Option<u64>,
 }
 
+/// Partial update for a revolute joint.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RevoluteJointPatch {
+    /// Replaces the local pivot anchor on `body_a` when present.
+    pub local_anchor_a: Option<Point>,
+    /// Replaces the local pivot anchor on `body_b` when present.
+    pub local_anchor_b: Option<Point>,
+    /// Replaces the user payload when present.
+    pub user_data: Option<u64>,
+}
+
 /// Stable joint patch enum matching the descriptor kind.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum JointPatch {
     /// Partial update for a distance joint.
     Distance(DistanceJointPatch),
     /// Partial update for a world-anchor joint.
     WorldAnchor(WorldAnchorJointPatch),
+    /// Partial update for a revolute joint.
+    Revolute(RevoluteJointPatch),
 }
 
 impl JointPatch {
@@ -156,6 +208,7 @@ impl JointPatch {
         match self {
             Self::Distance(_) => JointKind::Distance,
             Self::WorldAnchor(_) => JointKind::WorldAnchor,
+            Self::Revolute(_) => JointKind::Revolute,
         }
     }
 
@@ -163,6 +216,28 @@ impl JointPatch {
         match self {
             Self::Distance(patch) => patch.validate(),
             Self::WorldAnchor(patch) => patch.validate(),
+            Self::Revolute(patch) => patch.validate(),
+        }
+    }
+
+    pub(crate) fn changes_constraint(&self) -> bool {
+        match self {
+            Self::Distance(patch) => {
+                patch.local_anchor_a.is_some()
+                    || patch.local_anchor_b.is_some()
+                    || patch.rest_length.is_some()
+                    || patch.stiffness.is_some()
+                    || patch.damping.is_some()
+            }
+            Self::WorldAnchor(patch) => {
+                patch.local_anchor.is_some()
+                    || patch.world_anchor.is_some()
+                    || patch.stiffness.is_some()
+                    || patch.damping.is_some()
+            }
+            Self::Revolute(patch) => {
+                patch.local_anchor_a.is_some() || patch.local_anchor_b.is_some()
+            }
         }
     }
 }
@@ -211,6 +286,13 @@ impl JointRecord {
                 }
             }
             JointDesc::WorldAnchor(desc) => vec![desc.body],
+            JointDesc::Revolute(desc) => {
+                if desc.body_a == desc.body_b {
+                    vec![desc.body_a]
+                } else {
+                    vec![desc.body_a, desc.body_b]
+                }
+            }
         }
     }
 
@@ -249,6 +331,18 @@ impl JointRecord {
                 }
                 if let Some(value) = patch.damping {
                     desc.damping = value;
+                }
+                if let Some(value) = patch.user_data {
+                    desc.user_data = value;
+                }
+                true
+            }
+            (JointDesc::Revolute(desc), JointPatch::Revolute(patch)) => {
+                if let Some(value) = patch.local_anchor_a {
+                    desc.local_anchor_a = value;
+                }
+                if let Some(value) = patch.local_anchor_b {
+                    desc.local_anchor_b = value;
                 }
                 if let Some(value) = patch.user_data {
                     desc.user_data = value;
@@ -316,6 +410,22 @@ impl WorldAnchorJointDesc {
         }
         if !self.damping.is_finite() || self.damping < 0.0 {
             return Err(ValidationError::JointDesc { field: "damping" });
+        }
+        Ok(())
+    }
+}
+
+impl RevoluteJointDesc {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if !self.local_anchor_a.x().is_finite() || !self.local_anchor_a.y().is_finite() {
+            return Err(ValidationError::JointDesc {
+                field: "local_anchor_a",
+            });
+        }
+        if !self.local_anchor_b.x().is_finite() || !self.local_anchor_b.y().is_finite() {
+            return Err(ValidationError::JointDesc {
+                field: "local_anchor_b",
+            });
         }
         Ok(())
     }
@@ -400,6 +510,28 @@ impl WorldAnchorJointPatch {
             .is_some_and(|value| !value.is_finite() || value < 0.0)
         {
             return Err(ValidationError::JointPatch { field: "damping" });
+        }
+        Ok(())
+    }
+}
+
+impl RevoluteJointPatch {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self
+            .local_anchor_a
+            .is_some_and(|value| !value.x().is_finite() || !value.y().is_finite())
+        {
+            return Err(ValidationError::JointPatch {
+                field: "local_anchor_a",
+            });
+        }
+        if self
+            .local_anchor_b
+            .is_some_and(|value| !value.x().is_finite() || !value.y().is_finite())
+        {
+            return Err(ValidationError::JointPatch {
+                field: "local_anchor_b",
+            });
         }
         Ok(())
     }

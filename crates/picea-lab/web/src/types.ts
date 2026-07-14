@@ -93,7 +93,7 @@ export type DebugCollider = {
 
 export type DebugJoint = {
   handle: number;
-  kind: "distance" | "world_anchor";
+  kind: "distance" | "world_anchor" | "revolute";
   bodies: number[];
   anchors: Vec2[];
 };

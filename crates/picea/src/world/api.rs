@@ -93,7 +93,7 @@ impl World {
         }
         for joint in attached_joints {
             if self.joint_record(joint).is_ok() {
-                self.destroy_joint_internal(joint)?;
+                self.destroy_joint_internal(joint, Some(handle))?;
             }
         }
         self.pending_events
@@ -152,17 +152,25 @@ impl World {
     /// Creates a joint after validating all referenced bodies.
     pub fn create_joint(&mut self, desc: JointDesc) -> Result<JointHandle, WorldError> {
         desc.validate().map_err(WorldError::Validation)?;
-        if let JointDesc::Distance(distance) = &desc {
-            if distance.body_a == distance.body_b {
+        match &desc {
+            JointDesc::Distance(distance) if distance.body_a == distance.body_b => {
                 return Err(WorldError::Topology(TopologyError::SameBodyJointPair {
                     body: distance.body_a,
                     kind: JointKind::Distance,
                 }));
             }
+            JointDesc::Revolute(revolute) if revolute.body_a == revolute.body_b => {
+                return Err(WorldError::Topology(TopologyError::SameBodyJointPair {
+                    body: revolute.body_a,
+                    kind: JointKind::Revolute,
+                }));
+            }
+            _ => {}
         }
         let body_handles = match &desc {
             JointDesc::Distance(desc) => vec![desc.body_a, desc.body_b],
             JointDesc::WorldAnchor(desc) => vec![desc.body],
+            JointDesc::Revolute(desc) => vec![desc.body_a, desc.body_b],
         };
         for handle in body_handles.iter().copied() {
             self.body_record(handle)?;
@@ -182,13 +190,14 @@ impl World {
         }
         self.pending_events
             .push(WorldEvent::JointCreated { joint: handle });
+        self.wake_joint_lifecycle_endpoints(&body_handles, None);
         self.bump_revision();
         Ok(handle)
     }
 
     /// Destroys a joint and detaches it from all referenced bodies.
     pub fn destroy_joint(&mut self, handle: JointHandle) -> Result<(), WorldError> {
-        self.destroy_joint_internal(handle)?;
+        self.destroy_joint_internal(handle, None)?;
         self.bump_revision();
         Ok(())
     }
@@ -278,14 +287,20 @@ impl World {
         patch: JointPatch,
     ) -> Result<(), WorldError> {
         patch.validate().map_err(WorldError::Validation)?;
+        let changes_constraint = patch.changes_constraint();
         let expected_kind = patch.kind();
-        let actual_kind = self.joint_record(handle)?.desc.kind();
+        let record = self.joint_record(handle)?;
+        let actual_kind = record.desc.kind();
+        let body_handles = record.body_handles();
         if expected_kind != actual_kind {
             return Err(WorldError::Handle(HandleError::WrongJointKind {
                 handle,
                 expected: expected_kind,
                 actual: actual_kind,
             }));
+        }
+        for body in body_handles.iter().copied() {
+            self.body_record(body)?;
         }
         let applied = self.joint_record_mut(handle)?.apply_patch(patch);
         if !applied {
@@ -294,6 +309,9 @@ impl World {
                 expected: expected_kind,
                 actual: actual_kind,
             }));
+        }
+        if changes_constraint {
+            self.wake_joint_lifecycle_endpoints(&body_handles, None);
         }
         self.bump_revision();
         Ok(())
@@ -392,10 +410,15 @@ impl World {
         Ok(())
     }
 
-    fn destroy_joint_internal(&mut self, handle: JointHandle) -> Result<(), WorldError> {
+    fn destroy_joint_internal(
+        &mut self,
+        handle: JointHandle,
+        excluded_body: Option<BodyHandle>,
+    ) -> Result<(), WorldError> {
         let bodies = self.joint_record(handle)?.body_handles();
-        self.pending_events
-            .push(WorldEvent::JointRemoved { joint: handle });
+        for body in bodies.iter().copied() {
+            self.body_record(body)?;
+        }
         remove_slot(
             &mut self.joints,
             &mut self.free_joints,
@@ -403,12 +426,47 @@ impl World {
             super::missing_joint_error(handle),
             super::stale_joint_error(handle),
         )?;
-        for body in bodies {
+        for body in bodies.iter().copied() {
             if let Ok(record) = self.body_record_mut(body) {
                 record.detach_joint(handle);
             }
         }
+        self.pending_events
+            .push(WorldEvent::JointRemoved { joint: handle });
+        self.wake_joint_lifecycle_endpoints(&bodies, excluded_body);
         Ok(())
+    }
+
+    fn wake_joint_lifecycle_endpoints(
+        &mut self,
+        bodies: &[BodyHandle],
+        excluded_body: Option<BodyHandle>,
+    ) {
+        for body in bodies.iter().copied() {
+            if excluded_body == Some(body) {
+                continue;
+            }
+            let should_wake = self
+                .body_record(body)
+                .is_ok_and(|record| record.body_type.is_dynamic() && record.sleeping);
+            if !should_wake {
+                continue;
+            }
+
+            // A lifecycle mutation is visible before its wake receipt. Updating the retained
+            // body state and pending reason together keeps direct calls and scratch-command
+            // commits observationally identical while preserving existing reason priority.
+            let Ok(record) = self.body_record_mut(body) else {
+                continue;
+            };
+            record.sleeping = false;
+            record.sleep_idle_time = 0.0;
+            crate::pipeline::sleep::record_wake_reason(
+                &mut self.pending_wake_reasons,
+                body,
+                SleepTransitionReason::UserPatch,
+            );
+        }
     }
 
     pub(crate) fn bump_revision(&mut self) {

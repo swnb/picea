@@ -11,7 +11,7 @@ use crate::{
     body::{BodyDesc, BodyPatch, BodyType, Pose},
     collider::{ColliderDesc, ColliderPatch, CollisionFilter, Material, SharedShape},
     handles::{BodyHandle, ColliderHandle, JointHandle},
-    joint::{DistanceJointDesc, JointDesc, JointPatch, WorldAnchorJointDesc},
+    joint::{DistanceJointDesc, JointDesc, JointPatch, RevoluteJointDesc, WorldAnchorJointDesc},
     math::{point::Point, FloatNum},
     world::{HandleError, ValidationError, World, WorldDesc, WorldError},
 };
@@ -397,6 +397,7 @@ impl From<BodyBundle> for BodyAsset {
 /// in index space makes scene setup declarative while the command layer still
 /// resolves and validates concrete handles on a scratch world before commit.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum JointBundle {
     /// Distance joint between two recipe bodies.
     Distance {
@@ -413,6 +414,15 @@ pub enum JointBundle {
         body: usize,
         /// Low-level descriptor fields not including the resolved body handle.
         desc: WorldAnchorJointDesc,
+    },
+    /// Pin-only revolute joint between two recipe bodies.
+    Revolute {
+        /// Index of the first body bundle in `WorldRecipe::bodies`.
+        body_a: usize,
+        /// Index of the second body bundle in `WorldRecipe::bodies`.
+        body_b: usize,
+        /// Low-level descriptor fields not including resolved body handles.
+        desc: RevoluteJointDesc,
     },
 }
 
@@ -431,6 +441,15 @@ impl JointBundle {
         Self::WorldAnchor {
             body,
             desc: WorldAnchorJointDesc::default(),
+        }
+    }
+
+    /// Creates a pin-only revolute joint between two recipe body indices.
+    pub fn revolute(body_a: usize, body_b: usize) -> Self {
+        Self::Revolute {
+            body_a,
+            body_b,
+            desc: RevoluteJointDesc::default(),
         }
     }
 
@@ -466,6 +485,16 @@ impl JointBundle {
                 let mut desc = desc.clone();
                 desc.body = resolve_recipe_body(*body, body_handles, "body")?;
                 Ok(JointDesc::WorldAnchor(desc))
+            }
+            Self::Revolute {
+                body_a,
+                body_b,
+                desc,
+            } => {
+                let mut desc = desc.clone();
+                desc.body_a = resolve_recipe_body(*body_a, body_handles, "body_a")?;
+                desc.body_b = resolve_recipe_body(*body_b, body_handles, "body_b")?;
+                Ok(JointDesc::Revolute(desc))
             }
         }
     }

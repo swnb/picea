@@ -30,8 +30,8 @@ mod scene_static;
 pub use fixture::{
     instantiate_scene_fixture, CompoundProvenance, CompoundProvenancePiece, SceneBodyFixture,
     SceneCompoundPieceFixture, SceneCompoundPieceShapeFixture, SceneDistanceJointFixture,
-    SceneFixtureWorld, SceneJointFixture, SceneRecipeFixture, SceneShapeFixture,
-    SceneWorldAnchorJointFixture, SCENE_RECIPE_SCHEMA_VERSION,
+    SceneFixtureWorld, SceneJointFixture, SceneRecipeFixture, SceneRevoluteJointFixture,
+    SceneShapeFixture, SceneWorldAnchorJointFixture, SCENE_RECIPE_SCHEMA_VERSION,
 };
 #[allow(unused_imports)]
 pub(crate) use fixture::{instantiate_scene_fixture_with_provenance, InstantiatedSceneFixture};

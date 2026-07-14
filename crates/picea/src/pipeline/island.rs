@@ -153,6 +153,10 @@ where
                     .joint_rows
                     .push(JointSolvePlanRow::WorldAnchor { desc, body_slot });
             }
+            // S5-API retains and exposes Revolute descriptors, but the solver row is owned by
+            // S5-SOLVER. Skipping before slot lookup keeps this checkpoint honest: Revolute
+            // contributes neither a hot body slot nor a logical joint row yet.
+            JointDesc::Revolute(_) => continue,
         }
     }
 

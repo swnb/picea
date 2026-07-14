@@ -1,8 +1,9 @@
 use picea::prelude::{
     BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderDesc, ColliderPatch, DistanceJointDesc,
-    DistanceJointPatch, JointDesc, JointPatch, Pose, SharedShape, SimulationPipeline,
-    SleepTransitionReason, StepConfig, Vector, World, WorldAnchorJointDesc, WorldAnchorJointPatch,
-    WorldCommand, WorldCommandEvent, WorldDesc, WorldError, WorldEvent,
+    DistanceJointPatch, JointDesc, JointPatch, Pose, RevoluteJointDesc, RevoluteJointPatch,
+    SharedShape, SimulationPipeline, SleepTransitionReason, StepConfig, Vector, World,
+    WorldAnchorJointDesc, WorldAnchorJointPatch, WorldCommand, WorldCommandEvent, WorldDesc,
+    WorldError, WorldEvent,
 };
 use picea::world::{HandleError, TopologyError, ValidationError};
 
@@ -1132,16 +1133,22 @@ fn s5_observe_wake(
     }
 }
 
-fn s5_assert_existing_kinds_woke(
+fn s5_assert_joint_kinds_woke(
     case: &str,
     distance: S5WakeObservation,
     world_anchor: S5WakeObservation,
+    revolute: S5WakeObservation,
 ) {
     println!(
-        "S5_WAKE_OBSERVATION:{case}:Distance(awake={},user_patch={});WorldAnchor(awake={},user_patch={})",
-        distance.awake, distance.user_patch, world_anchor.awake, world_anchor.user_patch
+        "S5_WAKE_OBSERVATION:{case}:Distance(awake={},user_patch={});WorldAnchor(awake={},user_patch={});Revolute(awake={},user_patch={})",
+        distance.awake,
+        distance.user_patch,
+        world_anchor.awake,
+        world_anchor.user_patch,
+        revolute.awake,
+        revolute.user_patch
     );
-    if distance.satisfied() && world_anchor.satisfied() {
+    if distance.satisfied() && world_anchor.satisfied() && revolute.satisfied() {
         return;
     }
 
@@ -1153,8 +1160,13 @@ fn s5_assert_existing_kinds_woke(
         _ => "existing-kind wake contract was not satisfied",
     };
     panic!(
-        "S5_EXPECTED_WAKE:{case}: {expected_failure}; observed Distance(awake={},user_patch={}), WorldAnchor(awake={},user_patch={})",
-        distance.awake, distance.user_patch, world_anchor.awake, world_anchor.user_patch
+        "S5_EXPECTED_WAKE:{case}: {expected_failure}; observed Distance(awake={},user_patch={}), WorldAnchor(awake={},user_patch={}), Revolute(awake={},user_patch={})",
+        distance.awake,
+        distance.user_patch,
+        world_anchor.awake,
+        world_anchor.user_patch,
+        revolute.awake,
+        revolute.user_patch
     );
 }
 
@@ -1164,6 +1176,7 @@ fn joint_lifecycle_wake_create_contract() {
     let static_endpoint = s5_static_body(&mut world, "create");
     let distance_dynamic = s5_dynamic_body(&mut world, true, "create");
     let anchor_dynamic = s5_dynamic_body(&mut world, true, "create");
+    let revolute_dynamic = s5_dynamic_body(&mut world, true, "create");
 
     let distance_joint = world
         .create_joint(JointDesc::Distance(DistanceJointDesc {
@@ -1178,6 +1191,13 @@ fn joint_lifecycle_wake_create_contract() {
             ..WorldAnchorJointDesc::default()
         }))
         .expect("S5_HARNESS_BOUNDARY:create: WorldAnchor setup must succeed");
+    let revolute_joint = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a: revolute_dynamic,
+            body_b: static_endpoint,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:create: Revolute setup must succeed");
 
     let events = s5_step_events(&mut world);
     assert!(
@@ -1185,8 +1205,10 @@ fn joint_lifecycle_wake_create_contract() {
             |event| matches!(event, WorldEvent::JointCreated { joint } if *joint == distance_joint)
         ) && events.iter().any(
             |event| matches!(event, WorldEvent::JointCreated { joint } if *joint == anchor_joint)
+        ) && events.iter().any(
+            |event| matches!(event, WorldEvent::JointCreated { joint } if *joint == revolute_joint)
         ),
-        "S5_HARNESS_BOUNDARY:create: both existing joint kinds must execute"
+        "S5_HARNESS_BOUNDARY:create: all three joint kinds must execute"
     );
     assert!(
         !s5_has_sleep_transition(&events, static_endpoint),
@@ -1194,8 +1216,14 @@ fn joint_lifecycle_wake_create_contract() {
     );
     let distance_observation = s5_observe_wake(&world, &events, distance_dynamic, "create");
     let world_anchor_observation = s5_observe_wake(&world, &events, anchor_dynamic, "create");
+    let revolute_observation = s5_observe_wake(&world, &events, revolute_dynamic, "create");
     println!("S5_WAKE_CASE:create");
-    s5_assert_existing_kinds_woke("create", distance_observation, world_anchor_observation);
+    s5_assert_joint_kinds_woke(
+        "create",
+        distance_observation,
+        world_anchor_observation,
+        revolute_observation,
+    );
 }
 
 #[test]
@@ -1204,6 +1232,7 @@ fn joint_lifecycle_wake_constraint_patch_contract() {
     let static_endpoint = s5_static_body(&mut world, "constraint_patch");
     let distance_dynamic = s5_dynamic_body(&mut world, false, "constraint_patch");
     let anchor_dynamic = s5_dynamic_body(&mut world, false, "constraint_patch");
+    let revolute_dynamic = s5_dynamic_body(&mut world, false, "constraint_patch");
     let distance_joint = world
         .create_joint(JointDesc::Distance(DistanceJointDesc {
             body_a: distance_dynamic,
@@ -1217,9 +1246,17 @@ fn joint_lifecycle_wake_constraint_patch_contract() {
             ..WorldAnchorJointDesc::default()
         }))
         .expect("S5_HARNESS_BOUNDARY:constraint_patch: WorldAnchor setup must succeed");
+    let revolute_joint = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a: revolute_dynamic,
+            body_b: static_endpoint,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:constraint_patch: Revolute setup must succeed");
     let _setup_events = s5_step_events(&mut world);
     s5_set_sleeping(&mut world, distance_dynamic, "constraint_patch");
     s5_set_sleeping(&mut world, anchor_dynamic, "constraint_patch");
+    s5_set_sleeping(&mut world, revolute_dynamic, "constraint_patch");
 
     world
         .apply_joint_patch(
@@ -1239,6 +1276,15 @@ fn joint_lifecycle_wake_constraint_patch_contract() {
             }),
         )
         .expect("S5_HARNESS_BOUNDARY:constraint_patch: WorldAnchor patch must succeed");
+    world
+        .apply_joint_patch(
+            revolute_joint,
+            JointPatch::Revolute(RevoluteJointPatch {
+                local_anchor_a: Some((0.25, 0.0).into()),
+                ..RevoluteJointPatch::default()
+            }),
+        )
+        .expect("S5_HARNESS_BOUNDARY:constraint_patch: Revolute patch must succeed");
 
     let events = s5_step_events(&mut world);
     assert!(
@@ -1249,11 +1295,14 @@ fn joint_lifecycle_wake_constraint_patch_contract() {
         s5_observe_wake(&world, &events, distance_dynamic, "constraint_patch");
     let world_anchor_observation =
         s5_observe_wake(&world, &events, anchor_dynamic, "constraint_patch");
+    let revolute_observation =
+        s5_observe_wake(&world, &events, revolute_dynamic, "constraint_patch");
     println!("S5_WAKE_CASE:constraint_patch");
-    s5_assert_existing_kinds_woke(
+    s5_assert_joint_kinds_woke(
         "constraint_patch",
         distance_observation,
         world_anchor_observation,
+        revolute_observation,
     );
 }
 
@@ -1263,6 +1312,7 @@ fn joint_lifecycle_wake_user_data_only_contract() {
     let static_endpoint = s5_static_body(&mut world, "user_data_only");
     let distance_dynamic = s5_dynamic_body(&mut world, false, "user_data_only");
     let anchor_dynamic = s5_dynamic_body(&mut world, false, "user_data_only");
+    let revolute_dynamic = s5_dynamic_body(&mut world, false, "user_data_only");
     let distance_joint = world
         .create_joint(JointDesc::Distance(DistanceJointDesc {
             body_a: distance_dynamic,
@@ -1276,9 +1326,51 @@ fn joint_lifecycle_wake_user_data_only_contract() {
             ..WorldAnchorJointDesc::default()
         }))
         .expect("S5_HARNESS_BOUNDARY:user_data_only: WorldAnchor setup must succeed");
+    let revolute_joint = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a: revolute_dynamic,
+            body_b: static_endpoint,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: Revolute setup must succeed");
     let _setup_events = s5_step_events(&mut world);
     s5_set_sleeping(&mut world, distance_dynamic, "user_data_only");
     s5_set_sleeping(&mut world, anchor_dynamic, "user_data_only");
+    s5_set_sleeping(&mut world, revolute_dynamic, "user_data_only");
+
+    world
+        .apply_joint_patch(
+            distance_joint,
+            JointPatch::Distance(DistanceJointPatch::default()),
+        )
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: empty Distance patch must succeed");
+    world
+        .apply_joint_patch(
+            anchor_joint,
+            JointPatch::WorldAnchor(WorldAnchorJointPatch::default()),
+        )
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: empty WorldAnchor patch must succeed");
+    world
+        .apply_joint_patch(
+            revolute_joint,
+            JointPatch::Revolute(RevoluteJointPatch::default()),
+        )
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: empty Revolute patch must succeed");
+    assert!(
+        world
+            .body(distance_dynamic)
+            .expect("S5_HARNESS_BOUNDARY:user_data_only: Distance after empty patch")
+            .sleeping()
+            && world
+                .body(anchor_dynamic)
+                .expect("S5_HARNESS_BOUNDARY:user_data_only: WorldAnchor after empty patch")
+                .sleeping()
+            && world
+                .body(revolute_dynamic)
+                .expect("S5_HARNESS_BOUNDARY:user_data_only: Revolute after empty patch")
+                .sleeping(),
+        "S5_HARNESS_BOUNDARY:user_data_only: empty patch must not wake any joint kind"
+    );
 
     world
         .apply_joint_patch(
@@ -1298,6 +1390,15 @@ fn joint_lifecycle_wake_user_data_only_contract() {
             }),
         )
         .expect("S5_HARNESS_BOUNDARY:user_data_only: WorldAnchor metadata patch must succeed");
+    world
+        .apply_joint_patch(
+            revolute_joint,
+            JointPatch::Revolute(RevoluteJointPatch {
+                user_data: Some(43),
+                ..RevoluteJointPatch::default()
+            }),
+        )
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: Revolute metadata patch must succeed");
     let metadata_kept_distance_sleeping = world
         .body(distance_dynamic)
         .expect("S5_HARNESS_BOUNDARY:user_data_only: Distance endpoint must remain live")
@@ -1305,6 +1406,10 @@ fn joint_lifecycle_wake_user_data_only_contract() {
     let metadata_kept_anchor_sleeping = world
         .body(anchor_dynamic)
         .expect("S5_HARNESS_BOUNDARY:user_data_only: WorldAnchor endpoint must remain live")
+        .sleeping();
+    let metadata_kept_revolute_sleeping = world
+        .body(revolute_dynamic)
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: Revolute endpoint must remain live")
         .sleeping();
 
     world
@@ -1325,11 +1430,22 @@ fn joint_lifecycle_wake_user_data_only_contract() {
             }),
         )
         .expect("S5_HARNESS_BOUNDARY:user_data_only: WorldAnchor positive control must succeed");
+    world
+        .apply_joint_patch(
+            revolute_joint,
+            JointPatch::Revolute(RevoluteJointPatch {
+                local_anchor_b: Some((0.0, 0.5).into()),
+                ..RevoluteJointPatch::default()
+            }),
+        )
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: Revolute positive control must succeed");
 
     let events = s5_step_events(&mut world);
     assert!(
-        metadata_kept_distance_sleeping && metadata_kept_anchor_sleeping,
-        "S5_HARNESS_BOUNDARY:user_data_only: metadata-only patch must not wake either existing kind"
+        metadata_kept_distance_sleeping
+            && metadata_kept_anchor_sleeping
+            && metadata_kept_revolute_sleeping,
+        "S5_HARNESS_BOUNDARY:user_data_only: metadata-only patch must not wake any joint kind"
     );
     assert!(
         !s5_has_sleep_transition(&events, static_endpoint),
@@ -1338,11 +1454,13 @@ fn joint_lifecycle_wake_user_data_only_contract() {
     let distance_observation = s5_observe_wake(&world, &events, distance_dynamic, "user_data_only");
     let world_anchor_observation =
         s5_observe_wake(&world, &events, anchor_dynamic, "user_data_only");
+    let revolute_observation = s5_observe_wake(&world, &events, revolute_dynamic, "user_data_only");
     println!("S5_WAKE_CASE:user_data_only");
-    s5_assert_existing_kinds_woke(
+    s5_assert_joint_kinds_woke(
         "user_data_only",
         distance_observation,
         world_anchor_observation,
+        revolute_observation,
     );
 }
 
@@ -1352,6 +1470,7 @@ fn joint_lifecycle_wake_remove_contract() {
     let static_endpoint = s5_static_body(&mut world, "remove");
     let distance_dynamic = s5_dynamic_body(&mut world, false, "remove");
     let anchor_dynamic = s5_dynamic_body(&mut world, false, "remove");
+    let revolute_dynamic = s5_dynamic_body(&mut world, false, "remove");
     let distance_joint = world
         .create_joint(JointDesc::Distance(DistanceJointDesc {
             body_a: distance_dynamic,
@@ -1365,9 +1484,17 @@ fn joint_lifecycle_wake_remove_contract() {
             ..WorldAnchorJointDesc::default()
         }))
         .expect("S5_HARNESS_BOUNDARY:remove: WorldAnchor setup must succeed");
+    let revolute_joint = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a: revolute_dynamic,
+            body_b: static_endpoint,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:remove: Revolute setup must succeed");
     let _setup_events = s5_step_events(&mut world);
     s5_set_sleeping(&mut world, distance_dynamic, "remove");
     s5_set_sleeping(&mut world, anchor_dynamic, "remove");
+    s5_set_sleeping(&mut world, revolute_dynamic, "remove");
 
     world
         .destroy_joint(distance_joint)
@@ -1375,14 +1502,19 @@ fn joint_lifecycle_wake_remove_contract() {
     world
         .destroy_joint(anchor_joint)
         .expect("S5_HARNESS_BOUNDARY:remove: WorldAnchor remove must succeed");
+    world
+        .destroy_joint(revolute_joint)
+        .expect("S5_HARNESS_BOUNDARY:remove: Revolute remove must succeed");
     let events = s5_step_events(&mut world);
     assert!(
         events.iter().any(
             |event| matches!(event, WorldEvent::JointRemoved { joint } if *joint == distance_joint)
         ) && events.iter().any(
             |event| matches!(event, WorldEvent::JointRemoved { joint } if *joint == anchor_joint)
+        ) && events.iter().any(
+            |event| matches!(event, WorldEvent::JointRemoved { joint } if *joint == revolute_joint)
         ),
-        "S5_HARNESS_BOUNDARY:remove: both existing kinds must emit JointRemoved"
+        "S5_HARNESS_BOUNDARY:remove: all three kinds must emit JointRemoved"
     );
     assert!(
         !s5_has_sleep_transition(&events, static_endpoint),
@@ -1390,25 +1522,40 @@ fn joint_lifecycle_wake_remove_contract() {
     );
     let distance_observation = s5_observe_wake(&world, &events, distance_dynamic, "remove");
     let world_anchor_observation = s5_observe_wake(&world, &events, anchor_dynamic, "remove");
+    let revolute_observation = s5_observe_wake(&world, &events, revolute_dynamic, "remove");
     println!("S5_WAKE_CASE:remove");
-    s5_assert_existing_kinds_woke("remove", distance_observation, world_anchor_observation);
+    s5_assert_joint_kinds_woke(
+        "remove",
+        distance_observation,
+        world_anchor_observation,
+        revolute_observation,
+    );
 }
 
 #[test]
 fn joint_lifecycle_wake_body_cascade_contract() {
     let mut world = s5_lifecycle_world();
     let deleted_endpoint = s5_dynamic_body(&mut world, false, "body_cascade");
-    let surviving_endpoint = s5_dynamic_body(&mut world, false, "body_cascade");
-    let joint = world
+    let distance_survivor = s5_dynamic_body(&mut world, false, "body_cascade");
+    let revolute_survivor = s5_dynamic_body(&mut world, false, "body_cascade");
+    let distance_joint = world
         .create_joint(JointDesc::Distance(DistanceJointDesc {
             body_a: deleted_endpoint,
-            body_b: surviving_endpoint,
+            body_b: distance_survivor,
             ..DistanceJointDesc::default()
         }))
         .expect("S5_HARNESS_BOUNDARY:body_cascade: Distance setup must succeed");
+    let revolute_joint = world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a: deleted_endpoint,
+            body_b: revolute_survivor,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:body_cascade: Revolute setup must succeed");
     let _setup_events = s5_step_events(&mut world);
     s5_set_sleeping(&mut world, deleted_endpoint, "body_cascade");
-    s5_set_sleeping(&mut world, surviving_endpoint, "body_cascade");
+    s5_set_sleeping(&mut world, distance_survivor, "body_cascade");
+    s5_set_sleeping(&mut world, revolute_survivor, "body_cascade");
 
     world
         .destroy_body(deleted_endpoint)
@@ -1424,8 +1571,11 @@ fn joint_lifecycle_wake_body_cascade_contract() {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, WorldEvent::JointRemoved { joint: removed } if *removed == joint)),
-        "S5_HARNESS_BOUNDARY:body_cascade: cascaded joint must emit JointRemoved"
+            .any(|event| matches!(event, WorldEvent::JointRemoved { joint: removed } if *removed == distance_joint))
+            && events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::JointRemoved { joint: removed } if *removed == revolute_joint)),
+        "S5_HARNESS_BOUNDARY:body_cascade: both cascaded pair joints must emit JointRemoved"
     );
     assert!(
         !s5_has_sleep_transition(&events, deleted_endpoint),
@@ -1433,10 +1583,18 @@ fn joint_lifecycle_wake_body_cascade_contract() {
     );
     println!("S5_WAKE_CASE:body_cascade");
 
+    let distance_observation = s5_observe_wake(&world, &events, distance_survivor, "body_cascade");
+    let revolute_observation = s5_observe_wake(&world, &events, revolute_survivor, "body_cascade");
+    println!(
+        "S5_WAKE_OBSERVATION:body_cascade:Distance(awake={},user_patch={});Revolute(awake={},user_patch={})",
+        distance_observation.awake,
+        distance_observation.user_patch,
+        revolute_observation.awake,
+        revolute_observation.user_patch
+    );
     assert!(
-        s5_is_awake(&world, surviving_endpoint, "body_cascade")
-            && s5_has_user_patch_wake(&events, surviving_endpoint),
-        "S5_EXPECTED_WAKE:body_cascade: surviving Distance counterpart remained sleeping"
+        distance_observation.satisfied() && revolute_observation.satisfied(),
+        "S5_EXPECTED_WAKE:body_cascade: surviving Distance/Revolute counterpart remained sleeping"
     );
 }
 
@@ -1445,14 +1603,18 @@ fn joint_lifecycle_wake_rejected_transaction_contract() {
     let mut world = s5_lifecycle_world();
     let static_endpoint = s5_static_body(&mut world, "rejected_transaction");
     let dynamic_endpoint = s5_dynamic_body(&mut world, true, "rejected_transaction");
+    let revolute_endpoint = s5_dynamic_body(&mut world, true, "rejected_transaction");
     let setup_events = s5_step_events(&mut world);
     assert!(
         matches!(
             setup_events.as_slice(),
             [
                 WorldEvent::BodyCreated { body: first },
-                WorldEvent::BodyCreated { body: second }
-            ] if *first == static_endpoint && *second == dynamic_endpoint
+                WorldEvent::BodyCreated { body: second },
+                WorldEvent::BodyCreated { body: third }
+            ] if *first == static_endpoint
+                && *second == dynamic_endpoint
+                && *third == revolute_endpoint
         ),
         "S5_HARNESS_BOUNDARY:rejected_transaction: setup events must be fully drained before the rejected batch"
     );
@@ -1465,6 +1627,9 @@ fn joint_lifecycle_wake_rejected_transaction_contract() {
     let initial_dynamic = world
         .body(dynamic_endpoint)
         .expect("S5_HARNESS_BOUNDARY:rejected_transaction: dynamic setup view");
+    let initial_revolute = world
+        .body(revolute_endpoint)
+        .expect("S5_HARNESS_BOUNDARY:rejected_transaction: revolute setup view");
 
     let error = world
         .commands()
@@ -1474,6 +1639,13 @@ fn joint_lifecycle_wake_rejected_transaction_contract() {
                     body_a: dynamic_endpoint,
                     body_b: static_endpoint,
                     ..DistanceJointDesc::default()
+                }),
+            },
+            WorldCommand::CreateJoint {
+                desc: JointDesc::Revolute(RevoluteJointDesc {
+                    body_a: revolute_endpoint,
+                    body_b: static_endpoint,
+                    ..RevoluteJointDesc::default()
                 }),
             },
             WorldCommand::CreateJoint {
@@ -1488,8 +1660,8 @@ fn joint_lifecycle_wake_rejected_transaction_contract() {
     let rejected_joint_handles = world.joints().collect::<Vec<_>>();
 
     assert_eq!(
-        error.command_index, 1,
-        "S5_HARNESS_BOUNDARY:rejected_transaction: second command must be the rejection point"
+        error.command_index, 2,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: third command must be the rejection point"
     );
     assert_eq!(
         rejected_revision, initial_revision,
@@ -1513,6 +1685,13 @@ fn joint_lifecycle_wake_rejected_transaction_contract() {
             .expect("S5_HARNESS_BOUNDARY:rejected_transaction: dynamic endpoint after rejection"),
         initial_dynamic,
         "S5_HARNESS_BOUNDARY:rejected_transaction: rejected scratch batch changed dynamic body facts"
+    );
+    assert_eq!(
+        world
+            .body(revolute_endpoint)
+            .expect("S5_HARNESS_BOUNDARY:rejected_transaction: revolute endpoint after rejection"),
+        initial_revolute,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: rejected scratch batch changed Revolute body facts"
     );
 
     let rejected_events = s5_step_events(&mut world);
@@ -1548,78 +1727,111 @@ fn joint_lifecycle_wake_rejected_transaction_contract() {
             .expect("S5_HARNESS_BOUNDARY:rejected_transaction: control dynamic post-step view"),
         "S5_HARNESS_BOUNDARY:rejected_transaction: dynamic body diverged from untouched control"
     );
+    assert_eq!(
+        world
+            .body(revolute_endpoint)
+            .expect("S5_HARNESS_BOUNDARY:rejected_transaction: revolute post-step view"),
+        untouched_control
+            .body(revolute_endpoint)
+            .expect("S5_HARNESS_BOUNDARY:rejected_transaction: control revolute post-step view"),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: revolute body diverged from untouched control"
+    );
 
     let successful = world
         .commands()
-        .apply_one(WorldCommand::CreateJoint {
-            desc: JointDesc::WorldAnchor(WorldAnchorJointDesc {
-                body: dynamic_endpoint,
-                ..WorldAnchorJointDesc::default()
-            }),
-        })
+        .apply([
+            WorldCommand::CreateJoint {
+                desc: JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                    body: dynamic_endpoint,
+                    ..WorldAnchorJointDesc::default()
+                }),
+            },
+            WorldCommand::CreateJoint {
+                desc: JointDesc::Revolute(RevoluteJointDesc {
+                    body_a: revolute_endpoint,
+                    body_b: static_endpoint,
+                    ..RevoluteJointDesc::default()
+                }),
+            },
+        ])
         .expect("S5_HARNESS_BOUNDARY:rejected_transaction: positive transaction must succeed");
     let control_successful = untouched_control
         .commands()
-        .apply_one(WorldCommand::CreateJoint {
-            desc: JointDesc::WorldAnchor(WorldAnchorJointDesc {
-                body: dynamic_endpoint,
-                ..WorldAnchorJointDesc::default()
-            }),
-        })
+        .apply([
+            WorldCommand::CreateJoint {
+                desc: JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                    body: dynamic_endpoint,
+                    ..WorldAnchorJointDesc::default()
+                }),
+            },
+            WorldCommand::CreateJoint {
+                desc: JointDesc::Revolute(RevoluteJointDesc {
+                    body_a: revolute_endpoint,
+                    body_b: static_endpoint,
+                    ..RevoluteJointDesc::default()
+                }),
+            },
+        ])
         .expect("S5_HARNESS_BOUNDARY:rejected_transaction: untouched control create must succeed");
     assert_eq!(
         successful.joint_handles.len(),
-        1,
-        "S5_HARNESS_BOUNDARY:rejected_transaction: successful control must create one joint"
+        2,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: successful control must create two joints"
     );
     assert_eq!(
         control_successful.joint_handles.len(),
-        1,
-        "S5_HARNESS_BOUNDARY:rejected_transaction: untouched control must create one joint"
+        2,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: untouched control must create two joints"
     );
-    let actual_handle = successful.joint_handles[0];
-    let control_handle = control_successful.joint_handles[0];
     assert_eq!(
-        actual_handle, control_handle,
+        successful.joint_handles, control_successful.joint_handles,
         "S5_HARNESS_BOUNDARY:rejected_transaction: rejected scratch consumed authoritative joint-handle state"
     );
+    let actual_anchor = successful.joint_handles[0];
+    let actual_revolute = successful.joint_handles[1];
     assert!(
         matches!(
             successful.events.as_slice(),
-            [WorldCommandEvent::JointCreated { joint }] if *joint == actual_handle
+            [
+                WorldCommandEvent::JointCreated { joint: first },
+                WorldCommandEvent::JointCreated { joint: second }
+            ] if *first == actual_anchor && *second == actual_revolute
         ) && matches!(
             control_successful.events.as_slice(),
-            [WorldCommandEvent::JointCreated { joint }] if *joint == control_handle
+            [
+                WorldCommandEvent::JointCreated { joint: first },
+                WorldCommandEvent::JointCreated { joint: second }
+            ] if *first == actual_anchor && *second == actual_revolute
         ),
         "S5_HARNESS_BOUNDARY:rejected_transaction: successful reports must identify their authoritative handles"
     );
     assert_eq!(
         world.joints().collect::<Vec<_>>(),
-        vec![actual_handle],
-        "S5_HARNESS_BOUNDARY:rejected_transaction: actual handle must be the only authoritative joint"
+        successful.joint_handles,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: actual handles must be the authoritative joints"
     );
     assert_eq!(
         untouched_control.joints().collect::<Vec<_>>(),
-        vec![control_handle],
-        "S5_HARNESS_BOUNDARY:rejected_transaction: control handle must be the only authoritative joint"
+        control_successful.joint_handles,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: control handles must be the authoritative joints"
     );
-    let actual_desc = world
-        .joint(actual_handle)
-        .expect("S5_HARNESS_BOUNDARY:rejected_transaction: actual report handle must resolve")
-        .desc()
-        .clone();
-    let control_desc = untouched_control
-        .joint(control_handle)
-        .expect("S5_HARNESS_BOUNDARY:rejected_transaction: control report handle must resolve")
-        .desc()
-        .clone();
-    assert_eq!(
-        actual_desc, control_desc,
-        "S5_HARNESS_BOUNDARY:rejected_transaction: successful descriptor diverged from untouched control"
-    );
+    for handle in successful.joint_handles.iter().copied() {
+        assert_eq!(
+            world
+                .joint(handle)
+                .expect("S5_HARNESS_BOUNDARY:rejected_transaction: report handle must resolve")
+                .desc(),
+            untouched_control
+                .joint(handle)
+                .expect("S5_HARNESS_BOUNDARY:rejected_transaction: control handle must resolve")
+                .desc(),
+            "S5_HARNESS_BOUNDARY:rejected_transaction: successful descriptor diverged from untouched control"
+        );
+    }
     assert!(
-        matches!(actual_desc, JointDesc::WorldAnchor(desc) if desc.body == dynamic_endpoint),
-        "S5_HARNESS_BOUNDARY:rejected_transaction: authoritative descriptor must be the successful WorldAnchor command"
+        matches!(world.joint(actual_anchor).expect("anchor").desc(), JointDesc::WorldAnchor(desc) if desc.body == dynamic_endpoint)
+            && matches!(world.joint(actual_revolute).expect("revolute").desc(), JointDesc::Revolute(desc) if desc.body_a == revolute_endpoint && desc.body_b == static_endpoint),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: authoritative descriptors must preserve WorldAnchor/Revolute commands"
     );
 
     let successful_events = s5_step_events(&mut world);
@@ -1628,13 +1840,32 @@ fn joint_lifecycle_wake_rejected_transaction_contract() {
         "S5_HARNESS_BOUNDARY:rejected_transaction: failed scratch static endpoint must not transition"
     );
     println!(
-        "S5_REJECTED_TRANSACTION_BOUNDARY:events_empty=true;handle_control={actual_handle:?};descriptor_control=true"
+        "S5_REJECTED_TRANSACTION_BOUNDARY:events_empty=true;handle_control={:?};descriptor_control=true",
+        successful.joint_handles
     );
     println!("S5_WAKE_CASE:rejected_transaction");
 
+    let world_anchor_observation = s5_observe_wake(
+        &world,
+        &successful_events,
+        dynamic_endpoint,
+        "rejected_transaction",
+    );
+    let revolute_observation = s5_observe_wake(
+        &world,
+        &successful_events,
+        revolute_endpoint,
+        "rejected_transaction",
+    );
+    println!(
+        "S5_WAKE_OBSERVATION:rejected_transaction:WorldAnchor(awake={},user_patch={});Revolute(awake={},user_patch={})",
+        world_anchor_observation.awake,
+        world_anchor_observation.user_patch,
+        revolute_observation.awake,
+        revolute_observation.user_patch
+    );
     assert!(
-        s5_is_awake(&world, dynamic_endpoint, "rejected_transaction")
-            && s5_has_user_patch_wake(&successful_events, dynamic_endpoint),
-        "S5_EXPECTED_WAKE:rejected_transaction: successful transaction control did not wake with UserPatch"
+        world_anchor_observation.satisfied() && revolute_observation.satisfied(),
+        "S5_EXPECTED_WAKE:rejected_transaction: successful WorldAnchor/Revolute transaction controls did not wake with UserPatch"
     );
 }

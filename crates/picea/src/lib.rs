@@ -32,8 +32,8 @@ pub mod prelude {
         WorldRevision,
     };
     pub use super::joint::{
-        DistanceJointDesc, DistanceJointPatch, JointDesc, JointPatch, JointView,
-        WorldAnchorJointDesc, WorldAnchorJointPatch,
+        DistanceJointDesc, DistanceJointPatch, JointDesc, JointPatch, JointView, RevoluteJointDesc,
+        RevoluteJointPatch, WorldAnchorJointDesc, WorldAnchorJointPatch,
     };
     pub use super::math::{edge::Edge, point::Point, segment::Segment, vector::Vector, FloatNum};
     pub use super::pipeline::{SimulationPipeline, StepConfig, StepReport, StepStats};

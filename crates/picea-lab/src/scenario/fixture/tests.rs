@@ -935,3 +935,130 @@ fn scene_fixture_joint_body_reference_errors_keep_nested_recipe_paths() {
             "world setup failed: recipe.joints[0].desc.body_b: body handle does not belong to this world"
         );
 }
+
+#[test]
+fn scene_fixture_revolute_round_trips_schema_v1_fields() {
+    let json = r#"
+        {
+          "schema_version": 1,
+          "world": { "gravity": [0.0, 0.0], "enable_sleep": true },
+          "bodies": [
+            {
+              "body_type": "static",
+              "shape": { "type": "rect", "width": 1.0, "height": 1.0 }
+            },
+            {
+              "body_type": "dynamic",
+              "shape": { "type": "circle", "radius": 0.5 }
+            }
+          ],
+          "joints": [{
+            "type": "revolute",
+            "body_a": 1,
+            "body_b": 0,
+            "local_anchor_a": [0.25, -0.5],
+            "local_anchor_b": [-0.75, 1.25],
+            "user_data": 42
+          }]
+        }
+        "#;
+
+    let fixture: SceneRecipeFixture =
+        serde_json::from_str(json).expect("revolute fixture should deserialize");
+    assert_eq!(fixture.schema_version, SCENE_RECIPE_SCHEMA_VERSION);
+    match &fixture.joints[0] {
+        SceneJointFixture::Revolute(revolute) => {
+            assert_eq!((revolute.body_a, revolute.body_b), (1, 0));
+            assert_eq!(revolute.local_anchor_a, Some([0.25, -0.5]));
+            assert_eq!(revolute.local_anchor_b, Some([-0.75, 1.25]));
+            assert_eq!(revolute.user_data, Some(42));
+        }
+        _ => panic!("expected revolute fixture"),
+    }
+
+    let encoded = serde_json::to_value(&fixture).expect("revolute fixture should serialize");
+    assert_eq!(encoded["schema_version"], 1);
+    assert_eq!(encoded["joints"][0]["type"], "revolute");
+    assert_eq!(encoded["joints"][0]["body_a"], 1);
+    assert_eq!(encoded["joints"][0]["body_b"], 0);
+    assert_eq!(
+        encoded["joints"][0]["local_anchor_a"],
+        serde_json::json!([0.25, -0.5])
+    );
+    assert_eq!(
+        encoded["joints"][0]["local_anchor_b"],
+        serde_json::json!([-0.75, 1.25])
+    );
+    assert_eq!(encoded["joints"][0]["user_data"], 42);
+
+    let world = instantiate_scene_fixture(&fixture).expect("revolute fixture should instantiate");
+    let bodies = world.bodies().collect::<Vec<_>>();
+    let joint = world.joints().next().expect("revolute joint");
+    match world.joint(joint).expect("revolute view").desc() {
+        JointDesc::Revolute(desc) => {
+            assert_eq!(desc.body_a, bodies[1]);
+            assert_eq!(desc.body_b, bodies[0]);
+            assert_eq!(desc.local_anchor_a, Point::new(0.25, -0.5));
+            assert_eq!(desc.local_anchor_b, Point::new(-0.75, 1.25));
+            assert_eq!(desc.user_data, 42);
+        }
+        _ => panic!("expected revolute world descriptor"),
+    }
+}
+
+#[test]
+fn scene_fixture_revolute_defaults_optional_fields_from_core() {
+    let json = r#"
+        {
+          "schema_version": 1,
+          "bodies": [
+            {
+              "body_type": "static",
+              "shape": { "type": "rect", "width": 1.0, "height": 1.0 }
+            },
+            {
+              "body_type": "dynamic",
+              "shape": { "type": "circle", "radius": 0.5 }
+            }
+          ],
+          "joints": [{ "type": "revolute", "body_a": 1, "body_b": 0 }]
+        }
+        "#;
+
+    let fixture: SceneRecipeFixture =
+        serde_json::from_str(json).expect("minimal revolute fixture should deserialize");
+    match &fixture.joints[0] {
+        SceneJointFixture::Revolute(revolute) => {
+            assert_eq!(revolute.local_anchor_a, None);
+            assert_eq!(revolute.local_anchor_b, None);
+            assert_eq!(revolute.user_data, None);
+        }
+        _ => panic!("expected revolute fixture"),
+    }
+    let world = instantiate_scene_fixture(&fixture).expect("minimal fixture should instantiate");
+    let joint = world.joints().next().expect("revolute joint");
+    match world.joint(joint).expect("revolute view").desc() {
+        JointDesc::Revolute(desc) => {
+            let defaults = RevoluteJointDesc::default();
+            assert_eq!(desc.local_anchor_a, defaults.local_anchor_a);
+            assert_eq!(desc.local_anchor_b, defaults.local_anchor_b);
+            assert_eq!(desc.user_data, defaults.user_data);
+        }
+        _ => panic!("expected revolute world descriptor"),
+    }
+}
+
+#[test]
+fn scene_fixture_revolute_old_reader_rejects_unknown_variant() {
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum OldSceneJointReader {
+        Distance,
+        WorldAnchor,
+    }
+
+    let error =
+        serde_json::from_str::<OldSceneJointReader>(r#"{"type":"revolute","body_a":0,"body_b":1}"#)
+            .expect_err("old closed schema-v1 reader must reject revolute");
+    assert!(error.to_string().contains("unknown variant `revolute`"));
+}

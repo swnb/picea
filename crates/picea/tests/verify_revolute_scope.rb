@@ -60,6 +60,9 @@ SCOPES = {
       crates/picea-lab/src/scenario/scene_lattice.rs
       crates/picea-lab/web/src/types.ts
       docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+      crates/picea-lab/src/scenario/mod.rs
+      crates/picea-lab/src/lib.rs
+      crates/picea/tests/verify_revolute_scope.rb
     ],
     # Compiler-discovered consumers must be approved in the living spec first.
     optional: []
@@ -306,7 +309,8 @@ def self_test!
   tree = git("rev-parse", "#{valid}^{tree}").first.strip
   expect_contract_error("noncommit") { validate_sha!(tree, "test") }
   expect_contract_error("mismatch") { validate_cli_sha!("S5-API-RED", MILESTONE_BASE) }
-  expect_contract_error("future-receipt-pending") { receipt_sha("S5-API") }
+  validate_cli_sha!("S5-API", "6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68")
+  puts "S5_SCOPE_SELF_TEST=current-s5-api-receipt:PASS"
 
   validate_cli_sha!("S5-API-RED", valid)
   puts "S5_SCOPE_SELF_TEST=valid:PASS"
