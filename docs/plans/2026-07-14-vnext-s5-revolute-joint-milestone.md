@@ -1,6 +1,6 @@
 # vNext Handoff §5 Revolute Joint Pin-only V1 Milestone
 
-状态：S5-D第三轮reviewer=`0 High / 0 Medium / 1 Low`，independent docs verifier=`S5-D VERIFIER PASS`；commit待完成；implementation/API/solver未开始；Chrome `NOT RUN / BROWSER PENDING`
+状态：S5-D已commit（`eecbc331a36bfb694676c979bffb03f5a47202dd`）；S5-API-RED final reviewer=`0 High / 0 Medium / 0 Low`、independent verifier=`S5-API-RED VERIFIER PASS`，commit `PENDING`；API/solver未开始；Chrome `NOT RUN / BROWSER PENDING`
 日期：2026-07-14
 基线：`feat/vnext-s5-revolute-joint@28867b5`
 设计：`docs/design/2026-07-14-revolute-joint-v1-design.md`
@@ -307,14 +307,17 @@ S5-API-RED receipt：
 
 | Acceptance | Baseline expectation | 实际结果 |
 | --- | --- | --- |
-| Public desc/patch/prelude | RED: missing approved types | 待填 |
-| Six enum variants/attributes | RED: missing variant；attribute diagnosis分类记录 | 待填 |
-| Recipe/debug/fixture surface | RED: missing approved surface | 待填 |
-| Existing Distance/WorldAnchor lifecycle runtime | RED：六个exact tests均`running 1 test`+sentinel+指定positive wake assertion failure | 待填 |
-| Revolute lifecycle runtime | NOT RUN：baseline missing public surface；只能记录external surface RED | 待填 |
-| Workspace all-target compile | GREEN：RED tests baseline-compilable | 待填 |
-| Temp isolation | GREEN: repo无lock/target | 待填 |
-| Binary node scope | GREEN: exact required set、无unexpected path；negative self-test非零 | 待填 |
+| Public desc/patch/prelude | RED: missing approved types | RED有效：external verifier连续两次wrapper exit `0`，内部positive `cargo check --lib`均exit `101`；仅出现批准的`E0432/E0599`，明确缺少prelude `RevoluteJointDesc/RevoluteJointPatch`及对应variants；future GREEN fixture已精确锁定desc default的两个invalid handles、zero anchors、`user_data=0`与patch default全`None`，当前因surface缺失`NOT RUN` |
+| Six enum variants/attributes | RED: missing variant；attribute diagnosis分类记录 | 六个external feature probe均仅以`E0599`缺少`Revolute`失败：`JointKind/JointDesc/JointPatch/JointBundle/DebugJointKind/SceneJointFixture`；当前closed enums尚不能产生future `#[non_exhaustive]`的`E0004`，expect-green已逐enum锁定届时必须仅得到non-exhaustive wildcard `E0004` |
+| Recipe/debug/fixture surface | RED: missing approved surface | RED有效：诊断明确覆盖`JointBundle::Revolute`/`JointBundle::revolute`、`DebugJointKind::Revolute`、`SceneRevoluteJointFixture`/`SceneJointFixture::Revolute`缺口；无manifest/path/network/fixture syntax或其他compiler error；future schema-v1 GREEN lock使用两组不同非零anchors并精确断言body indices、两anchors、user_data、version/tag及old-reader reject，当前`NOT RUN` |
+| Existing Distance/WorldAnchor lifecycle runtime | RED：六个exact tests均`running 1 test`+sentinel+指定positive wake assertion failure | RED有效：六条exact命令均`running 1 test`、正确`S5_WAKE_CASE:*`、exit `101`；create/constraint patch/user-data positive control/remove均在最终positive failure前输出`S5_WAKE_OBSERVATION:*`并保存Distance与WorldAnchor两类state/event observation；body cascade在surviving Distance counterpart失败；rejected transaction先完整drain setup events，再通过revision/joint/body descriptor/完整empty event receipt以及untouched-control handle/descriptor一致性boundary，最后在successful WorldAnchor transaction positive control失败；无`S5_HARNESS_BOUNDARY`失败 |
+| Revolute lifecycle runtime | NOT RUN：baseline missing public surface；只能记录external surface RED | `NOT RUN`：positive fixture因public surface缺失不能执行；verifier稳定输出`S5_PUBLIC_API_RUNTIME=NOT_RUN`，未把surface RED冒充runtime wake RED |
+| Workspace all-target compile | GREEN：RED tests baseline-compilable | GREEN：`rtk proxy cargo check --workspace --all-targets` exit `0` |
+| Temp isolation | GREEN: repo无lock/target | GREEN：仅在批准root`/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode/picea-s5-revolute-api`生成isolated `Cargo.lock/target`；repository fixture无local `Cargo.lock`/`target`且repo内无temp copy |
+| Binary node scope | GREEN: exact required set、无unexpected path；negative self-test非零 | GREEN：receipt parser只读取§16严格Markdown data rows并要求target node唯一；self-test证明正文/代码块node字符串不能覆盖真实row、duplicate row拒绝，并覆盖empty/PENDING/short/nonhex/unresolvable/noncommit/mismatch均拒绝且valid通过；current receipt-head输出immutable SHA，future S5-API明确`raw=PENDING`失败；node scope actual严格等于7 required paths，missing/unexpected均空；`git diff --check`与production/lab/Web/root Cargo zero-diff通过 |
+| Independent review | PASS: 无未闭合finding | final independent reviewer=`0 High / 0 Medium / 0 Low`，裁决`PASS` |
+| Independent verification | PASS: 独立复跑完整RED gate | independent verifier=`S5-API-RED VERIFIER PASS`；public expect-red连续两次wrapper `0`/internal `101`且仅approved diagnostics，六条wake exact均`running 1 test`、正确sentinel、approved exit `101`；workspace/scope/temp/diff均GREEN，7-path exact；Revolute runtime与Chrome均`NOT RUN` |
+| Commit | PENDING: reviewer/verifier通过后由supervisor执行 | `PENDING`；未填写或伪造S5-API-RED commit hash，API/solver未开始 |
 
 ## 7. S5-API：public surface、lifecycle 与 authoring
 
@@ -834,8 +837,8 @@ RED receipt额外记录 failure signature，并区分：
 
 | 日期 | Node | Start HEAD (full, immutable) | 状态 | Commit | Receipt / 备注 |
 | --- | --- | --- | --- | --- | --- |
-| 2026-07-14 | S5-D | `28867b5c8eeae3ec290ad7dfd5f52cbf3ca69e80` | review/verifier已通过；commit `PENDING` | `PENDING` | 第三轮reviewer=`0 High / 0 Medium / 1 Low`，允许进入verifier；independent docs verifier于`2026-07-14 17:16:23 CST`给出`S5-D VERIFIER PASS`；8-file scope/YAML/Mermaid/required terms/diff-check/crates/Cargo/Web zero-diff/cached empty均PASS；唯一Low留到S5-C；Chrome `NOT RUN / BROWSER PENDING`；implementation/API/solver未开始 |
-| - | S5-API-RED | `PENDING` | 未开始 | - | supervisor须在第一处改动前写入full HEAD；先提交surface + existing-kind lifecycle RED |
+| 2026-07-14 | S5-D | `28867b5c8eeae3ec290ad7dfd5f52cbf3ca69e80` | 已commit | `eecbc331a36bfb694676c979bffb03f5a47202dd` | 第三轮reviewer=`0 High / 0 Medium / 1 Low`，允许进入verifier；independent docs verifier于`2026-07-14 17:16:23 CST`给出`S5-D VERIFIER PASS`；8-file scope/YAML/Mermaid/required terms/diff-check/crates/Cargo/Web zero-diff/cached empty均PASS；唯一Low留到S5-C；Chrome `NOT RUN / BROWSER PENDING`；implementation/API/solver未开始 |
+| 2026-07-14 | S5-API-RED | `eecbc331a36bfb694676c979bffb03f5a47202dd` | final reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-API-RED VERIFIER PASS`；commit `PENDING` | `PENDING` | 4M remediation complete；public expect-red连续两次wrapper `0`/internal `101`且仅approved diagnostics；六enum missing-variant分类与六条existing-kind lifecycle exact RED均有效，wake exact各自`running 1 test`、正确sentinel、approved exit `101`；workspace/scope/temp/diff GREEN，7-path exact；Revolute runtime `NOT RUN`；API/solver未开始；Chrome `NOT RUN / BROWSER PENDING` |
 | - | S5-API | `PENDING` | 未开始 | - | 不得写solver |
 | - | S5-BEHAVIOR-RED | `PENDING` | 未开始 | - | 必须单独提交runtime behavior locks |
 | - | S5-SOLVER | `PENDING` | 未开始 | - | 2x2 point constraint；streams不变 |

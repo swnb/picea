@@ -1,0 +1,25 @@
+[package]
+name = "picea-revolute-public-api-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+picea = { path = "__PICEA_PATH__" }
+picea-lab = { path = "__PICEA_LAB_PATH__" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+exhaustive-joint-kind = []
+exhaustive-joint-desc = []
+exhaustive-joint-patch = []
+exhaustive-joint-bundle = []
+exhaustive-debug-joint-kind = []
+exhaustive-scene-joint-fixture = []
+
+[[bin]]
+name = "exhaustive"
+path = "src/bin/exhaustive.rs"
+
+[workspace]

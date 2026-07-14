@@ -1,7 +1,8 @@
 use picea::prelude::{
     BodyDesc, BodyHandle, BodyPatch, BodyType, ColliderDesc, ColliderPatch, DistanceJointDesc,
-    DistanceJointPatch, JointDesc, JointPatch, Pose, SharedShape, SimulationPipeline, StepConfig,
-    Vector, World, WorldAnchorJointDesc, WorldAnchorJointPatch, WorldDesc, WorldError, WorldEvent,
+    DistanceJointPatch, JointDesc, JointPatch, Pose, SharedShape, SimulationPipeline,
+    SleepTransitionReason, StepConfig, Vector, World, WorldAnchorJointDesc, WorldAnchorJointPatch,
+    WorldCommand, WorldCommandEvent, WorldDesc, WorldError, WorldEvent,
 };
 use picea::world::{HandleError, TopologyError, ValidationError};
 
@@ -1018,5 +1019,622 @@ fn dynamic_static_distance_joints_solve_through_dense_island_slots() {
             .x(),
         static_left_before,
         "static endpoint must remain fixed while the dense island row solves"
+    );
+}
+
+fn s5_lifecycle_world() -> World {
+    World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: true,
+    })
+}
+
+fn s5_dynamic_body(world: &mut World, sleeping: bool, case: &str) -> BodyHandle {
+    world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            sleeping,
+            ..BodyDesc::default()
+        })
+        .unwrap_or_else(|error| {
+            panic!("S5_HARNESS_BOUNDARY:{case}: dynamic body setup failed: {error:?}")
+        })
+}
+
+fn s5_static_body(world: &mut World, case: &str) -> BodyHandle {
+    world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            ..BodyDesc::default()
+        })
+        .unwrap_or_else(|error| {
+            panic!("S5_HARNESS_BOUNDARY:{case}: static body setup failed: {error:?}")
+        })
+}
+
+fn s5_set_sleeping(world: &mut World, body: BodyHandle, case: &str) {
+    world
+        .apply_body_patch(
+            body,
+            BodyPatch {
+                sleeping: Some(true),
+                ..BodyPatch::default()
+            },
+        )
+        .unwrap_or_else(|error| {
+            panic!("S5_HARNESS_BOUNDARY:{case}: could not prepare sleeping dynamic: {error:?}")
+        });
+    assert!(
+        world
+            .body(body)
+            .unwrap_or_else(|error| {
+                panic!("S5_HARNESS_BOUNDARY:{case}: prepared body vanished: {error:?}")
+            })
+            .sleeping(),
+        "S5_HARNESS_BOUNDARY:{case}: sleeping precondition was not established"
+    );
+}
+
+fn s5_step_events(world: &mut World) -> Vec<WorldEvent> {
+    SimulationPipeline::new(StepConfig::default())
+        .step(world)
+        .events
+}
+
+fn s5_has_user_patch_wake(events: &[WorldEvent], body: BodyHandle) -> bool {
+    events.iter().any(|event| {
+        matches!(
+            event,
+            WorldEvent::SleepChanged(sleep)
+                if sleep.body == body
+                    && !sleep.is_sleeping
+                    && sleep.reason == SleepTransitionReason::UserPatch
+        )
+    })
+}
+
+fn s5_has_sleep_transition(events: &[WorldEvent], body: BodyHandle) -> bool {
+    events
+        .iter()
+        .any(|event| matches!(event, WorldEvent::SleepChanged(sleep) if sleep.body == body))
+}
+
+fn s5_is_awake(world: &World, body: BodyHandle, case: &str) -> bool {
+    !world
+        .body(body)
+        .unwrap_or_else(|error| {
+            panic!("S5_HARNESS_BOUNDARY:{case}: live endpoint vanished: {error:?}")
+        })
+        .sleeping()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct S5WakeObservation {
+    awake: bool,
+    user_patch: bool,
+}
+
+impl S5WakeObservation {
+    fn satisfied(self) -> bool {
+        self.awake && self.user_patch
+    }
+}
+
+fn s5_observe_wake(
+    world: &World,
+    events: &[WorldEvent],
+    body: BodyHandle,
+    case: &str,
+) -> S5WakeObservation {
+    S5WakeObservation {
+        awake: s5_is_awake(world, body, case),
+        user_patch: s5_has_user_patch_wake(events, body),
+    }
+}
+
+fn s5_assert_existing_kinds_woke(
+    case: &str,
+    distance: S5WakeObservation,
+    world_anchor: S5WakeObservation,
+) {
+    println!(
+        "S5_WAKE_OBSERVATION:{case}:Distance(awake={},user_patch={});WorldAnchor(awake={},user_patch={})",
+        distance.awake, distance.user_patch, world_anchor.awake, world_anchor.user_patch
+    );
+    if distance.satisfied() && world_anchor.satisfied() {
+        return;
+    }
+
+    let expected_failure = match case {
+        "create" => "Distance sleeping dynamic endpoint remained sleeping or lacked UserPatch",
+        "constraint_patch" => "Distance endpoint remained sleeping after a constraint patch",
+        "user_data_only" => "Distance positive constraint control remained sleeping",
+        "remove" => "still-live Distance endpoint remained sleeping",
+        _ => "existing-kind wake contract was not satisfied",
+    };
+    panic!(
+        "S5_EXPECTED_WAKE:{case}: {expected_failure}; observed Distance(awake={},user_patch={}), WorldAnchor(awake={},user_patch={})",
+        distance.awake, distance.user_patch, world_anchor.awake, world_anchor.user_patch
+    );
+}
+
+#[test]
+fn joint_lifecycle_wake_create_contract() {
+    let mut world = s5_lifecycle_world();
+    let static_endpoint = s5_static_body(&mut world, "create");
+    let distance_dynamic = s5_dynamic_body(&mut world, true, "create");
+    let anchor_dynamic = s5_dynamic_body(&mut world, true, "create");
+
+    let distance_joint = world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: distance_dynamic,
+            body_b: static_endpoint,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:create: Distance setup must succeed");
+    let anchor_joint = world
+        .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+            body: anchor_dynamic,
+            ..WorldAnchorJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:create: WorldAnchor setup must succeed");
+
+    let events = s5_step_events(&mut world);
+    assert!(
+        events.iter().any(
+            |event| matches!(event, WorldEvent::JointCreated { joint } if *joint == distance_joint)
+        ) && events.iter().any(
+            |event| matches!(event, WorldEvent::JointCreated { joint } if *joint == anchor_joint)
+        ),
+        "S5_HARNESS_BOUNDARY:create: both existing joint kinds must execute"
+    );
+    assert!(
+        !s5_has_sleep_transition(&events, static_endpoint),
+        "S5_HARNESS_BOUNDARY:create: static endpoint must not emit a sleep transition"
+    );
+    let distance_observation = s5_observe_wake(&world, &events, distance_dynamic, "create");
+    let world_anchor_observation = s5_observe_wake(&world, &events, anchor_dynamic, "create");
+    println!("S5_WAKE_CASE:create");
+    s5_assert_existing_kinds_woke("create", distance_observation, world_anchor_observation);
+}
+
+#[test]
+fn joint_lifecycle_wake_constraint_patch_contract() {
+    let mut world = s5_lifecycle_world();
+    let static_endpoint = s5_static_body(&mut world, "constraint_patch");
+    let distance_dynamic = s5_dynamic_body(&mut world, false, "constraint_patch");
+    let anchor_dynamic = s5_dynamic_body(&mut world, false, "constraint_patch");
+    let distance_joint = world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: distance_dynamic,
+            body_b: static_endpoint,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:constraint_patch: Distance setup must succeed");
+    let anchor_joint = world
+        .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+            body: anchor_dynamic,
+            ..WorldAnchorJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:constraint_patch: WorldAnchor setup must succeed");
+    let _setup_events = s5_step_events(&mut world);
+    s5_set_sleeping(&mut world, distance_dynamic, "constraint_patch");
+    s5_set_sleeping(&mut world, anchor_dynamic, "constraint_patch");
+
+    world
+        .apply_joint_patch(
+            distance_joint,
+            JointPatch::Distance(DistanceJointPatch {
+                stiffness: Some(0.75),
+                ..DistanceJointPatch::default()
+            }),
+        )
+        .expect("S5_HARNESS_BOUNDARY:constraint_patch: Distance patch must succeed");
+    world
+        .apply_joint_patch(
+            anchor_joint,
+            JointPatch::WorldAnchor(WorldAnchorJointPatch {
+                stiffness: Some(0.75),
+                ..WorldAnchorJointPatch::default()
+            }),
+        )
+        .expect("S5_HARNESS_BOUNDARY:constraint_patch: WorldAnchor patch must succeed");
+
+    let events = s5_step_events(&mut world);
+    assert!(
+        !s5_has_sleep_transition(&events, static_endpoint),
+        "S5_HARNESS_BOUNDARY:constraint_patch: static endpoint must not transition"
+    );
+    let distance_observation =
+        s5_observe_wake(&world, &events, distance_dynamic, "constraint_patch");
+    let world_anchor_observation =
+        s5_observe_wake(&world, &events, anchor_dynamic, "constraint_patch");
+    println!("S5_WAKE_CASE:constraint_patch");
+    s5_assert_existing_kinds_woke(
+        "constraint_patch",
+        distance_observation,
+        world_anchor_observation,
+    );
+}
+
+#[test]
+fn joint_lifecycle_wake_user_data_only_contract() {
+    let mut world = s5_lifecycle_world();
+    let static_endpoint = s5_static_body(&mut world, "user_data_only");
+    let distance_dynamic = s5_dynamic_body(&mut world, false, "user_data_only");
+    let anchor_dynamic = s5_dynamic_body(&mut world, false, "user_data_only");
+    let distance_joint = world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: distance_dynamic,
+            body_b: static_endpoint,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: Distance setup must succeed");
+    let anchor_joint = world
+        .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+            body: anchor_dynamic,
+            ..WorldAnchorJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: WorldAnchor setup must succeed");
+    let _setup_events = s5_step_events(&mut world);
+    s5_set_sleeping(&mut world, distance_dynamic, "user_data_only");
+    s5_set_sleeping(&mut world, anchor_dynamic, "user_data_only");
+
+    world
+        .apply_joint_patch(
+            distance_joint,
+            JointPatch::Distance(DistanceJointPatch {
+                user_data: Some(41),
+                ..DistanceJointPatch::default()
+            }),
+        )
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: Distance metadata patch must succeed");
+    world
+        .apply_joint_patch(
+            anchor_joint,
+            JointPatch::WorldAnchor(WorldAnchorJointPatch {
+                user_data: Some(42),
+                ..WorldAnchorJointPatch::default()
+            }),
+        )
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: WorldAnchor metadata patch must succeed");
+    let metadata_kept_distance_sleeping = world
+        .body(distance_dynamic)
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: Distance endpoint must remain live")
+        .sleeping();
+    let metadata_kept_anchor_sleeping = world
+        .body(anchor_dynamic)
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: WorldAnchor endpoint must remain live")
+        .sleeping();
+
+    world
+        .apply_joint_patch(
+            distance_joint,
+            JointPatch::Distance(DistanceJointPatch {
+                stiffness: Some(0.5),
+                ..DistanceJointPatch::default()
+            }),
+        )
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: Distance positive control must succeed");
+    world
+        .apply_joint_patch(
+            anchor_joint,
+            JointPatch::WorldAnchor(WorldAnchorJointPatch {
+                stiffness: Some(0.5),
+                ..WorldAnchorJointPatch::default()
+            }),
+        )
+        .expect("S5_HARNESS_BOUNDARY:user_data_only: WorldAnchor positive control must succeed");
+
+    let events = s5_step_events(&mut world);
+    assert!(
+        metadata_kept_distance_sleeping && metadata_kept_anchor_sleeping,
+        "S5_HARNESS_BOUNDARY:user_data_only: metadata-only patch must not wake either existing kind"
+    );
+    assert!(
+        !s5_has_sleep_transition(&events, static_endpoint),
+        "S5_HARNESS_BOUNDARY:user_data_only: static endpoint must not transition"
+    );
+    let distance_observation = s5_observe_wake(&world, &events, distance_dynamic, "user_data_only");
+    let world_anchor_observation =
+        s5_observe_wake(&world, &events, anchor_dynamic, "user_data_only");
+    println!("S5_WAKE_CASE:user_data_only");
+    s5_assert_existing_kinds_woke(
+        "user_data_only",
+        distance_observation,
+        world_anchor_observation,
+    );
+}
+
+#[test]
+fn joint_lifecycle_wake_remove_contract() {
+    let mut world = s5_lifecycle_world();
+    let static_endpoint = s5_static_body(&mut world, "remove");
+    let distance_dynamic = s5_dynamic_body(&mut world, false, "remove");
+    let anchor_dynamic = s5_dynamic_body(&mut world, false, "remove");
+    let distance_joint = world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: distance_dynamic,
+            body_b: static_endpoint,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:remove: Distance setup must succeed");
+    let anchor_joint = world
+        .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+            body: anchor_dynamic,
+            ..WorldAnchorJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:remove: WorldAnchor setup must succeed");
+    let _setup_events = s5_step_events(&mut world);
+    s5_set_sleeping(&mut world, distance_dynamic, "remove");
+    s5_set_sleeping(&mut world, anchor_dynamic, "remove");
+
+    world
+        .destroy_joint(distance_joint)
+        .expect("S5_HARNESS_BOUNDARY:remove: Distance remove must succeed");
+    world
+        .destroy_joint(anchor_joint)
+        .expect("S5_HARNESS_BOUNDARY:remove: WorldAnchor remove must succeed");
+    let events = s5_step_events(&mut world);
+    assert!(
+        events.iter().any(
+            |event| matches!(event, WorldEvent::JointRemoved { joint } if *joint == distance_joint)
+        ) && events.iter().any(
+            |event| matches!(event, WorldEvent::JointRemoved { joint } if *joint == anchor_joint)
+        ),
+        "S5_HARNESS_BOUNDARY:remove: both existing kinds must emit JointRemoved"
+    );
+    assert!(
+        !s5_has_sleep_transition(&events, static_endpoint),
+        "S5_HARNESS_BOUNDARY:remove: static endpoint must not transition"
+    );
+    let distance_observation = s5_observe_wake(&world, &events, distance_dynamic, "remove");
+    let world_anchor_observation = s5_observe_wake(&world, &events, anchor_dynamic, "remove");
+    println!("S5_WAKE_CASE:remove");
+    s5_assert_existing_kinds_woke("remove", distance_observation, world_anchor_observation);
+}
+
+#[test]
+fn joint_lifecycle_wake_body_cascade_contract() {
+    let mut world = s5_lifecycle_world();
+    let deleted_endpoint = s5_dynamic_body(&mut world, false, "body_cascade");
+    let surviving_endpoint = s5_dynamic_body(&mut world, false, "body_cascade");
+    let joint = world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: deleted_endpoint,
+            body_b: surviving_endpoint,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("S5_HARNESS_BOUNDARY:body_cascade: Distance setup must succeed");
+    let _setup_events = s5_step_events(&mut world);
+    s5_set_sleeping(&mut world, deleted_endpoint, "body_cascade");
+    s5_set_sleeping(&mut world, surviving_endpoint, "body_cascade");
+
+    world
+        .destroy_body(deleted_endpoint)
+        .expect("S5_HARNESS_BOUNDARY:body_cascade: body removal must succeed");
+    assert!(
+        matches!(
+            world.body(deleted_endpoint),
+            Err(WorldError::Handle(HandleError::StaleBody { .. }))
+        ),
+        "S5_HARNESS_BOUNDARY:body_cascade: deleted endpoint must be stale"
+    );
+    let events = s5_step_events(&mut world);
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::JointRemoved { joint: removed } if *removed == joint)),
+        "S5_HARNESS_BOUNDARY:body_cascade: cascaded joint must emit JointRemoved"
+    );
+    assert!(
+        !s5_has_sleep_transition(&events, deleted_endpoint),
+        "S5_HARNESS_BOUNDARY:body_cascade: deleted endpoint must not receive a wake transition"
+    );
+    println!("S5_WAKE_CASE:body_cascade");
+
+    assert!(
+        s5_is_awake(&world, surviving_endpoint, "body_cascade")
+            && s5_has_user_patch_wake(&events, surviving_endpoint),
+        "S5_EXPECTED_WAKE:body_cascade: surviving Distance counterpart remained sleeping"
+    );
+}
+
+#[test]
+fn joint_lifecycle_wake_rejected_transaction_contract() {
+    let mut world = s5_lifecycle_world();
+    let static_endpoint = s5_static_body(&mut world, "rejected_transaction");
+    let dynamic_endpoint = s5_dynamic_body(&mut world, true, "rejected_transaction");
+    let setup_events = s5_step_events(&mut world);
+    assert!(
+        matches!(
+            setup_events.as_slice(),
+            [
+                WorldEvent::BodyCreated { body: first },
+                WorldEvent::BodyCreated { body: second }
+            ] if *first == static_endpoint && *second == dynamic_endpoint
+        ),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: setup events must be fully drained before the rejected batch"
+    );
+
+    let mut untouched_control = world.clone();
+    let initial_revision = world.revision();
+    let initial_static = world
+        .body(static_endpoint)
+        .expect("S5_HARNESS_BOUNDARY:rejected_transaction: static setup view");
+    let initial_dynamic = world
+        .body(dynamic_endpoint)
+        .expect("S5_HARNESS_BOUNDARY:rejected_transaction: dynamic setup view");
+
+    let error = world
+        .commands()
+        .apply([
+            WorldCommand::CreateJoint {
+                desc: JointDesc::Distance(DistanceJointDesc {
+                    body_a: dynamic_endpoint,
+                    body_b: static_endpoint,
+                    ..DistanceJointDesc::default()
+                }),
+            },
+            WorldCommand::CreateJoint {
+                desc: JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                    body: BodyHandle::INVALID,
+                    ..WorldAnchorJointDesc::default()
+                }),
+            },
+        ])
+        .expect_err("S5_HARNESS_BOUNDARY:rejected_transaction: invalid scratch batch must reject");
+    let rejected_revision = world.revision();
+    let rejected_joint_handles = world.joints().collect::<Vec<_>>();
+
+    assert_eq!(
+        error.command_index, 1,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: second command must be the rejection point"
+    );
+    assert_eq!(
+        rejected_revision, initial_revision,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: rejected scratch batch leaked a revision"
+    );
+    assert_eq!(
+        rejected_joint_handles,
+        Vec::new(),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: rejected scratch batch leaked a joint"
+    );
+    assert_eq!(
+        world
+            .body(static_endpoint)
+            .expect("S5_HARNESS_BOUNDARY:rejected_transaction: static endpoint after rejection"),
+        initial_static,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: rejected scratch batch changed static body facts"
+    );
+    assert_eq!(
+        world
+            .body(dynamic_endpoint)
+            .expect("S5_HARNESS_BOUNDARY:rejected_transaction: dynamic endpoint after rejection"),
+        initial_dynamic,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: rejected scratch batch changed dynamic body facts"
+    );
+
+    let rejected_events = s5_step_events(&mut world);
+    let control_events = s5_step_events(&mut untouched_control);
+    assert!(
+        rejected_events.is_empty(),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: authoritative event receipt must be completely empty after rejection, got {rejected_events:?}"
+    );
+    assert!(
+        control_events.is_empty(),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: untouched control unexpectedly emitted events"
+    );
+    assert_eq!(
+        world.revision(),
+        untouched_control.revision(),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: rejected world revision diverged from untouched control"
+    );
+    assert_eq!(
+        world
+            .body(static_endpoint)
+            .expect("S5_HARNESS_BOUNDARY:rejected_transaction: static post-step view"),
+        untouched_control
+            .body(static_endpoint)
+            .expect("S5_HARNESS_BOUNDARY:rejected_transaction: control static post-step view"),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: static body diverged from untouched control"
+    );
+    assert_eq!(
+        world
+            .body(dynamic_endpoint)
+            .expect("S5_HARNESS_BOUNDARY:rejected_transaction: dynamic post-step view"),
+        untouched_control
+            .body(dynamic_endpoint)
+            .expect("S5_HARNESS_BOUNDARY:rejected_transaction: control dynamic post-step view"),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: dynamic body diverged from untouched control"
+    );
+
+    let successful = world
+        .commands()
+        .apply_one(WorldCommand::CreateJoint {
+            desc: JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                body: dynamic_endpoint,
+                ..WorldAnchorJointDesc::default()
+            }),
+        })
+        .expect("S5_HARNESS_BOUNDARY:rejected_transaction: positive transaction must succeed");
+    let control_successful = untouched_control
+        .commands()
+        .apply_one(WorldCommand::CreateJoint {
+            desc: JointDesc::WorldAnchor(WorldAnchorJointDesc {
+                body: dynamic_endpoint,
+                ..WorldAnchorJointDesc::default()
+            }),
+        })
+        .expect("S5_HARNESS_BOUNDARY:rejected_transaction: untouched control create must succeed");
+    assert_eq!(
+        successful.joint_handles.len(),
+        1,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: successful control must create one joint"
+    );
+    assert_eq!(
+        control_successful.joint_handles.len(),
+        1,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: untouched control must create one joint"
+    );
+    let actual_handle = successful.joint_handles[0];
+    let control_handle = control_successful.joint_handles[0];
+    assert_eq!(
+        actual_handle, control_handle,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: rejected scratch consumed authoritative joint-handle state"
+    );
+    assert!(
+        matches!(
+            successful.events.as_slice(),
+            [WorldCommandEvent::JointCreated { joint }] if *joint == actual_handle
+        ) && matches!(
+            control_successful.events.as_slice(),
+            [WorldCommandEvent::JointCreated { joint }] if *joint == control_handle
+        ),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: successful reports must identify their authoritative handles"
+    );
+    assert_eq!(
+        world.joints().collect::<Vec<_>>(),
+        vec![actual_handle],
+        "S5_HARNESS_BOUNDARY:rejected_transaction: actual handle must be the only authoritative joint"
+    );
+    assert_eq!(
+        untouched_control.joints().collect::<Vec<_>>(),
+        vec![control_handle],
+        "S5_HARNESS_BOUNDARY:rejected_transaction: control handle must be the only authoritative joint"
+    );
+    let actual_desc = world
+        .joint(actual_handle)
+        .expect("S5_HARNESS_BOUNDARY:rejected_transaction: actual report handle must resolve")
+        .desc()
+        .clone();
+    let control_desc = untouched_control
+        .joint(control_handle)
+        .expect("S5_HARNESS_BOUNDARY:rejected_transaction: control report handle must resolve")
+        .desc()
+        .clone();
+    assert_eq!(
+        actual_desc, control_desc,
+        "S5_HARNESS_BOUNDARY:rejected_transaction: successful descriptor diverged from untouched control"
+    );
+    assert!(
+        matches!(actual_desc, JointDesc::WorldAnchor(desc) if desc.body == dynamic_endpoint),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: authoritative descriptor must be the successful WorldAnchor command"
+    );
+
+    let successful_events = s5_step_events(&mut world);
+    assert!(
+        !s5_has_sleep_transition(&successful_events, static_endpoint),
+        "S5_HARNESS_BOUNDARY:rejected_transaction: failed scratch static endpoint must not transition"
+    );
+    println!(
+        "S5_REJECTED_TRANSACTION_BOUNDARY:events_empty=true;handle_control={actual_handle:?};descriptor_control=true"
+    );
+    println!("S5_WAKE_CASE:rejected_transaction");
+
+    assert!(
+        s5_is_awake(&world, dynamic_endpoint, "rejected_transaction")
+            && s5_has_user_patch_wake(&successful_events, dynamic_endpoint),
+        "S5_EXPECTED_WAKE:rejected_transaction: successful transaction control did not wake with UserPatch"
     );
 }
