@@ -44,6 +44,9 @@ impl ContactKey {
 #[derive(Clone, Debug)]
 pub(crate) struct ContactRecord {
     pub(crate) contact: ContactEvent,
+    pub(crate) geometry_revision_a: u64,
+    pub(crate) geometry_revision_b: u64,
+    pub(crate) is_sensor: bool,
     pub(crate) witness_a_local: crate::math::point::Point,
     pub(crate) witness_b_local: crate::math::point::Point,
     pub(crate) normal_impulse: FloatNum,

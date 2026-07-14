@@ -492,13 +492,16 @@ impl DebugJoint {
 /// Read-only contact facts for external consumers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DebugContact {
-    /// Stable contact identifier.
+    /// Contact-point identifier persisted across compatible simulation steps.
     pub id: ContactId,
     /// Bodies touched by this contact.
     pub bodies: [BodyHandle; 2],
     /// Colliders touched by this contact.
     pub colliders: [ColliderHandle; 2],
-    /// Stable geometric feature identity for this contact point.
+    /// Authoritative feature of the current final geometry; SAT roles may change it across frames.
+    ///
+    /// A confirmed solver interaction retained without final overlap may instead
+    /// report its solver-start source feature. Use `id` for cross-frame identity.
     pub feature_id: ContactFeatureId,
     /// World-space contact point.
     pub point: Point,
@@ -672,7 +675,8 @@ fn sanitize_ccd_trace(trace: CcdTrace) -> CcdTrace {
 pub struct DebugManifoldPoint {
     /// Contact id associated with this point.
     pub contact_id: ContactId,
-    /// Stable geometric feature identity for this point.
+    /// Authoritative current geometry feature, or a confirmed solver-start source feature.
+    /// Use `contact_id` for cross-frame point identity.
     pub feature_id: ContactFeatureId,
     /// World-space contact point.
     pub point: Point,
@@ -694,7 +698,7 @@ impl DebugManifoldPoint {
 /// Read-only manifold facts for external consumers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DebugManifold {
-    /// Stable manifold identifier.
+    /// Manifold identifier persisted across compatible simulation steps.
     pub id: ManifoldId,
     /// Bodies participating in this manifold.
     pub bodies: [BodyHandle; 2],

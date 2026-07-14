@@ -186,9 +186,10 @@ pub struct GenericConvexTrace {
 /// Why a contact did or did not reuse the previous step's impulse cache.
 ///
 /// A warm-start cache stores the normal/tangent impulses solved for a contact
-/// point in the previous step. Reusing them is only safe when the same
-/// geometric feature is still touching and the contact normal/point have not
-/// drifted enough to make the old impulse point at the wrong constraint.
+/// point in the previous step. Reusing them is only safe when the internal
+/// geometry generation and point correspondence match and the contact
+/// normal/point have not drifted enough to make the old impulse point at the
+/// wrong constraint.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WarmStartCacheReason {
@@ -197,7 +198,8 @@ pub enum WarmStartCacheReason {
     /// No previous contact for the normalized collider pair was active last step.
     #[default]
     MissNoPrevious,
-    /// The pair existed last step, but the point-level feature id did not match.
+    /// The pair existed last step, but point identity, its internal geometry
+    /// generation, or one-to-one previous-point reservation did not match.
     MissFeatureId,
     /// The previous matching contact was sensor-only and had no solver impulse cache.
     MissPreviousSensor,
@@ -256,7 +258,7 @@ pub enum SourceRowContinuityReason {
     Sensor,
     /// No previous contact pair existed to compare against.
     NoPreviousPair,
-    /// Previous contacts existed, but none belonged to the same normalized collider pair.
+    /// No previous point from the same normalized pair and compatible geometry generation was reservable.
     PairMismatch,
     /// The pair looks like a clipped edge-swap lifecycle instead of source-row continuity.
     EdgeSwap,
@@ -279,7 +281,7 @@ pub enum ContactLifecycleReason {
     Unknown,
     /// The contact did not match any active contact from the previous step.
     Started,
-    /// The previous step had the exact same pair + feature-id contact key.
+    /// The previous step had the exact same pair + feature-id key and compatible geometry revisions.
     ExactFeature,
     /// A clipped-manifold edge swap kept the same local contact identity.
     PersistentEdgeSwap,
@@ -313,9 +315,9 @@ pub enum SleepTransitionReason {
 /// Contact lifecycle information exposed by the stable event stream.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ContactEvent {
-    /// Stable contact identity for downstream consumers.
+    /// Contact-point identity persisted across compatible simulation steps.
     pub contact_id: ContactId,
-    /// Stable manifold identity for the owning contact cache entry.
+    /// Manifold identity persisted across compatible simulation steps.
     pub manifold_id: ManifoldId,
     /// Stable handle for the first body in the pair.
     pub body_a: BodyHandle,
@@ -325,7 +327,10 @@ pub struct ContactEvent {
     pub collider_a: ColliderHandle,
     /// Stable handle for the second collider in the pair.
     pub collider_b: ColliderHandle,
-    /// Stable geometric feature identity for this contact point.
+    /// Authoritative feature of the current final geometry; SAT roles may change it across frames.
+    ///
+    /// A confirmed solver interaction retained without final overlap may instead
+    /// report its solver-start source feature. Use `contact_id` for cross-frame identity.
     pub feature_id: ContactFeatureId,
     /// World-space contact position.
     pub point: Point,

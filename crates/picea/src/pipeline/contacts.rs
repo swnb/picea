@@ -52,6 +52,8 @@ pub(crate) struct ContactObservation {
     pub(crate) body_b: BodyHandle,
     pub(crate) collider_a: ColliderHandle,
     pub(crate) collider_b: ColliderHandle,
+    pub(crate) geometry_revision_a: u64,
+    pub(crate) geometry_revision_b: u64,
     pub(crate) anchor_a: Vector,
     pub(crate) anchor_b: Vector,
     pub(crate) witness_a_local: Point,
@@ -101,6 +103,7 @@ pub(crate) struct ContactObservation {
 struct ColliderSnapshot {
     handle: ColliderHandle,
     body: BodyHandle,
+    geometry_revision: u64,
     shape: SharedShape,
     world_pose: Pose,
     aabb: ShapeAabb,
@@ -238,6 +241,8 @@ impl World {
                 ordered_pose_b,
                 ordered_current_pose_a,
                 ordered_current_pose_b,
+                ordered_geometry_revision_a,
+                ordered_geometry_revision_b,
             ) = if collider_a.handle <= collider_b.handle {
                 (
                     collider_a.handle,
@@ -248,6 +253,8 @@ impl World {
                     collider_b.world_pose,
                     collider_a.current_world_pose,
                     collider_b.current_world_pose,
+                    collider_a.geometry_revision,
+                    collider_b.geometry_revision,
                 )
             } else {
                 (
@@ -259,6 +266,8 @@ impl World {
                     collider_a.world_pose,
                     collider_b.current_world_pose,
                     collider_a.current_world_pose,
+                    collider_b.geometry_revision,
+                    collider_a.geometry_revision,
                 )
             };
 
@@ -295,6 +304,8 @@ impl World {
                         ordered_b,
                         ordered_body_a,
                         ordered_body_b,
+                        ordered_geometry_revision_a,
+                        ordered_geometry_revision_b,
                         if predicted {
                             ordered_pose_a
                         } else {
@@ -336,47 +347,78 @@ impl World {
         contacts: &mut [ContactObservation],
         previous_contacts: &BTreeMap<ContactKey, ContactRecord>,
     ) {
-        let previous_pairs = previous_contacts
-            .values()
-            .map(|record| ContactPairKey::new(record.contact.collider_a, record.contact.collider_b))
-            .collect::<BTreeSet<_>>();
-
-        for contact in contacts {
-            let exact_previous = previous_contacts.get(&contact.key);
-            let fallback_previous = exact_previous
-                .is_none()
-                .then(|| same_feature_index_warm_start_candidate(previous_contacts, contact))
-                .flatten();
-            let persistent_previous = exact_previous
-                .is_none()
-                .then(|| persistent_manifold_warm_start_candidate(previous_contacts, contact))
-                .flatten();
-            let warm_start = if let Some(previous) = exact_previous.or(fallback_previous) {
-                warm_start_transfer(Some(previous), contact, true)
-            } else if let Some(previous) = persistent_previous {
-                let mut warm_start = warm_start_transfer(Some(previous), contact, true);
+        let warm_reservations =
+            reserve_previous_matches(contacts, previous_contacts, ReservationPolicy::WarmStart);
+        for (index, contact) in contacts.iter_mut().enumerate() {
+            let reserved = warm_reservations
+                .reserved
+                .get(index)
+                .and_then(Option::as_ref);
+            let previous = reserved.and_then(|reserved| previous_contacts.get(&reserved.key));
+            let had_previous_pair = warm_reservations
+                .previous_pairs
+                .contains_key(&contact.pair_key);
+            let mut warm_start = warm_start_transfer(previous, contact, had_previous_pair);
+            if reserved
+                .is_some_and(|reserved| reserved.kind == PreviousMatchKind::PersistentEdgeSwap)
+            {
                 warm_start.tangent_impulse = 0.0;
-                warm_start
-            } else {
-                warm_start_transfer(None, contact, previous_pairs.contains(&contact.pair_key))
-            };
+            }
             contact.warm_start_reason = warm_start.reason;
             contact.warm_start_anchor_drift = warm_start.anchor_drift;
             contact.warm_start_normal_anchor_drift = warm_start.normal_anchor_drift;
             contact.warm_start_tangent_anchor_drift = warm_start.tangent_anchor_drift;
             contact.warm_start_normal_impulse = warm_start.normal_impulse;
             contact.warm_start_tangent_impulse = warm_start.tangent_impulse;
-            contact.source_row_continuity_reason =
-                source_row_continuity_reason(previous_contacts, contact);
-            contact.source_row_continuity_candidate = matches!(
-                contact.warm_start_reason,
-                WarmStartCacheReason::MissFeatureId
-            ) && matches!(
-                contact.source_row_continuity_reason,
-                SourceRowContinuityReason::Candidate
-            );
             contact.normal_impulse = warm_start.normal_impulse.max(0.0);
             contact.tangent_impulse = warm_start.tangent_impulse;
+        }
+
+        let source_reservations =
+            reserve_previous_matches(contacts, previous_contacts, ReservationPolicy::SourceRow);
+        for (index, contact) in contacts.iter_mut().enumerate() {
+            let warm_match_kind = warm_reservations
+                .reserved
+                .get(index)
+                .and_then(Option::as_ref)
+                .map(|reserved| reserved.kind);
+            let warm_hit_source_reason = (contact.warm_start_reason == WarmStartCacheReason::Hit)
+                .then(|| match warm_match_kind {
+                    Some(PreviousMatchKind::Exact | PreviousMatchKind::SameFeatureIndex) => {
+                        Some(SourceRowContinuityReason::Unknown)
+                    }
+                    Some(PreviousMatchKind::PersistentEdgeSwap) => {
+                        Some(SourceRowContinuityReason::EdgeSwap)
+                    }
+                    Some(PreviousMatchKind::SourceRowCandidate) | None => None,
+                })
+                .flatten();
+            if let Some(reason) = warm_hit_source_reason {
+                contact.source_row_continuity_candidate = false;
+                contact.source_row_continuity_reason = reason;
+                continue;
+            }
+            let reserved = source_reservations
+                .reserved
+                .get(index)
+                .and_then(Option::as_ref);
+            let is_candidate = reserved.is_some_and(|reserved| {
+                reserved.kind == PreviousMatchKind::SourceRowCandidate
+                    && contact.warm_start_reason == WarmStartCacheReason::MissFeatureId
+            });
+            contact.source_row_continuity_candidate = is_candidate;
+            contact.source_row_continuity_reason = if is_candidate {
+                SourceRowContinuityReason::Candidate
+            } else {
+                source_row_unreserved_reason(
+                    previous_contacts,
+                    source_reservations
+                        .previous_pairs
+                        .get(&contact.pair_key)
+                        .map(Vec::as_slice),
+                    contact,
+                )
+            };
         }
     }
 
@@ -385,27 +427,49 @@ impl World {
         contacts: Vec<ContactObservation>,
         mut previous: BTreeMap<ContactKey, ContactRecord>,
     ) -> (Vec<WorldEvent>, usize, usize, WarmStartStats) {
-        let mut pair_manifold_ids = previous
-            .values()
-            .map(|record| {
-                (
-                    ContactPairKey::new(record.contact.collider_a, record.contact.collider_b),
-                    record.contact.manifold_id,
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+        let lifecycle_reservations =
+            reserve_previous_matches(&contacts, &previous, ReservationPolicy::Lifecycle);
+        let mut pair_manifold_ids = BTreeMap::new();
+        for (pair_key, current_indices) in &lifecycle_reservations.current_pairs {
+            let Some(contact) = current_indices
+                .first()
+                .and_then(|index| contacts.get(*index))
+            else {
+                continue;
+            };
+            let Some(previous_keys) = lifecycle_reservations.previous_pairs.get(pair_key) else {
+                continue;
+            };
+            if let Some(manifold_id) = previous_keys.iter().find_map(|key| {
+                previous
+                    .get(key)
+                    .filter(|record| geometry_compatible(record, contact))
+                    .map(|record| record.contact.manifold_id)
+            }) {
+                pair_manifold_ids.insert(*pair_key, manifold_id);
+            }
+        }
         let mut next = BTreeMap::new();
         let mut events = Vec::new();
         let mut warm_start_stats = WarmStartStats::default();
 
-        for contact in contacts {
-            let existing = previous
-                .remove(&contact.key)
-                .map(|record| (record, ContactLifecycleReason::ExactFeature))
-                .or_else(|| {
-                    persistent_manifold_lifecycle_candidate_key(&previous, &contact)
-                        .and_then(|key| previous.remove(&key))
-                        .map(|record| (record, ContactLifecycleReason::PersistentEdgeSwap))
+        for (index, contact) in contacts.into_iter().enumerate() {
+            let existing = lifecycle_reservations
+                .reserved
+                .get(index)
+                .and_then(Option::as_ref)
+                .and_then(|reserved| {
+                    let reason = match reserved.kind {
+                        PreviousMatchKind::Exact => Some(ContactLifecycleReason::ExactFeature),
+                        PreviousMatchKind::PersistentEdgeSwap => {
+                            Some(ContactLifecycleReason::PersistentEdgeSwap)
+                        }
+                        PreviousMatchKind::SameFeatureIndex
+                        | PreviousMatchKind::SourceRowCandidate => None,
+                    }?;
+                    previous
+                        .remove(&reserved.key)
+                        .map(|record| (record, reason))
                 });
             let is_persisted = existing.is_some();
             warm_start_stats.record(contact.warm_start_reason);
@@ -437,6 +501,9 @@ impl World {
                 contact.key,
                 ContactRecord {
                     contact: event,
+                    geometry_revision_a: contact.geometry_revision_a,
+                    geometry_revision_b: contact.geometry_revision_b,
+                    is_sensor: contact.is_sensor,
                     witness_a_local: contact.witness_a_local,
                     witness_b_local: contact.witness_b_local,
                     normal_impulse: contact.normal_impulse,
@@ -504,6 +571,8 @@ impl World {
                             prototype.collider_b,
                             prototype.body_a,
                             prototype.body_b,
+                            prototype.geometry_revision_a,
+                            prototype.geometry_revision_b,
                             pose_a,
                             pose_b,
                             pose_a,
@@ -614,6 +683,7 @@ impl World {
                 Some(ColliderSnapshot {
                     handle,
                     body: record.body,
+                    geometry_revision: record.geometry_revision(),
                     shape: record.shape.clone(),
                     world_pose,
                     aabb: geometry.aabb,
@@ -636,6 +706,8 @@ fn contact_observation_from_point(
     ordered_b: ColliderHandle,
     ordered_body_a: BodyHandle,
     ordered_body_b: BodyHandle,
+    geometry_revision_a: u64,
+    geometry_revision_b: u64,
     source_pose_a: Pose,
     source_pose_b: Pose,
     current_pose_a: Pose,
@@ -666,6 +738,8 @@ fn contact_observation_from_point(
         body_b: ordered_body_b,
         collider_a: ordered_a,
         collider_b: ordered_b,
+        geometry_revision_a,
+        geometry_revision_b,
         anchor_a: current_point - current_pose_a.point(),
         anchor_b: current_point - current_pose_b.point(),
         witness_a_local,
@@ -856,82 +930,386 @@ fn union_aabb(a: ShapeAabb, b: ShapeAabb) -> ShapeAabb {
     }
 }
 
-fn same_feature_index_warm_start_candidate<'a>(
-    previous_contacts: &'a BTreeMap<ContactKey, ContactRecord>,
-    contact: &ContactObservation,
-) -> Option<&'a ContactRecord> {
-    previous_contacts
-        .values()
-        .filter(|record| {
-            record.contact.collider_a == contact.collider_a
-                && record.contact.collider_b == contact.collider_b
-                && same_point_identity_reduction(
-                    record.contact.reduction_reason,
-                    contact.reduction_reason,
-                )
-                && record.contact.feature_id.index() == contact.feature_id.index()
-                && warm_start_transfer(Some(record), contact, true)
-                    .reason
-                    .is_hit()
-        })
-        .min_by(|lhs, rhs| {
-            let lhs_drift = contact_anchor_drift(lhs, contact);
-            let rhs_drift = contact_anchor_drift(rhs, contact);
-            lhs_drift.total_cmp(&rhs_drift)
-        })
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum PreviousMatchKind {
+    Exact,
+    SameFeatureIndex,
+    PersistentEdgeSwap,
+    SourceRowCandidate,
 }
 
-fn persistent_manifold_lifecycle_candidate_key(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReservationPolicy {
+    WarmStart,
+    Lifecycle,
+    SourceRow,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ReservedPrevious {
+    key: ContactKey,
+    kind: PreviousMatchKind,
+}
+
+struct PairScopedReservations {
+    reserved: Vec<Option<ReservedPrevious>>,
+    current_pairs: BTreeMap<ContactPairKey, Vec<usize>>,
+    previous_pairs: BTreeMap<ContactPairKey, Vec<ContactKey>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CandidateEdge {
+    previous_index: usize,
+    previous_key: ContactKey,
+    kind: PreviousMatchKind,
+    drift: FloatNum,
+}
+
+fn reserve_previous_matches(
+    contacts: &[ContactObservation],
     previous_contacts: &BTreeMap<ContactKey, ContactRecord>,
-    contact: &ContactObservation,
-) -> Option<ContactKey> {
-    previous_contacts
-        .iter()
-        .filter(|(_, record)| persistent_manifold_lifecycle_candidate(record, contact))
-        .min_by(|(_, lhs), (_, rhs)| {
-            let lhs_drift = contact_anchor_drift(lhs, contact);
-            let rhs_drift = contact_anchor_drift(rhs, contact);
-            lhs_drift.total_cmp(&rhs_drift)
-        })
-        .map(|(key, _)| *key)
+    policy: ReservationPolicy,
+) -> PairScopedReservations {
+    let mut current_pairs = BTreeMap::<ContactPairKey, Vec<usize>>::new();
+    for (index, contact) in contacts.iter().enumerate() {
+        if policy == ReservationPolicy::SourceRow
+            && contact.warm_start_reason != WarmStartCacheReason::MissFeatureId
+        {
+            continue;
+        }
+        current_pairs
+            .entry(contact.pair_key)
+            .or_default()
+            .push(index);
+    }
+    for indices in current_pairs.values_mut() {
+        indices.sort_by_key(|index| (contacts.get(*index).map(|contact| contact.key), *index));
+    }
+
+    let mut previous_pairs = BTreeMap::<ContactPairKey, Vec<ContactKey>>::new();
+    for key in previous_contacts.keys().copied() {
+        previous_pairs.entry(key.pair).or_default().push(key);
+    }
+
+    let mut reserved = vec![None; contacts.len()];
+    for (pair_key, current_indices) in &current_pairs {
+        let Some(previous_keys) = previous_pairs.get(pair_key) else {
+            continue;
+        };
+        reserve_pair_matches(
+            contacts,
+            previous_contacts,
+            current_indices,
+            previous_keys,
+            policy,
+            &mut reserved,
+        );
+    }
+
+    PairScopedReservations {
+        reserved,
+        current_pairs,
+        previous_pairs,
+    }
 }
 
-fn persistent_manifold_warm_start_candidate<'a>(
-    previous_contacts: &'a BTreeMap<ContactKey, ContactRecord>,
-    contact: &ContactObservation,
-) -> Option<&'a ContactRecord> {
-    previous_contacts
-        .values()
-        .filter(|record| {
-            persistent_manifold_lifecycle_candidate(record, contact)
-                && warm_start_transfer(Some(record), contact, true)
-                    .reason
-                    .is_hit()
-        })
-        .min_by(|lhs, rhs| {
-            let lhs_drift = contact_anchor_drift(lhs, contact);
-            let rhs_drift = contact_anchor_drift(rhs, contact);
-            lhs_drift.total_cmp(&rhs_drift)
-        })
+fn reserve_pair_matches(
+    contacts: &[ContactObservation],
+    previous_contacts: &BTreeMap<ContactKey, ContactRecord>,
+    current_indices: &[usize],
+    previous_keys: &[ContactKey],
+    policy: ReservationPolicy,
+    reserved: &mut [Option<ReservedPrevious>],
+) {
+    let mut previous_used = vec![false; previous_keys.len()];
+    let mut residual_current_indices = Vec::new();
+
+    for current_index in current_indices.iter().copied() {
+        let Some(contact) = contacts.get(current_index) else {
+            continue;
+        };
+        let exact_previous_index = previous_keys
+            .iter()
+            .enumerate()
+            .find(|(previous_index, key)| {
+                !previous_used.get(*previous_index).copied().unwrap_or(true)
+                    && **key == contact.key
+                    && previous_contacts
+                        .get(key)
+                        .is_some_and(|record| geometry_compatible(record, contact))
+            })
+            .map(|(previous_index, _)| previous_index);
+        if let Some(previous_index) = exact_previous_index {
+            if let Some(used) = previous_used.get_mut(previous_index) {
+                *used = true;
+            }
+            if let (Some(slot), Some(key)) = (
+                reserved.get_mut(current_index),
+                previous_keys.get(previous_index).copied(),
+            ) {
+                *slot = Some(ReservedPrevious {
+                    key,
+                    kind: PreviousMatchKind::Exact,
+                });
+            }
+        } else {
+            residual_current_indices.push(current_index);
+        }
+    }
+
+    let mut candidate_graph = Vec::with_capacity(residual_current_indices.len());
+    for current_index in residual_current_indices.iter().copied() {
+        let mut edges = Vec::new();
+        let Some(contact) = contacts.get(current_index) else {
+            candidate_graph.push(edges);
+            continue;
+        };
+        for (previous_index, previous_key) in previous_keys.iter().copied().enumerate() {
+            if previous_used.get(previous_index).copied().unwrap_or(true) {
+                continue;
+            }
+            let Some(previous) = previous_contacts.get(&previous_key) else {
+                continue;
+            };
+            if let Some((kind, drift)) = reservation_candidate(policy, previous, contact) {
+                edges.push(CandidateEdge {
+                    previous_index,
+                    previous_key,
+                    kind,
+                    drift,
+                });
+            }
+        }
+        edges.sort_by_key(|edge| (edge.previous_key, edge.kind));
+        candidate_graph.push(edges);
+    }
+
+    let mut assignments = vec![None; residual_current_indices.len()];
+    let mut best = None;
+    enumerate_residual_matchings(
+        0,
+        &residual_current_indices,
+        contacts,
+        &candidate_graph,
+        &mut previous_used,
+        &mut assignments,
+        policy,
+        &mut best,
+    );
+    let Some(best) = best else {
+        return;
+    };
+    for (current_index, edge) in residual_current_indices.iter().copied().zip(best) {
+        let Some(edge) = edge else {
+            continue;
+        };
+        if let Some(slot) = reserved.get_mut(current_index) {
+            *slot = Some(ReservedPrevious {
+                key: edge.previous_key,
+                kind: edge.kind,
+            });
+        }
+    }
 }
 
-fn persistent_manifold_lifecycle_candidate(
+#[allow(clippy::too_many_arguments)]
+fn enumerate_residual_matchings(
+    position: usize,
+    current_indices: &[usize],
+    contacts: &[ContactObservation],
+    candidate_graph: &[Vec<CandidateEdge>],
+    previous_used: &mut [bool],
+    assignments: &mut [Option<CandidateEdge>],
+    policy: ReservationPolicy,
+    best: &mut Option<Vec<Option<CandidateEdge>>>,
+) {
+    if position == current_indices.len() {
+        if best.as_ref().is_none_or(|incumbent| {
+            residual_matching_is_better(assignments, incumbent, current_indices, contacts, policy)
+        }) {
+            *best = Some(assignments.to_vec());
+        }
+        return;
+    }
+
+    if let Some(slot) = assignments.get_mut(position) {
+        *slot = None;
+    }
+    enumerate_residual_matchings(
+        position + 1,
+        current_indices,
+        contacts,
+        candidate_graph,
+        previous_used,
+        assignments,
+        policy,
+        best,
+    );
+
+    let Some(edges) = candidate_graph.get(position) else {
+        return;
+    };
+    for edge in edges.iter().copied() {
+        if previous_used
+            .get(edge.previous_index)
+            .copied()
+            .unwrap_or(true)
+        {
+            continue;
+        }
+        if let Some(used) = previous_used.get_mut(edge.previous_index) {
+            *used = true;
+        }
+        if let Some(slot) = assignments.get_mut(position) {
+            *slot = Some(edge);
+        }
+        enumerate_residual_matchings(
+            position + 1,
+            current_indices,
+            contacts,
+            candidate_graph,
+            previous_used,
+            assignments,
+            policy,
+            best,
+        );
+        if let Some(used) = previous_used.get_mut(edge.previous_index) {
+            *used = false;
+        }
+    }
+}
+
+fn residual_matching_is_better(
+    candidate: &[Option<CandidateEdge>],
+    incumbent: &[Option<CandidateEdge>],
+    current_indices: &[usize],
+    contacts: &[ContactObservation],
+    policy: ReservationPolicy,
+) -> bool {
+    let cardinality =
+        |matching: &[Option<CandidateEdge>]| matching.iter().filter(|edge| edge.is_some()).count();
+    let candidate_cardinality = cardinality(candidate);
+    let incumbent_cardinality = cardinality(incumbent);
+    if candidate_cardinality != incumbent_cardinality {
+        return candidate_cardinality > incumbent_cardinality;
+    }
+
+    if policy == ReservationPolicy::WarmStart {
+        let same_feature_count = |matching: &[Option<CandidateEdge>]| {
+            matching
+                .iter()
+                .flatten()
+                .filter(|edge| edge.kind == PreviousMatchKind::SameFeatureIndex)
+                .count()
+        };
+        let candidate_same_feature_count = same_feature_count(candidate);
+        let incumbent_same_feature_count = same_feature_count(incumbent);
+        if candidate_same_feature_count != incumbent_same_feature_count {
+            return candidate_same_feature_count > incumbent_same_feature_count;
+        }
+    }
+
+    let drift_score = |matching: &[Option<CandidateEdge>]| {
+        matching
+            .iter()
+            .flatten()
+            .fold((0.0_f32, 0.0_f32), |(max_drift, total_drift), edge| {
+                (max_drift.max(edge.drift), total_drift + edge.drift)
+            })
+    };
+    let candidate_drift = drift_score(candidate);
+    let incumbent_drift = drift_score(incumbent);
+    let max_drift_order = candidate_drift.0.total_cmp(&incumbent_drift.0);
+    if !max_drift_order.is_eq() {
+        return max_drift_order.is_lt();
+    }
+    let total_drift_order = candidate_drift.1.total_cmp(&incumbent_drift.1);
+    if !total_drift_order.is_eq() {
+        return total_drift_order.is_lt();
+    }
+
+    let mapping = |matching: &[Option<CandidateEdge>]| {
+        current_indices
+            .iter()
+            .copied()
+            .zip(matching.iter().copied())
+            .filter_map(|(current_index, edge)| {
+                let edge = edge?;
+                let current_key = contacts.get(current_index)?.key;
+                Some((current_key, edge.previous_key, edge.kind))
+            })
+            .collect::<Vec<_>>()
+    };
+    mapping(candidate) < mapping(incumbent)
+}
+
+fn reservation_candidate(
+    policy: ReservationPolicy,
+    previous: &ContactRecord,
+    contact: &ContactObservation,
+) -> Option<(PreviousMatchKind, FloatNum)> {
+    #[cfg(test)]
+    if policy == ReservationPolicy::Lifecycle {
+        LIFECYCLE_CANDIDATE_EVALUATION_COUNT.with(|count| count.set(count.get() + 1));
+    }
+
+    if !geometry_compatible(previous, contact) {
+        return None;
+    }
+    let drift = contact_anchor_drift(previous, contact);
+    if !drift.is_finite() {
+        return None;
+    }
+
+    match policy {
+        ReservationPolicy::WarmStart => {
+            let transfer = warm_start_transfer(Some(previous), contact, true);
+            if !transfer.reason.is_hit() {
+                return None;
+            }
+            if same_point_identity_reduction(
+                previous.contact.reduction_reason,
+                contact.reduction_reason,
+            ) && previous.contact.feature_id.index() == contact.feature_id.index()
+            {
+                Some((PreviousMatchKind::SameFeatureIndex, drift))
+            } else if persistent_manifold_edge_compatible(previous, contact) {
+                Some((PreviousMatchKind::PersistentEdgeSwap, drift))
+            } else {
+                None
+            }
+        }
+        ReservationPolicy::Lifecycle => (!previous.is_sensor
+            && !contact.is_sensor
+            && persistent_manifold_edge_compatible(previous, contact))
+        .then_some((PreviousMatchKind::PersistentEdgeSwap, drift)),
+        ReservationPolicy::SourceRow => (contact.warm_start_reason
+            == WarmStartCacheReason::MissFeatureId
+            && !previous.is_sensor
+            && source_row_continuity_record_reason(previous, contact)
+                == SourceRowContinuityReason::Candidate)
+            .then_some((PreviousMatchKind::SourceRowCandidate, drift)),
+    }
+}
+
+fn geometry_compatible(previous: &ContactRecord, contact: &ContactObservation) -> bool {
+    previous.contact.collider_a == contact.collider_a
+        && previous.contact.collider_b == contact.collider_b
+        && previous.geometry_revision_a == contact.geometry_revision_a
+        && previous.geometry_revision_b == contact.geometry_revision_b
+}
+
+fn persistent_manifold_edge_compatible(
     previous: &ContactRecord,
     contact: &ContactObservation,
 ) -> bool {
-    #[cfg(test)]
-    LIFECYCLE_CANDIDATE_EVALUATION_COUNT.with(|count| count.set(count.get() + 1));
-
     // A settling clipped manifold may pass through a single-point frame while
     // the reference face swaps, so point-count oscillation must not disqualify
     // an otherwise compatible edge-swap candidate.
     let clip_identity = |reason| {
         clipped_manifold_reduction(reason) || reason == ContactReductionReason::SinglePoint
     };
-    if contact.is_sensor
-        || previous.contact.collider_a != contact.collider_a
-        || previous.contact.collider_b != contact.collider_b
-        || !clip_identity(previous.contact.reduction_reason)
+    if !clip_identity(previous.contact.reduction_reason)
         || !clip_identity(contact.reduction_reason)
         || !feature_id_edge_swap(previous.contact.feature_id, contact.feature_id)
     {
@@ -955,6 +1333,7 @@ fn persistent_manifold_lifecycle_candidate(
         && local_anchor_drift <= PERSISTENT_MANIFOLD_LOCAL_ANCHOR_DRIFT_THRESHOLD
 }
 
+#[cfg(test)]
 fn source_row_continuity_reason(
     previous_contacts: &BTreeMap<ContactKey, ContactRecord>,
     contact: &ContactObservation,
@@ -975,14 +1354,54 @@ fn source_row_continuity_reason(
     rejection.unwrap_or(SourceRowContinuityReason::NoPreviousPair)
 }
 
+fn source_row_unreserved_reason(
+    previous_contacts: &BTreeMap<ContactKey, ContactRecord>,
+    previous_keys: Option<&[ContactKey]>,
+    contact: &ContactObservation,
+) -> SourceRowContinuityReason {
+    if contact.is_sensor {
+        return SourceRowContinuityReason::Sensor;
+    }
+    let Some(previous_keys) = previous_keys else {
+        return if previous_contacts.is_empty() {
+            SourceRowContinuityReason::NoPreviousPair
+        } else {
+            SourceRowContinuityReason::PairMismatch
+        };
+    };
+
+    let mut rejection = None;
+    let mut had_candidate = false;
+    for key in previous_keys {
+        let Some(record) = previous_contacts.get(key) else {
+            continue;
+        };
+        let reason = source_row_continuity_record_reason(record, contact);
+        if reason == SourceRowContinuityReason::Candidate {
+            had_candidate = true;
+        } else {
+            rejection = source_row_continuity_rejection(rejection, reason);
+        }
+    }
+    if had_candidate {
+        SourceRowContinuityReason::Unknown
+    } else {
+        rejection.unwrap_or(SourceRowContinuityReason::PairMismatch)
+    }
+}
+
 fn source_row_continuity_record_reason(
     previous: &ContactRecord,
     contact: &ContactObservation,
 ) -> SourceRowContinuityReason {
     if previous.contact.collider_a != contact.collider_a
         || previous.contact.collider_b != contact.collider_b
+        || !geometry_compatible(previous, contact)
     {
         return SourceRowContinuityReason::PairMismatch;
+    }
+    if previous.is_sensor {
+        return SourceRowContinuityReason::Sensor;
     }
 
     // Edge-swapped clipped manifolds may still represent one geometric pair,
@@ -1100,7 +1519,13 @@ fn contact_event(
 fn contact_anchor_drift(previous: &ContactRecord, contact: &ContactObservation) -> FloatNum {
     let drift_a = contact.witness_a_local - previous.witness_a_local;
     let drift_b = contact.witness_b_local - previous.witness_b_local;
-    drift_a.length().max(drift_b.length())
+    let drift_a = drift_a.length();
+    let drift_b = drift_b.length();
+    if drift_a.is_finite() && drift_b.is_finite() {
+        drift_a.max(drift_b)
+    } else {
+        FloatNum::NAN
+    }
 }
 
 fn clipped_manifold_reduction(reason: ContactReductionReason) -> bool {
@@ -1131,6 +1556,9 @@ fn feature_id_edge_swap(
     previous: crate::handles::ContactFeatureId,
     current: crate::handles::ContactFeatureId,
 ) -> bool {
+    if previous.index() == current.index() {
+        return false;
+    }
     let Some(previous) = decode_feature_id(previous) else {
         return false;
     };
@@ -1139,6 +1567,8 @@ fn feature_id_edge_swap(
     };
 
     previous.kind == current.kind
+        && previous.reference_edge != previous.incident_edge
+        && current.reference_edge != current.incident_edge
         && previous.reference_edge == current.incident_edge
         && previous.incident_edge == current.reference_edge
 }
@@ -1170,7 +1600,7 @@ fn warm_start_transfer(
         };
     };
 
-    if previous.contact.warm_start_reason == WarmStartCacheReason::SkippedSensor {
+    if previous.is_sensor {
         return warm_start_transfer_result(WarmStartCacheReason::MissPreviousSensor, 0.0, 0.0);
     }
 
@@ -1198,6 +1628,17 @@ fn warm_start_transfer(
     // together keeps its cache, while contact movement on either shape drops it.
     let drift_a = contact.witness_a_local - previous.witness_a_local;
     let drift_b = contact.witness_b_local - previous.witness_b_local;
+    let drift_a_length = drift_a.length();
+    let drift_b_length = drift_b.length();
+    if !drift_a.x().is_finite()
+        || !drift_a.y().is_finite()
+        || !drift_b.x().is_finite()
+        || !drift_b.y().is_finite()
+        || !drift_a_length.is_finite()
+        || !drift_b_length.is_finite()
+    {
+        return warm_start_transfer_result(WarmStartCacheReason::DroppedPointDrift, 0.0, 0.0);
+    }
     let normal_drift = drift_a
         .dot(current_normal_a_local)
         .abs()
@@ -1208,7 +1649,7 @@ fn warm_start_transfer(
         .dot(tangent_a_local)
         .abs()
         .max(drift_b.dot(tangent_b_local).abs());
-    let drift = drift_a.length().max(drift_b.length());
+    let drift = drift_a_length.max(drift_b_length);
     let anchor_drift = WarmStartTransfer {
         anchor_drift: drift,
         normal_anchor_drift: normal_drift,
@@ -1358,6 +1799,8 @@ mod tests {
             body_b: test_body(2),
             collider_a,
             collider_b,
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
             anchor_a: Vector::new(0.25, 0.0),
             anchor_b: Vector::new(-0.25, 0.0),
             witness_a_local: Point::new(0.25, 0.0),
@@ -1425,6 +1868,9 @@ mod tests {
     ) -> ContactRecord {
         ContactRecord {
             contact: test_contact_event_with_ids(feature_id, contact_raw, manifold_raw),
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(witness_x, 0.0),
             witness_b_local: Point::new(witness_x, 0.0),
             normal_impulse,
@@ -1675,6 +2121,230 @@ mod tests {
     }
 
     #[test]
+    fn residual_matching_ranks_kind_then_max_and_total_drift() {
+        fn best_matching(
+            contacts: &[ContactObservation],
+            current_indices: &[usize],
+            candidate_graph: &[Vec<CandidateEdge>],
+            previous_count: usize,
+            policy: ReservationPolicy,
+        ) -> Vec<Option<CandidateEdge>> {
+            let mut previous_used = vec![false; previous_count];
+            let mut assignments = vec![None; current_indices.len()];
+            let mut best = None;
+            enumerate_residual_matchings(
+                0,
+                current_indices,
+                contacts,
+                candidate_graph,
+                &mut previous_used,
+                &mut assignments,
+                policy,
+                &mut best,
+            );
+            best.expect("finite candidate graph should produce a best matching")
+        }
+
+        let contacts = vec![
+            test_contact_observation(test_feature(0x0100_3001, 0)),
+            test_contact_observation(test_feature(0x0100_3001, 1)),
+        ];
+        let previous_keys = [
+            ContactKey::new(
+                test_collider(1),
+                test_collider(2),
+                test_feature(0x0100_1003, 0),
+            ),
+            ContactKey::new(
+                test_collider(1),
+                test_collider(2),
+                test_feature(0x0100_1003, 1),
+            ),
+        ];
+        let edge = |previous_index, kind, drift| CandidateEdge {
+            previous_index,
+            previous_key: previous_keys[previous_index],
+            kind,
+            drift,
+        };
+
+        let kind_preference = best_matching(
+            &contacts,
+            &[0],
+            &[vec![
+                edge(0, PreviousMatchKind::SameFeatureIndex, 0.20),
+                edge(1, PreviousMatchKind::PersistentEdgeSwap, 0.01),
+            ]],
+            2,
+            ReservationPolicy::WarmStart,
+        );
+        assert_eq!(kind_preference[0].map(|edge| edge.previous_index), Some(0));
+
+        let max_drift = best_matching(
+            &contacts,
+            &[0, 1],
+            &[
+                vec![
+                    edge(0, PreviousMatchKind::PersistentEdgeSwap, 0.20),
+                    edge(1, PreviousMatchKind::PersistentEdgeSwap, 0.10),
+                ],
+                vec![
+                    edge(1, PreviousMatchKind::PersistentEdgeSwap, 0.20),
+                    edge(0, PreviousMatchKind::PersistentEdgeSwap, 0.25),
+                ],
+            ],
+            2,
+            ReservationPolicy::Lifecycle,
+        );
+        assert_eq!(
+            max_drift
+                .iter()
+                .map(|edge| edge.map(|edge| edge.previous_index))
+                .collect::<Vec<_>>(),
+            vec![Some(0), Some(1)]
+        );
+
+        let total_drift = best_matching(
+            &contacts,
+            &[0, 1],
+            &[
+                vec![
+                    edge(0, PreviousMatchKind::PersistentEdgeSwap, 0.10),
+                    edge(1, PreviousMatchKind::PersistentEdgeSwap, 0.20),
+                ],
+                vec![
+                    edge(1, PreviousMatchKind::PersistentEdgeSwap, 0.20),
+                    edge(0, PreviousMatchKind::PersistentEdgeSwap, 0.20),
+                ],
+            ],
+            2,
+            ReservationPolicy::Lifecycle,
+        );
+        assert_eq!(
+            total_drift
+                .iter()
+                .map(|edge| edge.map(|edge| edge.previous_index))
+                .collect::<Vec<_>>(),
+            vec![Some(0), Some(1)]
+        );
+    }
+
+    #[test]
+    fn residual_matching_lexicographic_tie_break_is_input_order_independent() {
+        fn run(
+            contacts: Vec<ContactObservation>,
+            previous_contacts: &BTreeMap<ContactKey, ContactRecord>,
+        ) -> BTreeMap<ContactKey, ContactKey> {
+            let reservations = reserve_previous_matches(
+                &contacts,
+                previous_contacts,
+                ReservationPolicy::Lifecycle,
+            );
+            contacts
+                .iter()
+                .enumerate()
+                .filter_map(|(index, contact)| {
+                    reservations
+                        .reserved
+                        .get(index)
+                        .and_then(Option::as_ref)
+                        .map(|reserved| (contact.key, reserved.key))
+                })
+                .collect()
+        }
+
+        let previous_features = [test_feature(0x0100_1003, 0), test_feature(0x0100_1003, 1)];
+        let mut previous_contacts = BTreeMap::new();
+        for (slot, feature) in previous_features.into_iter().enumerate() {
+            previous_contacts.insert(
+                ContactKey::new(test_collider(1), test_collider(2), feature),
+                test_contact_record(feature, 90 + slot as u32, 15, 0.0, 1.0, 0.1),
+            );
+        }
+        let mut first = test_contact_observation(test_feature(0x0100_3001, 2));
+        let mut second = test_contact_observation(test_feature(0x0100_3001, 3));
+        set_observation_witness(&mut first, 0.0);
+        set_observation_witness(&mut second, 0.0);
+
+        let forward = run(vec![first.clone(), second.clone()], &previous_contacts);
+        let reversed = run(vec![second, first], &previous_contacts);
+
+        assert_eq!(forward, reversed);
+        assert_eq!(forward.len(), 2);
+        assert_eq!(
+            forward.into_iter().collect::<Vec<_>>(),
+            vec![
+                (
+                    ContactKey::new(
+                        test_collider(1),
+                        test_collider(2),
+                        test_feature(0x0100_3001, 2),
+                    ),
+                    ContactKey::new(
+                        test_collider(1),
+                        test_collider(2),
+                        test_feature(0x0100_1003, 0),
+                    ),
+                ),
+                (
+                    ContactKey::new(
+                        test_collider(1),
+                        test_collider(2),
+                        test_feature(0x0100_3001, 3),
+                    ),
+                    ContactKey::new(
+                        test_collider(1),
+                        test_collider(2),
+                        test_feature(0x0100_1003, 1),
+                    ),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn reservation_rejects_nonfinite_edges_and_handles_five_by_five() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let mut nonfinite_previous = BTreeMap::new();
+        nonfinite_previous.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            test_contact_record(previous_feature, 95, 16, 0.0, 1.0, 0.1),
+        );
+        let mut nonfinite = test_contact_observation(test_feature(0x0100_3001, 0));
+        set_observation_witness(&mut nonfinite, 0.0);
+        nonfinite.witness_a_local = Point::new(FloatNum::NAN, 0.0);
+        let nonfinite_result = reserve_previous_matches(
+            &[nonfinite],
+            &nonfinite_previous,
+            ReservationPolicy::Lifecycle,
+        );
+        assert!(nonfinite_result.reserved[0].is_none());
+
+        let mut previous_contacts = BTreeMap::new();
+        let mut contacts = Vec::new();
+        for slot in 0..5_u32 {
+            let previous_feature = test_feature(0x0100_1003, slot);
+            previous_contacts.insert(
+                ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+                test_contact_record(previous_feature, 100 + slot, 17, 0.0, 1.0, 0.1),
+            );
+            let mut current = test_contact_observation(test_feature(0x0100_3001, 10 + slot));
+            set_observation_witness(&mut current, 0.0);
+            contacts.push(current);
+        }
+        let five_by_five =
+            reserve_previous_matches(&contacts, &previous_contacts, ReservationPolicy::Lifecycle);
+        let reserved_keys = five_by_five
+            .reserved
+            .iter()
+            .flatten()
+            .map(|reserved| reserved.key)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(five_by_five.reserved.iter().flatten().count(), 5);
+        assert_eq!(reserved_keys.len(), 5);
+    }
+
+    #[test]
     fn source_row_reservation_does_not_reuse_previous_point() {
         let previous_feature = test_feature(0x0100_1003, 0);
         let previous_record = test_contact_record(previous_feature, 81, 11, 0.0, 1.0, 0.1);
@@ -1702,6 +2372,36 @@ mod tests {
         );
         assert!(contacts[0].source_row_continuity_candidate);
         assert!(!contacts[1].source_row_continuity_candidate);
+    }
+
+    #[test]
+    fn source_row_contention_keeps_unreserved_reason_unknown() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let previous_record = test_contact_record(previous_feature, 82, 11, 0.0, 1.0, 0.1);
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut first = test_contact_observation(test_feature(0x0100_1004, 0));
+        let mut second = test_contact_observation(test_feature(0x0100_1005, 0));
+        set_observation_witness(&mut first, 0.01);
+        set_observation_witness(&mut second, 0.02);
+        let mut contacts = vec![first, second];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(
+            contacts[0].source_row_continuity_reason,
+            SourceRowContinuityReason::Candidate
+        );
+        assert!(contacts[0].source_row_continuity_candidate);
+        assert!(!contacts[1].source_row_continuity_candidate);
+        assert_eq!(
+            contacts[1].source_row_continuity_reason,
+            SourceRowContinuityReason::Unknown
+        );
     }
 
     #[test]
@@ -1794,6 +2494,64 @@ mod tests {
     }
 
     #[test]
+    fn source_row_rejects_previous_sensor_feature_miss() {
+        let previous_feature = test_feature(0x0100_1003, 0);
+        let current_feature = test_feature(0x0100_1004, 0);
+        let mut previous_record = test_contact_record(previous_feature, 84, 14, 0.0, 0.0, 0.0);
+        previous_record.is_sensor = true;
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+            previous_record,
+        );
+        let mut current = test_contact_observation(current_feature);
+        set_observation_witness(&mut current, 0.01);
+        let mut contacts = vec![current];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(
+            contacts[0].warm_start_reason,
+            WarmStartCacheReason::MissFeatureId
+        );
+        assert!(!contacts[0].source_row_continuity_candidate);
+        assert_eq!(
+            contacts[0].source_row_continuity_reason,
+            SourceRowContinuityReason::Sensor
+        );
+    }
+
+    #[test]
+    fn source_row_keeps_unknown_for_exact_and_same_index_warm_hits() {
+        fn run(previous_feature: ContactFeatureId, current_feature: ContactFeatureId) {
+            let previous_record = test_contact_record(previous_feature, 85, 14, 0.0, 1.0, 0.2);
+            let mut previous_contacts = BTreeMap::new();
+            previous_contacts.insert(
+                ContactKey::new(test_collider(1), test_collider(2), previous_feature),
+                previous_record,
+            );
+            let mut current = test_contact_observation(current_feature);
+            set_observation_witness(&mut current, 0.0);
+            let mut contacts = vec![current];
+            let world = World::new(WorldDesc::default());
+
+            world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+            assert_eq!(contacts[0].warm_start_reason, WarmStartCacheReason::Hit);
+            assert!(!contacts[0].source_row_continuity_candidate);
+            assert_eq!(
+                contacts[0].source_row_continuity_reason,
+                SourceRowContinuityReason::Unknown
+            );
+        }
+
+        let previous_feature = test_feature(0x0100_1003, 0);
+        run(previous_feature, previous_feature);
+        run(previous_feature, test_feature(0x0100_1003, 1));
+    }
+
+    #[test]
     fn sensor_transition_same_index_does_not_persist_lifecycle() {
         fn run(previous_sensor: bool, current_sensor: bool) -> ContactEvent {
             let previous_feature = test_feature(0x0100_1003, 0);
@@ -1804,6 +2562,7 @@ mod tests {
             } else {
                 WarmStartCacheReason::Hit
             };
+            previous_record.is_sensor = previous_sensor;
             previous_record.contact.warm_start_normal_impulse = 0.0;
             previous_record.contact.warm_start_tangent_impulse = 0.0;
             let previous_contact_id = previous_record.contact.contact_id;
@@ -1992,6 +2751,9 @@ mod tests {
                 collider_b,
                 ..test_contact_event_with_ids(feature, 91, 12)
             },
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: source.witness_a_local,
             witness_b_local: source.witness_b_local,
             normal_impulse: 1.0,
@@ -2120,6 +2882,9 @@ mod tests {
 
         let (pair_only, base_candidate_evaluations) = run(false);
         let (with_unrelated, unrelated_candidate_evaluations) = run(true);
+        eprintln!(
+            "A15 candidate evaluations: base={base_candidate_evaluations}, with_unrelated={unrelated_candidate_evaluations}"
+        );
         assert!(
             base_candidate_evaluations > 0 && base_candidate_evaluations <= 16,
             "4x4 candidate-edge instrumentation must be non-vacuous and bounded; base_candidate_evaluations={base_candidate_evaluations}"
@@ -2153,6 +2918,9 @@ mod tests {
         let current_feature = test_feature(0x0100_1003, 1);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(0.25, 0.0),
             witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
@@ -2180,6 +2948,9 @@ mod tests {
         let current_feature = test_feature(0x0100_1003, 1);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(2.0, 0.0),
             witness_b_local: Point::new(-2.0, 0.0),
             normal_impulse: 0.25,
@@ -2213,6 +2984,9 @@ mod tests {
         let current_feature = test_feature(0x0100_1003, 1);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(0.25, 0.0),
             witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
@@ -2235,6 +3009,33 @@ mod tests {
         world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
 
         assert_eq!(contacts[0].warm_start_reason, WarmStartCacheReason::Hit);
+    }
+
+    #[test]
+    fn exact_warm_start_rejects_single_sided_nonfinite_witness() {
+        let feature = test_feature(0x0100_1003, 0);
+        let previous_record = test_contact_record(feature, 111, 18, 0.0, 1.5, 0.5);
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), feature),
+            previous_record,
+        );
+        let mut current = test_contact_observation(feature);
+        set_observation_witness(&mut current, 0.0);
+        current.witness_a_local = Point::new(FloatNum::NAN, 0.0);
+        let mut contacts = vec![current];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(
+            contacts[0].warm_start_reason,
+            WarmStartCacheReason::DroppedPointDrift
+        );
+        assert_eq!(contacts[0].warm_start_normal_impulse, 0.0);
+        assert_eq!(contacts[0].warm_start_tangent_impulse, 0.0);
+        assert_eq!(contacts[0].normal_impulse, 0.0);
+        assert_eq!(contacts[0].tangent_impulse, 0.0);
     }
 
     #[test]
@@ -2341,6 +3142,9 @@ mod tests {
         let current_feature = test_feature(0x0100_1003, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(0.25, 0.0),
             witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
@@ -2368,6 +3172,9 @@ mod tests {
         let current_feature = test_feature(0x0100_1004, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(0.25, 0.0),
             witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
@@ -2409,6 +3216,9 @@ mod tests {
         let current_feature = test_feature(0x0100_3001, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(0.25, 0.0),
             witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
@@ -2442,6 +3252,37 @@ mod tests {
     }
 
     #[test]
+    fn edge_swap_warm_hit_ignores_source_compatible_distractor() {
+        let edge_feature = test_feature(0x0100_1003, 0);
+        let distractor_feature = test_feature(0x0100_1004, 0);
+        let current_feature = test_feature(0x0100_3001, 0);
+        let edge_record = test_contact_record(edge_feature, 112, 19, 0.0, 1.0, 0.2);
+        let distractor_record = test_contact_record(distractor_feature, 113, 19, 0.01, 2.0, 0.3);
+        let mut previous_contacts = BTreeMap::new();
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), edge_feature),
+            edge_record,
+        );
+        previous_contacts.insert(
+            ContactKey::new(test_collider(1), test_collider(2), distractor_feature),
+            distractor_record,
+        );
+        let mut current = test_contact_observation(current_feature);
+        set_observation_witness(&mut current, 0.0);
+        let mut contacts = vec![current];
+        let world = World::new(WorldDesc::default());
+
+        world.prepare_contact_warm_start(&mut contacts, &previous_contacts);
+
+        assert_eq!(contacts[0].warm_start_reason, WarmStartCacheReason::Hit);
+        assert!(!contacts[0].source_row_continuity_candidate);
+        assert_eq!(
+            contacts[0].source_row_continuity_reason,
+            SourceRowContinuityReason::EdgeSwap
+        );
+    }
+
+    #[test]
     fn edge_swap_warm_start_survives_clip_manifold_point_count_oscillation() {
         // SAT reference-face swaps on a settling manifold often coincide with
         // the manifold dropping to a single point for that frame. The reduction
@@ -2452,6 +3293,9 @@ mod tests {
         let current_feature = test_feature(0x0100_3001, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(0.25, 0.0),
             witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
@@ -2485,6 +3329,9 @@ mod tests {
         let previous_manifold_id = previous_event.manifold_id;
         let previous_record = ContactRecord {
             contact: previous_event,
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(0.25, 0.0),
             witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
@@ -2526,6 +3373,9 @@ mod tests {
         let current_feature = test_feature(0x0100_1004, 0);
         let previous_record = ContactRecord {
             contact: test_contact_event(previous_feature),
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(0.25, 0.0),
             witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,
@@ -2570,6 +3420,9 @@ mod tests {
         previous_event.collider_b = test_collider(4);
         let previous_record = ContactRecord {
             contact: previous_event,
+            geometry_revision_a: 0,
+            geometry_revision_b: 0,
+            is_sensor: false,
             witness_a_local: Point::new(0.25, 0.0),
             witness_b_local: Point::new(-0.25, 0.0),
             normal_impulse: 0.25,

@@ -734,7 +734,7 @@ pub(crate) struct ColliderRecord {
     pub(crate) filter: CollisionFilter,
     pub(crate) is_sensor: bool,
     pub(crate) user_data: u64,
-    geometry_revision: u32,
+    geometry_revision: u64,
     geometry_cache: RwLock<DerivedGeometryCache>,
 }
 
@@ -785,6 +785,10 @@ impl ColliderRecord {
 
     pub(crate) fn world_pose(&self, body_pose: Pose) -> Pose {
         body_pose.compose(self.local_pose)
+    }
+
+    pub(crate) fn geometry_revision(&self) -> u64 {
+        self.geometry_revision
     }
 
     pub(crate) fn view(&self, handle: ColliderHandle, body_pose: Pose) -> ColliderView {
@@ -868,7 +872,7 @@ impl Clone for ColliderRecord {
 
 #[derive(Clone, Debug, Default)]
 struct DerivedGeometryCache {
-    revision: u32,
+    revision: u64,
     world_pose: Option<Pose>,
     aabb: Option<ShapeAabb>,
     world_vertices: Option<Vec<Point>>,
@@ -884,7 +888,7 @@ fn pose_bits_equal(a: Pose, b: Pose) -> bool {
 }
 
 impl DerivedGeometryCache {
-    fn is_fresh(&self, revision: u32, world_pose: Pose) -> bool {
+    fn is_fresh(&self, revision: u64, world_pose: Pose) -> bool {
         self.revision == revision
             && self.aabb.is_some()
             && self

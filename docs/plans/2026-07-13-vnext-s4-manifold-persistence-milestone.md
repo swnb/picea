@@ -1,6 +1,6 @@
 # vNext Handoff §4 SAT Manifold Persistence Milestone
 
-状态：S4-D `6045bd2`、S4-RED `c4298ae`、S4-ORACLE-D `4a0c865`、S4-ORACLE-RED `4a32ddb`、S4-ORACLE-EVIDENCE `cca2475` 已提交；S4-ORACLE-REPLACE under review
+状态：S4-D `6045bd2`、S4-RED `c4298ae`、S4-ORACLE-D `4a0c865`、S4-ORACLE-RED `4a32ddb`、S4-ORACLE-EVIDENCE `cca2475`、S4-ORACLE-REPLACE `d9d96b0` 已提交；S4-IMPL targeted accepted，commit pending
 日期：2026-07-13
 基线：`main=origin/main=9427a17`
 设计：`docs/design/2026-07-13-sat-manifold-persistence-design.md`
@@ -631,3 +631,98 @@ Living spec的聚合命令`rtk proxy cargo test -p picea --test physics_realism_
 - Matrix180/forced600 baseline penetration max/sum`0.028555/0.799082`，working`0.027232/0.927301`；aligned两侧`0.003365/0.054014`。全部无ejection、quiet speed0并全部sleeping。
 - Baseline的3个final-unabsorbed与3个unexpected仍只分别表示各自分类计数，不主张相同transition keys。
 - Supervisor已reverse同一replacement patch并clean remove临时baseline worktree。Replacement仍待最终test/code与scope reviewer确认后提交。
+
+### 2026-07-14 - S4-IMPL worker receipt（under review，未commit）
+
+#### 1. 成功标准
+
+在`HEAD=d9d96b0`已提交ORACLE-REPLACE上完成private revision与sensor facts、pair-scoped三consumer reservation、exact-hard/residual maximum-cardinality matching和严格non-symmetric edge-swap分类；全部implementation targeted/full core gates green，tests/oracle/solver/lib/narrowphase production零diff。
+
+#### 2. 检查结果
+
+逐项实现锁：
+
+| Gate | Exact command | Exit / count | 关键事实 |
+| --- | --- | --- | --- |
+| A01 | `rtk proxy cargo test -p picea --lib pipeline::narrowphase::tests::stacked_rectangles_expose_raw_feature_role_swap -- --exact --nocapture` | exit 0；1 passed / 0 failed | Raw SAT role swap characterization保持green。 |
+| A03 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::lifecycle_reservation_keeps_later_exact_match -- --exact --nocapture` | exit 0；1 passed / 0 failed | Compatible full exact保持硬预留。 |
+| A04 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::lifecycle_reservation_maximizes_edge_swap_cardinality -- --exact --nocapture` | exit 0；1 passed / 0 failed | 缺边residual graph选择cardinality 2。 |
+| A05 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::warm_start_reservation_keeps_distinct_impulses_with_local_witnesses -- --exact --nocapture` | exit 0；1 passed / 0 failed | 两个sentinel impulses一对一且edge-swap tangent清零。 |
+| A06 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::warm_start_reservation_maximizes_residual_cardinality_after_exact_matches -- --exact --nocapture` | exit 0；1 passed / 0 failed | Exact后先最大cardinality，再应用warm same-index偏好。 |
+| A07 | 两条`source_row_reservation_does_not_reuse_previous_point` / `source_row_revision_is_rejected_before_solver_rows_are_built` exact命令 | 均exit 0；各1 passed / 0 failed | Source-row独立一对一；revision mismatch在solver前拒绝。 |
+| A08/A09 | 两条`manifold_persistence_geometry_patch_invalidates_all_history_consumers` / `manifold_persistence_world_commands_geometry_patch_is_atomic` exact命令 | 均exit 0；各1 passed / 0 failed | Direct/transaction geometry patch分配新ContactId与ManifoldId；rejected transaction保留history。 |
+| A10 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_sensor_transitions_do_not_expand_edge_swap_identity -- --exact --nocapture`；same-index unit exact | 两条均exit 0；各1 passed / 0 failed | Previous sensor只读private `ContactRecord::is_sensor`；sensor fallback不扩大lifecycle。 |
+| A11 | 两条`pipeline::contacts::tests::manifold_persistence_two_to_one_to_two_preserves_only_surviving_point` / integration同名exact命令 | 均exit 0；各1 passed / 0 failed | Unit与真实pipeline 2->1->2均保持幸存id并拒绝复活返回point history。 |
+| A12 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_normalizes_geometric_a_b_order_with_revisions -- --exact --nocapture` | exit 0；1 passed / 0 failed | Ordered revisions按normalized collider handles对齐。 |
+| A13 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::manifold_persistence_history_only_separation_does_not_fabricate_contact -- --exact --nocapture` | exit 0；1 passed / 0 failed | Separation与confirmed interaction例外保持。 |
+| A15 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::reservation_stays_pair_scoped_for_four_by_four_inputs_and_unrelated_pairs -- --exact --nocapture` | exit 0；1 passed / 0 failed | Test-only counter位于真实lifecycle residual candidate-edge gate；实际`base=4`、`with_unrelated=4`。 |
+| O01 partition/desired | 两条`matrix_stack_edge_swap_attribution_*` exact命令 | 均exit 0；各1 passed / 0 failed | Reported `59=46 final-attributed + 13 source-boundary + 0 unexpected`；final candidates `46=46+0`；exact predecessors `25431`、theft 0。 |
+| O02/O03 | `manifold_persistence_sat_role_swap_reports_persistent_edge_swap` / `artifact_records_persistent_edge_swap_with_stable_ids` exact命令 | 均exit 0；各1 passed / 0 failed | O03落盘样本frame 7，raw `4311744514 -> 16785408`，`ContactId(24)` / `ManifoldId(13)`，drift `0.0021390484`。 |
+| O05 | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_symmetric_edge_index_is_not_role_swap -- --exact --nocapture` | exit 0；1 passed / 0 failed | Same raw index/slot drift与`reference_edge == incident_edge`均不再进入edge-swap；lifecycle/source-row共享严格predicate。 |
+
+Matrix与聚合门：
+
+| Gate | Command | Exit / count | 指标 |
+| --- | --- | --- | --- |
+| Matrix180 replacement | `rtk proxy cargo test -p picea-lab --test artifact_run matrix_stack_artifacts_capture_nxm_grid_stack_facts -- --exact --nocapture` | exit 0；1 passed / 0 failed | penetration max/sum `0.027232/0.927301`；0 awake / 48 sleeping；quiet linear/angular `0/0`；无ejection。 |
+| Aligned1200 | `rtk proxy cargo test -p picea-lab --test artifact_run aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock -- --exact --nocapture` | exit 0；1 passed / 0 failed | penetration `0.003365/0.054014`；0 / 12；quiet `0/0`；无ejection。 |
+| Forced600 | `rtk proxy env PICEA_MATRIX_STACK_E4_ACCEPTANCE=1 cargo test -p picea-lab --test artifact_run matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed -- --ignored --exact --nocapture` | exit 0；1 passed / 0 failed | penetration `0.027232/0.927301`；0 / 48；quiet `0/0`；无ejection。 |
+| Narrowphase targeted | `rtk proxy cargo test -p picea --lib pipeline::narrowphase::tests -- --nocapture` | exit 0；18 passed / 0 failed | Raw SAT/clip behavior保持。 |
+| Contacts targeted | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests -- --nocapture` | exit 0；31 passed / 0 failed | 三consumer、matching、ranking、finite和5x5边界全部green；A15同时输出`4/4`。 |
+| Manifold targeted | `rtk proxy cargo test -p picea --test physics_realism_acceptance manifold_persistence_ -- --nocapture` | exit 0；8 passed / 0 failed | A02/A08-A12/O02/O05全部green。 |
+| Existing warm/stack | `sat_edge_swap_candidate_persists_lifecycle_without_auto_warm_start_impulse -- --exact`；`warm_start_cache`；`stack_4` filters | 均exit 0；分别1、13、3 passed | Warm provenance未由matrix需求改写；stack稳定合同保持。 |
+| Source freeze | `rtk proxy ruby crates/picea-lab/tests/verify_s4_matrix_source_freeze.rb c4298ae replace-one-oracle ec463132197639a58bf7b1287dcdb8d9c91059839d263d149a23530ed643a0df` | exit 0 | `s4 matrix source freeze replace-one-oracle ok`。 |
+| Core lib | `rtk proxy cargo test -p picea --lib` | exit 0；128 passed / 0 failed | 无ignored或filtered失败。 |
+| Full realism | `rtk proxy cargo test -p picea --test physics_realism_acceptance` | exit 0；79 passed / 0 failed | 全target green。 |
+| Static | `rtk proxy cargo check -p picea --lib`；`rtk proxy cargo fmt --all --check`；`rtk proxy git diff --check` | 全部exit 0 | `cargo fmt --all`后tests/tool相对`d9d96b0`零diff。 |
+
+Review findings的TDD RED证据：
+
+| Focused lock | Exact command | RED exit / count | 当前失败断言 |
+| --- | --- | --- | --- |
+| Previous sensor source rejection | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::source_row_rejects_previous_sensor_feature_miss -- --exact --nocapture` | exit 101；0 passed / 1 failed | Warm reason已为`MissFeatureId`，但`!source_row_continuity_candidate`失败，previous sensor仍错误授权source row。 |
+| Warm-hit source bypass | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::source_row_keeps_unknown_for_exact_and_same_index_warm_hits -- --exact --nocapture` | exit 101；0 passed / 1 failed | Exact与same-index fixture先锁定warm `Hit`；目标断言actual `PairMismatch`、expected `Unknown`。首次fixture因current witness未对齐而在`DroppedPointDrift != Hit`提前失败，修正仅限test witness后取得本目标RED。 |
+| Edge warm-hit distractor | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::edge_swap_warm_hit_ignores_source_compatible_distractor -- --exact --nocapture` | exit 101；0 passed / 1 failed | Actual `Unknown`、expected `EdgeSwap`；source-compatible distractor覆盖了actual warm edge classification。 |
+| Exact single-sided NaN | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::exact_warm_start_rejects_single_sided_nonfinite_witness -- --exact --nocapture` | exit 101；0 passed / 1 failed | Actual `Hit`、expected `DroppedPointDrift`；单侧NaN被projection中的`FloatNum::max`吞掉。 |
+
+Review findings的GREEN与Low边界：
+
+| Focused lock | Exact command | Exit / count | 结果 |
+| --- | --- | --- | --- |
+| Previous sensor source rejection | 同上`source_row_rejects_previous_sensor_feature_miss` exact | exit 0；1 passed / 0 failed | `MissFeatureId`但previous sensor时`false/Sensor`。 |
+| Compatible warm-hit bypass | 同上`source_row_keeps_unknown_for_exact_and_same_index_warm_hits` exact | exit 0；1 passed / 0 failed | 仅Exact/SameFeatureIndex warm `Hit`为`false/Unknown`；edge-swap Hit仍`EdgeSwap`，真实no-pair仍`NoPreviousPair/PairMismatch`。 |
+| Source contention | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::source_row_contention_keeps_unreserved_reason_unknown -- --exact --nocapture` | exit 0；1 passed / 0 failed | 同pair合法candidate被另一current消费后，未reserved row为`false/Unknown`。 |
+| Kind/max/total ranking | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::residual_matching_ranks_kind_then_max_and_total_drift -- --exact --nocapture` | exit 0；1 passed / 0 failed | Equal cardinality依次验证warm SameFeatureIndex数量、最小max drift、最小total drift。 |
+| Lex/permutation | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::residual_matching_lexicographic_tie_break_is_input_order_independent -- --exact --nocapture` | exit 0；1 passed / 0 failed | 完全同分时按完整mapping字典序；反转current输入结果不变。 |
+| Finite/5x5 | `rtk proxy cargo test -p picea --lib pipeline::contacts::tests::reservation_rejects_nonfinite_edges_and_handles_five_by_five -- --exact --nocapture` | 首跑exit 101，0 passed / 1 failed；修复后exit 0，1 passed / 0 failed | RED为单侧NaN被`FloatNum::max`吞掉；共享drift显式检查双侧finite后NaN fail-closed，5x5完成5个distinct reservations。 |
+| Edge warm-hit distractor | 同上`edge_swap_warm_hit_ignores_source_compatible_distractor` exact | RED exit 101，0 passed / 1 failed；GREEN exit 0，1 passed / 0 failed | Actual warm reservation kind直接决定source reason；PersistentEdgeSwap为`false/EdgeSwap`，不再被其他previous覆盖成`Unknown`。 |
+| Exact single-sided NaN | 同上`exact_warm_start_rejects_single_sided_nonfinite_witness` exact | RED exit 101，0 passed / 1 failed；GREEN exit 0，1 passed / 0 failed | `warm_start_transfer`在任何projection/max前检查两侧drift vector与length finite；输出`DroppedPointDrift`且全部warm/solver seeds为0。 |
+
+Changed files：`crates/picea/src/collider.rs`、`crates/picea/src/world/contact_state.rs`、`crates/picea/src/pipeline/contacts.rs`、`crates/picea/src/events.rs`、`crates/picea/src/debug.rs`，以及本次状态/receipt的S4 design与living spec。`contacts.rs`同时包含private-field test constructor适配、8条additive inline tests和A15计数输出；external `crates/picea/tests`、`crates/picea-lab/tests`及oracle assertions相对`d9d96b0`零diff。五core binary diff SHA-256为`3880f3c9a9625dbd67bfb0f22e42ff8e851525883c29e2650b9547d631517416`。
+
+#### 3. 复跑方式
+
+按本计划“Targeted green commands”顺序复跑，再运行上述A03-A15先前RED exact、O01-O05、source-freeze、`cargo test -p picea --lib`、full `physics_realism_acceptance`及三条static命令。Matrix命令保留`--exact --nocapture`，forced600必须同时给出`PICEA_MATRIX_STACK_E4_ACCEPTANCE=1`与`--ignored`。
+
+#### 4. 范围外
+
+未修改external committed tests/helper/oracle assertions、任何阈值、Cargo、solver、`lib.rs`、narrowphase production、public enum/field/serde或artifact schema。`contacts.rs`内已提交inline test constructors因新增private fields而适配，本轮又增加8条focused inline tests并为A15增加nocapture计数输出；所有旧assertion保留。未运行workspace full、clippy、bench或进入S4-V；未创建subagent、stage、commit、push、fetch、branch或worktree。
+
+#### 5. 残余风险
+
+- `u64` geometry revision理论上可wrap；当前合同只假设实际world生命周期内不发生。
+- Residual matching按当前每pair至多4x4枚举全部合法matching；未来多点manifold扩大`k`时需重新评估组合复杂度。
+- A08/A09尚未额外锁定“先制造nonzero revision再进入WorldCommands scratch clone”与revision mismatch时old `ContactEnded`事件；现有direct/transaction tests已锁三consumer invalidation和新ids，本轮为避免扩大external test diff将这两项保留为Low residual。
+- S4-IMPL的spec/code review与独立targeted verifier已通过；S4-V workspace/clippy/bench尚未执行，不宣称milestone complete。
+
+### 2026-07-14 - S4-IMPL independent targeted verifier
+
+- 独立verifier结论PASS；全程只读，未修改、stage、commit、fetch、worktree或format。
+- A01-A15逐exact全部exit0；A07、A10、A11、A12的多条unit/integration均逐条通过。A15 candidate evaluations稳定为`base=4 / with_unrelated=4`。
+- 8条review新增inline exact锁全部exit0：previous sensor、exact/same warm Hit、edge distractor、single-sided NaN、source contention、kind/max/total、lex/permutation、finite/5x5。
+- Narrowphase `18/18`、contacts `31/31`、picea lib `128/128`、full physics realism `79/79`、manifold `8/8`、warm `13/13`、stack `3/3`。
+- O01 partition/desired均green：reported `59=46+13+0`、final candidates `46=46+0`、exact predecessors25431/theft0。O02/O03/O05均green；O03为frame7 `ContactId(24)`/`ManifoldId(13)`。
+- Matrix180 replacement：penetration max/sum`0.027232/0.927301`、0 awake/48 sleeping、quiet0/0、无ejection。Aligned1200：`0.003365/0.054014`、0/12。Forced600：`0.027232/0.927301`、0/48；均quiet0/0、无ejection。
+- `cargo fmt --all --check`、`cargo check -p picea --lib`、source-freeze replacement、`git diff --check`全部exit0。
+- External tests/oracle、narrowphase、solver、`lib.rs`相对`d9d96b0`零diff；最终仅5core+2docs unstaged dirty，无untracked/staged。5core binary diff SHA-256为`3880f3c9a9625dbd67bfb0f22e42ff8e851525883c29e2650b9547d631517416`。
+- Code reviewer round3无High/Medium；保留A08/A09 nonzero revision scratch clone与old `ContactEnded`专项锁的Low residual，不阻塞S4-IMPL commit。
