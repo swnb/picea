@@ -5396,3 +5396,1157 @@ fn manifold_persistence_symmetric_edge_index_is_not_role_swap() {
         "a symmetric raw edge index with only a point-slot change is not a SAT role swap; previous={previous:?}, current={current:?}"
     );
 }
+
+fn create_revolute(
+    world: &mut World,
+    body_a: BodyHandle,
+    body_b: BodyHandle,
+    local_anchor_a: Point,
+    local_anchor_b: Point,
+) -> JointHandle {
+    world
+        .create_joint(JointDesc::Revolute(RevoluteJointDesc {
+            body_a,
+            body_b,
+            local_anchor_a,
+            local_anchor_b,
+            ..RevoluteJointDesc::default()
+        }))
+        .expect("revolute joint should be created")
+}
+
+fn revolute_anchor(world: &World, body: BodyHandle, local_anchor: Point) -> Point {
+    world
+        .try_body(body)
+        .expect("revolute endpoint should remain live")
+        .pose()
+        .transform_point(local_anchor)
+}
+
+fn revolute_anchor_drift(
+    world: &World,
+    body_a: BodyHandle,
+    local_anchor_a: Point,
+    body_b: BodyHandle,
+    local_anchor_b: Point,
+) -> f32 {
+    (revolute_anchor(world, body_b, local_anchor_b)
+        - revolute_anchor(world, body_a, local_anchor_a))
+    .length()
+}
+
+fn assert_revolute_body_finite(world: &World, body: BodyHandle, label: &str) {
+    let body = world
+        .try_body(body)
+        .unwrap_or_else(|_| panic!("{label} should remain live"));
+    let pose = body.pose();
+    let mass = body.mass_properties();
+    assert!(
+        pose.translation().x().is_finite()
+            && pose.translation().y().is_finite()
+            && pose.angle().is_finite()
+            && body.linear_velocity().x().is_finite()
+            && body.linear_velocity().y().is_finite()
+            && body.angular_velocity().is_finite()
+            && mass.mass.is_finite()
+            && mass.inverse_mass.is_finite()
+            && mass.inertia.is_finite()
+            && mass.inverse_inertia.is_finite()
+            && mass.local_center_of_mass.x().is_finite()
+            && mass.local_center_of_mass.y().is_finite(),
+        "S5_HARNESS_BOUNDARY:{label}_must_stay_finite"
+    );
+}
+
+#[test]
+fn revolute_joint_two_dynamic_preserves_anchor_coincidence() {
+    let mut world = no_gravity_world();
+    let body_a = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        -1.0,
+        0.0,
+        Vector::new(-1.0, 0.0),
+    );
+    let body_b = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        1.0,
+        0.0,
+        Vector::new(1.0, 0.0),
+    );
+    attach_shape(
+        &mut world,
+        body_a,
+        SharedShape::rect(0.5, 0.5),
+        Material::default(),
+    );
+    attach_shape(
+        &mut world,
+        body_b,
+        SharedShape::rect(0.5, 0.5),
+        Material::default(),
+    );
+    let local_anchor_a = Point::new(1.0, 0.0);
+    let local_anchor_b = Point::new(-1.0, 0.0);
+    create_revolute(&mut world, body_a, body_b, local_anchor_a, local_anchor_b);
+
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    let mut max_drift = 0.0_f32;
+    let mut warning_count = 0usize;
+    for _ in 0..240 {
+        let report = pipeline.step(&mut world);
+        warning_count += report.stats.numeric_warnings;
+        max_drift = max_drift.max(revolute_anchor_drift(
+            &world,
+            body_a,
+            local_anchor_a,
+            body_b,
+            local_anchor_b,
+        ));
+    }
+    let final_drift = revolute_anchor_drift(&world, body_a, local_anchor_a, body_b, local_anchor_b);
+    println!(
+        "S5_REVOLUTE_FACT:two_dynamic:max_drift={max_drift:.6};final_drift={final_drift:.6};numeric_warnings={warning_count}"
+    );
+
+    assert_eq!(
+        warning_count, 0,
+        "S5_HARNESS_BOUNDARY:unexpected_numeric_warning"
+    );
+    assert!(
+        max_drift <= 0.03,
+        "S5_REVOLUTE_SOLVER_ASSERT:two_dynamic_max_drift:max_drift={max_drift:.6};limit=0.03"
+    );
+    assert!(
+        final_drift <= 0.01,
+        "S5_REVOLUTE_SOLVER_ASSERT:two_dynamic_final_drift:final_drift={final_drift:.6};limit=0.01"
+    );
+}
+
+#[test]
+fn revolute_joint_leaves_relative_rotation_free() {
+    let mut world = no_gravity_world();
+    let body_a = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            angular_velocity: 1.0,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("body A should be created");
+    let body_b = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            angular_velocity: -1.0,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("body B should be created");
+    let no_pair_contact = CollisionFilter {
+        memberships: 1,
+        collides_with: 0,
+    };
+    for body in [body_a, body_b] {
+        world
+            .create_collider(
+                body,
+                ColliderDesc {
+                    shape: SharedShape::rect(1.0, 0.5),
+                    density: 1.0,
+                    filter: no_pair_contact,
+                    ..ColliderDesc::default()
+                },
+            )
+            .expect("free-rotation endpoint should have finite positive mass and inertia");
+    }
+    create_revolute(
+        &mut world,
+        body_a,
+        body_b,
+        Point::default(),
+        Point::default(),
+    );
+    let mass_a = world
+        .try_body(body_a)
+        .expect("body A exists")
+        .mass_properties();
+    let mass_b = world
+        .try_body(body_b)
+        .expect("body B exists")
+        .mass_properties();
+    assert!(
+        mass_a.inverse_mass > 0.0
+            && mass_b.inverse_mass > 0.0
+            && mass_a.inverse_inertia > 0.0
+            && mass_b.inverse_inertia > 0.0,
+        "S5_HARNESS_BOUNDARY:free_rotation_requires_positive_inverse_mass_and_inertia"
+    );
+    // Both anchors and both centers of mass are at the body origins, so rA=rB=0 and
+    // K=(inv_mass_a+inv_mass_b)I. This proves the boundary is not passing via a singular row.
+    let k_diagonal = mass_a.inverse_mass + mass_b.inverse_mass;
+    let k_determinant = k_diagonal * k_diagonal;
+    assert!(
+        k_determinant.is_finite() && k_determinant > f32::EPSILON,
+        "S5_HARNESS_BOUNDARY:free_rotation_requires_invertible_effective_mass"
+    );
+    let initial_relative_angle = world
+        .try_body(body_b)
+        .expect("body B exists")
+        .pose()
+        .angle()
+        - world
+            .try_body(body_a)
+            .expect("body A exists")
+            .pose()
+            .angle();
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    let mut baseline_joint_rows = Vec::new();
+    for _ in 0..60 {
+        let report = pipeline.step(&mut world);
+        baseline_joint_rows.push(report.stats.joint_row_count);
+    }
+    let final_relative_angle = world
+        .try_body(body_b)
+        .expect("body B exists")
+        .pose()
+        .angle()
+        - world
+            .try_body(body_a)
+            .expect("body A exists")
+            .pose()
+            .angle();
+    let relative_change = (final_relative_angle - initial_relative_angle).abs();
+    println!(
+        "S5_REVOLUTE_BOUNDARY:free_rotation:inverse_mass=({:.6},{:.6});inverse_inertia=({:.6},{:.6});k_determinant={k_determinant:.6};relative_change={relative_change:.6};baseline_joint_rows={baseline_joint_rows:?}",
+        mass_a.inverse_mass,
+        mass_b.inverse_mass,
+        mass_a.inverse_inertia,
+        mass_b.inverse_inertia
+    );
+
+    assert!(
+        relative_change >= 1.0,
+        "S5_HARNESS_BOUNDARY:relative_rotation_was_locked:change={relative_change:.6}"
+    );
+}
+
+#[test]
+fn revolute_joint_static_dynamic_preserves_static_pose() {
+    let mut world = no_gravity_world();
+    let static_body = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let dynamic_body = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        1.0,
+        0.0,
+        Vector::new(2.0, 0.0),
+    );
+    attach_shape(
+        &mut world,
+        dynamic_body,
+        SharedShape::rect(1.0, 1.0),
+        Material::default(),
+    );
+    let static_anchor = Point::default();
+    let dynamic_anchor = Point::new(-1.0, 0.0);
+    create_revolute(
+        &mut world,
+        static_body,
+        dynamic_body,
+        static_anchor,
+        dynamic_anchor,
+    );
+    let static_pose_before = world
+        .try_body(static_body)
+        .expect("static endpoint should exist")
+        .pose();
+
+    let report = step_world(&mut world, 60);
+    let static_pose_after = world
+        .try_body(static_body)
+        .expect("static endpoint should exist")
+        .pose();
+    let drift = revolute_anchor_drift(
+        &world,
+        static_body,
+        static_anchor,
+        dynamic_body,
+        dynamic_anchor,
+    );
+    println!(
+        "S5_REVOLUTE_FACT:static_dynamic:drift={drift:.6};numeric_warnings={}",
+        report.stats.numeric_warnings
+    );
+
+    assert_eq!(static_pose_after, static_pose_before);
+    assert!(
+        drift <= 0.01,
+        "S5_REVOLUTE_SOLVER_ASSERT:static_dynamic_pivot_drift:drift={drift:.6};limit=0.01"
+    );
+}
+
+#[test]
+fn revolute_joint_off_center_anchor_uses_rotational_inertia() {
+    let mut world = no_gravity_world();
+    let static_body = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let dynamic_body = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        1.0,
+        0.0,
+        Vector::new(0.0, 4.0),
+    );
+    attach_shape(
+        &mut world,
+        dynamic_body,
+        SharedShape::rect(1.0, 0.5),
+        Material::default(),
+    );
+    create_revolute(
+        &mut world,
+        static_body,
+        dynamic_body,
+        Point::default(),
+        Point::new(-1.0, 0.0),
+    );
+
+    let report = step_world(&mut world, 60);
+    let rotation = world
+        .try_body(dynamic_body)
+        .expect("dynamic endpoint should exist")
+        .pose()
+        .angle()
+        .abs();
+    println!(
+        "S5_REVOLUTE_FACT:off_center:rotation={rotation:.6};numeric_warnings={}",
+        report.stats.numeric_warnings
+    );
+
+    assert!(
+        rotation >= 0.5,
+        "S5_REVOLUTE_SOLVER_ASSERT:off_center_requires_rotational_inertia:rotation={rotation:.6};minimum=0.5"
+    );
+}
+
+#[test]
+fn revolute_joint_is_deterministic_and_finite() {
+    fn run() -> (Vec<String>, Vec<usize>) {
+        let mut world = no_gravity_world();
+        let body_a = create_body(
+            &mut world,
+            BodyType::Dynamic,
+            -1.0,
+            0.0,
+            Vector::new(0.25, -0.5),
+        );
+        let body_b = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+                linear_velocity: Vector::new(-0.5, 0.25),
+                angular_velocity: 1.5,
+                can_sleep: false,
+                ..BodyDesc::default()
+            })
+            .expect("body B should be created");
+        for body in [body_a, body_b] {
+            attach_shape(
+                &mut world,
+                body,
+                SharedShape::rect(0.5, 0.75),
+                Material::default(),
+            );
+        }
+        create_revolute(
+            &mut world,
+            body_a,
+            body_b,
+            Point::new(1.0, 0.0),
+            Point::new(-1.0, 0.0),
+        );
+        let mut pipeline = SimulationPipeline::new(fixed_step_config());
+        let mut hashes = Vec::new();
+        let mut joint_rows = Vec::new();
+        for _ in 0..120 {
+            let report = pipeline.step(&mut world);
+            assert_eq!(report.stats.numeric_warnings, 0);
+            assert_revolute_body_finite(&world, body_a, "determinism_body_a");
+            assert_revolute_body_finite(&world, body_b, "determinism_body_b");
+            hashes.push(stable_snapshot_hash(
+                &world.debug_snapshot(&DebugSnapshotOptions::default()),
+            ));
+            joint_rows.push(report.stats.joint_row_count);
+        }
+        (hashes, joint_rows)
+    }
+
+    let first = run();
+    let second = run();
+    println!(
+        "S5_REVOLUTE_BOUNDARY:deterministic_finite:frames={};baseline_joint_rows={:?}",
+        first.0.len(),
+        first.1
+    );
+    assert_eq!(first.0, second.0, "revolute scenario must be deterministic");
+    assert_eq!(first.1, second.1, "solver-row facts must be deterministic");
+}
+
+fn build_connected_contact_revolute_world() -> (World, BodyHandle, BodyHandle) {
+    let mut world = no_gravity_world();
+    let body_a = create_body(&mut world, BodyType::Dynamic, 0.0, 0.0, Vector::default());
+    let body_b = create_body(&mut world, BodyType::Dynamic, 0.75, 0.0, Vector::default());
+    for body in [body_a, body_b] {
+        attach_shape(
+            &mut world,
+            body,
+            SharedShape::circle(0.5),
+            Material::default(),
+        );
+    }
+    create_revolute(
+        &mut world,
+        body_a,
+        body_b,
+        Point::new(0.375, 0.0),
+        Point::new(-0.375, 0.0),
+    );
+    (world, body_a, body_b)
+}
+
+#[test]
+fn revolute_joint_mixed_contact_island_keeps_separate_logical_rows() {
+    let (mut world, body_a, body_b) = build_connected_contact_revolute_world();
+    let report = step_world(&mut world, 1);
+    let pair_contact_count = active_contact_events(&report)
+        .iter()
+        .filter(|contact| {
+            [contact.body_a, contact.body_b].contains(&body_a)
+                && [contact.body_a, contact.body_b].contains(&body_b)
+        })
+        .count();
+    println!(
+        "S5_REVOLUTE_FACT:mixed_rows:pair_contacts={pair_contact_count};contact_rows={};joint_rows={}",
+        report.stats.contact_row_count, report.stats.joint_row_count
+    );
+
+    assert!(
+        pair_contact_count > 0,
+        "S5_HARNESS_BOUNDARY:mixed_fixture_has_no_contact"
+    );
+    assert!(
+        report.stats.contact_row_count > 0,
+        "S5_HARNESS_BOUNDARY:mixed_fixture_has_no_contact_row"
+    );
+    assert_eq!(
+        report.stats.joint_row_count, 1,
+        "S5_REVOLUTE_SOLVER_ASSERT:mixed_island_requires_one_logical_joint_row"
+    );
+}
+
+#[test]
+fn revolute_joint_connected_bodies_still_contact() {
+    let (mut world, body_a, body_b) = build_connected_contact_revolute_world();
+    let report = step_world(&mut world, 1);
+    let contacts = active_contact_events(&report);
+    let pair_contacts = contacts
+        .iter()
+        .filter(|contact| {
+            [contact.body_a, contact.body_b].contains(&body_a)
+                && [contact.body_a, contact.body_b].contains(&body_b)
+        })
+        .count();
+    println!(
+        "S5_REVOLUTE_BOUNDARY:connected_contact:pair_contacts={pair_contacts};contact_rows={};baseline_joint_rows={}",
+        report.stats.contact_row_count, report.stats.joint_row_count
+    );
+    assert!(
+        pair_contacts > 0,
+        "connected joint endpoints must still collide"
+    );
+    assert!(report.stats.contact_row_count > 0);
+}
+
+#[test]
+fn revolute_joint_nonzero_local_center_of_mass_preserves_pivot() {
+    let mut world = no_gravity_world();
+    let static_body = create_body(&mut world, BodyType::Static, 1.25, 0.25, Vector::default());
+    let dynamic_body = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            angular_velocity: 3.0,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("dynamic endpoint should be created");
+    attach_shape_with_local_pose(
+        &mut world,
+        dynamic_body,
+        SharedShape::rect(0.5, 0.75),
+        Pose::from_xy_angle(0.75, 0.25, 0.0),
+        Material::default(),
+    );
+    let local_anchor = Point::new(1.25, 0.25);
+    create_revolute(
+        &mut world,
+        static_body,
+        dynamic_body,
+        Point::default(),
+        local_anchor,
+    );
+    let mass = world
+        .try_body(dynamic_body)
+        .expect("dynamic endpoint should exist")
+        .mass_properties();
+    assert!(
+        Vector::from(mass.local_center_of_mass).length() > 0.5,
+        "S5_HARNESS_BOUNDARY:fixture_must_have_nonzero_local_com"
+    );
+    let anchor_from_center = local_anchor - mass.local_center_of_mass;
+    assert!(
+        anchor_from_center.length() >= 0.5 && mass.inverse_mass > 0.0 && mass.inverse_inertia > 0.0,
+        "S5_HARNESS_BOUNDARY:nonzero_com_fixture_requires_nonzero_lever_and_solvable_mass"
+    );
+
+    let mut pipeline = SimulationPipeline::new(fixed_step_config());
+    let mut max_drift = 0.0_f32;
+    for _ in 0..120 {
+        let report = pipeline.step(&mut world);
+        assert_eq!(report.stats.numeric_warnings, 0);
+        max_drift = max_drift.max(revolute_anchor_drift(
+            &world,
+            static_body,
+            Point::default(),
+            dynamic_body,
+            local_anchor,
+        ));
+    }
+    let final_drift = revolute_anchor_drift(
+        &world,
+        static_body,
+        Point::default(),
+        dynamic_body,
+        local_anchor,
+    );
+    let endpoint_angular_velocity = body_angular_velocity(&world, dynamic_body);
+    println!(
+        "S5_REVOLUTE_FACT:nonzero_com:local_com={:?};local_anchor={local_anchor:?};lever={anchor_from_center:?};lever_length={:.6};inverse_mass={:.6};inverse_inertia={:.6};angular_velocity={endpoint_angular_velocity:.6};max_drift={max_drift:.6};final_drift={final_drift:.6}",
+        mass.local_center_of_mass,
+        anchor_from_center.length(),
+        mass.inverse_mass,
+        mass.inverse_inertia
+    );
+    assert!(endpoint_angular_velocity.abs() > 0.1);
+    assert!(
+        max_drift <= 0.03,
+        "S5_REVOLUTE_SOLVER_ASSERT:nonzero_com_max_pivot_drift:max_drift={max_drift:.6};limit=0.03"
+    );
+    assert!(
+        final_drift <= 0.01,
+        "S5_REVOLUTE_SOLVER_ASSERT:nonzero_com_final_pivot_drift:final_drift={final_drift:.6};limit=0.01"
+    );
+}
+
+const CCD_SPINNER_INITIAL_ANGULAR_VELOCITY: f32 = 6.0;
+
+struct CcdSpinnerControl {
+    final_angular_velocity: f32,
+    mass_properties: MassProperties,
+    report: StepReport,
+    trace: CcdTrace,
+}
+
+struct CcdZeroAngularCorrectionOracle {
+    target_anchor: Point,
+    clamped_translation: Vector,
+    sampled_eval_angle: f32,
+    lever: Vector,
+    radial_error: Vector,
+    expected_position_delta_angle: f32,
+}
+
+fn assert_same_ccd_geometry(actual: &CcdTrace, control: &CcdTrace) {
+    // Body and collider handles are allocated per world, so the control and joint worlds
+    // cannot share identity values. Compare the CCD geometry/decision facts here; each test
+    // separately binds the actual trace identities to the bodies and colliders it created.
+    assert_eq!(actual.target_kind, control.target_kind);
+    assert_eq!(actual.swept_start, control.swept_start);
+    assert_eq!(actual.swept_end, control.swept_end);
+    assert_eq!(actual.target_swept_start, control.target_swept_start);
+    assert_eq!(actual.target_swept_end, control.target_swept_end);
+    assert_eq!(actual.toi, control.toi);
+    assert_eq!(actual.advancement, control.advancement);
+    assert_eq!(actual.clamp, control.clamp);
+    assert_eq!(actual.target_clamp, control.target_clamp);
+    assert_eq!(actual.slop, control.slop);
+    assert_eq!(actual.toi_point, control.toi_point);
+}
+
+fn run_ccd_spinner_without_joint(local_anchor: Point) -> CcdSpinnerControl {
+    let mut world = no_gravity_world();
+    let wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let spinner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            linear_velocity: Vector::new(200.0, 0.0),
+            angular_velocity: CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("CCD spinner should be created");
+    let material = Material {
+        friction: 1.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, wall, SharedShape::rect(0.1, 10.0), material);
+    attach_shape(&mut world, spinner, SharedShape::circle(0.05), material);
+    let report = step_world(&mut world, 1);
+    let body = world.try_body(spinner).expect("CCD spinner should survive");
+    let final_pose = body.pose();
+    let final_angular_velocity = body.angular_velocity();
+    let mass_properties = body.mass_properties();
+    let trace = active_contact_events(&report)
+        .into_iter()
+        .find_map(|contact| contact.ccd_trace)
+        .expect("S5_HARNESS_BOUNDARY:control_CCD_clamp_must_emit_trace");
+    assert!(final_pose.transform_point(local_anchor).x().is_finite());
+    CcdSpinnerControl {
+        final_angular_velocity,
+        mass_properties,
+        report,
+        trace,
+    }
+}
+
+fn ccd_zero_angular_correction_oracle(
+    control: &CcdSpinnerControl,
+    local_anchor: Point,
+    radial_error_length: f32,
+) -> CcdZeroAngularCorrectionOracle {
+    let sweep = control.trace.swept_end - control.trace.swept_start;
+    let sweep_direction = sweep.normalized_or_zero();
+    assert!(
+        sweep_direction.length() > f32::EPSILON,
+        "S5_HARNESS_BOUNDARY:CCD_control_requires_nonzero_sweep"
+    );
+    let clamped_translation =
+        Vector::from(control.trace.swept_end) - sweep_direction * control.trace.clamp;
+    let sampled_eval_angle = CCD_SPINNER_INITIAL_ANGULAR_VELOCITY * DT;
+    let eval_pose = Pose::from_xy_angle(
+        clamped_translation.x(),
+        clamped_translation.y(),
+        sampled_eval_angle,
+    );
+    let eval_anchor = eval_pose.transform_point(local_anchor);
+    let eval_world_com = eval_pose.transform_point(control.mass_properties.local_center_of_mass);
+    let lever = eval_anchor - eval_world_com;
+    let radial_error = lever.normalized_or_zero() * radial_error_length;
+    let target_anchor = eval_anchor + radial_error;
+
+    assert!(
+        control.mass_properties.inverse_mass > 0.0
+            && control.mass_properties.inverse_inertia > 0.0
+            && lever.length() > f32::EPSILON
+            && radial_error.length() > 0.01,
+        "S5_HARNESS_BOUNDARY:CCD_oracle_requires_solvable_off_center_endpoint"
+    );
+
+    // With a static counterpart, K has `lever` as its translational eigenvector. A
+    // constraint error parallel to `lever` therefore produces a parallel lambda and zero
+    // cross product, proving the position phase's expected angular correction is exactly zero.
+    let inverse_mass = control.mass_properties.inverse_mass;
+    let inverse_inertia = control.mass_properties.inverse_inertia;
+    let k11 = inverse_mass + inverse_inertia * lever.y() * lever.y();
+    let k12 = -inverse_inertia * lever.x() * lever.y();
+    let k22 = inverse_mass + inverse_inertia * lever.x() * lever.x();
+    let determinant = k11 * k22 - k12 * k12;
+    assert!(determinant.is_finite() && determinant > f32::EPSILON);
+    let constraint_error = eval_anchor - target_anchor;
+    let lambda = Vector::new(
+        -(k22 * constraint_error.x() - k12 * constraint_error.y()) / determinant,
+        -(-k12 * constraint_error.x() + k11 * constraint_error.y()) / determinant,
+    );
+    let expected_position_delta_angle = -inverse_inertia * lever.cross(lambda);
+    assert!(
+        expected_position_delta_angle.abs() <= 1.0e-6,
+        "S5_HARNESS_BOUNDARY:CCD_oracle_position_delta_angle_must_be_zero:delta_angle={expected_position_delta_angle}"
+    );
+
+    CcdZeroAngularCorrectionOracle {
+        target_anchor,
+        clamped_translation,
+        sampled_eval_angle,
+        lever,
+        radial_error,
+        expected_position_delta_angle,
+    }
+}
+
+#[test]
+fn revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle() {
+    let local_anchor = Point::new(0.0, 0.2);
+    let control = run_ccd_spinner_without_joint(local_anchor);
+    assert_eq!(control.report.stats.ccd_clamp_count, 1);
+    assert!(control.report.stats.contact_count > 0);
+    assert!(
+        (control.final_angular_velocity - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:control_contact_must_mutate_angular_velocity"
+    );
+    let oracle = ccd_zero_angular_correction_oracle(&control, local_anchor, 0.05);
+    let target_anchor = oracle.target_anchor;
+
+    let mut world = no_gravity_world();
+    let wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let target = create_body(
+        &mut world,
+        BodyType::Static,
+        target_anchor.x(),
+        target_anchor.y(),
+        Vector::default(),
+    );
+    let spinner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            linear_velocity: Vector::new(200.0, 0.0),
+            angular_velocity: CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("CCD spinner should be created");
+    let material = Material {
+        friction: 1.0,
+        restitution: 0.0,
+    };
+    let wall_collider = attach_shape(&mut world, wall, SharedShape::rect(0.1, 10.0), material);
+    let spinner_collider = attach_shape(&mut world, spinner, SharedShape::circle(0.05), material);
+    create_revolute(&mut world, target, spinner, Point::default(), local_anchor);
+
+    let report = step_world(&mut world, 1);
+    let spinner_view = world.try_body(spinner).expect("spinner should survive");
+    let expected_final_angle =
+        oracle.expected_position_delta_angle + spinner_view.angular_velocity() * DT;
+    let drift = revolute_anchor_drift(&world, target, Point::default(), spinner, local_anchor);
+    let actual_trace = active_contact_events(&report)
+        .into_iter()
+        .find_map(|contact| contact.ccd_trace)
+        .expect("S5_HARNESS_BOUNDARY:CCD clamp must produce a contact fact");
+    println!(
+        "S5_REVOLUTE_FACT:ccd_final_angle:clamps={};contacts={};clamped_translation={:?};sampled_eval_angle={:.6};lever={:?};radial_error={:?};position_delta_angle={:.6};initial_omega={:.6};latest_omega={:.6};angle={:.6};expected_angle={expected_final_angle:.6};drift={drift:.6}",
+        report.stats.ccd_clamp_count,
+        report.stats.contact_count,
+        oracle.clamped_translation,
+        oracle.sampled_eval_angle,
+        oracle.lever,
+        oracle.radial_error,
+        oracle.expected_position_delta_angle,
+        CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
+        spinner_view.angular_velocity(),
+        spinner_view.pose().angle()
+    );
+    assert_eq!(
+        report.stats.ccd_clamp_count, 1,
+        "S5_HARNESS_BOUNDARY:ccd_did_not_clamp"
+    );
+    assert!(
+        report.stats.contact_count > 0,
+        "S5_HARNESS_BOUNDARY:ccd_contact_missing"
+    );
+    assert_eq!(actual_trace.moving_body, spinner);
+    assert_eq!(actual_trace.static_body, wall);
+    assert_eq!(actual_trace.moving_collider, spinner_collider);
+    assert_eq!(actual_trace.static_collider, wall_collider);
+    assert_same_ccd_geometry(&actual_trace, &control.trace);
+    assert!(
+        (spinner_view.angular_velocity() - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:contact_must_mutate_angular_velocity"
+    );
+    assert!(
+        (spinner_view.pose().angle() - expected_final_angle).abs() <= 1.0e-4,
+        "S5_HARNESS_BOUNDARY:ccd_must_preserve_latest_angular_advance"
+    );
+    assert!(
+        drift <= 0.01,
+        "S5_REVOLUTE_SOLVER_ASSERT:ccd_final_angle_pivot_drift:drift={drift:.6};limit=0.01"
+    );
+}
+
+#[test]
+fn revolute_joint_awake_sleeping_pair_uses_current_pose_and_wakes_on_correction() {
+    // Inactive zero-correction and singular rows are boundary controls: they must not wake
+    // sleeping endpoints merely because a Revolute descriptor exists.
+    for (label, anchor_b, attach_mass) in [
+        ("zero", Point::new(-1.0, 0.0), true),
+        ("singular", Point::default(), false),
+        ("inactive_skip", Point::new(-0.75, 0.0), true),
+    ] {
+        let mut boundary_world = no_gravity_world();
+        let body_a = boundary_world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+                can_sleep: true,
+                ..BodyDesc::default()
+            })
+            .expect("boundary body A should be created");
+        let body_b = boundary_world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+                can_sleep: true,
+                ..BodyDesc::default()
+            })
+            .expect("boundary body B should be created");
+        if attach_mass {
+            for body in [body_a, body_b] {
+                attach_shape(
+                    &mut boundary_world,
+                    body,
+                    SharedShape::rect(0.5, 0.5),
+                    Material::default(),
+                );
+            }
+        } else {
+            assert_eq!(
+                boundary_world
+                    .try_body(body_a)
+                    .expect("body A exists")
+                    .mass_properties()
+                    .inverse_mass,
+                0.0
+            );
+        }
+        create_revolute(
+            &mut boundary_world,
+            body_a,
+            body_b,
+            Point::new(1.0, 0.0),
+            anchor_b,
+        );
+        step_world(&mut boundary_world, 31);
+        assert!(boundary_world
+            .try_body(body_a)
+            .expect("body A exists")
+            .sleeping());
+        assert!(boundary_world
+            .try_body(body_b)
+            .expect("body B exists")
+            .sleeping());
+        let report = step_world(&mut boundary_world, 1);
+        println!(
+            "S5_REVOLUTE_BOUNDARY:{label}:body_a={:?};body_b={:?};events={:?};joint_rows={}",
+            boundary_world
+                .try_body(body_a)
+                .expect("body A exists")
+                .status(),
+            boundary_world
+                .try_body(body_b)
+                .expect("body B exists")
+                .status(),
+            report.events,
+            report.stats.joint_row_count
+        );
+        assert!(boundary_world
+            .try_body(body_a)
+            .expect("body A exists")
+            .sleeping());
+        assert!(boundary_world
+            .try_body(body_b)
+            .expect("body B exists")
+            .sleeping());
+        assert!(!report.events.iter().any(|event| matches!(
+            event,
+            WorldEvent::SleepChanged(event)
+                if !event.is_sleeping
+                    && event.reason == picea::events::SleepTransitionReason::JointCorrection
+        )));
+        println!(
+            "S5_REVOLUTE_BOUNDARY:{label}:sleeping=true;joint_rows={}",
+            report.stats.joint_row_count
+        );
+    }
+
+    let mut world = no_gravity_world();
+    let sleeper = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("sleeping endpoint should be created");
+    let awake = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("awake endpoint should be created");
+    for body in [sleeper, awake] {
+        attach_shape(
+            &mut world,
+            body,
+            SharedShape::rect(0.5, 0.5),
+            Material::default(),
+        );
+    }
+    create_revolute(
+        &mut world,
+        sleeper,
+        awake,
+        Point::new(1.0, 0.0),
+        Point::new(-1.0, 0.0),
+    );
+    step_world(&mut world, 1);
+    world
+        .apply_body_patch(
+            sleeper,
+            BodyPatch {
+                linear_velocity: Some(Vector::new(-4.0, 0.0)),
+                angular_velocity: Some(2.0),
+                sleeping: Some(true),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("sleeper fixture patch should apply without a pending wake");
+    world
+        .apply_body_patch(
+            awake,
+            BodyPatch {
+                linear_velocity: Some(Vector::new(4.0, 0.0)),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("awake fixture velocity should apply");
+    let sleeper_before = world.try_body(sleeper).expect("sleeper exists").pose();
+    assert!(world.try_body(sleeper).expect("sleeper exists").sleeping());
+
+    let report = step_world(&mut world, 1);
+    let sleeper_after = world.try_body(sleeper).expect("sleeper exists").pose();
+    let correction = (sleeper_after.translation() - sleeper_before.translation()).length()
+        + (sleeper_after.angle() - sleeper_before.angle()).abs();
+    let correction_wake = report.events.iter().find_map(|event| match event {
+        WorldEvent::SleepChanged(event)
+            if event.body == sleeper
+                && !event.is_sleeping
+                && event.reason == picea::events::SleepTransitionReason::JointCorrection =>
+        {
+            Some(*event)
+        }
+        _ => None,
+    });
+    println!(
+        "S5_REVOLUTE_FACT:awake_sleeping:finite_correction={correction:.6};sleeping_after={};wake={correction_wake:?};events={:?}",
+        world.try_body(sleeper).expect("sleeper exists").sleeping(),
+        report.events
+    );
+    assert_revolute_body_finite(&world, sleeper, "awake_sleeping_sleeper");
+    assert_revolute_body_finite(&world, awake, "awake_sleeping_awake");
+    assert!(
+        correction_wake.is_some(),
+        "S5_REVOLUTE_SOLVER_ASSERT:finite_nonzero_correction_must_wake_with_joint_correction"
+    );
+    assert!(
+        correction > f32::EPSILON,
+        "S5_REVOLUTE_SOLVER_ASSERT:awake_sleeping_pair_requires_nonzero_correction"
+    );
+}
+
+struct RevoluteContactWindow {
+    max_drift: f32,
+    final_drift: f32,
+    contact_frames: usize,
+    numeric_warnings: usize,
+    final_joint_rows: usize,
+}
+
+fn run_revolute_contact_window(joint_velocity_projection: bool) -> RevoluteContactWindow {
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::new(0.0, 9.8),
+        ..WorldDesc::default()
+    });
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 2.5, Vector::default());
+    let pendulum = create_body(
+        &mut world,
+        BodyType::Dynamic,
+        0.0,
+        0.0,
+        Vector::new(0.5, 0.0),
+    );
+    let material = Material {
+        friction: 0.8,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, floor, SharedShape::rect(8.0, 0.5), material);
+    attach_shape(&mut world, pendulum, SharedShape::rect(1.0, 2.0), material);
+    let floor_anchor = Point::new(0.0, -3.5);
+    let pendulum_anchor = Point::new(0.0, -1.0);
+    create_revolute(&mut world, floor, pendulum, floor_anchor, pendulum_anchor);
+    let mut pipeline = SimulationPipeline::new(StepConfig {
+        joint_velocity_projection,
+        ..fixed_step_config()
+    });
+    let mut facts = RevoluteContactWindow {
+        max_drift: 0.0,
+        final_drift: 0.0,
+        contact_frames: 0,
+        numeric_warnings: 0,
+        final_joint_rows: 0,
+    };
+    for _ in 0..240 {
+        let report = pipeline.step(&mut world);
+        facts.contact_frames += usize::from(report.stats.contact_count > 0);
+        facts.numeric_warnings += report.stats.numeric_warnings;
+        facts.final_joint_rows = report.stats.joint_row_count;
+        facts.max_drift = facts.max_drift.max(revolute_anchor_drift(
+            &world,
+            floor,
+            floor_anchor,
+            pendulum,
+            pendulum_anchor,
+        ));
+    }
+    facts.final_drift =
+        revolute_anchor_drift(&world, floor, floor_anchor, pendulum, pendulum_anchor);
+    facts
+}
+
+fn assert_revolute_contact_window(facts: &RevoluteContactWindow, projection: &str) {
+    println!(
+        "S5_REVOLUTE_FACT:contact_window:{projection}:contact_frames={};max_drift={:.6};final_drift={:.6};numeric_warnings={};final_joint_rows={}",
+        facts.contact_frames,
+        facts.max_drift,
+        facts.final_drift,
+        facts.numeric_warnings,
+        facts.final_joint_rows
+    );
+    assert!(
+        facts.contact_frames > 0,
+        "S5_HARNESS_BOUNDARY:{projection}_contact_never_occurred"
+    );
+    assert_eq!(
+        facts.numeric_warnings, 0,
+        "S5_HARNESS_BOUNDARY:{projection}_numeric_warnings"
+    );
+    assert!(
+        facts.max_drift <= 0.03,
+        "S5_REVOLUTE_SOLVER_ASSERT:{projection}_contact_max_drift:max_drift={:.6};limit=0.03",
+        facts.max_drift
+    );
+    assert!(
+        facts.final_drift <= 0.01,
+        "S5_REVOLUTE_SOLVER_ASSERT:{projection}_contact_final_drift:final_drift={:.6};limit=0.01",
+        facts.final_drift
+    );
+}
+
+#[test]
+fn revolute_joint_contact_full_step_preserves_pivot_with_projection_enabled() {
+    let facts = run_revolute_contact_window(true);
+    assert_revolute_contact_window(&facts, "projection_enabled");
+}
+
+#[test]
+fn revolute_joint_contact_full_step_preserves_pivot_with_projection_disabled() {
+    let facts = run_revolute_contact_window(false);
+    assert_revolute_contact_window(&facts, "projection_disabled");
+}
+
+#[test]
+fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
+    let local_anchor = Point::new(0.0, 0.2);
+    let control = run_ccd_spinner_without_joint(local_anchor);
+    assert_eq!(control.report.stats.ccd_clamp_count, 1);
+    assert!(control.report.stats.contact_count > 0);
+    assert!(
+        (control.final_angular_velocity - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:control_contact_must_mutate_angular_velocity"
+    );
+    let oracle = ccd_zero_angular_correction_oracle(&control, local_anchor, 0.02);
+    let target_anchor = oracle.target_anchor;
+
+    let mut world = no_gravity_world();
+    let wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let target = create_body(
+        &mut world,
+        BodyType::Static,
+        target_anchor.x(),
+        target_anchor.y(),
+        Vector::default(),
+    );
+    let spinner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            linear_velocity: Vector::new(200.0, 0.0),
+            angular_velocity: CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("CCD spinner should be created");
+    let material = Material {
+        friction: 1.0,
+        restitution: 0.0,
+    };
+    let wall_collider = attach_shape(&mut world, wall, SharedShape::rect(0.1, 10.0), material);
+    let spinner_collider = attach_shape(&mut world, spinner, SharedShape::circle(0.05), material);
+    create_revolute(&mut world, target, spinner, Point::default(), local_anchor);
+
+    let report = step_world(&mut world, 1);
+    let spinner_view = world.try_body(spinner).expect("spinner should survive");
+    let drift = revolute_anchor_drift(&world, target, Point::default(), spinner, local_anchor);
+    let ccd_contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("S5_HARNESS_BOUNDARY:CCD clamp must produce a contact fact");
+    let actual_trace = ccd_contact
+        .ccd_trace
+        .expect("S5_HARNESS_BOUNDARY:CCD contact must preserve its trace");
+    let expected_angle =
+        oracle.expected_position_delta_angle + spinner_view.angular_velocity() * DT;
+    println!(
+        "S5_REVOLUTE_FACT:ccd_contact_full_step:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};sampled_eval_angle={:.6};lever={:?};radial_error={:?};position_delta_angle={:.6};initial_omega={:.6};final_omega={:.6};angle={:.6};expected_angle={expected_angle:.6};drift={drift:.6}",
+        report.stats.ccd_clamp_count,
+        report.stats.contact_count,
+        ccd_contact.solver_normal_impulse,
+        oracle.clamped_translation,
+        oracle.sampled_eval_angle,
+        oracle.lever,
+        oracle.radial_error,
+        oracle.expected_position_delta_angle,
+        CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
+        spinner_view.angular_velocity(),
+        spinner_view.pose().angle()
+    );
+    assert_eq!(
+        report.stats.ccd_clamp_count, 1,
+        "S5_HARNESS_BOUNDARY:ccd_did_not_clamp"
+    );
+    assert!(
+        report.stats.contact_count > 0,
+        "S5_HARNESS_BOUNDARY:ccd_contact_missing"
+    );
+    assert!(
+        ccd_contact.solver_normal_impulse > 0.0,
+        "S5_HARNESS_BOUNDARY:ccd_contact_must_reach_solver"
+    );
+    assert_eq!(actual_trace.moving_body, spinner);
+    assert_eq!(actual_trace.static_body, wall);
+    assert_eq!(actual_trace.moving_collider, spinner_collider);
+    assert_eq!(actual_trace.static_collider, wall_collider);
+    assert_same_ccd_geometry(&actual_trace, &control.trace);
+    assert!(
+        (spinner_view.angular_velocity() - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:contact_must_mutate_angular_velocity"
+    );
+    assert!(
+        (spinner_view.pose().angle() - expected_angle).abs() <= 1.0e-4,
+        "S5_HARNESS_BOUNDARY:ccd_angular_integration_must_use_latest_velocity"
+    );
+    assert!(
+        drift <= 0.01,
+        "S5_REVOLUTE_SOLVER_ASSERT:ccd_contact_full_step_pivot_drift:drift={drift:.6};limit=0.01"
+    );
+}

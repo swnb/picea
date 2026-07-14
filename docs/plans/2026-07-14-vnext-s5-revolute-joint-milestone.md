@@ -1,6 +1,6 @@
 # vNext Handoff §5 Revolute Joint Pin-only V1 Milestone
 
-状态：S5-D已commit（`eecbc331a36bfb694676c979bffb03f5a47202dd`）；S5-API-RED final reviewer=`0 High / 0 Medium / 0 Low`、independent verifier=`S5-API-RED VERIFIER PASS`，已commit（`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`）；S5-API scope spec/script sync已完成并reviewed，scope reviewer=`0 High / 0 Medium / 0 Low`且裁决`PASS`，independent re-verifier=`S5-API SCOPE RE-VERIFIER PASS`；首次independent scope verifier仅因living spec stale-status mismatch最终`FAIL`的历史保留；scope implementation gate已解除，implementation worker已完成且worker gates=`GREEN`；independent implementation reviewer首轮=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（顶部仍误报implementation未开始），第一次bounded remediation已完成；第一次复审=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（文档仍误报第一次状态修复未完成），第二次status-only bounded remediation已完成；最终独立复审=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-API VERIFIER PASS`；commit仍为`PENDING`；immutable Start HEAD=`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`；solver未开始；Chrome `NOT RUN / BROWSER PENDING`
+状态：S5-D已commit（`eecbc331a36bfb694676c979bffb03f5a47202dd`）；S5-API-RED已commit（`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`）；S5-API final reviewer=`0 High / 0 Medium / 0 Low`、independent verifier=`S5-API VERIFIER PASS`，已commit（`c5a47ed4252363ebf914802c8189cf2bcc9e3563`）；S5-BEHAVIOR-RED immutable Start HEAD=`c5a47ed4252363ebf914802c8189cf2bcc9e3563`，首轮reviewer=`1 High / 3 Medium / 1 Low`、裁决`FAIL`，bounded remediation后final reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`，independent verifier=`S5-BEHAVIOR-RED VERIFIER PASS`，commit=`PENDING`；solver未开始；Chrome `NOT RUN / BROWSER PENDING`
 日期：2026-07-14
 基线：`feat/vnext-s5-revolute-joint@28867b5`
 设计：`docs/design/2026-07-14-revolute-joint-v1-design.md`
@@ -179,7 +179,14 @@ ownership 补充：
   首轮=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（顶部仍误报implementation未开始），第一次bounded
   remediation已完成；第一次复审=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（文档仍误报第一次状态修复未完成），
   第二次status-only bounded remediation已完成；最终独立复审=`0 High / 0 Medium / 0 Low`、
-  裁决`PASS`；independent verifier=`S5-API VERIFIER PASS`；commit仍为`PENDING`。
+  裁决`PASS`；independent verifier=`S5-API VERIFIER PASS`；已commit为
+  `c5a47ed4252363ebf914802c8189cf2bcc9e3563`。S5-BEHAVIOR-RED immutable Start HEAD固定为
+  同一commit；worker首轮完成后independent reviewer=`1 High / 3 Medium / 1 Low`、裁决
+  `FAIL`，针对CCD final-angle oracle、free-rotation solvable mass、nonzero-COM lever、living
+  spec状态和早期sleep fixture记录的bounded remediation已完成；final reviewer=
+  `0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=
+  `S5-BEHAVIOR-RED VERIFIER PASS`；commit仍为`PENDING`，solver未开始，Chrome保持
+  `NOT RUN / BROWSER PENDING`。
   implementation worker未继续修改scope script。
 - S5-BEHAVIOR-RED保留直接2x2/singular/sign unit contract。若采用
   `pipeline/joints/tests.rs`，`pipeline/joints.rs`除`#[cfg(test)] mod tests;`外production
@@ -367,7 +374,8 @@ implementation未开始），第一次bounded remediation已完成；第一次�
 `0 High / 1 Medium / 0 Low`、裁决`FAIL`（文档仍误报第一次状态修复未完成），第二次status-only bounded
 remediation已完成；最终独立复审=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=
 `S5-API VERIFIER PASS`。immutable Start HEAD=
-`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`；S5-API commit `PENDING`；Chrome
+`6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`；S5-API已commit为
+`c5a47ed4252363ebf914802c8189cf2bcc9e3563`；Chrome
 `NOT RUN / BROWSER PENDING`。implementation worker未修改scope script。
 
 最小实现必须严格匹配 design §7/§10：
@@ -516,16 +524,16 @@ GREEN。
   与另一进程重叠使用固定temp root而出现一次`ENOENT`；停止重叠后串行执行同一命令及runtime
   补跑均PASS，且期间源文件zero-diff，因此分类为verifier orchestration noise，不是产品失败。
 
-**复跑方式**：保留当前未暂存S5-API worktree，从
+**复跑方式**：checkout `c5a47ed4252363ebf914802c8189cf2bcc9e3563`，以
 `6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68`作为immutable Start HEAD，按上方四组命令顺序
 复跑；scope必须继续得到exact 16，row-zero必须继续输出指定checkpoint sentinel，六条lifecycle
 必须各自显示`running 1 test`与对应`S5_WAKE_CASE:*`。
 
 **范围外**：未实现或修改S5-BEHAVIOR-RED、S5-SOLVER row/math、`pipeline/joints.rs`、
-`solver/*`、scenario/artifact/server/UI behavior；未stage、commit、push；Chrome验收未在CLI执行，
+`solver/*`、scenario/artifact/server/UI behavior；未push；Chrome验收未在CLI执行，
 保持`NOT RUN / BROWSER PENDING`，由ChatGPT App在后续S5-LAB/S5-V节点按本文prompt验收。
 
-**残余风险**：S5-API commit仍为`PENDING`；Revolute当前被明确保留但不进入solver，行为能力
+**残余风险**：Revolute当前被明确保留但不进入solver，行为能力
 必须等待后续独立S5-BEHAVIOR-RED/S5-SOLVER节点；六个`#[non_exhaustive]`是批准的external
 source break；Web build仍有既有500 kB chunk warning；Chrome仍为
 `NOT RUN / BROWSER PENDING`。
@@ -596,18 +604,87 @@ boundary GREEN项必须exit `0`。zero matched tests不算RED或GREEN。Unit com
 
 | Acceptance | Baseline expectation | 实际结果 |
 | --- | --- | --- |
-| 2x2 unit contract | RED：批准assertion；或仅E0425/E0599指向planned helper | 待填 |
-| two-dynamic drift | RED | 待填 |
-| free rotation | boundary GREEN：relative rotation `>=1.0 rad`；pivot preservation由two-dynamic RED锁定 | 待填 |
-| static/dynamic + inertia | RED | 待填 |
-| awake/sleeping current pose + correction wake | RED；zero/singular/skip子案例必须保持sleeping | 待填 |
-| nonzero local COM pose rebuild | RED，且exact实际运行1 test | 待填 |
-| CCD-clamped final angle | RED，且exact实际运行1 test | 待填 |
-| contact full-step projection enabled/disabled | 两条均RED；沿用`0.03/0.01`阈值 | 待填 |
-| CCD-clamped contact full-step | RED；linear skip + updated angular advance | 待填 |
-| determinism/finite | boundary GREEN；不把deterministic skip冒充solver能力 | 待填 |
-| mixed island logical row | RED | 待填 |
-| connected contact | boundary GREEN，必须exit 0；若RED则contract/harness失败 | 待填 |
+| 2x2 unit contract | RED：批准assertion；或仅E0425/E0599指向planned helper | expected RED有效：exit `101`，仅8个`E0425`，全部指向`invert_revolute_effective_mass`、`revolute_position_deltas`、`rebuild_revolute_current_pose_from_world_com`、`apply_revolute_pose_pair_atomically`四个批准的2x2/COM/atomic planned helper；无其他诊断 |
+| two-dynamic drift | RED | expected RED有效：`running 1 test`，exit `101`；`max_drift=8.000021`、`final_drift=8.000021`、numeric warning `0`，命中`S5_REVOLUTE_SOLVER_ASSERT:two_dynamic_max_drift` |
+| free rotation | boundary GREEN：relative rotation `>=1.0 rad`；pivot preservation由two-dynamic RED锁定 | boundary GREEN：`running 1 test`、exit `0`；两个dynamic endpoint均有真实矩形collider且禁用pair contact，inverse mass=`(2.0,2.0)`、inverse inertia=`(19.200001,19.200001)`；`rA=rB=0`时`K=(inv_mass_a+inv_mass_b)I`、determinant=`16.0`，证明row可逆；60帧relative change=`1.999999 rad`，baseline每帧`joint_row_count=0`，不把deterministic skip写成solver能力 |
+| static/dynamic + inertia | RED | 两条expected RED均有效且各自`running 1 test`、exit `101`：static pose先bit-exact，pivot drift=`1.999998`后命中static/dynamic solver assertion；off-center rotation=`0.000000`、warning `0`，命中`rotation>=0.5` solver assertion |
+| awake/sleeping current pose + correction wake | RED；zero/singular/skip子案例必须保持sleeping | expected RED有效：`running 1 test`、exit `101`；zero/singular/inactive-skip三子案例均先以`body_a/body_b sleeping=true`、无wake event、row `0` GREEN；positive case facts为finite correction=`0`、sleeping endpoint仅以`Unknown`离睡且无`JointCorrection`，命中批准wake assertion。早期fixture曾因复用固定`can_sleep=false`的`create_body` helper而先在sleeping前置断言失败；该失败属于fixture错误而非产品RED，改为直接创建`BodyDesc { can_sleep: true, .. }`后exact得到上述有效分类 |
+| nonzero local COM pose rebuild | RED，且exact实际运行1 test | expected RED有效：`running 1 test`、exit `101`；local COM=`(0.75,0.25)`、local anchor=`(1.25,0.25)`，因此anchor不等于COM、lever=`(0.5,0.0)`且length=`0.5`；inverse mass/inertia=`2.666667/39.384617`、endpoint angular velocity=`3.0`、max/final drift=`2.549487/0.359781`，命中nonzero-COM max-drift solver assertion |
+| CCD-clamped final angle | RED，且exact实际运行1 test | expected RED有效：`running 1 test`、exit `101`；真实clamp/contact=`1/1`，从trace重建clamped translation=`(-0.09899998,0)`，sampled eval angle=`0.1`；沿eval-pose lever的径向error使显式2x2 `K`求得position angular correction=`0`，latest omega=`2.054233`，actual/expected angle均=`0.034237`；actual-world handle/collider identity与control CCD geometry/decision facts分别通过，最终仅以pivot drift=`0.052117`命中solver assertion |
+| contact full-step projection enabled/disabled | 两条均RED；沿用`0.03/0.01`阈值 | 两条expected RED均有效且各自`running 1 test`、exit `101`；两配置均有211个contact frames、warning `0`，max/final drift均=`1.275484/1.275482`，分别命中固定`0.03` max-drift assertion |
+| CCD-clamped contact full-step | RED；linear skip + updated angular advance | expected RED有效：`running 1 test`、exit `101`；clamp/contact=`1/1`、normal impulse=`1.570796`，contact把omega从`6.0`改为`2.054233`，径向oracle证明position angular correction=`0`，final/expected angle均=`0.034237=latest omega*dt`；actual-world identity与control trace语义边界通过，最终仅以drift=`0.024294`命中solver assertion |
+| determinism/finite | boundary GREEN；不把deterministic skip冒充solver能力 | boundary GREEN：`running 1 test`、exit `0`；双跑120帧snapshot hash逐帧相同、body/mass/pose/velocity全部finite、warning `0`，baseline row facts逐帧均`0` |
+| mixed island logical row | RED | expected RED有效：`running 1 test`、exit `101`；pair contact=`1`、contact row=`1`先GREEN，joint row=`0`后命中`one logical joint row` assertion |
+| connected contact | boundary GREEN，必须exit 0；若RED则contract/harness失败 | boundary GREEN：`running 1 test`、exit `0`；connected pair contact=`1`、contact row=`1`，baseline joint row事实=`0` |
+
+### S5-BEHAVIOR-RED 验收报告（2026-07-14，worker receipt）
+
+**Start HEAD**：`c5a47ed4252363ebf914802c8189cf2bcc9e3563`。
+
+**成功标准**：unit仅以批准的2x2/COM helper compile contract变红；13条integration exact
+逐条真实运行1 test并严格得到10条expected RED与3条boundary GREEN；solver production
+zero-diff、node scope exact 4。
+
+**检查结果**：首轮reviewer=`1 High / 3 Medium / 1 Low`、裁决
+`FAIL`。High指出CCD final-angle没有排除position phase角修正；三个Medium分别指出
+free-rotation缺少positive mass/inertia与可逆`K`证明、nonzero-COM anchor等于COM导致lever为零、
+living spec仍误报`READY / NOT STARTED`；Low要求记录awake/sleep fixture早期
+`can_sleep=false` harness failure。bounded remediation已逐项闭环：加入径向zero-angular
+correction 2x2 oracle、真实mass/inertia与可逆`K`前置证据、非零lever fixture和本状态回填；
+CCD跨world trace改为actual identity与几何/decision facts分层比较，避免world-local handle误报。
+final reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`，五项finding均已闭环；首轮
+`1 High / 3 Medium / 1 Low`及其bounded remediation历史完整保留。independent verifier=
+`S5-BEHAVIOR-RED VERIFIER PASS`。
+
+§8列出的unit与13条integration exact命令已逐条运行；每条integration均输出
+`running 1 test`。unit exit `101`且仅批准的`E0425`；two-dynamic、static/dynamic、off-center、
+mixed-row、nonzero-COM、CCD-final-angle、awake/sleep、projection enabled、projection disabled、
+CCD-contact十条均exit `101`并命中上表指定`S5_REVOLUTE_SOLVER_ASSERT`；free-rotation、
+determinism/finite、connected-contact三条均exit `0`；remediation后无warning或harness failure。
+awake/sleep的最早失败为fixture复用`can_sleep=false` helper导致sleeping前置断言先失败，不是
+产品RED；改为直接使用`can_sleep=true`的`BodyDesc`后，zero/singular/inactive保持sleeping，
+positive case仅缺`JointCorrection`。额外API边界命令
+`rtk proxy cargo test -p picea --test core_model_world revolute_joint_ -- --nocapture`为
+`6 passed`并保留`S5_API_CHECKPOINT:joint_count=1;joint_row_count=0`；lifecycle边界命令
+`rtk proxy cargo test -p picea --test world_step_review_regressions joint_lifecycle_wake_ -- --nocapture`
+为`6 passed`，六类sentinel与Revolute/既有joint-kind observation均保留。`cargo fmt --all --check`
+与scope self-test均PASS；`pipeline/joints.rs`相对Start HEAD唯一diff为
+`#[cfg(test)] mod tests;`；scope self-test为`S5_SCOPE_SELF_TEST_PASS`，node scope为exact 4、
+missing/unexpected均空；`git diff --check`
+与lab/core API tests/world regression/root Cargo/Cargo.lock范围外zero-diff均PASS。
+
+independent verifier在Start/HEAD均为
+`c5a47ed4252363ebf914802c8189cf2bcc9e3563`的同一worktree从头复跑并给出
+`S5-BEHAVIOR-RED VERIFIER PASS`：unit exit `101`且只有8个`E0425`，严格落在四个批准的
+planned helpers；13条integration均为`running 1 test`，其中10条expected RED只命中批准的
+solver assertion，3条boundary GREEN均exit `0`。关键metric与上表一致：two-dynamic
+max/final drift=`8.000021/8.000021`、warning=`0`；free-rotation relative change=`1.999999`、
+`K` determinant=`16.0`；static/dynamic drift=`1.999998`、off-center rotation=`0.000000`；
+nonzero-COM lever length=`0.5`、max/final drift=`2.549487/0.359781`；CCD final-angle
+clamp/contact=`1/1`、drift=`0.052117`；projection enabled/disabled均有211 contact frames且
+max/final drift=`1.275484/1.275482`；CCD-contact clamp/contact=`1/1`、normal impulse=
+`1.570796`、drift=`0.024294`；mixed/connected contact row均为`1`，baseline joint row均为
+`0`。API focused=`6 passed`并保留row-zero checkpoint，lifecycle=`6 passed`；fmt、scope
+self-test、exact-4、diff-check、solver/lab/Cargo zero-diff、cached empty、唯一untracked
+`crates/picea/src/pipeline/joints/tests.rs`及repo-local generated-artifact hygiene均PASS。
+verifier有一次只读status `rg`因pattern中的反引号被shell展开而输出`command not found`；随即
+以单引号安全复跑同一检查并PASS，未修改文件、未改变任何验收结果，分类为verifier命令编排
+噪声，不是产品失败。
+
+**复跑方式**：从本node未提交worktree读取
+`S5_NODE_START_HEAD="$(rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb receipt-head S5-BEHAVIOR-RED)"`，
+按§8 `RED 命令`代码块原顺序逐条运行unit、13条integration exact、scope、diff与zero-diff
+命令；禁止用aggregate filter替代逐条分类。
+
+**范围外**：未实现2x2 helper、`JointSolverRow::Revolute`、joint solve batch/math、COM apply、
+phase reorder或任何solver production；未修改lab/Web、API/lifecycle tests、scope script、Cargo
+文件或integration阈值；未stage/commit/push；Chrome保持`NOT RUN / BROWSER PENDING`。
+
+**残余风险**：final reviewer与independent verifier均已PASS，但本RED节点commit仍为
+`PENDING`，S5-SOLVER保持deferred且尚未开始；十条expected RED是已批准的solver缺口合同，
+只能由后续S5-SOLVER最小实现转绿，不得修改已冻结integration阈值/断言或stream顺序。
+Chrome仍为`NOT RUN / BROWSER PENDING`；下一最小动作是supervisor提交本RED节点，提交前不得
+开始solver。
 
 ## 9. S5-SOLVER：2x2 point constraint
 
@@ -995,8 +1072,8 @@ RED receipt额外记录 failure signature，并区分：
 | --- | --- | --- | --- | --- | --- |
 | 2026-07-14 | S5-D | `28867b5c8eeae3ec290ad7dfd5f52cbf3ca69e80` | 已commit | `eecbc331a36bfb694676c979bffb03f5a47202dd` | 第三轮reviewer=`0 High / 0 Medium / 1 Low`，允许进入verifier；independent docs verifier于`2026-07-14 17:16:23 CST`给出`S5-D VERIFIER PASS`；8-file scope/YAML/Mermaid/required terms/diff-check/crates/Cargo/Web zero-diff/cached empty均PASS；唯一Low留到S5-C；Chrome `NOT RUN / BROWSER PENDING`；implementation/API/solver未开始 |
 | 2026-07-14 | S5-API-RED | `eecbc331a36bfb694676c979bffb03f5a47202dd` | final reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-API-RED VERIFIER PASS`；已commit | `6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68` | 4M remediation complete；public expect-red连续两次wrapper `0`/internal `101`且仅approved diagnostics；六enum missing-variant分类与六条existing-kind lifecycle exact RED均有效，wake exact各自`running 1 test`、正确sentinel、approved exit `101`；workspace/scope/temp/diff GREEN，7-path exact；Revolute runtime `NOT RUN`；API/solver未开始；Chrome `NOT RUN / BROWSER PENDING` |
-| 2026-07-14 | S5-API | `6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68` | scope reviewer/re-verifier已PASS；implementation worker完成；worker targeted/full/scope/hygiene gates=`GREEN`；independent implementation reviewer首轮=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（顶部仍误报implementation未开始），第一次bounded remediation已完成；第一次复审=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（文档仍误报第一次状态修复未完成），第二次status-only bounded remediation已完成；最终独立复审=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-API VERIFIER PASS`；Chrome `NOT RUN / BROWSER PENDING` | `PENDING` | exact-16内已实现Revolute public/lifecycle/authoring API、schema-v1 fixture/re-export/TS kind compatibility与island explicit skip；public positive GREEN+六enum仅批准`E0004`，runtime `2 passed`，core focused `6 passed`，row-zero为`running 1 test`+`joint_count=1;joint_row_count=0`，六条lifecycle各自`running 1 test`+sentinel/kind覆盖，fixture `3 passed`；full core/world/lab=`24/18/38 passed`，Web/workspace/fmt/scope self-test/exact-16/diff/Cargo/solver/cached/untracked/hygiene均PASS。首次public harness因重叠使用固定temp root出现一次`ENOENT`，串行同命令及runtime补跑PASS且源文件zero-diff，分类为verifier orchestration noise；solver、scenario behavior与Chrome未开始；未stage/commit/push；scope script保持implementation前approved diff，worker未修改 |
-| - | S5-BEHAVIOR-RED | `PENDING` | 未开始 | - | 必须单独提交runtime behavior locks |
+| 2026-07-14 | S5-API | `6312a5ddd655a7c5ff2ba77a1f86cb3931ed9d68` | scope reviewer/re-verifier已PASS；implementation worker完成；worker targeted/full/scope/hygiene gates=`GREEN`；independent implementation reviewer首轮=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（顶部仍误报implementation未开始），第一次bounded remediation已完成；第一次复审=`0 High / 1 Medium / 0 Low`、裁决`FAIL`（文档仍误报第一次状态修复未完成），第二次status-only bounded remediation已完成；最终独立复审=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-API VERIFIER PASS`；已commit；Chrome `NOT RUN / BROWSER PENDING` | `c5a47ed4252363ebf914802c8189cf2bcc9e3563` | exact-16内已实现Revolute public/lifecycle/authoring API、schema-v1 fixture/re-export/TS kind compatibility与island explicit skip；public positive GREEN+六enum仅批准`E0004`，runtime `2 passed`，core focused `6 passed`，row-zero为`running 1 test`+`joint_count=1;joint_row_count=0`，六条lifecycle各自`running 1 test`+sentinel/kind覆盖，fixture `3 passed`；full core/world/lab=`24/18/38 passed`，Web/workspace/fmt/scope self-test/exact-16/diff/Cargo/solver/cached/untracked/hygiene均PASS。首次public harness因重叠使用固定temp root出现一次`ENOENT`，串行同命令及runtime补跑PASS且源文件zero-diff，分类为verifier orchestration noise；solver、scenario behavior与Chrome未开始；未push；scope script保持implementation前approved diff，worker未修改 |
+| 2026-07-14 | S5-BEHAVIOR-RED | `c5a47ed4252363ebf914802c8189cf2bcc9e3563` | worker首轮完成；independent reviewer首轮=`1 High / 3 Medium / 1 Low`、裁决`FAIL`；bounded remediation完成；final reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-BEHAVIOR-RED VERIFIER PASS`；commit=`PENDING` | `PENDING` | 五项finding全部闭环；CCD final-angle zero-position-angular-correction oracle、free-rotation positive mass/inertia与可逆`K`、nonzero-COM非零lever均已补强；早期`can_sleep=false` fixture harness failure已记录并修复；unit仅8个批准`E0425`/四个planned helpers，13条integration均`running 1 test`且保持10 RED/3 GREEN；API focused=`6 passed`、row-zero checkpoint=`joint_count=1;joint_row_count=0`、lifecycle=`6 passed`；fmt/scope self-test/exact-4/diff/solver/lab/Cargo/cached/untracked/generated hygiene均PASS；一次只读status `rg`反引号shell展开噪声已用单引号安全复跑PASS且无文件修改；solver未开始；Chrome `NOT RUN / BROWSER PENDING` |
 | - | S5-SOLVER | `PENDING` | 未开始 | - | 2x2 point constraint；streams不变 |
 | - | S5-LAB-RED | `PENDING` | 未开始 | - | 必须单独提交cross-layer contracts |
 | - | S5-LAB | `PENDING` | 未开始 | - | CLI candidate commit后external browser receipt未回填则`BROWSER PENDING` |

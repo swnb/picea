@@ -351,3 +351,6 @@ fn normalized_or_x_axis(vector: Vector) -> Vector {
         vector.normalized_or_zero()
     }
 }
+
+#[cfg(test)]
+mod tests;
