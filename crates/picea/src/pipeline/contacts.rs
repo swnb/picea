@@ -383,7 +383,7 @@ impl World {
                 .and_then(Option::as_ref)
                 .map(|reserved| reserved.kind);
             let warm_hit_source_reason = (contact.warm_start_reason == WarmStartCacheReason::Hit)
-                .then(|| match warm_match_kind {
+                .then_some(match warm_match_kind {
                     Some(PreviousMatchKind::Exact | PreviousMatchKind::SameFeatureIndex) => {
                         Some(SourceRowContinuityReason::Unknown)
                     }
