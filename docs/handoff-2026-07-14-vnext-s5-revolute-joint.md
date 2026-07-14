@@ -4,12 +4,14 @@
 
 - 仓库：`/Users/asyncrustacean/projects/picea`
 - 当前分支：`feat/vnext-s5-revolute-joint`
-- 当前HEAD：`7fc5d32 docs: close sat manifold persistence milestone`
+- 当前HEAD：`28867b5 docs: hand off revolute joint milestone`（S5-D commit前基线）
 - 分支基线：`main=origin/main=9427a17`
 - Worktree：创建本交接文件前clean；现场仍以`rtk proxy git status --short --branch`为准。
 - Push：本轮没有push；用户授权了通过gate后的commit，没有授权push。
 - 进程：没有需要继承的server、web dev server或后台命令。
-- §5状态：只完成public API范围确认和只读证据探索；尚未创建S5 design/living spec，尚未修改任何§5 production/test代码。
+- §5状态：S5-D design/living spec和最小routing同步已通过第三轮reviewer
+  `0 High / 0 Medium / 1 Low`及independent docs verifier `S5-D VERIFIER PASS`；commit待完成；
+  S5-API-RED及全部production/test实现尚未开始；Chrome `NOT RUN / BROWSER PENDING`。
 
 ## 2. 已完成的§4
 
@@ -150,6 +152,10 @@ Default与validation：
 - `crates/picea/src/world/api.rs`：create/patch/remove joint，same-body与live handle topology validation。
 - `crates/picea/src/recipe.rs`：public `JointBundle`、recipe body-index resolution、transactional commands。
 - Public enums目前都没有`#[non_exhaustive]`；新增variant和该attribute均是明确public source compatibility gate。
+- S5-API必须同时处理可编译checkpoint：core `pipeline/island.rs`对Revolute显式skip，
+  `picea-lab`作为external crate迁移所有`JointDesc` exhaustive matches。当前live `rg`
+  至少命中`scenario/scene_lattice.rs`与`scenario/fixture/tests.rs`；迁移只允许
+  wildcard/compat，不改变场景行为。
 
 ### 5.2 Solver和island
 
@@ -158,7 +164,19 @@ Default与validation：
 - `crates/picea/src/pipeline/sleep.rs`：joint graph已通过`body_handles()`泛化，但joint lifecycle wake存在既有缺口。
 - `crates/picea/src/solver/body_state.rs`：现有pair position helper只做平移，不足以实现偏心revolute；point impulse helper已经支持inverse inertia。
 - `crates/picea/src/pipeline/step.rs`的live顺序是velocity integration、CCD、mandatory joint、contact、optional joint velocity projection、position integration、final contact、sleep。
+- active joint island只要求任一body awake，因此sleeping dynamic endpoint可能与awake body
+  一起进入solve；它使用current pose，只有finite nonzero correction才以
+  `JointCorrection` wake。
 - `docs/design/solver-island-ordering-contract.md`仍有与live step不一致的旧contact-first叙述。§5必须同步合同，但不能借机unify streams。
+- S5-API checkpoint不创建revolute solve-plan/solver row，故`joint_row_count==0`；
+  S5-BEHAVIOR-RED先锁住one-row/constraint缺口，S5-SOLVER才增加carrier/math。
+- Position correction的linear delta是world COM delta；nonzero local COM时必须先由
+  corrected eval world COM/angle反推corrected eval origin，再移除position-sampling
+  advance后写回current pose。该eval pose不是无条件final pose：后续contact/projection可改
+  velocity，final integration使用更新值。CCD-clamped dynamic保留clamped translation，
+  final linear advance仍skip，但angular advance使用最新velocity。
+- `StepConfig::joint_velocity_projection` public doc目前仍是distance-only；S5-SOLVER只允许
+  同步为joint point-velocity语义，不增加字段、不改default。
 
 ### 5.3 Debug、fixture和Web
 
@@ -179,31 +197,35 @@ Default与validation：
 
 共同结论：基础pivot使用两端local anchors；limits、motor、softness/damping和runtime warm-start state都是独立能力，不应混入Picea首版public descriptor。
 
-## 6. 下一Codex的第一项工作
+## 6. S5-D 当前状态与下一执行门
 
-严格只先完成S5-D docs，不写production或tests：
+S5-D严格只写docs，未写production或tests；design/living spec已通过review/verifier，但尚未commit：
 
-1. 新建设计：`docs/design/2026-07-14-revolute-joint-v1-design.md`
-2. 新建living spec：`docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md`
-3. 最小同步parent vNext plan、本文handoff、`docs/ai/index.md`、`repo-map.md`、`doc-catalog.yaml`和`docs/design/README.md`。
-4. Architecture doc至少包含：Facts/Inference/Decision、Software Interface Spec字段表、default/validation/error/compat示例、Mermaid data flow、Mermaid Body-Joint ER、2x2 effective-mass公式/伪代码、`#[non_exhaustive]` ADR、fixture schema v1 ADR、wake semantics、module ownership、acceptance matrix和里程碑交接合同。
-5. S5-D经architecture/spec/routing reviewer无High/Medium、docs verifier通过后单独commit，才可进入S5-API-RED。
+1. 设计：`docs/design/2026-07-14-revolute-joint-v1-design.md`。
+2. Living spec：`docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md`。
+3. Parent、本文、`docs/ai/index.md`、`repo-map.md`、`doc-catalog.yaml`和`docs/design/README.md`最小同步。
+4. Architecture doc已覆盖Facts/Inference/Decision、Software Interface Spec、两张Mermaid、2x2算法、compat/schema ADR、wake、acceptance matrix和里程碑交接合同。
+5. 第三轮reviewer结论为`0 High / 0 Medium / 1 Low`，允许进入verifier；唯一Low明确留到S5-C。
+6. independent docs verifier于`2026-07-14 17:16:23 CST`给出`S5-D VERIFIER PASS`；8-file scope/YAML/Mermaid/required terms/diff-check/crates/Cargo/Web zero-diff/cached empty均PASS。下一门仅为supervisor完成S5-D commit；commit前不得进入S5-API-RED。
 
 推荐执行链：
 
 | Node | 目标 | 关键gate |
 | --- | --- | --- |
 | S5-D | Architecture、living spec、routing和父计划addendum | Docs review、YAML、scope、crate zero-diff |
-| S5-API-RED | 提交外部temp-crate compile fixture，证明批准surface当前不存在 | Fixture复制到批准temp目录并调用`rtk proxy cargo check`；RED不阻塞workspace编译 |
-| S5-API | Public enums/desc/patch/bundle、storage/validation、debug/fixture/TS skeleton、lifecycle wake | Compile fixture GREEN；API/lifecycle reviewer；checkpoint commit |
-| S5-BEHAVIOR-RED | 提交runtime行为锁 | Shared anchor、free rotation、off-center inertia、static/dynamic、determinism、contact/island、wake稳定RED |
-| S5-SOLVER | 2x2 position/velocity point constraint和island row | Core behavior GREEN；无solver stream合流 |
+| S5-API-RED | 提交外部surface fixture与existing-kind lifecycle runtime locks | Missing Revolute只算surface RED；六个exact wake tests各`running 1 test`+sentinel+指定assertion RED，workspace all-target compile GREEN |
+| S5-API | Public/storage/lifecycle/debug/fixture/TS skeleton；island explicit skip；external exhaustive compat迁移 | Workspace compile GREEN；API checkpoint row count 0；不得添加solver row/math |
+| S5-BEHAVIOR-RED | 提交runtime与test-only 2x2行为锁 | Pivot RED；free rotation/determinism/connected contact boundary GREEN；sleeping pair、projection on/off、CCD+contact full-step按分类取证 |
+| S5-SOLVER | 2x2 position/velocity point constraint、island row与StepConfig doc | Core full-step behavior GREEN；无solver stream合流/重排 |
 | S5-LAB-RED | 提交scenario/artifact/server/web contract RED | Rust artifact、TS、i18n、UI contract先RED |
-| S5-LAB | Fixture、scenario、artifact/debug、server/Web label和browser体验 | Rust/lab/web/browser GREEN |
-| S5-V | Full workspace、clippy、examples、bench、lab、browser、scope | Independent verifier PASS |
+| S5-LAB | Fixture、scenario、artifact/debug、server/Web label；CLI不调用Chrome | CLI reviewer/verifier后可形成candidate commit；外部ChatGPT App receipt未回填则`BROWSER PENDING`，不得进入S5-V |
+| S5-V | Full workspace、clippy、examples、bench、lab、scope；独立external Chrome | CLI independent verifier与外部ChatGPT App各自PASS；不可复用S5-LAB browser receipt |
 | S5-C | Living spec、parent、handoff、routing closeout | Docs reviewer/verifier PASS后commit |
 
-S5-API-RED不能直接提交会破坏workspace编译的integration test。使用嵌套fixture源码和验证工具：工具将fixture复制到`/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode`，在temp中运行`rtk proxy cargo check`，RED/GREEN均不生成repo内`Cargo.lock`或`target`。
+S5-API-RED不能提交会破坏workspace编译的test。External fixture复制到
+`/var/folders/20/mtxygnnn3w7f0wd4t4dfgwq80000gn/T/opencode`，missing Revolute只分类为
+surface RED；existing Distance/WorldAnchor lifecycle tests在repo内baseline-compilable，六条
+exact runtime命令真实RED。`cargo check --workspace --all-targets`必须GREEN。
 
 ## 7. 最低行为验收
 
@@ -215,11 +237,20 @@ S5-API-RED不能直接提交会破坏workspace编译的integration test。使用
 - Two-dynamic 240帧：全窗anchor drift `<=0.03`，final `<=0.01`，无numeric warning。
 - Free relative rotation：60帧相对角变化`>=1.0 rad`，不得投影为零。
 - Static/dynamic：static pose bit-exact不变，dynamic旋转`>=0.5 rad`，anchor drift满足同一上限。
+- Nonzero local COM：translated/off-center collider的pivot满足同一drift上限，能区分COM
+  delta与Pose origin translation。
+- CCD-clamped rotating endpoint：命中帧保留clamped translation并使用full-step final angle；
+  只锁joint pose selection，不扩大CCD算法。
+- Awake/sleeping pair：sleeping endpoint用current pose；finite nonzero correction以
+  `JointCorrection` wake，skip/singular/zero correction不wake。
+- Contact-rich full step：projection enabled/disabled和CCD-clamped+contact三条locks都沿用
+  `0.03/0.01` drift阈值；final integration使用contact/projection更新后的velocity，禁止重排stream。
 - 同场景双跑逐帧snapshot/artifact hash完全相同，所有pose/velocity/anchors finite。
 - Mixed contact+revolute island同时有contact rows和`joint_row_count==1`，保持separate streams。
 - Connected bodies仍可产生contact。
 - Lab scenario artifact保留revolute kind/anchors/row facts；server和Web不把unknown kind降级为distance/world_anchor。
-- TS type、i18n、UI contract、production build和真实browser pendulum/hinge展示通过。
+- TS type、i18n、UI contract、production build由CLI通过；真实Chrome pendulum/hinge由living
+  spec固定prompt交给外部ChatGPT App，receipt必须绑定full SHA。未回填只能PENDING。
 - Final：`cargo fmt --all --check`、core/lab/full workspace、clippy 0 warnings、examples no-run、bench no-run、scope/public API审计全部通过。
 
 ## 8. 可直接交给下一Codex的Prompt
@@ -227,13 +258,21 @@ S5-API-RED不能直接提交会破坏workspace编译的integration test。使用
 ```text
 在 /Users/asyncrustacean/projects/picea 继续工作。先读 AGENTS.md、docs/ai/repo-map.md、docs/ai/index.md，以及 docs/handoff-2026-07-14-vnext-s5-revolute-joint.md。所有回复用简体中文，代码/命令/标识符保持原文。
 
-先用 rtk proxy git status --short --branch、rtk proxy git rev-parse --short HEAD、rtk proxy git log --oneline -12 确认现场。预期 branch=feat/vnext-s5-revolute-joint、HEAD=7fc5d32，handoff commit之后则以live HEAD为准；worktree应clean。不要重新做已冻结的§4，不要push。
+先用 rtk proxy git status --short --branch、rtk proxy git rev-parse --short HEAD、rtk proxy git log --oneline -12 确认现场。预期 branch=feat/vnext-s5-revolute-joint、S5-D前base HEAD=28867b5；S5-D commit之后以live HEAD为准。不要重新做已冻结的§4，不要push。
 
 必须加载并遵循 picea-milestone-runner、software-architecture-design、spec-driven-development、picea-doc-routing。用户已明确批准§5“完整 Pin-only V1”public API，具体字段、non_exhaustive边界、wake semantics、lab范围和延期项都冻结在handoff中，不要重新提问或擅自扩大。
 
-当前只执行S5-D：创建 docs/design/2026-07-14-revolute-joint-v1-design.md 和 docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md，并最小同步parent/handoff/AI routing/design index。不要修改crates、tests、Cargo或Web代码。Design必须包含接口spec、两张Mermaid、2x2 point constraint算法、compat ADR、fixture v1决策、wake语义、acceptance matrix和S5-D -> API-RED -> API -> BEHAVIOR-RED -> SOLVER -> LAB-RED -> LAB -> V -> C执行链。
+S5-D design/living spec和最小routing同步已经通过第三轮reviewer与independent docs verifier，commit仍为`PENDING`。Supervisor先按living spec完成S5-D commit；commit前不要修改crates、tests、Cargo或Web代码。Design必须继续保持接口spec、两张Mermaid、2x2 point constraint算法、compat ADR、fixture v1决策、wake语义、acceptance matrix和S5-D -> API-RED -> API -> BEHAVIOR-RED -> SOLVER -> LAB-RED -> LAB -> V -> C执行链。
 
-每个节点使用叶子worker/reviewer/verifier；从S5-API-RED起先确认RED并commit behavior locks；所有High/Medium闭环且独立verifier通过后才commit。所有Cargo/Git验证走rtk proxy。S5-D完成review、docs verifier和commit后，按living spec进入S5-API-RED；不能跳过RED直接实现revolute solver。
+每个节点使用叶子worker/reviewer/verifier；supervisor必须在第一处改动前把40位immutable
+start HEAD写入living spec receipt，每个新shell从receipt重新读取。从S5-API-RED起先确认
+分类正确的RED并commit behavior locks；所有High/Medium闭环且独立CLI verifier通过后才
+commit。所有Cargo/Git验证走rtk proxy。S5-D commit后，重新读取living spec并只进入
+S5-API-RED；不能跳过RED直接实现revolute solver。
+
+当前CLI不执行Chrome。S5-LAB CLI gate通过后可形成candidate commit，但节点保持
+`BROWSER PENDING`，必须把living spec §11固定prompt交给ChatGPT App并回填绑定full SHA的
+receipt后才能进入S5-V；S5-V再用§12 prompt独立复跑，不能复用前一份证据。未回填不得写PASS。
 
 用户授权满足gate后的commit，但没有授权push。遇到与handoff已批准public surface冲突、需要motor/limit/damping/collide_connected、修改solver stream或schema version时立即停下报告。
 ```

@@ -527,15 +527,15 @@ documents:
   applies_to: [lab, simulator, artifacts, server, cli, scenarios]
   keywords: [picea-lab, artifact, scenario, scene-schema, server, sse, cli]
   last_reviewed: 2026-05-17
-- path: crates/picea-lab/src/scenario.rs
+- path: crates/picea-lab/src/scenario/mod.rs
   title: Picea Lab Scenarios And Scene Fixtures
   kind: module
   authority: high
   status: active
   owner: picea-lab
   applies_to: [lab, scenarios, fixtures, scene-schema, authoring, runtime-config]
-  keywords: [scenario, scene-recipe-fixture, schema-version, parameter-schema]
-  last_reviewed: 2026-05-17
+  keywords: [scenario, scene-recipe-fixture, schema-version, parameter-schema, fixture, scene-dispatch]
+  last_reviewed: 2026-07-14
 - path: crates/picea-lab/src/artifact.rs
   title: Picea Lab Artifact Runner
   kind: module
@@ -581,6 +581,15 @@ documents:
   applies_to: [physics-realism, stack-stability, contact-persistence, sat, narrowphase, warm-start, lifecycle, source-row]
   keywords: [sat, manifold, persistence, contact-id, manifold-id, exact-first, maximum-cardinality, geometry-revision, role-swap, warm-start, source-row]
   last_reviewed: 2026-07-14
+- path: docs/design/2026-07-14-revolute-joint-v1-design.md
+  title: Revolute Joint Pin-only V1 Design
+  kind: architecture
+  authority: high
+  status: active
+  owner: architecture
+  applies_to: [physics-realism, joints, revolute, public-api, solver, lifecycle, schema-v1, picea-lab, picea-lab-web]
+  keywords: [revolute, pin-only, point-constraint, effective-mass, non-exhaustive, wake, joint-row, schema-v1, browser-acceptance]
+  last_reviewed: 2026-07-14
 - path: docs/plans/2026-07-10-workbench-interactive-run-model-plan.md
   title: Workbench Interactive Run Model Plan
   kind: plan
@@ -598,4 +607,13 @@ documents:
   owner: supervisor
   applies_to: [milestone, physics-realism, stack-stability, contact-persistence, sat, warm-start, lifecycle, source-row]
   keywords: [s4-d, s4-red, s4-impl, s4-v, s4-c, ignored-red, maximum-cardinality, geometry-revision, matrix-stack, living-spec]
+  last_reviewed: 2026-07-14
+- path: docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+  title: vNext Handoff Section 5 Revolute Joint Milestone
+  kind: plan
+  authority: high
+  status: active
+  owner: supervisor
+  applies_to: [milestone, physics-realism, joints, revolute, public-api, solver, lifecycle, picea-lab, picea-lab-web]
+  keywords: [s5-d, s5-api-red, s5-api, s5-behavior-red, s5-solver, s5-lab-red, s5-lab, s5-v, s5-c, living-spec]
   last_reviewed: 2026-07-14
