@@ -507,6 +507,188 @@ fn distance_joint_radial_speed(world: &World, body_a: BodyHandle, body_b: BodyHa
     (body_b.linear_velocity() - body_a.linear_velocity()).dot(direction)
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ContactWokenDistanceProjectionFacts {
+    radial_speed: f32,
+    joint_row_count: usize,
+}
+
+fn contact_woken_distance_projection_facts(
+    joint_velocity_projection: bool,
+) -> ContactWokenDistanceProjectionFacts {
+    let mut world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: true,
+    });
+    let body_a = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("contact-woken Distance body_a should be created");
+    let body_b = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("contact-woken Distance body_b should be created");
+    let body_a_collider = world
+        .create_collider(
+            body_a,
+            ColliderDesc {
+                shape: SharedShape::circle(0.2),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("contact-woken Distance body_a collider should be created");
+    world
+        .create_collider(
+            body_b,
+            ColliderDesc {
+                shape: SharedShape::circle(0.2),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("contact-woken Distance body_b collider should be created");
+    world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a,
+            body_b,
+            rest_length: 1.0,
+            stiffness: 1.0,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("contact-woken Distance joint should be created");
+
+    // Consume lifecycle wakes before establishing the sleeping precondition. The actual test
+    // step then starts with an inactive Distance island, so only its contact can activate it.
+    let mut preparation_pipeline = SimulationPipeline::new(StepConfig {
+        joint_velocity_projection: false,
+        enable_sleep: true,
+        ..StepConfig::default()
+    });
+    preparation_pipeline.step(&mut world);
+    for body in [body_a, body_b] {
+        world
+            .apply_body_patch(
+                body,
+                BodyPatch {
+                    sleeping: Some(true),
+                    ..BodyPatch::default()
+                },
+            )
+            .expect("Distance endpoint should enter the sleeping precondition");
+    }
+    assert!(
+        world
+            .try_body(body_a)
+            .expect("body_a stays live")
+            .sleeping()
+            && world
+                .try_body(body_b)
+                .expect("body_b stays live")
+                .sleeping(),
+        "S5_HARNESS_BOUNDARY:contact_woken_distance_sleeping_precondition"
+    );
+
+    let striker = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-0.35, 0.0, 0.0),
+            linear_velocity: Vector::new(4.0, 0.0),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("contact-woken Distance striker should be created");
+    let striker_collider = world
+        .create_collider(
+            striker,
+            ColliderDesc {
+                shape: SharedShape::circle(0.2),
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("contact-woken Distance striker collider should be created");
+    let mut pipeline = SimulationPipeline::new(StepConfig {
+        joint_velocity_projection,
+        enable_sleep: true,
+        ..StepConfig::default()
+    });
+    let report = pipeline.step(&mut world);
+    let normal_impulse = report
+        .events
+        .iter()
+        .find_map(|event| match event {
+            WorldEvent::ContactStarted(contact) | WorldEvent::ContactPersisted(contact)
+                if (contact.collider_a == body_a_collider
+                    && contact.collider_b == striker_collider)
+                    || (contact.collider_a == striker_collider
+                        && contact.collider_b == body_a_collider) =>
+            {
+                Some(contact.solver_normal_impulse)
+            }
+            _ => None,
+        })
+        .expect("S5_HARNESS_BOUNDARY:contact_woken_distance_contact_missing");
+    let radial_speed = distance_joint_radial_speed(&world, body_a, body_b).abs();
+    let body_a_awake = !world
+        .try_body(body_a)
+        .expect("body_a stays live")
+        .sleeping();
+    let body_b_awake = !world
+        .try_body(body_b)
+        .expect("body_b stays live")
+        .sleeping();
+    let body_a_contact_wake = report.events.iter().any(|event| {
+        matches!(
+            event,
+            WorldEvent::SleepChanged(sleep)
+                if sleep.body == body_a
+                    && !sleep.is_sleeping
+                    && matches!(
+                        sleep.reason,
+                        SleepTransitionReason::Impact
+                            | SleepTransitionReason::ContactImpulse
+                    )
+        )
+    });
+    let body_b_island_wake = report.events.iter().any(|event| {
+        matches!(
+            event,
+            WorldEvent::SleepChanged(sleep) if sleep.body == body_b && !sleep.is_sleeping
+        )
+    });
+    println!(
+        "S5_DISTANCE_CONTACT_WAKE_FACT:projection={joint_velocity_projection};radial_speed={radial_speed:.9};normal_impulse={normal_impulse:.9};contacts={};contact_rows={};joint_rows={};sleep_transitions={};body_a_contact_wake={body_a_contact_wake};body_b_island_wake={body_b_island_wake};body_a_awake={body_a_awake};body_b_awake={body_b_awake};numeric_warnings={}",
+        report.stats.contact_count,
+        report.stats.contact_row_count,
+        report.stats.joint_row_count,
+        report.stats.sleep_transition_count,
+        report.stats.numeric_warnings
+    );
+    assert!(
+        radial_speed.is_finite()
+            && normal_impulse.is_finite()
+            && normal_impulse > 0.0
+            && report.stats.contact_count > 0
+            && report.stats.contact_row_count > 0
+            && body_a_contact_wake
+            && body_b_island_wake
+            && body_a_awake
+            && body_b_awake
+            && report.stats.numeric_warnings == 0,
+        "S5_HARNESS_BOUNDARY:contact_woken_distance_requires_real_contact_and_wake"
+    );
+    ContactWokenDistanceProjectionFacts {
+        radial_speed,
+        joint_row_count: report.stats.joint_row_count,
+    }
+}
+
 #[test]
 fn joint_velocity_projection_flag_controls_radial_velocity_projection() {
     let (mut disabled_world, disabled_a, disabled_b) = radial_velocity_joint_world();
@@ -1178,6 +1360,8 @@ fn post_contact_revolute_reconciliation_does_not_repeat_existing_joint_rows() {
         ..StepConfig::default()
     };
     let dt = config.dt;
+    let contact_woken_projection_enabled = contact_woken_distance_projection_facts(true);
+    let contact_woken_projection_disabled = contact_woken_distance_projection_facts(false);
 
     let mut distance_world = World::new(WorldDesc {
         gravity: Vector::default(),
@@ -1283,8 +1467,22 @@ fn post_contact_revolute_reconciliation_does_not_repeat_existing_joint_rows() {
         distance_report.stats.joint_row_count,
         anchor_report.stats.joint_row_count
     );
+    println!(
+        "S5_REVOLUTE_REPLAN_BOUNDARY:contact_woken_distance_projection:enabled={contact_woken_projection_enabled:?};disabled={contact_woken_projection_disabled:?}"
+    );
     assert_eq!(distance_report.stats.joint_row_count, 1);
     assert_eq!(anchor_report.stats.joint_row_count, 1);
+    assert!(
+        contact_woken_projection_enabled.joint_row_count == 0
+            && contact_woken_projection_disabled.joint_row_count == 0
+            && contact_woken_projection_enabled.radial_speed <= 1.0e-4
+            && contact_woken_projection_disabled.radial_speed > 1.0e-3,
+        "S5_REVOLUTE_REPLAN_BOUNDARY:contact_woken_distance_projection: enabled radial speed={:.9}, disabled radial speed={:.9}, enabled rows={}, disabled rows={}",
+        contact_woken_projection_enabled.radial_speed,
+        contact_woken_projection_disabled.radial_speed,
+        contact_woken_projection_enabled.joint_row_count,
+        contact_woken_projection_disabled.joint_row_count
+    );
     assert!(
         (distance_actual - distance_single).abs() <= 1.0e-6
             && (distance_actual - distance_repeated).abs() > 0.01,

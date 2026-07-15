@@ -6154,7 +6154,7 @@ fn revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle() {
     .expect("S5_HARNESS_BOUNDARY:ccd_final_pose_oracle_must_be_finite");
     let actual_pose_error = s5_pose_distance(final_pose, final_pose_oracle.expected_final_pose);
     println!(
-        "S5_REVOLUTE_CONTACT_STATE_FACT:ccd_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_lever={:?};mandatory_radial_error={:?};legacy_position_delta_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};shadow_final={:?};shadow_latest_linear={:?};shadow_latest_omega={:.6};shadow_clamps={};shadow_contacts={};shadow_rows={};shadow_warnings={};p_contact={:?};subject_latest_linear={:?};initial_omega={:.6};subject_latest_omega={:.6};post_eval={:?};post_demand={:.6};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_candidate={:?};no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};tolerance_scale={:.9};discrete_equivalent={};max_float_field={};max_float_delta={:.9};max_float_tolerance={:.9};max_float_ratio={:.3};contact_equivalent={};subject_contact_facts={:?};shadow_contact_facts={:?};joint_rows={};numeric_warnings={}",
+        "S5_REVOLUTE_POSE_EFFECT_FACT:ccd_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_lever={:?};mandatory_radial_error={:?};legacy_position_delta_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};shadow_final={:?};shadow_latest_linear={:?};shadow_latest_omega={:.6};shadow_clamps={};shadow_contacts={};shadow_rows={};shadow_warnings={};p_contact={:?};subject_latest_linear={:?};initial_omega={:.6};subject_latest_omega={:.6};post_eval={:?};post_demand={:.6};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_candidate={:?};no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};tolerance_scale={:.9};discrete_equivalent={};max_float_field={};max_float_delta={:.9};max_float_tolerance={:.9};max_float_ratio={:.3};pose_effect_equivalent={};subject_contact_facts={:?};shadow_contact_facts={:?};joint_rows={};numeric_warnings={}",
         report.stats.ccd_clamp_count,
         report.stats.contact_count,
         ccd_contact.solver_normal_impulse,
@@ -6238,7 +6238,7 @@ fn revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle() {
             && final_pose_oracle.contact_comparison.equivalent
             && drift <= 0.01
             && actual_pose_error <= 1.0e-4,
-        "S5_REVOLUTE_CONTACT_STATE_ASSERT:ccd_post_contact_final_pose:joint_rows={};numeric_warnings={};contact_equivalent={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_error={:.6};double_advance_error={:.6}",
+        "S5_REVOLUTE_POSE_EFFECT_ASSERT:ccd_post_contact_final_pose:joint_rows={};numeric_warnings={};pose_effect_equivalent={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_error={:.6};double_advance_error={:.6}",
         report.stats.joint_row_count,
         report.stats.numeric_warnings,
         final_pose_oracle.contact_comparison.equivalent,
@@ -6674,8 +6674,13 @@ fn s5_compare_contact_state_facts(
     // The shadow and Revolute mandatory paths are algebraically equivalent but can order f32
     // operations differently. This scaled 1e-6 envelope admits roundoff while remaining two
     // orders below the existing 1e-4 pose/negative gate and far below live contact mismatches.
+    // Velocity-response fields still update the max-delta diagnostic, but only pose-producing
+    // fields are allowed to decide cross-world equivalence.
     macro_rules! compare_float {
-        ($field:literal, $subject:expr, $shadow:expr) => {{
+        ($field:literal, $subject:expr, $shadow:expr) => {
+            compare_float!($field, $subject, $shadow, true)
+        };
+        ($field:literal, $subject:expr, $shadow:expr, $gates_equivalence:expr) => {{
             let subject_value = $subject;
             let shadow_value = $shadow;
             let finite = subject_value.is_finite() && shadow_value.is_finite();
@@ -6693,7 +6698,9 @@ fn s5_compare_contact_state_facts(
                 max_float_tolerance = tolerance;
                 max_float_ratio = ratio;
             }
-            floats_equivalent &= finite && delta <= tolerance;
+            if $gates_equivalence {
+                floats_equivalent &= finite && delta <= tolerance;
+            }
         }};
     }
 
@@ -6763,42 +6770,50 @@ fn s5_compare_contact_state_facts(
     compare_float!(
         "solver_initial_normal_speed",
         subject.solver_initial_normal_speed,
-        shadow.solver_initial_normal_speed
+        shadow.solver_initial_normal_speed,
+        false
     );
     compare_float!(
         "solver_initial_tangent_speed",
         subject.solver_initial_tangent_speed,
-        shadow.solver_initial_tangent_speed
+        shadow.solver_initial_tangent_speed,
+        false
     );
     compare_float!(
         "solver_final_normal_speed",
         subject.solver_final_normal_speed,
-        shadow.solver_final_normal_speed
+        shadow.solver_final_normal_speed,
+        false
     );
     compare_float!(
         "solver_final_tangent_speed",
         subject.solver_final_tangent_speed,
-        shadow.solver_final_tangent_speed
+        shadow.solver_final_tangent_speed,
+        false
     );
     compare_float!(
         "solver_position_bias",
         subject.solver_position_bias,
-        shadow.solver_position_bias
+        shadow.solver_position_bias,
+        false
     );
     compare_float!(
         "solver_restitution_bias",
         subject.solver_restitution_bias,
-        shadow.solver_restitution_bias
+        shadow.solver_restitution_bias,
+        false
     );
     compare_float!(
         "solver_normal_impulse",
         subject.solver_normal_impulse,
-        shadow.solver_normal_impulse
+        shadow.solver_normal_impulse,
+        false
     );
     compare_float!(
         "solver_tangent_impulse",
         subject.solver_tangent_impulse,
-        shadow.solver_tangent_impulse
+        shadow.solver_tangent_impulse,
+        false
     );
     compare_float!(
         "solver_position_correction_depth",
@@ -7010,9 +7025,9 @@ fn s5_revolute_ccd_contact_state_oracle(
             && shadow_angular_velocity.is_finite()
             && shadow_report.stats.ccd_clamp_count == 1
             && shadow_report.stats.contact_count > 0
+            && shadow_report.stats.contact_row_count > 0
             && shadow_report.stats.joint_row_count == 1
-            && shadow_report.stats.numeric_warnings == 0
-            && shadow_contact.solver_normal_impulse > 0.0,
+            && shadow_report.stats.numeric_warnings == 0,
         "S5_HARNESS_BOUNDARY:WorldAnchor_shadow_must_reach_CCD_contact_solver"
     );
 
@@ -7063,6 +7078,27 @@ fn s5_revolute_ccd_contact_state_oracle(
 
     let contact_comparison =
         s5_compare_contact_state_facts(&subject_contact_facts, &shadow_contact_facts);
+    let mut pose_effect_negative_control = subject_contact_facts;
+    pose_effect_negative_control.position_correction_input_max_depth += 1.0e-3;
+    assert!(
+        s5_contact_state_facts_are_finite(&pose_effect_negative_control),
+        "S5_HARNESS_BOUNDARY:pose_effect_negative_control_must_be_finite"
+    );
+    let pose_effect_self_test =
+        s5_compare_contact_state_facts(&subject_contact_facts, &pose_effect_negative_control);
+    println!(
+        "S5_CONTACT_POSE_EFFECT_SELF_TEST:max_field={};delta={:.9};tolerance={:.9};equivalent={}",
+        pose_effect_self_test.max_float_field,
+        pose_effect_self_test.max_float_delta,
+        pose_effect_self_test.max_float_tolerance,
+        pose_effect_self_test.equivalent
+    );
+    assert!(
+        pose_effect_self_test.discrete_equivalent
+            && !pose_effect_self_test.equivalent
+            && pose_effect_self_test.max_float_field == "position_correction_input_max_depth",
+        "S5_HARNESS_BOUNDARY:pose_effect_comparator_negative_control"
+    );
     Some(S5RevoluteCcdContactStateOracle {
         mandatory,
         mandatory_current_spinner,
@@ -8081,7 +8117,7 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
     .expect("S5_HARNESS_BOUNDARY:ccd_contact_final_pose_oracle_must_be_finite");
     let actual_pose_error = s5_pose_distance(final_pose, final_pose_oracle.expected_final_pose);
     println!(
-        "S5_REVOLUTE_CONTACT_STATE_FACT:ccd_contact_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};shadow_final={:?};shadow_latest_linear={:?};shadow_latest_omega={:.6};shadow_clamps={};shadow_contacts={};shadow_rows={};shadow_warnings={};p_contact={:?};subject_latest_linear={:?};initial_omega={:.6};subject_latest_omega={:.6};post_eval={:?};post_demand={:.6};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_candidate={:?};no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};tolerance_scale={:.9};discrete_equivalent={};max_float_field={};max_float_delta={:.9};max_float_tolerance={:.9};max_float_ratio={:.3};contact_equivalent={};subject_contact_facts={:?};shadow_contact_facts={:?};joint_rows={};numeric_warnings={}",
+        "S5_REVOLUTE_POSE_EFFECT_FACT:ccd_contact_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};shadow_final={:?};shadow_latest_linear={:?};shadow_latest_omega={:.6};shadow_clamps={};shadow_contacts={};shadow_rows={};shadow_warnings={};p_contact={:?};subject_latest_linear={:?};initial_omega={:.6};subject_latest_omega={:.6};post_eval={:?};post_demand={:.6};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_candidate={:?};no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};tolerance_scale={:.9};discrete_equivalent={};max_float_field={};max_float_delta={:.9};max_float_tolerance={:.9};max_float_ratio={:.3};pose_effect_equivalent={};subject_contact_facts={:?};shadow_contact_facts={:?};joint_rows={};numeric_warnings={}",
         report.stats.ccd_clamp_count,
         report.stats.contact_count,
         ccd_contact.solver_normal_impulse,
@@ -8130,7 +8166,7 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
         "S5_HARNESS_BOUNDARY:ccd_contact_missing"
     );
     assert!(
-        ccd_contact.solver_normal_impulse > 0.0,
+        ccd_contact.solver_normal_impulse.is_finite() && ccd_contact.solver_normal_impulse > 0.0,
         "S5_HARNESS_BOUNDARY:ccd_contact_must_reach_solver"
     );
     s5_assert_ccd_trace_roles(
@@ -8162,7 +8198,7 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
             && final_pose_oracle.contact_comparison.equivalent
             && drift <= 0.01
             && actual_pose_error <= 1.0e-4,
-        "S5_REVOLUTE_CONTACT_STATE_ASSERT:ccd_contact_post_contact_final_pose:joint_rows={};numeric_warnings={};contact_equivalent={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_error={:.6};double_advance_error={:.6}",
+        "S5_REVOLUTE_POSE_EFFECT_ASSERT:ccd_contact_post_contact_final_pose:joint_rows={};numeric_warnings={};pose_effect_equivalent={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_error={:.6};double_advance_error={:.6}",
         report.stats.joint_row_count,
         report.stats.numeric_warnings,
         final_pose_oracle.contact_comparison.equivalent,

@@ -22,6 +22,9 @@ PROGRESS_NODES = %w[
   S5-REPLAN-2
   S5-BEHAVIOR-RED-4
   S5-SOLVER-4
+  S5-REPLAN-3
+  S5-BEHAVIOR-RED-5
+  S5-SOLVER-5
   S5-LAB-RED
   S5-LAB
   S5-V
@@ -165,6 +168,41 @@ SCOPES = {
     ],
     optional: %w[crates/picea/src/pipeline/joints/tests.rs]
   },
+  "S5-REPLAN-3" => {
+    required: %w[
+      docs/design/2026-07-14-revolute-joint-v1-design.md
+      docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+      openspec/config.yaml
+      openspec/changes/complete-s5-revolute-solver-5/.openspec.yaml
+      openspec/changes/complete-s5-revolute-solver-5/proposal.md
+      openspec/changes/complete-s5-revolute-solver-5/design.md
+      openspec/changes/complete-s5-revolute-solver-5/specs/revolute-joint-solver/spec.md
+      openspec/changes/complete-s5-revolute-solver-5/tasks.md
+    ],
+    optional: []
+  },
+  "S5-BEHAVIOR-RED-5" => {
+    required: %w[
+      crates/picea/tests/physics_realism_acceptance.rs
+      crates/picea/tests/world_step_review_regressions.rs
+      crates/picea/tests/verify_revolute_scope.rb
+      docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+      openspec/changes/complete-s5-revolute-solver-5/tasks.md
+    ],
+    optional: []
+  },
+  "S5-SOLVER-5" => {
+    required: %w[
+      crates/picea/src/pipeline.rs
+      crates/picea/src/pipeline/step.rs
+      crates/picea/src/pipeline/island.rs
+      crates/picea/src/pipeline/joints.rs
+      crates/picea/src/solver/body_state.rs
+      docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+      openspec/changes/complete-s5-revolute-solver-5/tasks.md
+    ],
+    optional: %w[crates/picea/src/pipeline/joints/tests.rs]
+  },
   "S5-LAB-RED" => {
     required: %w[
       crates/picea-lab/tests/artifact_run.rs
@@ -218,7 +256,9 @@ PRE_V_NODES = %w[
   S5-BEHAVIOR-RED-3
   S5-REPLAN-2
   S5-BEHAVIOR-RED-4
-  S5-SOLVER-4
+  S5-REPLAN-3
+  S5-BEHAVIOR-RED-5
+  S5-SOLVER-5
   S5-LAB-RED
   S5-LAB
 ].freeze
@@ -392,6 +432,8 @@ def self_test!
   red_3_start = "07b2bd6cd3ff4b80d1b6c124a4752e36e8e8d88f"
   replan_2_start = "6ffa1e3f29e902b68708b62e11d5fae160db97ec"
   red_4_start = "4e8bd4616e1f43e330d75212a74c459e8e693ca7"
+  replan_3_start = "29bafce59a0913be7b4d37055ab57ed5e5233116"
+  red_5_start = "195215119a3544e71849f21cb7bdaf245188de13"
   replan_fixture = <<~MARKDOWN
     #{PROGRESS_HEADING}
 
@@ -404,7 +446,10 @@ def self_test!
     | 2026-07-15 | S5-SOLVER-3 | `#{replan_2_start}` | stopped | NOT COMMITTED | conflict |
     | 2026-07-15 | S5-REPLAN-2 | `#{replan_2_start}` | committed | `#{red_4_start}` | current |
     | 2026-07-15 | S5-BEHAVIOR-RED-4 | `#{red_4_start}` | current | PENDING | current |
-    | - | S5-SOLVER-4 | `PENDING` | future | - | future |
+    | 2026-07-15 | S5-SOLVER-4 | `#{replan_3_start}` | stopped | NOT COMMITTED | conflict |
+    | 2026-07-15 | S5-REPLAN-3 | `#{replan_3_start}` | committed | `#{red_5_start}` | current |
+    | 2026-07-15 | S5-BEHAVIOR-RED-5 | `#{red_5_start}` | current | PENDING | current |
+    | - | S5-SOLVER-5 | `PENDING` | future | - | future |
 
     ## 17. next
   MARKDOWN
@@ -415,7 +460,10 @@ def self_test!
          receipt_raw_from_text(replan_fixture, "S5-SOLVER-3") == replan_2_start &&
          receipt_raw_from_text(replan_fixture, "S5-REPLAN-2") == replan_2_start &&
          receipt_raw_from_text(replan_fixture, "S5-BEHAVIOR-RED-4") == red_4_start &&
-         receipt_raw_from_text(replan_fixture, "S5-SOLVER-4") == "PENDING"
+         receipt_raw_from_text(replan_fixture, "S5-SOLVER-4") == replan_3_start &&
+         receipt_raw_from_text(replan_fixture, "S5-REPLAN-3") == replan_3_start &&
+         receipt_raw_from_text(replan_fixture, "S5-BEHAVIOR-RED-5") == red_5_start &&
+         receipt_raw_from_text(replan_fixture, "S5-SOLVER-5") == "PENDING"
     raise ContractError, "self-test new-node parser did not preserve all receipt values"
   end
   puts "S5_SCOPE_SELF_TEST=parser-new-nodes:PASS"
@@ -438,15 +486,31 @@ def self_test!
   expect_contract_error("s5-behavior-red-4-pending-fixture") do
     validate_sha!(receipt_raw_from_text(red_4_pending_fixture, "S5-BEHAVIOR-RED-4"), "test RED-4")
   end
-  solver_4_sha_fixture = replan_fixture.sub(
-    "| - | S5-SOLVER-4 | `PENDING` | future | - | future |",
-    "| 2026-07-15 | S5-SOLVER-4 | `#{red_4_start}` | current | PENDING | current |"
-  )
-  solver_4_fixture_raw = receipt_raw_from_text(solver_4_sha_fixture, "S5-SOLVER-4")
+  solver_4_fixture_raw = receipt_raw_from_text(replan_fixture, "S5-SOLVER-4")
   validate_cli_sha_against_receipt!("S5-SOLVER-4", solver_4_fixture_raw, solver_4_fixture_raw)
   puts "S5_SCOPE_SELF_TEST=s5-solver-4-sha-fixture-positive:PASS"
   expect_contract_error("s5-solver-4-sha-fixture-mismatch") do
     validate_cli_sha_against_receipt!("S5-SOLVER-4", replan_start, solver_4_fixture_raw)
+  end
+  red_5_pending_fixture = replan_fixture.sub(
+    "| 2026-07-15 | S5-BEHAVIOR-RED-5 | `#{red_5_start}` | current | PENDING | current |",
+    "| - | S5-BEHAVIOR-RED-5 | `PENDING` | future | - | future |"
+  )
+  expect_contract_error("s5-behavior-red-5-pending-fixture") do
+    validate_sha!(
+      receipt_raw_from_text(red_5_pending_fixture, "S5-BEHAVIOR-RED-5"),
+      "test RED-5"
+    )
+  end
+  solver_5_sha_fixture = replan_fixture.sub(
+    "| - | S5-SOLVER-5 | `PENDING` | future | - | future |",
+    "| 2026-07-15 | S5-SOLVER-5 | `#{red_5_start}` | current | PENDING | current |"
+  )
+  solver_5_fixture_raw = receipt_raw_from_text(solver_5_sha_fixture, "S5-SOLVER-5")
+  validate_cli_sha_against_receipt!("S5-SOLVER-5", solver_5_fixture_raw, solver_5_fixture_raw)
+  puts "S5_SCOPE_SELF_TEST=s5-solver-5-sha-fixture-positive:PASS"
+  expect_contract_error("s5-solver-5-sha-fixture-mismatch") do
+    validate_cli_sha_against_receipt!("S5-SOLVER-5", replan_start, solver_5_fixture_raw)
   end
   duplicate_fixture = parser_fixture.sub(
     "| - | S5-API | `PENDING` | future | - | real future row |",
@@ -545,6 +609,45 @@ def self_test!
     end
     puts "S5_SCOPE_SELF_TEST=current-s5-solver-4-sha-branch:PASS"
   end
+  validate_cli_sha!("S5-REPLAN-3", replan_3_start)
+  puts "S5_SCOPE_SELF_TEST=current-s5-replan-3-receipt:PASS"
+  red_5_raw = receipt_raw_from_text(File.read(File.join(ROOT, SPEC)), "S5-BEHAVIOR-RED-5")
+  if red_5_raw == "PENDING"
+    expect_contract_error("current-s5-behavior-red-5-pending") do
+      receipt_sha("S5-BEHAVIOR-RED-5")
+    end
+    puts "S5_SCOPE_SELF_TEST=current-s5-behavior-red-5-pending-branch:PASS"
+  else
+    validate_cli_sha!("S5-BEHAVIOR-RED-5", red_5_raw)
+    mismatch_sha = [valid, replan_start, red_2_start, red_3_start, replan_2_start,
+                    red_4_start, replan_3_start].find { |candidate| candidate != red_5_raw }
+    raise ContractError, "self-test S5-BEHAVIOR-RED-5: no distinct mismatch SHA" unless mismatch_sha
+
+    expect_contract_error("current-s5-behavior-red-5-sha-mismatch") do
+      validate_cli_sha!("S5-BEHAVIOR-RED-5", mismatch_sha)
+    end
+    puts "S5_SCOPE_SELF_TEST=current-s5-behavior-red-5-sha-branch:PASS"
+  end
+  solver_5_raw = receipt_raw_from_text(File.read(File.join(ROOT, SPEC)), "S5-SOLVER-5")
+  if solver_5_raw == "PENDING"
+    expect_contract_error("current-s5-solver-5-pending") { receipt_sha("S5-SOLVER-5") }
+    puts "S5_SCOPE_SELF_TEST=current-s5-solver-5-pending-branch:PASS"
+  else
+    validate_cli_sha!("S5-SOLVER-5", solver_5_raw)
+    mismatch_sha = [valid, replan_start, red_2_start, red_3_start, replan_2_start,
+                    red_4_start, replan_3_start, red_5_start].find do |candidate|
+      candidate != solver_5_raw
+    end
+    raise ContractError, "self-test S5-SOLVER-5: no distinct mismatch SHA" unless mismatch_sha
+
+    expect_contract_error("current-s5-solver-5-sha-mismatch") do
+      validate_cli_sha!("S5-SOLVER-5", mismatch_sha)
+    end
+    puts "S5_SCOPE_SELF_TEST=current-s5-solver-5-sha-branch:PASS"
+  end
+  progress_text = File.read(File.join(ROOT, SPEC))
+  PROGRESS_NODES.each { |node| receipt_raw_from_text(progress_text, node) }
+  puts "S5_SCOPE_SELF_TEST=all-progress-nodes-have-one-row:PASS"
   expect_contract_error("current-s5-behavior-red-2-mismatch") do
     validate_cli_sha!("S5-BEHAVIOR-RED-2", replan_start)
   end
@@ -553,6 +656,9 @@ def self_test!
   end
   expect_contract_error("current-s5-replan-2-mismatch") do
     validate_cli_sha!("S5-REPLAN-2", replan_start)
+  end
+  expect_contract_error("current-s5-replan-3-mismatch") do
+    validate_cli_sha!("S5-REPLAN-3", replan_start)
   end
 
   replan_scope = scope_for("S5-REPLAN")
@@ -659,6 +765,43 @@ def self_test!
     solver_4_scope[:required],
     solver_4_scope[:optional]
   )
+  replan_3_scope = scope_for("S5-REPLAN-3")
+  verify_paths!(
+    "self-test:S5-REPLAN-3-positive",
+    replan_3_scope[:required],
+    replan_3_scope[:required],
+    replan_3_scope[:optional]
+  )
+  red_5_scope = scope_for("S5-BEHAVIOR-RED-5")
+  verify_paths!(
+    "self-test:S5-BEHAVIOR-RED-5-positive",
+    red_5_scope[:required],
+    red_5_scope[:required],
+    red_5_scope[:optional]
+  )
+  expect_contract_error("s5-behavior-red-5-missing") do
+    verify_paths!(
+      "self-test:S5-BEHAVIOR-RED-5-missing",
+      red_5_scope[:required].drop(1),
+      red_5_scope[:required],
+      red_5_scope[:optional]
+    )
+  end
+  expect_contract_error("s5-behavior-red-5-unexpected") do
+    verify_paths!(
+      "self-test:S5-BEHAVIOR-RED-5-unexpected",
+      red_5_scope[:required] + ["unexpected/path"],
+      red_5_scope[:required],
+      red_5_scope[:optional]
+    )
+  end
+  solver_5_scope = scope_for("S5-SOLVER-5")
+  verify_paths!(
+    "self-test:S5-SOLVER-5-optional",
+    solver_5_scope[:required] + solver_5_scope[:optional],
+    solver_5_scope[:required],
+    solver_5_scope[:optional]
+  )
 
   approved_pre_v = %w[
     S5-API-RED
@@ -669,17 +812,19 @@ def self_test!
     S5-BEHAVIOR-RED-3
     S5-REPLAN-2
     S5-BEHAVIOR-RED-4
-    S5-SOLVER-4
+    S5-REPLAN-3
+    S5-BEHAVIOR-RED-5
+    S5-SOLVER-5
     S5-LAB-RED
     S5-LAB
   ]
   raise ContractError, "self-test PRE_V_NODES drift" unless PRE_V_NODES == approved_pre_v
 
-  stopped_solvers = %w[S5-SOLVER S5-SOLVER-2 S5-SOLVER-3]
+  stopped_solvers = %w[S5-SOLVER S5-SOLVER-2 S5-SOLVER-3 S5-SOLVER-4]
   unless (PRE_V_NODES & stopped_solvers).empty?
     raise ContractError, "self-test stopped solver entered milestone union"
   end
-  puts "S5_SCOPE_SELF_TEST=pre-v-excludes-three-stopped-solvers:PASS"
+  puts "S5_SCOPE_SELF_TEST=pre-v-excludes-four-stopped-solvers:PASS"
 
   validate_cli_sha!("S5-API-RED", valid)
   puts "S5_SCOPE_SELF_TEST=valid:PASS"

@@ -9,14 +9,14 @@
 
 ## 2. S5-BEHAVIOR-RED-5 acceptance-as-code
 
-- [ ] 2.1 从REPLAN-3 commit记录RED-5 immutable Start HEAD，并在scope verifier/living receipt登记新三节点、PENDING/SHA双分支与PRE_V排除四个STOPPED solver
-- [ ] 2.2 将shadow comparator收窄为CCD/role/residual-position/StepStats pose-effect facts；保留`1e-6`、全部velocity-response finite/diagnostic输出及subject normal impulse positive门，并用`position_correction_input_max_depth + 1e-3` negative control证明comparator可证伪
-- [ ] 2.3 扩展现有exact `post_contact_revolute_reconciliation_does_not_repeat_existing_joint_rows`：新增contact唤醒sleeping Distance后的projection子case，锁定enabled`<=1e-4`、disabled`>1e-3`及固定signature；总数仍为16
-- [ ] 2.4 在clean baseline逐条运行8个unit与16条integration exact，确认仅批准symbol RED、严格`12 RED / 4 GREEN`及两条唯一pose-effect signature
-- [ ] 2.5 临时应用保留production patch作compatibility witness，确认两条目标exact转绿且Distance新边界锁能检出旧plan复用风险；撤回临时production文件后证明tests/docs/scope blobs不变
-- [ ] 2.6 运行scope self-tests、fmt、diff、cached/untracked/hygiene与OpenSpec strict validate gates
-- [ ] 2.7 完成独立test/spec reviewer和RED verifier，闭合全部High/Medium findings
-- [ ] 2.8 仅stage批准的RED-5 acceptance paths与tasks receipt，复核cached exact allowlist并提交 `test: lock revolute pose-state oracle`
+- [x] 2.1 从REPLAN-3 commit记录RED-5 immutable Start HEAD，并在scope verifier/living receipt登记新三节点、PENDING/SHA双分支与PRE_V排除四个STOPPED solver
+- [x] 2.2 将shadow comparator收窄为CCD/role/residual-position/StepStats pose-effect facts；保留`1e-6`、全部velocity-response finite/diagnostic输出及subject normal impulse positive门，并用`position_correction_input_max_depth + 1e-3` negative control证明comparator可证伪
+- [x] 2.3 扩展现有exact `post_contact_revolute_reconciliation_does_not_repeat_existing_joint_rows`：新增contact唤醒sleeping Distance后的projection子case，锁定enabled`<=1e-4`、disabled`>1e-3`及固定signature；总数仍为16
+- [x] 2.4 在clean baseline逐条运行8个unit与16条integration exact，确认仅批准symbol RED、严格`12 RED / 4 GREEN`及两条唯一pose-effect signature
+- [x] 2.5 临时应用保留production patch作compatibility witness，确认两条目标exact转绿且Distance新边界锁能检出旧plan复用风险；撤回临时production文件后证明tests/docs/scope blobs不变
+- [x] 2.6 运行scope self-tests、fmt、diff、cached/untracked/hygiene与OpenSpec strict validate gates
+- [x] 2.7 完成独立test/spec reviewer和RED verifier，闭合全部High/Medium findings
+- [x] 2.8 仅stage批准的RED-5 acceptance paths与tasks receipt，复核cached exact allowlist并提交 `test: lock revolute pose-state oracle`
 
 ## 3. S5-SOLVER-5 production实现
 

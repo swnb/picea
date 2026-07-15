@@ -12,7 +12,7 @@ S5-SOLVER-4 immutable Start HEAD=`29bafce59a0913be7b4d37055ab57ed5e5233116`；un
 未提交production。用户本轮已批准继续
 `S5-REPLAN-3 -> S5-BEHAVIOR-RED-5 -> S5-SOLVER-5`；S5-REPLAN-3以
 `29bafce59a0913be7b4d37055ab57ed5e5233116`为immutable Start HEAD，review/verifier gates已闭合；
-其commit identity由RED-5开始时登记。
+已commit为`195215119a3544e71849f21cb7bdaf245188de13`，当前执行S5-BEHAVIOR-RED-5。
 新链唯一task checkbox/完成进度来源为
 `openspec/changes/complete-s5-revolute-solver-5/tasks.md`；本文只保留冻结合同与
 identity/evidence receipt。Chrome `NOT RUN / BROWSER PENDING`
@@ -2082,11 +2082,13 @@ independent spec review因缺§9I/J/K、scope/receipt与closeout自引用以
 `0 High / 0 Medium`、PASS。Independent docs verifier复跑OpenSpec 1.6.0、4/4、strict validate、
 apply、exact-8、YAML/fences/required terms、outside zero-diff、main blobs、diff/cached gates，给出
 `0 High / 0 Medium / 0 Low`与`S5-REPLAN-3 DOCS VERIFIER PASS`。OpenSpec tasks 1.1-1.6完成；
-supervisor提交门已解锁，commit SHA不在本commit中自引用。
+supervisor已提交`195215119a3544e71849f21cb7bdaf245188de13`；该SHA仅由后继RED-5 receipt登记，
+未回写或amend REPLAN-3 commit。
 
 ## 9J. S5-BEHAVIOR-RED-5：pose-effect acceptance-as-code
 
-Immutable Start HEAD只在S5-REPLAN-3提交后由supervisor写入§16；当前为`PENDING`。Ownership
+Immutable Start HEAD=`195215119a3544e71849f21cb7bdaf245188de13`，由supervisor在
+S5-REPLAN-3提交后写入§16。Ownership
 exact 5：
 
 ```text
@@ -2212,6 +2214,17 @@ Reviewer逐项审查comparator字段所有权、negative control、12/4分类、
 independent RED verifier从clean baseline重跑unit+16 exact、witness和全部scope/hygiene。闭合High/Medium
 后把OpenSpec tasks 2.1-2.8勾完，stage exact-5并提交`test: lock revolute pose-state oracle`；commit
 后只读复核paths，不在该commit内记录自身SHA。
+
+Worker完成：clean unit仅8个批准`E0425`；16条integration逐条均为`running 1 test`并严格
+`12 RED / 4 GREEN`。两条CCD各打印一次`S5_CONTACT_POSE_EFFECT_SELF_TEST`，仅命中各自新
+pose-effect signature；第16条clean enabled/disabled径向速度=`0/2`、contact rows=`1/1`、
+joint rows=`0/0`、两端wake与warning=`true/true/0`，保持GREEN。Temporary production witness使
+两条CCD exact均GREEN，且第16条只在contact-woken Distance enabled边界以径向速度`2`失败，
+原Distance/WorldAnchor no-repeat controls仍先GREEN；恢复五个production文件后exact-5 blobs与
+witness前bit-identical、production对Start HEAD zero-diff。Scope self-test/exact-5、fmt、OpenSpec
+strict validate、apply=`12/24`、diff/outside/cached/untracked gates均PASS。Final reviewer与independent
+re-verifier均给出`0 High / 0 Medium / 0 Low`、`PASS`；唯一初始Medium（apply进度与§17 stale
+status）已通过status-only remediation闭合，复验确认仍仅exact-5 dirty且未stage/commit。
 
 ## 9K. S5-SOLVER-5：消费committed RED-5
 
@@ -2655,8 +2668,8 @@ RED receipt额外记录 failure signature，并区分：
 | 2026-07-15 | S5-REPLAN-2 | `6ffa1e3f29e902b68708b62e11d5fae160db97ec` | docs worker=`S5-REPLAN-2 WORKER COMPLETE`；independent reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-2 VERIFIER PASS`；已commit | `4e8bd4616e1f43e330d75212a74c459e8e693ca7` | exact-1 living spec；保持ADR-S5-5/design不变，记录new chain、WorldAnchor shadow oracle、RED-4/SOLVER-4 scopes/gates/STOP与worker receipt；review/verifier确认exact-1/zero-diff、shadow observable fields、new chain/PRE_V、STOP/progress与全部docs gates均无finding；不声称future nodes已验证；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-BEHAVIOR-RED-4 | `4e8bd4616e1f43e330d75212a74c459e8e693ca7` | 首轮reviewer=`0 High / 1 Medium / 0 Low`、裁决`FAIL`；bit-exact float equality bounded remediation已完成；final re-reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、`S5-BEHAVIOR-RED-4 VERIFIER PASS`；已commit | `29bafce59a0913be7b4d37055ab57ed5e5233116` | exact-3；显式float comparator=`1e-6 * max(1,abs(a),abs(b))`；两条baseline最大delta/tolerance=`0.048708964/0.000001000`与`0.011979997/0.000001000`；unit仅8个批准`E0425`；16条integration逐条`running 1 test`并严格`12 RED / 4 GREEN`；两条WorldAnchor shadow只命中各自批准CONTACT_STATE signature，scope/self-test/fmt/zero-diff/hygiene均PASS；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-SOLVER-4 | `29bafce59a0913be7b4d37055ab57ed5e5233116` | `STOPPED / TEST CONTRACT CONFLICT`；worker命中§15，supervisor fresh复跑同一唯一FAIL；未派reviewer/verifier | `NOT COMMITTED` | exact-6保留accepted production patch；receipt/scope与unit 8/8 PASS；第一条shadow GREEN，第二条因WorldAnchor shadow 1 ULP under-correction导致tangent impulse delta=`0.000020315 > 0.000001`、`contact_equivalent=false`；row/warning=`1/0`、pose error=`0`、drift=`0.000917`；实验已撤销；完整16条/broad未运行，fmt仍FAIL；Chrome `NOT RUN / BROWSER PENDING` |
-| 2026-07-15 | S5-REPLAN-3 | `29bafce59a0913be7b4d37055ab57ed5e5233116` | 首轮independent spec reviewer=`4 High / 4 Medium / 1 Low`、FAIL；bounded remediation后final re-review=`0 High / 0 Medium`、PASS；independent docs verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-3 DOCS VERIFIER PASS`；supervisor commit gate unlocked | `PENDING` | clean detached exact-8；导入living blob=`6bc4dc8ff9f506c5e13bb048afd1da6b0db3b56f`、design baseline blob=`f945b0f530191b4c1de0921aa930146210e723ce`及6个OpenSpec paths；OpenSpec 4/4、strict validate、apply 4/24 pre-status、YAML/fences/terms/exact-8/outside-zero-diff/main blobs/diff/cached均PASS；commit identity由RED-5 receipt登记；Chrome `NOT RUN / BROWSER PENDING` |
-| - | S5-BEHAVIOR-RED-5 | `PENDING` | 未开始；等待S5-REPLAN-3 commit | `PENDING` | exact-5；clean unit 8 approved symbol RED、16 integration=`12 RED / 4 GREEN`、pose-effect negative control、Distance contact-wake boundary与temporary production witness均待执行 |
+| 2026-07-15 | S5-REPLAN-3 | `29bafce59a0913be7b4d37055ab57ed5e5233116` | 首轮independent spec reviewer=`4 High / 4 Medium / 1 Low`、FAIL；bounded remediation后final re-review=`0 High / 0 Medium`、PASS；independent docs verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-3 DOCS VERIFIER PASS`；已commit | `195215119a3544e71849f21cb7bdaf245188de13` | clean detached exact-8；导入living blob=`6bc4dc8ff9f506c5e13bb048afd1da6b0db3b56f`、design baseline blob=`f945b0f530191b4c1de0921aa930146210e723ce`及6个OpenSpec paths；OpenSpec 4/4、strict validate、apply 6/24、YAML/fences/terms/exact-8/outside-zero-diff/main blobs/diff/cached均PASS；commit paths复核exact-8、提交后worktree clean；Chrome `NOT RUN / BROWSER PENDING` |
+| 2026-07-15 | S5-BEHAVIOR-RED-5 | `195215119a3544e71849f21cb7bdaf245188de13` | worker完成；final reviewer与independent re-verifier均=`0 High / 0 Medium / 0 Low`、`PASS`；commit gate已解锁 | `PENDING` | exact-5；clean unit仅8个批准`E0425`，16 exact逐条`running 1 test`且`12 RED / 4 GREEN`；两条pose-effect self-test/唯一signature有效；Distance clean=`0/2` GREEN、temporary production witness两条CCD GREEN且Distance enabled=`2`精准FAIL；scope/fmt/OpenSpec apply=`12/24`/diff/hygiene PASS；唯一初始Medium status drift已闭合；未stage/commit |
 | - | S5-SOLVER-5 | `PENDING` | 未开始；等待committed RED-5 | `PENDING` | required exact-7 + reviewer-triggered optional unit path；unit+sub-EPS、16/16、targeted/broad/fmt/scope/OpenSpec gates待执行；完成后本change hard-stop，不进入S5-LAB-RED |
 | - | S5-LAB-RED | `PENDING` | 未开始 | - | 必须单独提交cross-layer contracts |
 | - | S5-LAB | `PENDING` | 未开始 | - | CLI candidate commit后external browser receipt未回填则`BROWSER PENDING` |
@@ -2683,8 +2696,9 @@ RED receipt额外记录 failure signature，并区分：
   committed tests/contact/narrowphase或放宽assert。当前只走用户批准的REPLAN-3/RED-5/SOLVER-5。
 - 主worktree保留的`pipeline/joints.rs`仍有rustfmt diff。S5-SOLVER-5必须在owned Rust范围内使
   `cargo fmt --all --check`真正GREEN，不能以physics gate为由豁免独立hygiene失败。
-- RED-5尚未实跑，pose-effect clean分类、comparator negative control与contact-woken Distance
-  boundary仍是未知；尤其旧plan复用能否被第16条稳定检出必须由temporary witness证明。
+- RED-5 clean已实跑并确认严格`12 RED / 4 GREEN`，两条pose-effect comparator negative
+  control均可证伪；contact-woken Distance边界在clean为GREEN，temporary production witness
+  稳定检出旧plan复用（enabled径向速度=`2`）。
 - post-contact reconciliation增加一次Revolute 2x2 pose evaluation；当前无性能阈值变化，
   但S5-SOLVER-5 verifier仍需报告warning、row/stats/no-repeat、contact residual、`P_contact`、
   active-plan rebuild与determinism事实。
