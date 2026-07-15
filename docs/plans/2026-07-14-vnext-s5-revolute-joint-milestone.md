@@ -1,6 +1,6 @@
 # vNext Handoff §5 Revolute Joint Pin-only V1 Milestone
 
-状态：S5-D/API-RED/API/BEHAVIOR-RED/S5-REPLAN/S5-BEHAVIOR-RED-2/S5-BEHAVIOR-RED-3均已commit；历史S5-SOLVER保持`STOPPED / FROZEN CONTRACT CONFLICT / NOT COMMITTED`；S5-SOLVER-2与S5-SOLVER-3均保持`STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`。S5-SOLVER-3 immutable Start HEAD=`6ffa1e3f29e902b68708b62e11d5fae160db97ec`，unit=`8/8 GREEN`、16条integration exact=`15 GREEN / 1 FAIL`；唯一FAIL已由independent reviewer以`1 High / 1 Medium / 0 Low`裁决`CONFLICT CONFIRMED`，根因是RED-3 oracle遗漏contact residual correction对authoritative current pose的真实mutation，不是accepted ADR-S5-5 production bug。用户已批准唯一新链`S5-REPLAN-2 -> S5-BEHAVIOR-RED-4 -> S5-SOLVER-4`；current S5-REPLAN-2 immutable Start HEAD=`6ffa1e3f29e902b68708b62e11d5fae160db97ec`，docs worker已完成，independent reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`，结论`S5-REPLAN-2 VERIFIER PASS`；commit待supervisor执行。Chrome `NOT RUN / BROWSER PENDING`
+状态：S5-D/API-RED/API/BEHAVIOR-RED/S5-REPLAN/S5-BEHAVIOR-RED-2/S5-BEHAVIOR-RED-3/S5-REPLAN-2均已commit；历史S5-SOLVER保持`STOPPED / FROZEN CONTRACT CONFLICT / NOT COMMITTED`；S5-SOLVER-2与S5-SOLVER-3均保持`STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`。S5-SOLVER-3 immutable Start HEAD=`6ffa1e3f29e902b68708b62e11d5fae160db97ec`，unit=`8/8 GREEN`、16条integration exact=`15 GREEN / 1 FAIL`；唯一FAIL已由independent reviewer以`1 High / 1 Medium / 0 Low`裁决`CONFLICT CONFIRMED`，根因是RED-3 oracle遗漏contact residual correction对authoritative current pose的真实mutation，不是accepted ADR-S5-5 production bug。用户已批准唯一新链`S5-REPLAN-2 -> S5-BEHAVIOR-RED-4 -> S5-SOLVER-4`；current S5-BEHAVIOR-RED-4 immutable Start HEAD=`4e8bd4616e1f43e330d75212a74c459e8e693ca7`，状态`VERIFIER PASS / COMMIT PENDING / NOT COMMITTED`；首轮reviewer=`0 High / 1 Medium / 0 Low`、裁决`FAIL`，bit-exact float equality finding已完成bounded remediation；final re-reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、`S5-BEHAVIOR-RED-4 VERIFIER PASS`；clean baseline unit仅8个批准`E0425`、16条integration exact严格`12 RED / 4 GREEN`；commit仍由supervisor执行，S5-SOLVER-4仍为`PENDING / NOT STARTED`。Chrome `NOT RUN / BROWSER PENDING`
 初始日期：2026-07-14；S5-REPLAN：2026-07-15
 基线：`feat/vnext-s5-revolute-joint@28867b5`
 设计：`docs/design/2026-07-14-revolute-joint-v1-design.md`
@@ -1611,7 +1611,9 @@ clean baseline `12 RED / 4 GREEN`和最终16/16只能由后续committed acceptan
 
 ## 9G. S5-BEHAVIOR-RED-4：WorldAnchor shadow contact-state oracle
 
-Start HEAD只在S5-REPLAN-2 commit后由supervisor写入§16，当前为`PENDING`。Ownership exact 3：
+Immutable Start HEAD=`4e8bd4616e1f43e330d75212a74c459e8e693ca7`，当前状态
+`VERIFIER PASS / COMMIT PENDING / NOT COMMITTED`。
+Ownership exact 3：
 
 ```text
 crates/picea/tests/physics_realism_acceptance.rs
@@ -1673,6 +1675,18 @@ Shadow不是snapshot替身。两world必须逐项比较以下可观察solver fac
   `position_correction_input_total_depth`、`position_correction_body_count`、
   `position_correction_max_translation`、`position_correction_total_translation`。
 
+Identity、`target_kind`与两个`usize` count使用exact equality。全部float先分别通过finite gate，
+再显式使用以下scaled comparator，禁止`derive PartialEq`产生bit-exact float合同：
+
+```text
+abs(subject - shadow) <= 1e-6 * max(1, abs(subject), abs(shadow))
+```
+
+WorldAnchor shadow与Revolute mandatory路径代数等价，但允许因合法的运算顺序差异产生f32
+roundoff；`1e-6`比既有`1e-4` pose/negative gate小两个数量级。每条CONTACT_STATE fact必须打印
+`tolerance_scale`、`discrete_equivalent`、最大float field/delta/tolerance/ratio及最终
+`contact_equivalent`，使容差是否遮蔽真实差异可直接审计。
+
 不得比较final exported contact point/normal：两world在final integration后的展示几何允许因
 Revolute post correction不同。Shadow自身必须`joint_row_count==1`、`numeric_warnings==0`，并
 证明真实CCD/contact/positive normal impulse；recovered `P_contact`及全部shadow facts必须finite。
@@ -1724,6 +1738,105 @@ RED-4 receipt必须逐条记录16 exact的exit/`running 1 test`/signature或metr
 全部关键事实和scope actual。若shadow不能证明contact等价、clean RED不只命中批准signature、
 需要production test开关/public config或任何production改动，立即STOP。本node目标commit=
 `test: lock revolute contact-state oracle`；reviewer/verifier PASS并提交前不得进入SOLVER-4。
+
+### S5-BEHAVIOR-RED-4 worker验收报告（2026-07-15）
+
+**Start HEAD**：`4e8bd4616e1f43e330d75212a74c459e8e693ca7`。
+
+**成功标准**：exact-3内让两条CCD tests统一使用真实WorldAnchor shadow恢复`P_contact`并锁定
+subject/shadow contact-state等价；clean baseline的unit只保留8个批准`E0425`，16条integration
+exact逐条`running 1 test`且严格`12 RED / 4 GREEN`，scope state transition与全部hygiene门PASS。
+
+**检查结果**：
+
+- Unit exact exit `101`，共8个diagnostic且全部为`E0425`；只指向
+  `invert_revolute_effective_mass`、`revolute_position_deltas`、
+  `rebuild_revolute_current_pose_from_world_com`、`apply_revolute_pose_pair_atomically`四个批准
+  helper，无其他compiler diagnostic。
+- 两条CCD test共用`s5_revolute_ccd_contact_state_oracle`。Shadow按wall/target/spinner与collider
+  创建顺序真实建world，使用origin WorldAnchor、`stiffness=1/DT`、`damping=0`跑完整step；
+  subject/shadow分别校验role-local CCD identity，再只比较§9G批准的CCD、solver与StepStats facts，
+  不比较final contact point/normal。三个离散字段exact；全部30个float先通过finite gate，再按
+  `abs_delta <= 1e-6 * max(1, |a|, |b|)`逐字段比较并记录最大delta/tolerance/ratio。
+- 16条integration exact逐条结果如下；每条都真实输出`running 1 test`，无zero-test：
+
+| # | Exact | Exit / 分类 | Signature / 关键事实 |
+| --- | --- | --- | --- |
+| 1 | `revolute_joint_two_dynamic_preserves_anchor_coincidence` | `101` / RED | `S5_REVOLUTE_SOLVER_ASSERT:two_dynamic_max_drift`；max/final=`8.000021/8.000021`，warning=`0` |
+| 2 | `revolute_joint_leaves_relative_rotation_free` | `0` / GREEN | relative change=`1.999999`，K determinant=`16.0`，baseline rows均`0` |
+| 3 | `revolute_joint_static_dynamic_preserves_static_pose` | `101` / RED | `S5_REVOLUTE_SOLVER_ASSERT:static_dynamic_pivot_drift`；drift=`1.999998` |
+| 4 | `revolute_joint_off_center_anchor_uses_rotational_inertia` | `101` / RED | `S5_REVOLUTE_SOLVER_ASSERT:off_center_requires_rotational_inertia`；rotation=`0` |
+| 5 | `revolute_joint_is_deterministic_and_finite` | `0` / GREEN | 120帧双跑hash/facts deterministic finite，baseline rows均`0` |
+| 6 | `revolute_joint_mixed_contact_island_keeps_separate_logical_rows` | `101` / RED | `S5_REVOLUTE_SOLVER_ASSERT:mixed_island_requires_one_logical_joint_row`；pair/contact rows=`1/1`、joint row=`0` |
+| 7 | `revolute_joint_connected_bodies_still_contact` | `0` / GREEN | pair contact/contact row=`1/1`、baseline joint row=`0` |
+| 8 | `revolute_joint_nonzero_local_center_of_mass_preserves_pivot` | `101` / RED | `S5_REVOLUTE_SOLVER_ASSERT:nonzero_com_max_pivot_drift`；lever=`0.5`、max/final=`2.549487/0.359781` |
+| 9 | `revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle` | `101` / RED | 只命中`S5_REVOLUTE_CONTACT_STATE_ASSERT:ccd_post_contact_final_pose` |
+| 10 | `revolute_joint_awake_sleeping_pair_uses_current_pose_and_wakes_on_correction` | `101` / RED | `S5_REVOLUTE_SOLVER_ASSERT:finite_nonzero_correction_must_wake_with_joint_correction`；zero/singular/inactive controls保持sleeping |
+| 11 | `revolute_joint_contact_full_step_preserves_pivot_with_projection_enabled` | `101` / RED | `S5_REVOLUTE_SOLVER_ASSERT:positive_penetration_joint_row:projection_enabled`；首帧contact/rows=`2/2`、impulse=`0.465877`、joint row=`0` |
+| 12 | `revolute_joint_contact_full_step_preserves_pivot_with_projection_disabled` | `101` / RED | `S5_REVOLUTE_SOLVER_ASSERT:positive_penetration_joint_row:projection_disabled`；首帧contact/rows=`2/2`、impulse=`0.465877`、joint row=`0` |
+| 13 | `revolute_joint_ccd_clamped_contact_full_step_preserves_pivot` | `101` / RED | 只命中`S5_REVOLUTE_CONTACT_STATE_ASSERT:ccd_contact_post_contact_final_pose` |
+| 14 | `revolute_joint_post_contact_reconciliation_uses_latest_velocity` | `101` / RED | `S5_REVOLUTE_REPLAN_ASSERT:latest_velocity_post_contact`；latest omega=`2.054233`、post demand=`0.013150`、rows=`0/0` |
+| 15 | `revolute_joint_post_contact_reconciliation_would_wake_resamples_latest_velocity` | `101` / RED | `S5_REVOLUTE_REPLAN_ASSERT:would_wake_resamples_latest_velocity`；probe/recompute demand=`0.013150/0.018604`、wake=`false` |
+| 16 | `post_contact_revolute_reconciliation_does_not_repeat_existing_joint_rows` | `0` / GREEN | Distance actual/single/repeated=`0.1/0.1/0.196667`；WorldAnchor=`0.058056/0.058056/0.102921`，rows各`1` |
+
+- CCD final-angle shadow：shadow clamp/contact/normal impulse=`1/1/1.570796`、row/warning=`1/0`；
+  recovered `P_contact=Pose(-0.09595666,0.049750205,~0)`，post demand=`0.015095`；subject/
+  shadow residual translation=`0/0.0019483586`、shadow correction depth=`0.048708964`，故clean
+  `contact_equivalent=false`；最大float差异字段=`solver_position_correction_depth`，delta/tolerance=
+  `0.048708964/0.000001000`、ratio=`48708.965`，且correction counts使
+  `discrete_equivalent=false`。actual drift/pose error=`0.052117/0.122657`，no-post/double errors=
+  `0.073750/0.034237`。所有前置finite/identity/CCD/contact/positive impulse/negative checks先PASS，
+  只在批准的最终组合signature失败。
+- CCD contact-full-step shadow：shadow clamp/contact/normal impulse=`1/1/1.570796`、row/warning=
+  `1/0`；recovered `P_contact=Pose(-0.09700331,0.019900082,0)`，post demand=`0.013150`；两world
+  residual correction均为`0`，且`discrete_equivalent=true`；最大float差异字段=
+  `solver_initial_tangent_speed`，delta/tolerance=`0.011979997/0.000001000`、ratio=`11979.997`，
+  故clean`contact_equivalent=false`。actual drift/pose error=`0.024294/0.083323`，no-post/double
+  errors=`0.064312/0.034237`。同样无提前harness failure，只命中本节第二个批准signature。
+- Scope script只新增REPLAN-2/RED-4/SOLVER-4的`PROGRESS_NODES`、`SCOPES`、`PRE_V_NODES`数据
+  与对应self-tests；通用parser、SHA/cat-file、tracked+untracked、cached和milestone-base函数
+  zero-diff。`ruby -c`=`Syntax OK`，`receipt-head`返回本40位Start HEAD，self-test=
+  `S5_SCOPE_SELF_TEST_PASS`；node actual严格为physics test、scope script、living spec exact-3，
+  missing/unexpected均空，三个STOPPED solver均未进入PRE_V。
+- `cargo fmt --all --check`、`git diff --check`、production/其他tests/lab/design/Cargo zero-diff、
+  cached empty、untracked empty全部exit `0`。
+
+**复跑方式**：在`/tmp/picea-s5-red4`读取
+`S5_NODE_START_HEAD="$(rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb receipt-head S5-BEHAVIOR-RED-4)"`，
+按§8原顺序逐条运行unit与13条integration exact，再按§9B逐条运行latest、would-wake、no-repeat；
+最后运行§9G.3 scope/hygiene命令。不得用aggregate filter替代逐条分类。
+
+**范围外**：未修改production、design、其他tests、lab/Web、Cargo、阈值或测试名；未增加test
+hook/public config，未stage、commit、push、merge或运行Chrome；未进入S5-SOLVER-4。
+
+**残余风险**：clean baseline只能证明RED-4 acceptance合同有效；`contact_equivalent=false`与
+subject row=`0`是预期RED，不是solver能力结论。只有S5-SOLVER-4在不改committed tests/scope的
+前提下证明两条`contact_equivalent=true`及16/16 GREEN后，才能把shadow推断升级为production
+验收事实。Worker bounded remediation已完成；final re-review=`0 High / 0 Medium / 0 Low`、
+裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、
+`S5-BEHAVIOR-RED-4 VERIFIER PASS`。Commit仍为`PENDING`，由supervisor执行；Chrome保持
+`NOT RUN / BROWSER PENDING`。
+
+### S5-BEHAVIOR-RED-4 review / verifier history
+
+- 首轮independent reviewer=`0 High / 1 Medium / 0 Low`、裁决`FAIL`。唯一Medium指出
+  `S5ContactStateFacts`及nested CCD facts用derived `PartialEq`比较，使全部f32变成bit-exact；
+  合法sub-ULP roundoff可能让正确的S5-SOLVER-4永久得到`contact_equivalent=false`。
+- Bounded remediation移除两个facts struct的`PartialEq`，加入上述显式scaled comparator；
+  enum/count/identity保持exact，30个float均finite后比较，mismatch仍只进入每条test唯一最终组合
+  signature。两条clean baseline最大差异分别超过tolerance约`48708.965x`与`11979.997x`，因此
+  `contact_equivalent=false`仍由真实solver/contact差异支撑，不是浮点抖动。
+- Remediation后unit仍只报8个批准`E0425`；16条integration exact逐条均`running 1 test`并严格
+  `12 RED / 4 GREEN`；两条CCD test只命中各自批准CONTACT_STATE signature，无harness failure。
+  Scope script blob保持`fb78d83911f3ac208ced37a3c881a52bb9286abc`不变。
+- Final independent re-reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；确认首轮Medium已闭合、
+  首轮FAIL历史保留、comparator覆盖与baseline margin可审计，允许派independent verifier。
+  该PASS本身不代表verifier PASS、commit完成或SOLVER-4授权。
+- Independent verifier=`0 High / 0 Medium / 0 Low`，结论
+  `S5-BEHAVIOR-RED-4 VERIFIER PASS`；确认unit仅8个批准`E0425`、16条integration exact严格
+  `12 RED / 4 GREEN`、两条CCD只命中批准CONTACT_STATE signature，并确认scope exact-3、fmt、
+  diff/zero-diff、cached/untracked与physics/scope blob不变量全部PASS。Commit仍由supervisor执行，
+  S5-SOLVER-4在commit前保持`PENDING / NOT STARTED`。
 
 ## 9H. S5-SOLVER-4：消费committed RED-4
 
@@ -2118,8 +2231,8 @@ RED receipt额外记录 failure signature，并区分：
 | 2026-07-15 | S5-SOLVER-2 | `07b2bd6cd3ff4b80d1b6c124a4752e36e8e8d88f` | `STOPPED / TEST CONTRACT CONFLICT`；independent reviewer=`CONFLICT CONFIRMED` | `NOT COMMITTED` | accepted full post 2x2 patch使new latest exact pose error=`0/0`、row=`1/1`；两条旧absolute-angle oracle分别angle error=`0.105111/0.095758`但drift=`0.001104/0.000917 <= 0.01`，只败旧angle equality；production patch保留主worktree作证据、不属于RED-3；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-BEHAVIOR-RED-3 | `07b2bd6cd3ff4b80d1b6c124a4752e36e8e8d88f` | test/spec reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier首轮因stale progress review状态以`0 High / 1 Medium / 0 Low`裁决`FAIL`；status-only remediation后re-verifier=`0 High / 0 Medium / 0 Low`，结论`S5-BEHAVIOR-RED-3 RE-VERIFIER PASS`；已commit | `6ffa1e3f29e902b68708b62e11d5fae160db97ec` | exact-3；首轮及re-verifier确认unit仅8个批准`E0425`、16条integration逐条`running 1 test`且严格`12 RED / 4 GREEN`、两条superseding exact signature、scope self-test/exact-3/fmt/diff/全部zero-diff与hygiene均PASS；physics/scope blobs未变化；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-SOLVER-3 | `6ffa1e3f29e902b68708b62e11d5fae160db97ec` | `STOPPED / TEST CONTRACT CONFLICT`；independent reviewer=`1 High / 1 Medium / 0 Low`、`CONFLICT CONFIRMED` | `NOT COMMITTED` | unit=`8/8`、16 exact=`15 GREEN / 1 FAIL`；唯一FAIL full-pose error=`0.011336`，row/warning=`1/0`、drift=`0.001104`；contact residual translation/depth=`0.00194835861/0.0487089641`、input contact/body=`1/1`，RED-3 oracle遗漏authoritative current mutation；另有`joints.rs` fmt hygiene FAIL；production patch仅留主worktree；Chrome `NOT RUN / BROWSER PENDING` |
-| 2026-07-15 | S5-REPLAN-2 | `6ffa1e3f29e902b68708b62e11d5fae160db97ec` | docs worker=`S5-REPLAN-2 WORKER COMPLETE`；independent reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-2 VERIFIER PASS` | `PENDING` | exact-1 living spec；保持ADR-S5-5/design不变，记录new chain、WorldAnchor shadow oracle、RED-4/SOLVER-4 scopes/gates/STOP与worker receipt；review/verifier确认exact-1/zero-diff、shadow observable fields、new chain/PRE_V、STOP/progress与全部docs gates均无finding；不声称future nodes已验证；commit待supervisor；Chrome `NOT RUN / BROWSER PENDING` |
-| - | S5-BEHAVIOR-RED-4 | `PENDING` | `PENDING / NOT STARTED` | - | exact-3；两条CCD full-pose WorldAnchor shadow oracle与scope state transition；必须先证明clean `12 RED / 4 GREEN` |
+| 2026-07-15 | S5-REPLAN-2 | `6ffa1e3f29e902b68708b62e11d5fae160db97ec` | docs worker=`S5-REPLAN-2 WORKER COMPLETE`；independent reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-2 VERIFIER PASS`；已commit | `4e8bd4616e1f43e330d75212a74c459e8e693ca7` | exact-1 living spec；保持ADR-S5-5/design不变，记录new chain、WorldAnchor shadow oracle、RED-4/SOLVER-4 scopes/gates/STOP与worker receipt；review/verifier确认exact-1/zero-diff、shadow observable fields、new chain/PRE_V、STOP/progress与全部docs gates均无finding；不声称future nodes已验证；Chrome `NOT RUN / BROWSER PENDING` |
+| 2026-07-15 | S5-BEHAVIOR-RED-4 | `4e8bd4616e1f43e330d75212a74c459e8e693ca7` | 首轮reviewer=`0 High / 1 Medium / 0 Low`、裁决`FAIL`；bit-exact float equality bounded remediation已完成；final re-reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、`S5-BEHAVIOR-RED-4 VERIFIER PASS`；`VERIFIER PASS / COMMIT PENDING` | `PENDING` | exact-3；显式float comparator=`1e-6 * max(1,abs(a),abs(b))`；两条baseline最大delta/tolerance=`0.048708964/0.000001000`与`0.011979997/0.000001000`；unit仅8个批准`E0425`；16条integration逐条`running 1 test`并严格`12 RED / 4 GREEN`；两条WorldAnchor shadow只命中各自批准CONTACT_STATE signature，scope/self-test/fmt/zero-diff/hygiene均PASS；commit由supervisor执行，S5-SOLVER-4尚未开始；Chrome `NOT RUN / BROWSER PENDING` |
 | - | S5-SOLVER-4 | `PENDING` | `PENDING / NOT STARTED` | - | required exact-6；只消费committed RED-4并复用accepted production patch；unit 8/8、integration 16/16、broad/fmt/scope全GREEN后才可commit |
 | - | S5-LAB-RED | `PENDING` | 未开始 | - | 必须单独提交cross-layer contracts |
 | - | S5-LAB | `PENDING` | 未开始 | - | CLI candidate commit后external browser receipt未回填则`BROWSER PENDING` |
@@ -2138,10 +2251,13 @@ RED receipt额外记录 failure signature，并区分：
   对authoritative current的真实mutation。S5-SOLVER-3因此同样是
   `STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`；三个历史solver node都不得进入
   current PRE_V chain或被改写为PASS。
-- WorldAnchor shadow是可证伪的test-side推荐路径，不是已验证事实；S5-REPLAN-2 docs reviewer/
-  verifier PASS只确认该docs合同闭合，不把future behavior升级为事实。RED-4仍可能发现shadow与
-  subject的contact facts不等价、clean baseline分类漂移或negative candidate不具区分力；任一
-  情况都必须STOP并回到spec，不得增加production test开关或放宽assert。
+- RED-4 clean baseline已验证WorldAnchor shadow路径可执行、negative candidates可区分、16条分类
+  严格为`12 RED / 4 GREEN`；这只把S5-REPLAN-2的test-side推断升级为RED acceptance事实，不证明
+  production已满足contact equivalence。首轮reviewer的bit-exact float finding已bounded remediation，
+  final re-reviewer已以`0 High / 0 Medium / 0 Low`裁决`PASS`，independent verifier也已以
+  `0 High / 0 Medium / 0 Low`给出`S5-BEHAVIOR-RED-4 VERIFIER PASS`。Commit仍待supervisor执行；
+  S5-SOLVER-4必须在RED-4 commit后才能开始，并须在不改committed tests/scope的前提下证明两条
+  `contact_equivalent=true`与16/16 GREEN；否则必须STOP，不得增加production test开关或放宽assert。
 - S5-SOLVER-3的dirty `pipeline/joints.rs`尚有rustfmt diff。S5-SOLVER-4必须在exact-6内使
   `cargo fmt --all --check`真正GREEN，不能以physics gate为由豁免独立hygiene失败。
 - post-contact reconciliation增加一次Revolute 2x2 pose evaluation；当前无性能阈值变化，

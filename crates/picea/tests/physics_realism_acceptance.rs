@@ -6141,18 +6141,20 @@ fn revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle() {
     let actual_trace = ccd_contact
         .ccd_trace
         .expect("S5_HARNESS_BOUNDARY:CCD contact must preserve its trace");
-    let final_pose_oracle = s5_revolute_ccd_post_contact_final_pose_oracle(
+    let final_pose_oracle = s5_revolute_ccd_contact_state_oracle(
         &oracle,
         target_mass,
         spinner_mass,
         local_anchor,
+        &ccd_contact,
+        &report.stats,
         latest_linear_velocity,
         latest_angular_velocity,
     )
     .expect("S5_HARNESS_BOUNDARY:ccd_final_pose_oracle_must_be_finite");
     let actual_pose_error = s5_pose_distance(final_pose, final_pose_oracle.expected_final_pose);
     println!(
-        "S5_REVOLUTE_REPLAN_FACT:ccd_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_lever={:?};mandatory_radial_error={:?};legacy_position_delta_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};latest_linear={:?};initial_omega={:.6};latest_omega={:.6};post_eval={:?};post_demand={:.6};post_write_current={:?};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};old_no_post_candidate={:?};old_no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};joint_rows={};numeric_warnings={}",
+        "S5_REVOLUTE_CONTACT_STATE_FACT:ccd_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_lever={:?};mandatory_radial_error={:?};legacy_position_delta_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};shadow_final={:?};shadow_latest_linear={:?};shadow_latest_omega={:.6};shadow_clamps={};shadow_contacts={};shadow_rows={};shadow_warnings={};p_contact={:?};subject_latest_linear={:?};initial_omega={:.6};subject_latest_omega={:.6};post_eval={:?};post_demand={:.6};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_candidate={:?};no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};tolerance_scale={:.9};discrete_equivalent={};max_float_field={};max_float_delta={:.9};max_float_tolerance={:.9};max_float_ratio={:.3};contact_equivalent={};subject_contact_facts={:?};shadow_contact_facts={:?};joint_rows={};numeric_warnings={}",
         report.stats.ccd_clamp_count,
         report.stats.contact_count,
         ccd_contact.solver_normal_impulse,
@@ -6164,18 +6166,34 @@ fn revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle() {
         final_pose_oracle.mandatory.constraint_error.length(),
         final_pose_oracle.mandatory.corrected_eval_b,
         final_pose_oracle.mandatory_current_spinner,
+        final_pose_oracle.shadow_final_pose,
+        final_pose_oracle.shadow_linear_velocity,
+        final_pose_oracle.shadow_angular_velocity,
+        final_pose_oracle.shadow_ccd_clamp_count,
+        final_pose_oracle.shadow_contact_count,
+        final_pose_oracle.shadow_joint_row_count,
+        final_pose_oracle.shadow_numeric_warnings,
+        final_pose_oracle.contact_post_current_spinner,
         latest_linear_velocity,
         CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
         latest_angular_velocity,
         final_pose_oracle.post_eval_spinner,
         final_pose_oracle.post.constraint_error.length(),
-        final_pose_oracle.post_write_current_spinner,
         final_pose_oracle.expected_final_pose,
         final_pose_oracle.expected_final_drift,
-        final_pose_oracle.old_no_post_candidate,
-        final_pose_oracle.old_no_post_error,
+        final_pose_oracle.no_post_candidate,
+        final_pose_oracle.no_post_error,
         final_pose_oracle.double_advance_candidate,
         final_pose_oracle.double_advance_error,
+        S5_CONTACT_STATE_FLOAT_TOLERANCE_SCALE,
+        final_pose_oracle.contact_comparison.discrete_equivalent,
+        final_pose_oracle.contact_comparison.max_float_field,
+        final_pose_oracle.contact_comparison.max_float_delta,
+        final_pose_oracle.contact_comparison.max_float_tolerance,
+        final_pose_oracle.contact_comparison.max_float_ratio,
+        final_pose_oracle.contact_comparison.equivalent,
+        final_pose_oracle.subject_contact_facts,
+        final_pose_oracle.shadow_contact_facts,
         report.stats.joint_row_count,
         report.stats.numeric_warnings
     );
@@ -6191,10 +6209,13 @@ fn revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle() {
         ccd_contact.solver_normal_impulse.is_finite() && ccd_contact.solver_normal_impulse > 0.0,
         "S5_HARNESS_BOUNDARY:ccd_contact_must_reach_solver"
     );
-    assert_eq!(actual_trace.moving_body, spinner);
-    assert_eq!(actual_trace.static_body, wall);
-    assert_eq!(actual_trace.moving_collider, spinner_collider);
-    assert_eq!(actual_trace.static_collider, wall_collider);
+    s5_assert_ccd_trace_roles(
+        &actual_trace,
+        spinner,
+        wall,
+        spinner_collider,
+        wall_collider,
+    );
     assert_same_ccd_geometry(&actual_trace, &control.trace);
     assert!(
         (latest_angular_velocity - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
@@ -6207,21 +6228,23 @@ fn revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle() {
         "S5_HARNESS_BOUNDARY:ccd_post_contact_final_pose_oracle"
     );
     assert!(
-        final_pose_oracle.old_no_post_error > 1.0e-4
+        final_pose_oracle.no_post_error > 1.0e-4
             && final_pose_oracle.double_advance_error > 1.0e-4,
         "S5_HARNESS_BOUNDARY:ccd_post_contact_final_pose_oracle_must_distinguish_stale_and_double_advance"
     );
     assert!(
         report.stats.joint_row_count == 1
             && report.stats.numeric_warnings == 0
+            && final_pose_oracle.contact_comparison.equivalent
             && drift <= 0.01
             && actual_pose_error <= 1.0e-4,
-        "S5_REVOLUTE_REPLAN_ASSERT:ccd_post_contact_final_pose:joint_rows={};numeric_warnings={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};old_no_post_error={:.6};double_advance_error={:.6}",
+        "S5_REVOLUTE_CONTACT_STATE_ASSERT:ccd_post_contact_final_pose:joint_rows={};numeric_warnings={};contact_equivalent={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_error={:.6};double_advance_error={:.6}",
         report.stats.joint_row_count,
         report.stats.numeric_warnings,
+        final_pose_oracle.contact_comparison.equivalent,
         final_pose_oracle.post.constraint_error.length(),
         final_pose_oracle.expected_final_drift,
-        final_pose_oracle.old_no_post_error,
+        final_pose_oracle.no_post_error,
         final_pose_oracle.double_advance_error
     );
 }
@@ -6512,36 +6535,371 @@ fn s5_pose_distance(actual: Pose, expected: Pose) -> f32 {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct S5RevoluteCcdPostContactFinalPoseOracle {
-    mandatory: S5RevolutePoseOracle,
-    mandatory_current_spinner: Pose,
-    post_eval_spinner: Pose,
-    post: S5RevolutePoseOracle,
-    post_write_current_spinner: Pose,
-    expected_final_pose: Pose,
-    expected_final_drift: f32,
-    old_no_post_candidate: Pose,
-    old_no_post_error: f32,
-    double_advance_candidate: Pose,
-    double_advance_error: f32,
+struct S5CcdTraceObservableFacts {
+    target_kind: CcdTargetKind,
+    swept_start: Point,
+    swept_end: Point,
+    target_swept_start: Point,
+    target_swept_end: Point,
+    toi: f32,
+    advancement: f32,
+    clamp: f32,
+    target_clamp: f32,
+    slop: f32,
+    toi_point: Point,
 }
 
-// Reconstruct both pose passes independently from the observed latest velocity. For a
-// CCD-clamped endpoint the sampled translation advance is zero in both passes, while angular
-// integration remains live. The post-pass write subtracts its latest sampled advance and final
-// integration adds the same advance back, so the authoritative final pose is the corrected post
-// evaluation pose—not the uncorrected no-post pose or a corrected pose advanced twice.
-fn s5_revolute_ccd_post_contact_final_pose_oracle(
+#[derive(Clone, Copy, Debug)]
+struct S5ContactStateFacts {
+    ccd: S5CcdTraceObservableFacts,
+    solver_initial_normal_speed: f32,
+    solver_initial_tangent_speed: f32,
+    solver_final_normal_speed: f32,
+    solver_final_tangent_speed: f32,
+    solver_position_bias: f32,
+    solver_restitution_bias: f32,
+    solver_normal_impulse: f32,
+    solver_tangent_impulse: f32,
+    solver_position_correction_depth: f32,
+    solver_position_correction_body_a_translation: f32,
+    solver_position_correction_body_b_translation: f32,
+    position_correction_input_contact_count: usize,
+    position_correction_input_max_depth: f32,
+    position_correction_input_total_depth: f32,
+    position_correction_body_count: usize,
+    position_correction_max_translation: f32,
+    position_correction_total_translation: f32,
+}
+
+fn s5_contact_state_facts(contact: &ContactEvent, stats: &StepStats) -> S5ContactStateFacts {
+    let trace = contact
+        .ccd_trace
+        .expect("S5_HARNESS_BOUNDARY:contact_state_requires_CCD_trace");
+    S5ContactStateFacts {
+        ccd: S5CcdTraceObservableFacts {
+            target_kind: trace.target_kind,
+            swept_start: trace.swept_start,
+            swept_end: trace.swept_end,
+            target_swept_start: trace.target_swept_start,
+            target_swept_end: trace.target_swept_end,
+            toi: trace.toi,
+            advancement: trace.advancement,
+            clamp: trace.clamp,
+            target_clamp: trace.target_clamp,
+            slop: trace.slop,
+            toi_point: trace.toi_point,
+        },
+        solver_initial_normal_speed: contact.solver_initial_normal_speed,
+        solver_initial_tangent_speed: contact.solver_initial_tangent_speed,
+        solver_final_normal_speed: contact.solver_final_normal_speed,
+        solver_final_tangent_speed: contact.solver_final_tangent_speed,
+        solver_position_bias: contact.solver_position_bias,
+        solver_restitution_bias: contact.solver_restitution_bias,
+        solver_normal_impulse: contact.solver_normal_impulse,
+        solver_tangent_impulse: contact.solver_tangent_impulse,
+        solver_position_correction_depth: contact.solver_position_correction_depth,
+        solver_position_correction_body_a_translation: contact
+            .solver_position_correction_body_a_translation,
+        solver_position_correction_body_b_translation: contact
+            .solver_position_correction_body_b_translation,
+        position_correction_input_contact_count: stats.position_correction_input_contact_count,
+        position_correction_input_max_depth: stats.position_correction_input_max_depth,
+        position_correction_input_total_depth: stats.position_correction_input_total_depth,
+        position_correction_body_count: stats.position_correction_body_count,
+        position_correction_max_translation: stats.position_correction_max_translation,
+        position_correction_total_translation: stats.position_correction_total_translation,
+    }
+}
+
+fn s5_contact_state_facts_are_finite(facts: &S5ContactStateFacts) -> bool {
+    let point_is_finite = |point: Point| point.x().is_finite() && point.y().is_finite();
+    facts.ccd.swept_start.x().is_finite()
+        && facts.ccd.swept_start.y().is_finite()
+        && point_is_finite(facts.ccd.swept_end)
+        && point_is_finite(facts.ccd.target_swept_start)
+        && point_is_finite(facts.ccd.target_swept_end)
+        && facts.ccd.toi.is_finite()
+        && facts.ccd.advancement.is_finite()
+        && facts.ccd.clamp.is_finite()
+        && facts.ccd.target_clamp.is_finite()
+        && facts.ccd.slop.is_finite()
+        && point_is_finite(facts.ccd.toi_point)
+        && facts.solver_initial_normal_speed.is_finite()
+        && facts.solver_initial_tangent_speed.is_finite()
+        && facts.solver_final_normal_speed.is_finite()
+        && facts.solver_final_tangent_speed.is_finite()
+        && facts.solver_position_bias.is_finite()
+        && facts.solver_restitution_bias.is_finite()
+        && facts.solver_normal_impulse.is_finite()
+        && facts.solver_tangent_impulse.is_finite()
+        && facts.solver_position_correction_depth.is_finite()
+        && facts
+            .solver_position_correction_body_a_translation
+            .is_finite()
+        && facts
+            .solver_position_correction_body_b_translation
+            .is_finite()
+        && facts.position_correction_input_max_depth.is_finite()
+        && facts.position_correction_input_total_depth.is_finite()
+        && facts.position_correction_max_translation.is_finite()
+        && facts.position_correction_total_translation.is_finite()
+}
+
+const S5_CONTACT_STATE_FLOAT_TOLERANCE_SCALE: f32 = 1.0e-6;
+
+#[derive(Clone, Copy, Debug)]
+struct S5ContactStateComparison {
+    equivalent: bool,
+    discrete_equivalent: bool,
+    max_float_field: &'static str,
+    max_float_delta: f32,
+    max_float_tolerance: f32,
+    max_float_ratio: f32,
+}
+
+fn s5_compare_contact_state_facts(
+    subject: &S5ContactStateFacts,
+    shadow: &S5ContactStateFacts,
+) -> S5ContactStateComparison {
+    let discrete_equivalent = subject.ccd.target_kind == shadow.ccd.target_kind
+        && subject.position_correction_input_contact_count
+            == shadow.position_correction_input_contact_count
+        && subject.position_correction_body_count == shadow.position_correction_body_count;
+    let mut floats_equivalent = true;
+    let mut max_float_field = "none";
+    let mut max_float_delta = 0.0_f32;
+    let mut max_float_tolerance = 0.0_f32;
+    let mut max_float_ratio = -1.0_f32;
+
+    // The shadow and Revolute mandatory paths are algebraically equivalent but can order f32
+    // operations differently. This scaled 1e-6 envelope admits roundoff while remaining two
+    // orders below the existing 1e-4 pose/negative gate and far below live contact mismatches.
+    macro_rules! compare_float {
+        ($field:literal, $subject:expr, $shadow:expr) => {{
+            let subject_value = $subject;
+            let shadow_value = $shadow;
+            let finite = subject_value.is_finite() && shadow_value.is_finite();
+            let delta = if finite {
+                (subject_value - shadow_value).abs()
+            } else {
+                f32::INFINITY
+            };
+            let tolerance = S5_CONTACT_STATE_FLOAT_TOLERANCE_SCALE
+                * 1.0_f32.max(subject_value.abs()).max(shadow_value.abs());
+            let ratio = delta / tolerance;
+            if ratio > max_float_ratio {
+                max_float_field = $field;
+                max_float_delta = delta;
+                max_float_tolerance = tolerance;
+                max_float_ratio = ratio;
+            }
+            floats_equivalent &= finite && delta <= tolerance;
+        }};
+    }
+
+    compare_float!(
+        "ccd.swept_start.x",
+        subject.ccd.swept_start.x(),
+        shadow.ccd.swept_start.x()
+    );
+    compare_float!(
+        "ccd.swept_start.y",
+        subject.ccd.swept_start.y(),
+        shadow.ccd.swept_start.y()
+    );
+    compare_float!(
+        "ccd.swept_end.x",
+        subject.ccd.swept_end.x(),
+        shadow.ccd.swept_end.x()
+    );
+    compare_float!(
+        "ccd.swept_end.y",
+        subject.ccd.swept_end.y(),
+        shadow.ccd.swept_end.y()
+    );
+    compare_float!(
+        "ccd.target_swept_start.x",
+        subject.ccd.target_swept_start.x(),
+        shadow.ccd.target_swept_start.x()
+    );
+    compare_float!(
+        "ccd.target_swept_start.y",
+        subject.ccd.target_swept_start.y(),
+        shadow.ccd.target_swept_start.y()
+    );
+    compare_float!(
+        "ccd.target_swept_end.x",
+        subject.ccd.target_swept_end.x(),
+        shadow.ccd.target_swept_end.x()
+    );
+    compare_float!(
+        "ccd.target_swept_end.y",
+        subject.ccd.target_swept_end.y(),
+        shadow.ccd.target_swept_end.y()
+    );
+    compare_float!("ccd.toi", subject.ccd.toi, shadow.ccd.toi);
+    compare_float!(
+        "ccd.advancement",
+        subject.ccd.advancement,
+        shadow.ccd.advancement
+    );
+    compare_float!("ccd.clamp", subject.ccd.clamp, shadow.ccd.clamp);
+    compare_float!(
+        "ccd.target_clamp",
+        subject.ccd.target_clamp,
+        shadow.ccd.target_clamp
+    );
+    compare_float!("ccd.slop", subject.ccd.slop, shadow.ccd.slop);
+    compare_float!(
+        "ccd.toi_point.x",
+        subject.ccd.toi_point.x(),
+        shadow.ccd.toi_point.x()
+    );
+    compare_float!(
+        "ccd.toi_point.y",
+        subject.ccd.toi_point.y(),
+        shadow.ccd.toi_point.y()
+    );
+    compare_float!(
+        "solver_initial_normal_speed",
+        subject.solver_initial_normal_speed,
+        shadow.solver_initial_normal_speed
+    );
+    compare_float!(
+        "solver_initial_tangent_speed",
+        subject.solver_initial_tangent_speed,
+        shadow.solver_initial_tangent_speed
+    );
+    compare_float!(
+        "solver_final_normal_speed",
+        subject.solver_final_normal_speed,
+        shadow.solver_final_normal_speed
+    );
+    compare_float!(
+        "solver_final_tangent_speed",
+        subject.solver_final_tangent_speed,
+        shadow.solver_final_tangent_speed
+    );
+    compare_float!(
+        "solver_position_bias",
+        subject.solver_position_bias,
+        shadow.solver_position_bias
+    );
+    compare_float!(
+        "solver_restitution_bias",
+        subject.solver_restitution_bias,
+        shadow.solver_restitution_bias
+    );
+    compare_float!(
+        "solver_normal_impulse",
+        subject.solver_normal_impulse,
+        shadow.solver_normal_impulse
+    );
+    compare_float!(
+        "solver_tangent_impulse",
+        subject.solver_tangent_impulse,
+        shadow.solver_tangent_impulse
+    );
+    compare_float!(
+        "solver_position_correction_depth",
+        subject.solver_position_correction_depth,
+        shadow.solver_position_correction_depth
+    );
+    compare_float!(
+        "solver_position_correction_body_a_translation",
+        subject.solver_position_correction_body_a_translation,
+        shadow.solver_position_correction_body_a_translation
+    );
+    compare_float!(
+        "solver_position_correction_body_b_translation",
+        subject.solver_position_correction_body_b_translation,
+        shadow.solver_position_correction_body_b_translation
+    );
+    compare_float!(
+        "position_correction_input_max_depth",
+        subject.position_correction_input_max_depth,
+        shadow.position_correction_input_max_depth
+    );
+    compare_float!(
+        "position_correction_input_total_depth",
+        subject.position_correction_input_total_depth,
+        shadow.position_correction_input_total_depth
+    );
+    compare_float!(
+        "position_correction_max_translation",
+        subject.position_correction_max_translation,
+        shadow.position_correction_max_translation
+    );
+    compare_float!(
+        "position_correction_total_translation",
+        subject.position_correction_total_translation,
+        shadow.position_correction_total_translation
+    );
+
+    S5ContactStateComparison {
+        equivalent: discrete_equivalent && floats_equivalent,
+        discrete_equivalent,
+        max_float_field,
+        max_float_delta,
+        max_float_tolerance,
+        max_float_ratio,
+    }
+}
+
+fn s5_assert_ccd_trace_roles(
+    trace: &CcdTrace,
+    moving_body: BodyHandle,
+    target_body: BodyHandle,
+    moving_collider: ColliderHandle,
+    target_collider: ColliderHandle,
+) {
+    assert_eq!(trace.moving_body, moving_body);
+    assert_eq!(trace.static_body, target_body);
+    assert_eq!(trace.moving_collider, moving_collider);
+    assert_eq!(trace.static_collider, target_collider);
+}
+
+#[derive(Clone, Copy, Debug)]
+struct S5RevoluteCcdContactStateOracle {
+    mandatory: S5RevolutePoseOracle,
+    mandatory_current_spinner: Pose,
+    contact_post_current_spinner: Pose,
+    post_eval_spinner: Pose,
+    post: S5RevolutePoseOracle,
+    expected_final_pose: Pose,
+    expected_final_drift: f32,
+    no_post_candidate: Pose,
+    no_post_error: f32,
+    double_advance_candidate: Pose,
+    double_advance_error: f32,
+    subject_contact_facts: S5ContactStateFacts,
+    shadow_contact_facts: S5ContactStateFacts,
+    contact_comparison: S5ContactStateComparison,
+    shadow_final_pose: Pose,
+    shadow_linear_velocity: Vector,
+    shadow_angular_velocity: f32,
+    shadow_ccd_clamp_count: usize,
+    shadow_contact_count: usize,
+    shadow_joint_row_count: usize,
+    shadow_numeric_warnings: usize,
+}
+
+// The shadow uses a real WorldAnchor row to reproduce the mandatory Revolute current pose, then
+// lets the unmodified contact pipeline produce the otherwise unobservable post-contact current.
+// Comparing only solver-owned facts avoids treating final display geometry as contact truth.
+fn s5_revolute_ccd_contact_state_oracle(
     geometry: &CcdZeroAngularCorrectionOracle,
     target_mass: MassProperties,
     spinner_mass: MassProperties,
     local_anchor: Point,
-    latest_linear_velocity: Vector,
-    latest_angular_velocity: f32,
-) -> Option<S5RevoluteCcdPostContactFinalPoseOracle> {
-    if !latest_linear_velocity.x().is_finite()
-        || !latest_linear_velocity.y().is_finite()
-        || !latest_angular_velocity.is_finite()
+    subject_contact: &ContactEvent,
+    subject_stats: &StepStats,
+    subject_latest_linear_velocity: Vector,
+    subject_latest_angular_velocity: f32,
+) -> Option<S5RevoluteCcdContactStateOracle> {
+    if !subject_latest_linear_velocity.x().is_finite()
+        || !subject_latest_linear_velocity.y().is_finite()
+        || !subject_latest_angular_velocity.is_finite()
     {
         return None;
     }
@@ -6569,12 +6927,109 @@ fn s5_revolute_ccd_post_contact_final_pose_oracle(
         mandatory.corrected_eval_b.angle() - initial_sampled_angle_advance,
     );
 
-    let latest_translation_advance = Vector::default();
-    let latest_angle_advance = latest_angular_velocity * DT;
+    let mut shadow = no_gravity_world();
+    let shadow_wall = create_body(&mut shadow, BodyType::Static, 0.0, 0.0, Vector::default());
+    // Preserve the subject's body allocation order while comparing identities by world-local
+    // roles; raw handles are not a valid cross-world oracle.
+    let _shadow_target = create_body(
+        &mut shadow,
+        BodyType::Static,
+        geometry.target_anchor.x(),
+        geometry.target_anchor.y(),
+        Vector::default(),
+    );
+    let shadow_spinner = shadow
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, mandatory_current_spinner.angle()),
+            linear_velocity: Vector::new(200.0, 0.0),
+            angular_velocity: CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("WorldAnchor shadow spinner should be created");
+    let material = Material {
+        friction: 1.0,
+        restitution: 0.0,
+    };
+    let shadow_wall_collider = attach_shape(
+        &mut shadow,
+        shadow_wall,
+        SharedShape::rect(0.1, 10.0),
+        material,
+    );
+    let shadow_spinner_collider = attach_shape(
+        &mut shadow,
+        shadow_spinner,
+        SharedShape::circle(0.05),
+        material,
+    );
+    shadow
+        .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+            body: shadow_spinner,
+            local_anchor: Point::default(),
+            world_anchor: mandatory_current_spinner.point(),
+            stiffness: 1.0 / DT,
+            damping: 0.0,
+            ..WorldAnchorJointDesc::default()
+        }))
+        .expect("WorldAnchor shadow joint should be created");
+
+    let shadow_report = step_world(&mut shadow, 1);
+    let shadow_spinner_view = shadow
+        .try_body(shadow_spinner)
+        .expect("WorldAnchor shadow spinner should survive");
+    let shadow_final_pose = shadow_spinner_view.pose();
+    let shadow_linear_velocity = shadow_spinner_view.linear_velocity();
+    let shadow_angular_velocity = shadow_spinner_view.angular_velocity();
+    let shadow_contact = active_contact_events(&shadow_report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("S5_HARNESS_BOUNDARY:WorldAnchor_shadow_CCD_contact_missing");
+    let shadow_trace = shadow_contact
+        .ccd_trace
+        .expect("S5_HARNESS_BOUNDARY:WorldAnchor_shadow_CCD_trace_missing");
+    s5_assert_ccd_trace_roles(
+        &shadow_trace,
+        shadow_spinner,
+        shadow_wall,
+        shadow_spinner_collider,
+        shadow_wall_collider,
+    );
+
+    let subject_contact_facts = s5_contact_state_facts(subject_contact, subject_stats);
+    let shadow_contact_facts = s5_contact_state_facts(&shadow_contact, &shadow_report.stats);
+    assert!(
+        s5_contact_state_facts_are_finite(&subject_contact_facts)
+            && s5_contact_state_facts_are_finite(&shadow_contact_facts),
+        "S5_HARNESS_BOUNDARY:contact_state_facts_must_be_finite"
+    );
+    assert!(
+        shadow_linear_velocity.x().is_finite()
+            && shadow_linear_velocity.y().is_finite()
+            && shadow_angular_velocity.is_finite()
+            && shadow_report.stats.ccd_clamp_count == 1
+            && shadow_report.stats.contact_count > 0
+            && shadow_report.stats.joint_row_count == 1
+            && shadow_report.stats.numeric_warnings == 0
+            && shadow_contact.solver_normal_impulse > 0.0,
+        "S5_HARNESS_BOUNDARY:WorldAnchor_shadow_must_reach_CCD_contact_solver"
+    );
+
+    let shadow_latest_translation_advance = Vector::default();
+    let shadow_latest_angle_advance = shadow_angular_velocity * DT;
+    let contact_post_current_spinner = Pose::from_xy_angle(
+        shadow_final_pose.translation().x() - shadow_latest_translation_advance.x(),
+        shadow_final_pose.translation().y() - shadow_latest_translation_advance.y(),
+        shadow_final_pose.angle() - shadow_latest_angle_advance,
+    );
+
+    let subject_latest_translation_advance = Vector::default();
+    let subject_latest_angle_advance = subject_latest_angular_velocity * DT;
     let post_eval_spinner = Pose::from_xy_angle(
-        mandatory_current_spinner.translation().x() + latest_translation_advance.x(),
-        mandatory_current_spinner.translation().y() + latest_translation_advance.y(),
-        mandatory_current_spinner.angle() + latest_angle_advance,
+        contact_post_current_spinner.translation().x() + subject_latest_translation_advance.x(),
+        contact_post_current_spinner.translation().y() + subject_latest_translation_advance.y(),
+        contact_post_current_spinner.angle() + subject_latest_angle_advance,
     );
     let post = s5_revolute_pose_oracle(
         target_eval,
@@ -6584,49 +7039,52 @@ fn s5_revolute_ccd_post_contact_final_pose_oracle(
         spinner_mass,
         local_anchor,
     )?;
-    let post_write_current_spinner = Pose::from_xy_angle(
-        post.corrected_eval_b.translation().x() - latest_translation_advance.x(),
-        post.corrected_eval_b.translation().y() - latest_translation_advance.y(),
-        post.corrected_eval_b.angle() - latest_angle_advance,
-    );
-    let expected_final_pose = Pose::from_xy_angle(
-        post_write_current_spinner.translation().x() + latest_translation_advance.x(),
-        post_write_current_spinner.translation().y() + latest_translation_advance.y(),
-        post_write_current_spinner.angle() + latest_angle_advance,
-    );
+    let expected_final_pose = post.corrected_eval_b;
     let expected_final_drift =
         (expected_final_pose.transform_point(local_anchor) - geometry.target_anchor).length();
-    let old_no_post_candidate = post_eval_spinner;
-    let old_no_post_error = s5_pose_distance(old_no_post_candidate, expected_final_pose);
+    let no_post_candidate = post_eval_spinner;
+    let no_post_error = s5_pose_distance(no_post_candidate, expected_final_pose);
     let double_advance_candidate = Pose::from_xy_angle(
-        expected_final_pose.translation().x() + latest_translation_advance.x(),
-        expected_final_pose.translation().y() + latest_translation_advance.y(),
-        expected_final_pose.angle() + latest_angle_advance,
+        expected_final_pose.translation().x() + subject_latest_translation_advance.x(),
+        expected_final_pose.translation().y() + subject_latest_translation_advance.y(),
+        expected_final_pose.angle() + subject_latest_angle_advance,
     );
     let double_advance_error = s5_pose_distance(double_advance_candidate, expected_final_pose);
     if !s5_pose_is_finite(mandatory_current_spinner)
+        || !s5_pose_is_finite(contact_post_current_spinner)
         || !s5_pose_is_finite(post_eval_spinner)
-        || !s5_pose_is_finite(post_write_current_spinner)
         || !s5_pose_is_finite(expected_final_pose)
         || !expected_final_drift.is_finite()
-        || !old_no_post_error.is_finite()
+        || !no_post_error.is_finite()
         || !double_advance_error.is_finite()
     {
         return None;
     }
 
-    Some(S5RevoluteCcdPostContactFinalPoseOracle {
+    let contact_comparison =
+        s5_compare_contact_state_facts(&subject_contact_facts, &shadow_contact_facts);
+    Some(S5RevoluteCcdContactStateOracle {
         mandatory,
         mandatory_current_spinner,
+        contact_post_current_spinner,
         post_eval_spinner,
         post,
-        post_write_current_spinner,
         expected_final_pose,
         expected_final_drift,
-        old_no_post_candidate,
-        old_no_post_error,
+        no_post_candidate,
+        no_post_error,
         double_advance_candidate,
         double_advance_error,
+        subject_contact_facts,
+        shadow_contact_facts,
+        contact_comparison,
+        shadow_final_pose,
+        shadow_linear_velocity,
+        shadow_angular_velocity,
+        shadow_ccd_clamp_count: shadow_report.stats.ccd_clamp_count,
+        shadow_contact_count: shadow_report.stats.contact_count,
+        shadow_joint_row_count: shadow_report.stats.joint_row_count,
+        shadow_numeric_warnings: shadow_report.stats.numeric_warnings,
     })
 }
 
@@ -7610,18 +8068,20 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
     let actual_trace = ccd_contact
         .ccd_trace
         .expect("S5_HARNESS_BOUNDARY:CCD contact must preserve its trace");
-    let final_pose_oracle = s5_revolute_ccd_post_contact_final_pose_oracle(
+    let final_pose_oracle = s5_revolute_ccd_contact_state_oracle(
         &oracle,
         target_mass,
         spinner_mass,
         local_anchor,
+        &ccd_contact,
+        &report.stats,
         latest_linear_velocity,
         latest_angular_velocity,
     )
     .expect("S5_HARNESS_BOUNDARY:ccd_contact_final_pose_oracle_must_be_finite");
     let actual_pose_error = s5_pose_distance(final_pose, final_pose_oracle.expected_final_pose);
     println!(
-        "S5_REVOLUTE_REPLAN_FACT:ccd_contact_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};latest_linear={:?};initial_omega={:.6};latest_omega={:.6};post_eval={:?};post_demand={:.6};post_write_current={:?};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};old_no_post_candidate={:?};old_no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};joint_rows={};numeric_warnings={}",
+        "S5_REVOLUTE_CONTACT_STATE_FACT:ccd_contact_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};shadow_final={:?};shadow_latest_linear={:?};shadow_latest_omega={:.6};shadow_clamps={};shadow_contacts={};shadow_rows={};shadow_warnings={};p_contact={:?};subject_latest_linear={:?};initial_omega={:.6};subject_latest_omega={:.6};post_eval={:?};post_demand={:.6};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_candidate={:?};no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};tolerance_scale={:.9};discrete_equivalent={};max_float_field={};max_float_delta={:.9};max_float_tolerance={:.9};max_float_ratio={:.3};contact_equivalent={};subject_contact_facts={:?};shadow_contact_facts={:?};joint_rows={};numeric_warnings={}",
         report.stats.ccd_clamp_count,
         report.stats.contact_count,
         ccd_contact.solver_normal_impulse,
@@ -7630,18 +8090,34 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
         final_pose_oracle.mandatory.constraint_error.length(),
         final_pose_oracle.mandatory.corrected_eval_b,
         final_pose_oracle.mandatory_current_spinner,
+        final_pose_oracle.shadow_final_pose,
+        final_pose_oracle.shadow_linear_velocity,
+        final_pose_oracle.shadow_angular_velocity,
+        final_pose_oracle.shadow_ccd_clamp_count,
+        final_pose_oracle.shadow_contact_count,
+        final_pose_oracle.shadow_joint_row_count,
+        final_pose_oracle.shadow_numeric_warnings,
+        final_pose_oracle.contact_post_current_spinner,
         latest_linear_velocity,
         CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
         latest_angular_velocity,
         final_pose_oracle.post_eval_spinner,
         final_pose_oracle.post.constraint_error.length(),
-        final_pose_oracle.post_write_current_spinner,
         final_pose_oracle.expected_final_pose,
         final_pose_oracle.expected_final_drift,
-        final_pose_oracle.old_no_post_candidate,
-        final_pose_oracle.old_no_post_error,
+        final_pose_oracle.no_post_candidate,
+        final_pose_oracle.no_post_error,
         final_pose_oracle.double_advance_candidate,
         final_pose_oracle.double_advance_error,
+        S5_CONTACT_STATE_FLOAT_TOLERANCE_SCALE,
+        final_pose_oracle.contact_comparison.discrete_equivalent,
+        final_pose_oracle.contact_comparison.max_float_field,
+        final_pose_oracle.contact_comparison.max_float_delta,
+        final_pose_oracle.contact_comparison.max_float_tolerance,
+        final_pose_oracle.contact_comparison.max_float_ratio,
+        final_pose_oracle.contact_comparison.equivalent,
+        final_pose_oracle.subject_contact_facts,
+        final_pose_oracle.shadow_contact_facts,
         report.stats.joint_row_count,
         report.stats.numeric_warnings
     );
@@ -7657,10 +8133,13 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
         ccd_contact.solver_normal_impulse > 0.0,
         "S5_HARNESS_BOUNDARY:ccd_contact_must_reach_solver"
     );
-    assert_eq!(actual_trace.moving_body, spinner);
-    assert_eq!(actual_trace.static_body, wall);
-    assert_eq!(actual_trace.moving_collider, spinner_collider);
-    assert_eq!(actual_trace.static_collider, wall_collider);
+    s5_assert_ccd_trace_roles(
+        &actual_trace,
+        spinner,
+        wall,
+        spinner_collider,
+        wall_collider,
+    );
     assert_same_ccd_geometry(&actual_trace, &control.trace);
     assert!(
         (latest_angular_velocity - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
@@ -7673,21 +8152,23 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
         "S5_HARNESS_BOUNDARY:ccd_contact_post_contact_final_pose_oracle"
     );
     assert!(
-        final_pose_oracle.old_no_post_error > 1.0e-4
+        final_pose_oracle.no_post_error > 1.0e-4
             && final_pose_oracle.double_advance_error > 1.0e-4,
         "S5_HARNESS_BOUNDARY:ccd_contact_post_contact_final_pose_oracle_must_distinguish_stale_and_double_advance"
     );
     assert!(
         report.stats.joint_row_count == 1
             && report.stats.numeric_warnings == 0
+            && final_pose_oracle.contact_comparison.equivalent
             && drift <= 0.01
             && actual_pose_error <= 1.0e-4,
-        "S5_REVOLUTE_REPLAN_ASSERT:ccd_contact_post_contact_final_pose:joint_rows={};numeric_warnings={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};old_no_post_error={:.6};double_advance_error={:.6}",
+        "S5_REVOLUTE_CONTACT_STATE_ASSERT:ccd_contact_post_contact_final_pose:joint_rows={};numeric_warnings={};contact_equivalent={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};no_post_error={:.6};double_advance_error={:.6}",
         report.stats.joint_row_count,
         report.stats.numeric_warnings,
+        final_pose_oracle.contact_comparison.equivalent,
         final_pose_oracle.post.constraint_error.length(),
         final_pose_oracle.expected_final_drift,
-        final_pose_oracle.old_no_post_error,
+        final_pose_oracle.no_post_error,
         final_pose_oracle.double_advance_error
     );
 }
