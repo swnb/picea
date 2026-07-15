@@ -254,12 +254,16 @@ def receipt_sha(node)
   validate_sha!(raw, "#{node} receipt")
 end
 
-def validate_cli_sha!(node, cli_sha)
-  recorded = receipt_sha(node)
+def validate_cli_sha_against_receipt!(node, cli_sha, recorded)
+  validate_sha!(recorded, "#{node} receipt")
   validate_sha!(cli_sha, "#{node} CLI")
   raise ContractError, "#{node}: CLI SHA does not match receipt" unless cli_sha == recorded
 
   recorded
+end
+
+def validate_cli_sha!(node, cli_sha)
+  validate_cli_sha_against_receipt!(node, cli_sha, receipt_sha(node))
 end
 
 def changed_paths(base, cached: false)
@@ -350,6 +354,16 @@ def self_test!
     raise ContractError, "self-test new-node parser did not preserve all receipt values"
   end
   puts "S5_SCOPE_SELF_TEST=parser-new-nodes:PASS"
+  solver_2_sha_fixture = replan_fixture.sub(
+    "| - | S5-SOLVER-2 | `PENDING` | future | - | future |",
+    "| 2026-07-15 | S5-SOLVER-2 | `#{red_2_start}` | current | PENDING | current |"
+  )
+  solver_2_fixture_raw = receipt_raw_from_text(solver_2_sha_fixture, "S5-SOLVER-2")
+  validate_cli_sha_against_receipt!("S5-SOLVER-2", solver_2_fixture_raw, solver_2_fixture_raw)
+  puts "S5_SCOPE_SELF_TEST=s5-solver-2-sha-fixture-positive:PASS"
+  expect_contract_error("s5-solver-2-sha-fixture-mismatch") do
+    validate_cli_sha_against_receipt!("S5-SOLVER-2", replan_start, solver_2_fixture_raw)
+  end
   duplicate_fixture = parser_fixture.sub(
     "| - | S5-API | `PENDING` | future | - | real future row |",
     "| - | S5-API | `PENDING` | future | - | real future row |\n" \
@@ -375,7 +389,22 @@ def self_test!
   puts "S5_SCOPE_SELF_TEST=current-s5-replan-receipt:PASS"
   validate_cli_sha!("S5-BEHAVIOR-RED-2", red_2_start)
   puts "S5_SCOPE_SELF_TEST=current-s5-behavior-red-2-receipt:PASS"
-  expect_contract_error("current-s5-solver-2-pending") { receipt_sha("S5-SOLVER-2") }
+  solver_2_raw = receipt_raw_from_text(File.read(File.join(ROOT, SPEC)), "S5-SOLVER-2")
+  # The strict row has two legitimate lifecycle states: pending before supervisor handoff,
+  # then one immutable Start HEAD that must obey the same CLI/receipt contract as prior nodes.
+  if solver_2_raw == "PENDING"
+    expect_contract_error("current-s5-solver-2-pending") { receipt_sha("S5-SOLVER-2") }
+    puts "S5_SCOPE_SELF_TEST=current-s5-solver-2-pending-branch:PASS"
+  else
+    validate_cli_sha!("S5-SOLVER-2", solver_2_raw)
+    mismatch_sha = [valid, replan_start, red_2_start].find { |candidate| candidate != solver_2_raw }
+    raise ContractError, "self-test S5-SOLVER-2: no distinct mismatch SHA" unless mismatch_sha
+
+    expect_contract_error("current-s5-solver-2-sha-mismatch") do
+      validate_cli_sha!("S5-SOLVER-2", mismatch_sha)
+    end
+    puts "S5_SCOPE_SELF_TEST=current-s5-solver-2-sha-branch:PASS"
+  end
   expect_contract_error("current-s5-behavior-red-2-mismatch") do
     validate_cli_sha!("S5-BEHAVIOR-RED-2", replan_start)
   end
