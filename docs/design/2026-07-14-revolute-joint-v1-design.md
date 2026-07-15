@@ -1,17 +1,21 @@
 # Picea Revolute Joint Pin-only V1 软件架构设计
 
-状态：S5-D review / verifier 已通过，commit 待完成；implementation / API / solver 未开始；Chrome `NOT RUN / BROWSER PENDING`
+状态：S5-REPLAN首轮docs reviewer=`2 High / 3 Medium / 1 Low`、裁决`FAIL`；bounded remediation已完成；final reviewer=`0 High / 0 Medium / 1 Low`、裁决`PASS`，唯一Low `A05-A10d -> A05-A10e`已闭合；independent verifier首轮因stale reviewer status裁决`FAIL`，status-only remediation已完成，re-verifier=`S5-REPLAN RE-VERIFIER PASS`；待supervisor commit；历史S5-SOLVER为`STOPPED / FROZEN CONTRACT CONFLICT`且`NOT COMMITTED`；S5-BEHAVIOR-RED-2 / S5-SOLVER-2未开始；Chrome `NOT RUN / BROWSER PENDING`
 设计文档：`docs/design/2026-07-14-revolute-joint-v1-design.md`
-最后更新：2026-07-14
+最后更新：2026-07-15
 工作目录：`/Users/asyncrustacean/projects/picea`
 执行计划：`docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md`
 父计划：`docs/plans/2026-06-17-physics-realism-vnext-milestones.md`
 Profiles：architecture-heavy, api-contract, ui-browser
-Artifact 状态：architecture reviewed；ADR accepted；risk matrix reviewed；S5-D commit pending；implementation not started
+Artifact 状态：原S5-D architecture/ADR/risk matrix已reviewed并commit；2026-07-15用户批准ADR-S5-5方向；S5-REPLAN首轮docs review FAIL，bounded remediation已完成；final reviewer=`0 High / 0 Medium / 1 Low`、裁决`PASS`，唯一Low已闭合；independent verifier首轮因stale reviewer status裁决`FAIL`，status-only remediation已完成，re-verifier=`S5-REPLAN RE-VERIFIER PASS`；待supervisor commit；Chrome `NOT RUN / BROWSER PENDING`
 
 ## 1. 背景、目标与边界
 
-本设计把用户已批准的 handoff §5“完整 Pin-only V1”边界收敛为已通过S5-D review/verifier、等待commit的架构包。已冻结的是 public字段、`#[non_exhaustive]`列表、wake语义、lab范围和延期项；2x2具体apply、solver pose selection、checkpoint ownership与acceptance plan已经通过S5-D文档验收，但implementation仍必须按后续RED-first节点逐项取证。V1 的 revolute joint 只约束两个 body 的 local anchor 在 world space 重合；相对旋转保持自由。
+本设计把用户已批准的 handoff §5“完整 Pin-only V1”边界收敛为已通过S5-D
+review/verifier并提交的架构包。已冻结的是 public字段、`#[non_exhaustive]`列表、wake语义、
+lab范围和延期项；API/BEHAVIOR-RED已经提交，solver因frozen-contract conflict停机后由
+2026-07-15 ADR-S5-5追加局部设计。剩余implementation仍必须按新RED-first chain逐项取证。
+V1 的 revolute joint 只约束两个 body 的 local anchor 在 world space 重合；相对旋转保持自由。
 
 目标：
 
@@ -25,7 +29,8 @@ Artifact 状态：architecture reviewed；ADR accepted；risk matrix reviewed；
 
 - 不增加 motor、angle limits、`reference_angle`、stiffness、damping、break force 或 persistent joint warm-start cache。
 - 不增加 `collide_connected`；connected bodies 继续按现有 collision filter 产生 contact。
-- 不改变 contact solver、contact/joint phase ordering或把两类 row stream 合并。
+- 不改变 contact solver或把contact/joint两类row stream合并；除ADR-S5-5批准的
+  Revolute-only post-contact局部插入外，不重排既有phase。
 - 不把一个 revolute 的 x/y 约束计成两个 logical joint rows。
 - 不增加 generic live joint patch protocol，不增加 motor/limit UI。
 - 不升级 fixture schema version，不修改 Cargo manifest/依赖。
@@ -51,6 +56,14 @@ Artifact 状态：architecture reviewed；ADR accepted；risk matrix reviewed；
 - `DebugJoint` 已有通用 `bodies: Vec<BodyHandle>` 与两个 world-space `anchors`，无需新增 debug payload field；`WorldEvent::JointCreated/JointRemoved` 也无需新增 event schema。
 - lab scenario 已模块化为 `crates/picea-lab/src/scenario/{mod.rs,fixture.rs,...}`。`SceneJointFixture` 当前是 schema v1 tagged enum，只有 `distance` / `world_anchor`。
 - `artifact.rs` 和 `server.rs` 直接投影 `DebugSnapshot.joints` 与 `joint_row_count`；Web `DebugJoint.kind` 当前是 `"distance" | "world_anchor"`，label 由 `dynamicValueLabel` 消费。
+- 历史S5-SOLVER按§9.1-§9.6实现并运行冻结行为锁后，13条integration仅
+  7条GREEN、6条FAIL：two-dynamic首帧drift=`0.033333`，nonzero-COM max drift=
+  `0.056089`，两条CCD drift=`0.021701`/`0.019774`；projection on/off contact
+  fixture在pivot正确对齐后，按live `SharedShape::rect(width,height)` full-dimensions语义仍有
+  `1.25`的vertical gap，因此`contact_frames=0`；不是切触。独立reviewer报告
+  `2 High / 0 Medium / 0 Low`，确认冲突不是`K`、符号、COM重建、atomic apply、wake、
+  logical row或separate stream实现遗漏。该production diff已恢复，历史节点保持
+  `STOPPED / FROZEN CONTRACT CONFLICT`、未提交。
 
 ### Inference（由现状强推导，仍由后续行为锁验真）
 
@@ -71,13 +84,18 @@ Artifact 状态：architecture reviewed；ADR accepted；risk matrix reviewed；
 - fixture envelope 保持 schema v1；新 reader 读旧 v1 数据，旧 reader 读含 `revolute` 的新数据会明确 unknown-variant reject。
 - 当前CLI不执行Chrome；S5-LAB/S5-V browser acceptance由外部ChatGPT App按living spec固定
   prompt针对明确full commit SHA回填。未回填只能PENDING/NOT RUN。
+- 用户于2026-07-15批准用ADR-S5-5 supersede旧§9.6中“position只解一次”的边界：
+  在contact与optional joint velocity projection之后、final position integration之前，
+  只对既有Revolute rows执行一次post-contact pose reconciliation；原13条阈值不放宽，
+  contact fixture改为pivot对齐后仍有解析正穿透。
 
-### S5-D architecture decisions（review / verifier 已通过，commit 待完成）
+### S5-D architecture decisions（review / verifier 已通过，已commit）
 
 - S5-API checkpoint先使所有exhaustive consumers可编译：core `pipeline/island.rs` 对
   `Revolute` 显式skip，不创建solve-plan/solver row，所以该checkpoint的
-  `joint_row_count == 0`。S5-BEHAVIOR-RED随后锁定这个缺口，S5-SOLVER才增加one-row
-  carrier和2x2 math。
+  `joint_row_count == 0`。S5-BEHAVIOR-RED随后锁定这个缺口；历史S5-SOLVER曾实现
+  one-row carrier/2x2 math但因§9.6冲突STOPPED并恢复，current S5-SOLVER-2按ADR-S5-5
+  重新交付。
 - position `lambda` 导出的平移量是world center-of-mass delta，不是Pose origin delta；
   local COM非零时必须先在`eval_pose`上由corrected world COM和corrected angle反推
   corrected origin，再移除position sampling使用的advance，得到要写回的current pose；
@@ -85,9 +103,12 @@ Artifact 状态：architecture reviewed；ADR accepted；risk matrix reviewed；
 - debug JSON增加`"revolute"`是additive capability；old serde consumer会明确
   unknown-variant reject，不宣称forward compatible。
 
-### Unknown（无阻塞项）
+### Unknown（当前无阻塞项）
 
-不存在阻塞设计决策。后续唯一允许触发停机的未知是 live implementation 证明本设计与当前 source contract 冲突；此时必须先修订 design/living spec，不能静默扩大 public surface 或算法范围。
+当前没有阻塞未知项。RED-2仍需用acceptance-as-code验证latest-velocity sampling、正穿透
+fixture与existing Distance/WorldAnchor no-repeat边界；这些是待执行验证，不是未决设计。
+若后续live implementation证明ADR-S5-5仍要求改contact solver/CCD算法、冻结旧velocity、
+合并或重排既有streams/phases，必须再次停机并修订design/living spec，不能静默扩范围。
 
 ## 3. 领域名词
 
@@ -121,9 +142,10 @@ Artifact 状态：architecture reviewed；ADR accepted；risk matrix reviewed；
 | `crates/picea/src/lib.rs` | prelude 只重导出 desc/patch | `joint` public types | 不重导出 `JointKind` | 保持批准的 prelude 边界 |
 | `crates/picea/src/world/api.rs` | topology/live-handle validation、atomic lifecycle、wake | existing store/sleep helpers | 新 event/wake enums | authoritative lifecycle owner |
 | `crates/picea/src/recipe.rs` | `JointBundle::Revolute`、body-index resolve、commands | existing scratch transaction | hot-path solver behavior | declarative authoring owner |
-| `crates/picea/src/pipeline/island.rs` | S5-API只加`JointDesc::Revolute`显式skip compile adapter；S5-SOLVER才增加one-row carrier和dense slots | `JointDesc` | API checkpoint不得创建solve-plan row；始终禁止unified stream | 分开API可编译性与solver行为ownership |
-| `crates/picea/src/pipeline/joints.rs`、new `pipeline/joints/tests.rs` | S5-BEHAVIOR-RED只允许`#[cfg(test)] mod tests;`和test-only 2x2/sign/singular locks；S5-SOLVER才增加production position/velocity math | island rows、body state | RED节点不得提前实现row/math；禁止phase reorder、warm cache | 先锁test contract，再进入numeric orchestration |
-| `crates/picea/src/pipeline.rs` | S5-SOLVER只同步`joint_velocity_projection` public doc与既有default/serde配置锁 | `StepConfig` existing field/tests | 不增加字段、不改default、不改phase order | public配置描述覆盖distance和revolute point-velocity semantics |
+| `crates/picea/src/pipeline/island.rs` | S5-API只加`JointDesc::Revolute`显式skip compile adapter；历史S5-SOLVER曾验证one-row carrier但已STOPPED并恢复；S5-SOLVER-2重新交付one-row carrier和dense slots | `JointDesc` | API checkpoint不得创建solve-plan row；始终禁止unified stream | 分开API可编译性、历史失败与新solver ownership |
+| `crates/picea/src/pipeline/joints.rs`、new `pipeline/joints/tests.rs` | 已提交S5-BEHAVIOR-RED锁定2x2/sign/singular；S5-BEHAVIOR-RED-2增加post-contact/no-repeat锁；S5-SOLVER-2才增加production mandatory/velocity/reconciliation math | island rows、body state | RED节点不得实现production；production worker不得改committed tests；禁止warm cache或处理existing Distance/WorldAnchor第二遍 | 先锁superseding test contract，再实现局部reconciliation |
+| `crates/picea/src/pipeline.rs` | S5-SOLVER-2只同步`joint_velocity_projection` public doc与既有default/serde配置锁 | `StepConfig` existing field/tests | 不增加字段、不改default | public配置描述覆盖distance和revolute point-velocity semantics |
+| `crates/picea/src/pipeline/step.rs` | S5-SOLVER-2在optional joint velocity projection与final position integration之间插入Revolute-only reconciliation调用 | existing phase functions、CCD clamp facts | 不重排既有phase、不改contact调用、不累计第二份stats | ADR-S5-5唯一orchestration插入点 |
 | `crates/picea/src/solver/body_state.rs` | pair point correction/impulse的最小 helper | body record/mass facts | contact solver stream | 集中 Picea angular sign 与原子 apply |
 | `crates/picea/src/debug.rs` | `DebugJointKind::Revolute`、two-anchor projection | World/JointDesc | 新 debug fields | stable read model owner |
 | `crates/picea/src/events.rs` | 无 schema 变更；只使用 existing wake/joint events | existing enum | 新 variants | 已有通用事件足够 |
@@ -143,10 +165,15 @@ flowchart LR
   Caller["外部调用方 / WorldRecipe / Scene fixture"] --> API["joint.rs public descriptors + enums"]
   API --> World["World lifecycle + JointRecord"]
   World --> ApiSkip["S5-API island adapter: Revolute explicit skip / row count 0"]
-  ApiSkip --> Island["S5-SOLVER: one Revolute row in separate joint_rows"]
-  Island --> JointPhase["S5-SOLVER joints.rs 2x2 point constraint"]
+  ApiSkip --> Island["S5-SOLVER-2: one Revolute row in separate joint_rows"]
+  Island --> JointPhase["mandatory joints.rs 2x2 point constraint"]
   BodyState["body_state.rs mass/inertia apply"] --> JointPhase
   JointPhase --> Stats["StepStats joint_row_count = logical rows"]
+  JointPhase --> ContactPhase["existing contact solve"]
+  ContactPhase --> Projection["optional joint velocity projection"]
+  Projection --> Reconcile["Revolute-only post-contact pose reconciliation<br/>no stats / no second row"]
+  Island --> Reconcile
+  BodyState --> Reconcile
   World --> Debug["DebugSnapshot two world anchors"]
   Stats --> Lab["artifact/server Rust facts"]
   Debug --> Lab
@@ -157,9 +184,11 @@ flowchart LR
 
 数据与 ownership 要点：
 
-- `JointRecord` 是 descriptor 的 authoritative retained owner；S5-API checkpoint只存储/投影descriptor并在island显式skip。S5-SOLVER后solver row才每步clone descriptor，且不保留impulse cache。
+- `JointRecord` 是 descriptor 的 authoritative retained owner；S5-API checkpoint只存储/投影descriptor并在island显式skip。S5-SOLVER-2后solver row才每步clone descriptor，且不保留impulse cache。
 - `World` 是 create/patch/remove/revision/event/wake 的唯一 write owner。
 - `IslandSolveBatch` 可以让 contact/joint 共享 body slots，但 `contact_rows` 与 `joint_rows` 始终是两个 collections 和两个 phases。
+- mandatory solve与post-contact reconciliation匹配同一个existing Revolute row；后者不创建第二个
+  row、不返回或累计solver stats，也不再次处理Distance/WorldAnchor。
 - `DebugSnapshot` 是 lab/Web 的 joint geometry事实源；artifact/server 不重新推导 anchor 或 kind。
 
 ## 7. Software Interface Spec
@@ -530,6 +559,84 @@ contact/projection之后的最新angular velocity，而不是position sampling�
 `revolute_joint_ccd_clamped_contact_full_step_preserves_pivot`锁定该合同。若只能通过重排
 contact/joint streams或phase才能满足，命中stop condition，不在S5内改pipeline order。
 
+以上是历史S5-SOLVER实际执行时使用的冻结合同。2026-07-15的verified conflict证明，
+mandatory solve的sampling velocity与contact/projection后的latest velocity之间存在一帧phase
+lag，且原contact fixture按full-dimensions语义存在`1.25` gap而非切触。旧S5-SOLVER因此
+保持STOPPED；以下
+§9.7-§9.8由ADR-S5-5 supersede旧“禁止second position solve”边界，但不把历史结果改写为PASS。
+
+### 9.7 Revolute-only post-contact pose reconciliation
+
+用户批准后的精确phase顺序是：
+
+```text
+velocity integration
+-> CCD
+-> mandatory joint position
+-> contact
+-> optional joint velocity projection
+-> Revolute-only post-contact reconciliation
+-> final position integration
+-> finalize/sleep
+```
+
+这是在既有optional projection与final integration之间的局部插入，不重排任何既有phase，
+也不合并contact/joint separate streams。Pass只遍历mandatory plan中已经存在的一个
+`JointSolverRow::Revolute`；不得创建第二logical row，不再次应用Distance position/stiffness、
+WorldAnchor correction/damping，不返回或累计`SolverStepStats`。`joint_row_count`只在mandatory
+plan按一个Revolute记录一次，继续等于`1`。
+
+Post-contact pass对sleeping endpoint使用两阶段probe/recompute；不能直接把sleeping current-pose
+correction写入后再让final integration消费它保留的nonzero velocity。
+
+第一阶段是read-only probe，evaluation pose规则为：
+
+```text
+static:                    probe_eval_pose = current
+sleeping dynamic:          probe_eval_pose = current
+awake dynamic:             probe_eval_pose = current + latest stored velocity * dt
+CCD-clamped awake dynamic: probe_eval_translation = current.translation
+                            probe_eval_angle = current.angle + latest stored angular_velocity * dt
+kinematic:                 probe_eval_pose = current + latest stored velocity * dt, but no correction
+```
+
+Probe复用§9.2的同一对称2x2 `K`与§9.3 finite gate，只用于判断current-pose row是否对
+sleeping endpoint存在finite nonzero constraint correction demand。inactive、zero、singular或
+non-finite probe整体skip，不apply、不wake。
+
+若probe没有would-wake sleeping endpoint，finite/atomic probe row可直接进入正常commit。
+若probe对任一sleeping endpoint产生finite nonzero correction demand，该endpoint成为
+`would-wake sleeper`；在任何write/wake前必须重新构造**整行**：
+
+- would-wake sleeper按“本pass wake后final integration将消费的latest stored linear/angular
+  velocity”预测eval pose；若它CCD-clamped，则translation仍为current，只预测latest angle；
+- 其他endpoint继续使用上面的latest probe规则；未成为would-wake的sleeping endpoint仍current；
+- 重新计算anchors/COM/lever arms、同一2x2 `K`、lambda和A/B全部deltas，并重跑finite/
+  atomic gate；recompute失败则不apply、不wake。
+
+Commit时复用§9.4 COM-to-origin rebuild与atomic helpers：从最终采用的eval row重建corrected eval
+origin，再减去**该row本次latest sampled advance**写回authoritative current pose；final position
+integration加回同一advance。不得减mandatory旧advance、直接写eval pose、冻结旧velocity或
+修改`integrate.rs`语义。Would-wake sleeper以`JointCorrection` wake；wake资格来自第一阶段
+finite nonzero correction demand，即使recomputed pose delta因为其stored velocity恰好闭合误差
+而为zero，也不得把它降级成zero-row synthetic wake。Static/kinematic不接收correction；
+所有A/B writes与wake只在最终row finite/atomic时一起提交，不新增numeric warning。
+
+### 9.8 Positive-penetration contact behavior lock
+
+两条projection full-step fixture固定使用可解析的正穿透。`SharedShape::rect(width,height)`
+接收full dimensions：floor constructor args=`(8.0,0.5)`，derived half extents=
+`(4.0,0.25)`，center `y=1.125`，所以y range=`[0.875,1.375]`，floor local anchor=
+`(0,-2.125)`；pendulum constructor args=`(1.0,2.0)`，derived half extents=
+`(0.5,1.0)`，center `y=0`，所以y range=`[-1.0,1.0]`，anchor=`(0,-1.0)`。
+两端解析pivot都为`y=-1.0`，range overlap给出y penetration=`1.0-0.875=0.125 > 1e-4`。
+RED-2 baseline必须在首帧证明initial pivot一致、解析penetration、`contact_count > 0`、
+`contact_row_count > 0`、normal impulse `> 0`、所有facts finite且numeric warning `0`；
+baseline Revolute仍被island explicit skip，所以`joint_row_count == 0`也是必须记录的事实。
+`joint_row_count == 1`是批准的`S5_REVOLUTE_SOLVER_ASSERT:positive_penetration_joint_row` expected
+RED，只能由S5-SOLVER-2转绿；其后才检查原有全窗`<=0.03`、final`<=0.01`阈值。不得通过
+弱化contact事实或跳过row assertion让fixture变绿。
+
 ## 10. Wake semantics 与副作用顺序
 
 ### 10.1 二元规则
@@ -540,8 +647,9 @@ contact/joint streams或phase才能满足，命中stop condition，不在S5内�
 | constraint patch | patch中至少一个physics constraint字段为`Some`时，affected sleeping dynamic endpoints | empty patch、`user_data`-only | descriptor/revision/wake/row facts不变 |
 | remove joint | 仍 live 的 sleeping dynamic endpoints | non-dynamic | joint保持、无event/revision/wake |
 | body cascade remove joint | 只 wake仍存活的sleeping dynamic counterpart | 即将删除的body | transaction失败则全部不变 |
-| solver position/velocity correction | 实际发生finite非零delta的sleeping dynamic body | skipped/singular/zero delta | no partial apply |
-| solver row skip/singular/zero correction | 无 | sleeping dynamic保持sleeping且使用current eval pose | 不产生synthetic wake/reason |
+| solver mandatory position/velocity correction | 实际发生finite非零delta的sleeping dynamic body | skipped/singular/zero delta | no partial apply |
+| post-contact reconciliation | first current-pose probe对sleeping endpoint产生finite非零correction demand，且latest-velocity整行recompute finite/atomic可提交；即使recomputed delta为zero也按would-wake资格以`JointCorrection` wake | probe zero/singular/non-finite/inactive或recompute失败 | no partial apply/wake；final integration消费同一latest advance |
+| solver row skip/singular/zero correction | 无；post-pass only exception见上一行的first-probe would-wake资格 | sleeping dynamic保持sleeping且使用current eval pose | 不产生synthetic wake/reason |
 | `WorldCommands` batch | 仅整个 scratch transaction成功commit后可见上述 wake | rejected scratch | authoritative world完全不变 |
 
 Constraint fields：Distance 为 anchors/rest_length/stiffness/damping；WorldAnchor 为 local/world anchor/stiffness/damping；Revolute 为两个 local anchors。`user_data` 永远不属于 constraint field。
@@ -597,6 +705,29 @@ ADR 采用 append-only 语义；若未来变更，新增 superseding ADR，不�
 - 代价：不能复用潜在 unified row scheduler；该优化不属于本 milestone。
 - 重访触发：独立 solver-stream architecture milestone获用户批准。
 
+### ADR-S5-5：专用 post-contact Revolute pose reconciliation
+
+- 状态：Accepted（用户于2026-07-15明确批准）。
+- Supersedes：只supersede旧§9.6“mandatory position solve后不再做position reconciliation”
+  的局部边界；不废弃ADR-S5-4，也不把历史S5-SOLVER STOPPED改写为PASS。
+- 选择：在contact与optional joint velocity projection之后、final position integration之前，
+  对mandatory plan中已有Revolute rows执行§9.7 pose reconciliation；sleeping endpoint先用
+  current pose probe would-wake demand，命中后在write前按latest stored velocity重算整行。
+- 语义：这是同一logical Revolute row的后置pose一致化，不是第二logical row或第二stats
+  source；`joint_row_count`只记录mandatory plan一次，reconciliation不返回/累计stats。
+- 保持：contact/joint row collections和既有phase相对顺序不变；不再次solve Distance或
+  WorldAnchor，不改contact solver、CCD algorithm、public API、schema或wake reason。
+- 理由：历史S5-SOLVER证据表明mandatory sampling早于contact/projection velocity mutation，
+  final integration使用latest velocity时会产生已测得的phase-lag drift；局部reconciliation
+  能在不冻结旧velocity、不merge/reorder streams的前提下恢复pivot约束。
+- 代价：Revolute每帧多一次2x2 pose evaluation；必须用RED-2锁定latest velocity、
+  positive penetration、Distance/WorldAnchor no-repeat与one-row/stats语义。
+- 拒绝方案：接受phase-lag并放宽drift阈值；重定义CCD/final integration；冻结mandatory
+  sampling velocity；统一或重排contact/joint streams。它们分别削弱验收或扩大solver边界。
+- 重访触发：实现要求改contact solver/CCD algorithm、处理existing joint kinds、增加第二row/
+  public stats、skip/freeze final integration、修改`integrate.rs`语义，或无法在原13阈值内通过；
+  届时立即STOP并另开design gate。
+
 ## 12. 风险与取舍
 
 | 风险 | 严重度 | 场景 | 缓解 | 剩余风险 |
@@ -605,8 +736,10 @@ ADR 采用 append-only 语义；若未来变更，新增 superseding ADR，不�
 | singular/non-finite污染world | High | static-static、degenerate mass、NaN | validate + finite/determinant gate + atomic deltas | fail-closed意味着该frame不纠正 |
 | nonzero local COM写错Pose origin | High | translated/off-center collider且发生角向correction | 以corrected eval COM/angle重建origin，再移除sampled advance + dedicated behavior lock | 极端COM/angle输入仍走finite fail-closed |
 | CCD-clamped endpoint吞掉角度预测 | High | 命中帧dynamic仍有angular velocity | translation保留clamp、angle预测full step + dedicated lock | 不扩展rotational CCD命中算法 |
-| sleeping endpoint被错误预测或虚假唤醒 | High | joint island另一body awake | sleeping current pose + finite-nonzero correction wake lock | existing island wake reason优先级仍保持 |
-| 把position sampling pose误当final pose | High | contact/projection改变velocity | projection on/off与CCD+contact full-step locks；保持phase order | 若只能靠reorder满足则立即停机 |
+| sleeping endpoint被错误预测、wake后又被final integration带偏或虚假唤醒 | High | sleeper保留nonzero velocity且post-contact首次产生correction | current-pose probe判定would-wake；write前按latest stored velocity重算整行；probe zero/singular/non-finite controls不wake | existing island wake reason优先级仍保持 |
+| 把position sampling pose误当final pose | High | contact/projection改变velocity | mandatory sampling与latest-velocity post-contact reconciliation分离；projection on/off与CCD+contact full-step locks | 若只能靠reorder或冻结旧velocity满足则立即停机 |
+| post-contact pass误变成通用second solve | High | implementation复用全部joint rows或重复累计stats | 只匹配existing Revolute row；Distance/WorldAnchor no-repeat boundary lock；row/stats只记mandatory plan | future通用coupling需独立milestone |
+| contact fixture存在gap导致假覆盖 | High | 旧fixture按full dimensions有`1.25` gap、`contact_frames=0` | §9.8 full-dimensions/range解析得到`0.125`正穿透，首帧contact/contact-row/normal impulse前置断言 | shape/contact tolerance变化仍由解析几何和`>1e-4`双重锁定 |
 | lifecycle wake泄漏 | High | rejected `WorldCommands` | scratch commit gate + direct/batch tests | wake reason仍受existing priority合并 |
 | user_data误唤醒 | Medium | metadata-only patch | field classification test | empty patch仍可能按existing behavior bump revision |
 | public source break未显式记录 | High | external exhaustive match | ADR + temp crates positive/compile-fail contracts | beta ecosystem需迁移 wildcard |
@@ -626,15 +759,18 @@ ADR 采用 append-only 语义；若未来变更，新增 superseding ADR，不�
 | A02 | create/view/kind/default/validation/atomic patch | core integration | `rtk proxy cargo test -p picea --test core_model_world revolute_joint_ -- --nocapture` | all named tests pass；negative cases descriptor/revision/wake不变 | test output | S5-API verifier |
 | A03 | lifecycle wake和transaction | core integration | living spec §6的六个`joint_lifecycle_wake_*_contract` exact commands | 每条`running 1 test`+sentinel；Distance/WorldAnchor/Revolute适用case全覆盖；create/constraint/remove/cascade wake，user_data-only/reject不wake | exact test output + events/state assertions | S5-API verifier |
 | A04 | recipe、fixture schema v1与external exhaustive consumer迁移 | core + lab contract | `rtk proxy cargo test -p picea-lab scene_fixture_revolute -- --nocapture`；`rtk proxy cargo check --workspace --all-targets` | JSON roundtrip保留indices/anchors/user_data；old fixtures green；unknown/version negative明确；`scene_lattice.rs`、`fixture/tests.rs`及compiler指出的consumer只做wildcard/compat迁移 | test/check output | S5-API verifier |
-| A05 | 2x2 off-center mass/inertia、COM pose rebuild | unit/integration | `rtk proxy cargo test -p picea --lib pipeline::joints::tests::revolute_point_constraint_ -- --nocapture` | matrix/cross-sign/static/singular/non-finite、nonzero-local-COM及sampled-advance roundtrip helper tests全绿，无warning/partial mutation | test output | S5-SOLVER verifier |
-| A06 | two-dynamic drift | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_two_dynamic_preserves_anchor_coincidence -- --exact --nocapture` | 240帧全窗drift `<=0.03`，final `<=0.01`，numeric warning 0 | per-frame metric log | S5-SOLVER verifier |
-| A07 | relative rotation free | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_leaves_relative_rotation_free -- --exact --nocapture` | 60帧relative angle change `>=1.0 rad`，未归零 | output | S5-SOLVER verifier |
-| A08 | static/dynamic、off-center torque与nonzero local COM | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_static_dynamic_preserves_static_pose -- --exact --nocapture`；`rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_off_center_anchor_uses_rotational_inertia -- --exact --nocapture`；`rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_nonzero_local_center_of_mass_preserves_pivot -- --exact --nocapture` | static pose bit-exact；dynamic rotation `>=0.5 rad`；带非零angular velocity的COM fixture满足A06 drift；对照可区分translation-only、COM-delta-as-origin和current-pose rebuild错误实现 | output | S5-SOLVER verifier |
-| A08b | CCD-clamped rotating endpoint position sampling | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle -- --exact --nocapture` | 无后续velocity mutation的隔离case使用clamped current translation和sampled `angle + angular_velocity*dt`；不要求新增rotational CCD | output | S5-SOLVER verifier |
-| A08c | awake/sleeping endpoint solve与wake | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_awake_sleeping_pair_uses_current_pose_and_wakes_on_correction -- --exact --nocapture` | sleeping endpoint用current pose；finite nonzero correction以`JointCorrection` wake；skip/singular/zero保持sleeping | pose/events output | S5-SOLVER verifier |
-| A09 | determinism/finite | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_is_deterministic_and_finite -- --exact --nocapture` | 同场景双跑逐帧snapshot hash相同；所有pose/velocity/anchors finite | hashes/log | S5-SOLVER verifier |
-| A10 | separate streams/logical row/contact | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_mixed_contact_island_keeps_separate_logical_rows -- --exact --nocapture`；`rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_connected_bodies_still_contact -- --exact --nocapture` | 同island contact rows >0且`joint_row_count==1`；connected contact存在 | StepStats/events | S5-SOLVER verifier |
-| A10b | contact/projection/CCD full-step integration | core integration | living spec §8/§9三个`revolute_joint_*full_step*` exact commands | projection enabled/disabled及CCD-clamped+contact均有真实contact并满足全窗`<=0.03`、final`<=0.01`、warning 0；final使用更新velocity；phase order不变 | per-frame metrics/config/contact facts | S5-SOLVER verifier |
+| A05 | 2x2 off-center mass/inertia、COM pose rebuild | unit/integration | `rtk proxy cargo test -p picea --lib pipeline::joints::tests::revolute_point_constraint_ -- --nocapture` | matrix/cross-sign/static/singular/non-finite、nonzero-local-COM及sampled-advance roundtrip helper tests全绿，无warning/partial mutation | test output | S5-SOLVER-2 verifier |
+| A06 | two-dynamic drift | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_two_dynamic_preserves_anchor_coincidence -- --exact --nocapture` | 240帧全窗drift `<=0.03`，final `<=0.01`，numeric warning 0 | per-frame metric log | S5-SOLVER-2 verifier |
+| A07 | relative rotation free | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_leaves_relative_rotation_free -- --exact --nocapture` | 60帧relative angle change `>=1.0 rad`，未归零 | output | S5-SOLVER-2 verifier |
+| A08 | static/dynamic、off-center torque与nonzero local COM | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_static_dynamic_preserves_static_pose -- --exact --nocapture`；`rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_off_center_anchor_uses_rotational_inertia -- --exact --nocapture`；`rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_nonzero_local_center_of_mass_preserves_pivot -- --exact --nocapture` | static pose bit-exact；dynamic rotation `>=0.5 rad`；带非零angular velocity的COM fixture满足A06 drift；对照可区分translation-only、COM-delta-as-origin和current-pose rebuild错误实现 | output | S5-SOLVER-2 verifier |
+| A08b | CCD-clamped rotating endpoint position sampling | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle -- --exact --nocapture` | 无后续velocity mutation的隔离case使用clamped current translation和sampled `angle + angular_velocity*dt`；不要求新增rotational CCD | output | S5-SOLVER-2 verifier |
+| A08c | awake/sleeping endpoint solve与wake | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_awake_sleeping_pair_uses_current_pose_and_wakes_on_correction -- --exact --nocapture` | sleeping endpoint用current pose；finite nonzero correction以`JointCorrection` wake；skip/singular/zero保持sleeping | pose/events output | S5-SOLVER-2 verifier |
+| A09 | determinism/finite | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_is_deterministic_and_finite -- --exact --nocapture` | 同场景双跑逐帧snapshot hash相同；所有pose/velocity/anchors finite | hashes/log | S5-SOLVER-2 verifier |
+| A10 | separate streams/logical row/contact | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_mixed_contact_island_keeps_separate_logical_rows -- --exact --nocapture`；`rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_connected_bodies_still_contact -- --exact --nocapture` | 同island contact rows >0且`joint_row_count==1`；connected contact存在 | StepStats/events | S5-SOLVER-2 verifier |
+| A10b | contact/projection/CCD full-step integration | core integration | living spec §8/§9三个`revolute_joint_*full_step*` exact commands | projection enabled/disabled及CCD-clamped+contact均有真实contact并满足全窗`<=0.03`、final`<=0.01`、warning 0；final使用更新velocity；既有phase相对顺序不变，仅含ADR-S5-5批准插入 | per-frame metrics/config/contact facts | S5-SOLVER-2 verifier |
+| A10c | latest-velocity post-contact reconciliation | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_post_contact_reconciliation_uses_latest_velocity -- --exact --nocapture` | contact/projection修改linear/angular velocity后，reconciliation按latest velocity重建eval pose、撤回同一latest advance，final integration无double advance；CCD-clamped translation仍不advance | pose/velocity/anchor oracle | S5-BEHAVIOR-RED-2 / S5-SOLVER-2 verifier |
+| A10d | existing joint kinds不被post pass重复求解 | core integration | `rtk proxy cargo test -p picea --test world_step_review_regressions post_contact_revolute_reconciliation_does_not_repeat_existing_joint_rows -- --exact --nocapture` | Distance position/stiffness与WorldAnchor correction/damping保持一次existing mandatory/optional语义；无第二次通用solve，Revolute仍一个logical row | exact boundary facts | S5-BEHAVIOR-RED-2 / S5-SOLVER-2 verifier |
+| A10e | would-wake sleeper按latest velocity重采样 | core integration | `rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_post_contact_reconciliation_would_wake_resamples_latest_velocity -- --exact --nocapture` | mandatory correction为0；contact/projection后首次产生post correction；sleeping endpoint保留nonzero linear/angular velocity；current-pose probe产生finite nonzero demand后整行重采样，`JointCorrection` wake，final drift `<=0.01`且final pose匹配latest velocity；zero/singular controls不wake | probe/recompute pose/events oracle | S5-BEHAVIOR-RED-2 / S5-SOLVER-2 verifier |
 | A11 | lab scenario/artifact + debug forward compatibility | lab integration | `rtk proxy cargo test -p picea-lab --test artifact_run revolute_pendulum -- --nocapture`；`rtk proxy cargo test -p picea-lab --test artifact_run revolute_debug_kind_old_consumer_rejects_unknown_variant -- --exact --nocapture` | artifact有revolute kind、2 anchors、row facts、deterministic hash、finite；old closed debug-kind consumer fixture明确unknown-variant reject | artifact/test output | S5-LAB verifier |
 | A12 | server passthrough + debug forward compatibility | lab API | `rtk proxy cargo test -p picea-lab --test server_routes revolute_pendulum -- --nocapture` | frame JSON原样保留`revolute`和anchors；不为old consumer降级；compat reject行为有证据 | response assertions | S5-LAB verifier |
 | A13 | TS/i18n/UI/build | web contract | `rtk proxy npm --prefix crates/picea-lab/web run test:ui-contract`；`rtk proxy npm --prefix crates/picea-lab/web run test:i18n`；`rtk proxy npm --prefix crates/picea-lab/web run build` | 三条exit0；kind union和两locale显式覆盖 | logs/dist build | S5-LAB verifier |
@@ -648,7 +784,7 @@ ADR 采用 append-only 语义；若未来变更，新增 superseding ADR，不�
 - 本文基于已批准 public/wake/lab/deferred边界，包含字段/default/validation/error/atomicity/compat examples、两张有ownership含义的Mermaid、已通过S5-D review的2x2 apply/pose plan、wake contract、ADR、acceptance mapping和里程碑交接合同。
 - living spec 给每个 mandatory item 指定 primary owner、RED gate、review/verifier和commit边界。
 - 第三轮reviewer结论为`0 High / 0 Medium / 1 Low`，允许进入verifier；唯一Low保留到S5-C处理。
-- independent docs verifier于`2026-07-14 17:16:23 CST`给出`S5-D VERIFIER PASS`；S5-D commit仍为`PENDING`。
+- independent docs verifier于`2026-07-14 17:16:23 CST`给出`S5-D VERIFIER PASS`；S5-D已commit为`eecbc331a36bfb694676c979bffb03f5a47202dd`。
 
 ### 实现验收输入
 
@@ -675,10 +811,12 @@ ADR 采用 append-only 语义；若未来变更，新增 superseding ADR，不�
 | lifecycle wake/atomicity | §10 | 必须 | S5-API | `world/api.rs`, focused tests | new wake/event enum | A03 | state/events |
 | fixture v1 + TS skeleton | §7.4/7.5, ADR-S5-3 | 必须 | S5-API | fixture/type union | schema version bump | A04/A13 type gate | JSON/test |
 | API checkpoint compile adapters | §5/§6, S5-D decision | 必须 | S5-API | `pipeline/island.rs` explicit skip；external exhaustive matches | solver row/math、场景行为变化 | A01/A04 + workspace check | compile + row-count-zero lock |
-| one logical row | §9, ADR-S5-4 | 必须 | S5-SOLVER | island/joint row | stream merge | A05/A10 | stats/tests |
-| 2x2 position solve + COM pose rebuild | §9.1-9.4 | 必须 | S5-SOLVER | `joints.rs`, minimal body helper | scalar sequential correction、COM delta直接加origin | A05-A09 | unit/integration |
-| CCD-clamped solver pose / sleeping endpoint | §9.1 | 必须 | S5-SOLVER | existing clamp set + endpoint sampling + sleep wake | rotational CCD算法扩张 | A08b/A08c/A10b | exact integration tests |
-| optional velocity projection / full-step mutation | §9.5/9.6 | 必须 | S5-SOLVER | existing optional phase；`pipeline.rs` public doc/default lock | always-on projection/cache、phase reorder | A05/A10/A10b | tests |
+| one logical row | §9, ADR-S5-4 | 必须 | historical S5-SOLVER STOPPED；current S5-SOLVER-2 | island/joint row | stream merge、second row/stats | A05/A10 | stats/tests |
+| 2x2 position solve + COM pose rebuild | §9.1-9.4 | 必须 | historical S5-SOLVER STOPPED；current S5-SOLVER-2 | `joints.rs`, minimal body helper | scalar sequential correction、COM delta直接加origin | A05-A09 | unit/integration |
+| CCD-clamped solver pose / sleeping endpoint | §9.1/§9.7 | 必须 | S5-SOLVER-2 | existing clamp set + mandatory/latest endpoint sampling + sleep wake | rotational CCD算法扩张 | A08b/A08c/A10b/A10c | exact integration tests |
+| optional velocity projection / full-step mutation | §9.5-§9.7 | 必须 | S5-SOLVER-2 | existing optional phase；`pipeline.rs` public doc/default lock；`step.rs`局部插入 | always-on projection/cache、existing phase reorder | A05/A10/A10b/A10c | tests |
+| positive-penetration、sleeping resample与no-repeat locks | §9.7-§9.8, ADR-S5-5 | 必须 | S5-BEHAVIOR-RED-2 | two contact fixtures、latest-velocity exact、would-wake resample exact、Distance/WorldAnchor boundary exact、scope contract | production solver | A10b-A10e | committed RED/boundary GREEN |
+| Revolute-only post-contact reconciliation | §9.7, ADR-S5-5 | 必须 | S5-SOLVER-2 | `pipeline/step.rs`, existing Revolute rows, 2x2/COM/atomic helpers | Distance/WorldAnchor second solve、second row/stats、contact/CCD改动 | A05-A10e | exact/full regression |
 | debug projection / old-consumer reject | §7.3 | 必须 | S5-API/S5-LAB | `debug.rs` + compat tests | new payload fields、kind降级 | A02/A11/A12 | snapshot/artifact/server |
 | scenario/artifact/server | §7.5 | 必须 | S5-LAB | scenario modules/tests | Web physics/live patch | A11/A12 | artifact/response |
 | Web label/browser | §7.5, user gate | 必须 | S5-LAB/S5-V | types/i18n/consumers；external ChatGPT App receipts | CLI调用Chrome、motor/limit UI | A13/A14 | build + full-SHA screenshot/DOM/network receipt |
@@ -687,19 +825,32 @@ ADR 采用 append-only 语义；若未来变更，新增 superseding ADR，不�
 
 ## 15. 执行链、停机条件与残余风险
 
-唯一允许的执行顺序：
+历史批准执行顺序保留如下；它已在S5-SOLVER命中frozen-contract conflict并STOPPED，
+不得把该节点改写为PASS或继续沿旧链进入S5-LAB-RED：
 
 ```text
 S5-D -> S5-API-RED -> S5-API -> S5-BEHAVIOR-RED -> S5-SOLVER
      -> S5-LAB-RED -> S5-LAB -> S5-V -> S5-C
 ```
 
+用户于2026-07-15批准ADR-S5-5后，唯一current execution chain为：
+
+```text
+S5-REPLAN -> S5-BEHAVIOR-RED-2 -> S5-SOLVER-2
+          -> S5-LAB-RED -> S5-LAB -> S5-V -> S5-C
+```
+
 每个 node 使用独立叶子 worker/reviewer/verifier；reviewer/verifier只读。High/Medium全部闭环且 verifier通过后才可 commit。S5-API-RED、S5-BEHAVIOR-RED、S5-LAB-RED必须先提交 acceptance artifacts 并记录真实RED，不能把RED和实现混成一个commit。
+S5-BEHAVIOR-RED-2同样必须独立提交acceptance artifacts并记录原13历史分类、三条新增exact
+及scope-script state transition，才能开始S5-SOLVER-2。
 
 立即停止并报告：
 
 - 需要 motor、limits、damping、`collide_connected`、`reference_angle`、break force或persistent joint cache；
-- 需要合并/重排 contact/joint solver stream；
+- 需要合并/重排 contact/joint solver stream或既有phase；ADR-S5-5批准的局部插入不算重排；
+- post-contact pass需要修改contact solver/CCD algorithm、冻结mandatory sampling旧velocity、
+  skip/freeze final integration、修改`integrate.rs`语义、再次处理Distance/WorldAnchor、创建
+  第二logical row/public stats或改变`joint_row_count`；
 - 需要 fixture schema version升级；
 - 需要修改已批准字段、`#[non_exhaustive]`列表、prelude边界或wake语义；
 - 现有行为锁只能通过删断言、调批准阈值或伪造Web facts变绿；
@@ -709,6 +860,8 @@ S5-D -> S5-API-RED -> S5-API -> S5-BEHAVIOR-RED -> S5-SOLVER
 当前残余风险：
 
 - 单次linearized position correction对极端大初始anchor误差的收敛未承诺；V1 acceptance以批准drift窗口为界。
+- ADR-S5-5仍待RED-2/implementation验证；目前只完成用户批准和docs contract，未证明
+  latest-velocity reconciliation已实现或原13行为已GREEN。
 - fail-closed singular row会跳过该frame；这是防污染选择，不是约束成功保证。
 - `ScenarioId` additive variant对仓库外 exhaustive match有source影响；批准lab scenario要求已接受该影响，但不借机改变其attribute policy。
 - 旧 reader不能读取新revolute fixture；已明确记录而非隐藏。
