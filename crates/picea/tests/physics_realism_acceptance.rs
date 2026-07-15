@@ -6125,25 +6125,59 @@ fn revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle() {
 
     let report = step_world(&mut world, 1);
     let spinner_view = world.try_body(spinner).expect("spinner should survive");
-    let expected_final_angle =
-        oracle.expected_position_delta_angle + spinner_view.angular_velocity() * DT;
+    let final_pose = spinner_view.pose();
+    let latest_linear_velocity = spinner_view.linear_velocity();
+    let latest_angular_velocity = spinner_view.angular_velocity();
+    let spinner_mass = spinner_view.mass_properties();
+    let target_mass = world
+        .try_body(target)
+        .expect("target should survive")
+        .mass_properties();
     let drift = revolute_anchor_drift(&world, target, Point::default(), spinner, local_anchor);
-    let actual_trace = active_contact_events(&report)
+    let ccd_contact = active_contact_events(&report)
         .into_iter()
-        .find_map(|contact| contact.ccd_trace)
+        .find(|contact| contact.ccd_trace.is_some())
         .expect("S5_HARNESS_BOUNDARY:CCD clamp must produce a contact fact");
+    let actual_trace = ccd_contact
+        .ccd_trace
+        .expect("S5_HARNESS_BOUNDARY:CCD contact must preserve its trace");
+    let final_pose_oracle = s5_revolute_ccd_post_contact_final_pose_oracle(
+        &oracle,
+        target_mass,
+        spinner_mass,
+        local_anchor,
+        latest_linear_velocity,
+        latest_angular_velocity,
+    )
+    .expect("S5_HARNESS_BOUNDARY:ccd_final_pose_oracle_must_be_finite");
+    let actual_pose_error = s5_pose_distance(final_pose, final_pose_oracle.expected_final_pose);
     println!(
-        "S5_REVOLUTE_FACT:ccd_final_angle:clamps={};contacts={};clamped_translation={:?};sampled_eval_angle={:.6};lever={:?};radial_error={:?};position_delta_angle={:.6};initial_omega={:.6};latest_omega={:.6};angle={:.6};expected_angle={expected_final_angle:.6};drift={drift:.6}",
+        "S5_REVOLUTE_REPLAN_FACT:ccd_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_lever={:?};mandatory_radial_error={:?};legacy_position_delta_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};latest_linear={:?};initial_omega={:.6};latest_omega={:.6};post_eval={:?};post_demand={:.6};post_write_current={:?};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};old_no_post_candidate={:?};old_no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};joint_rows={};numeric_warnings={}",
         report.stats.ccd_clamp_count,
         report.stats.contact_count,
+        ccd_contact.solver_normal_impulse,
         oracle.clamped_translation,
         oracle.sampled_eval_angle,
         oracle.lever,
         oracle.radial_error,
         oracle.expected_position_delta_angle,
+        final_pose_oracle.mandatory.constraint_error.length(),
+        final_pose_oracle.mandatory.corrected_eval_b,
+        final_pose_oracle.mandatory_current_spinner,
+        latest_linear_velocity,
         CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
-        spinner_view.angular_velocity(),
-        spinner_view.pose().angle()
+        latest_angular_velocity,
+        final_pose_oracle.post_eval_spinner,
+        final_pose_oracle.post.constraint_error.length(),
+        final_pose_oracle.post_write_current_spinner,
+        final_pose_oracle.expected_final_pose,
+        final_pose_oracle.expected_final_drift,
+        final_pose_oracle.old_no_post_candidate,
+        final_pose_oracle.old_no_post_error,
+        final_pose_oracle.double_advance_candidate,
+        final_pose_oracle.double_advance_error,
+        report.stats.joint_row_count,
+        report.stats.numeric_warnings
     );
     assert_eq!(
         report.stats.ccd_clamp_count, 1,
@@ -6153,22 +6187,42 @@ fn revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle() {
         report.stats.contact_count > 0,
         "S5_HARNESS_BOUNDARY:ccd_contact_missing"
     );
+    assert!(
+        ccd_contact.solver_normal_impulse.is_finite() && ccd_contact.solver_normal_impulse > 0.0,
+        "S5_HARNESS_BOUNDARY:ccd_contact_must_reach_solver"
+    );
     assert_eq!(actual_trace.moving_body, spinner);
     assert_eq!(actual_trace.static_body, wall);
     assert_eq!(actual_trace.moving_collider, spinner_collider);
     assert_eq!(actual_trace.static_collider, wall_collider);
     assert_same_ccd_geometry(&actual_trace, &control.trace);
     assert!(
-        (spinner_view.angular_velocity() - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
+        (latest_angular_velocity - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
         "S5_HARNESS_BOUNDARY:contact_must_mutate_angular_velocity"
     );
     assert!(
-        (spinner_view.pose().angle() - expected_final_angle).abs() <= 1.0e-4,
-        "S5_HARNESS_BOUNDARY:ccd_must_preserve_latest_angular_advance"
+        final_pose_oracle.post.constraint_error.length().is_finite()
+            && final_pose_oracle.post.constraint_error.length() > 1.0e-4
+            && final_pose_oracle.expected_final_drift <= 0.01,
+        "S5_HARNESS_BOUNDARY:ccd_post_contact_final_pose_oracle"
     );
     assert!(
-        drift <= 0.01,
-        "S5_REVOLUTE_SOLVER_ASSERT:ccd_final_angle_pivot_drift:drift={drift:.6};limit=0.01"
+        final_pose_oracle.old_no_post_error > 1.0e-4
+            && final_pose_oracle.double_advance_error > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:ccd_post_contact_final_pose_oracle_must_distinguish_stale_and_double_advance"
+    );
+    assert!(
+        report.stats.joint_row_count == 1
+            && report.stats.numeric_warnings == 0
+            && drift <= 0.01
+            && actual_pose_error <= 1.0e-4,
+        "S5_REVOLUTE_REPLAN_ASSERT:ccd_post_contact_final_pose:joint_rows={};numeric_warnings={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};old_no_post_error={:.6};double_advance_error={:.6}",
+        report.stats.joint_row_count,
+        report.stats.numeric_warnings,
+        final_pose_oracle.post.constraint_error.length(),
+        final_pose_oracle.expected_final_drift,
+        final_pose_oracle.old_no_post_error,
+        final_pose_oracle.double_advance_error
     );
 }
 
@@ -6455,6 +6509,125 @@ fn s5_revolute_pose_oracle(
 fn s5_pose_distance(actual: Pose, expected: Pose) -> f32 {
     (actual.translation() - expected.translation()).length()
         + (actual.angle() - expected.angle()).abs()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct S5RevoluteCcdPostContactFinalPoseOracle {
+    mandatory: S5RevolutePoseOracle,
+    mandatory_current_spinner: Pose,
+    post_eval_spinner: Pose,
+    post: S5RevolutePoseOracle,
+    post_write_current_spinner: Pose,
+    expected_final_pose: Pose,
+    expected_final_drift: f32,
+    old_no_post_candidate: Pose,
+    old_no_post_error: f32,
+    double_advance_candidate: Pose,
+    double_advance_error: f32,
+}
+
+// Reconstruct both pose passes independently from the observed latest velocity. For a
+// CCD-clamped endpoint the sampled translation advance is zero in both passes, while angular
+// integration remains live. The post-pass write subtracts its latest sampled advance and final
+// integration adds the same advance back, so the authoritative final pose is the corrected post
+// evaluation pose—not the uncorrected no-post pose or a corrected pose advanced twice.
+fn s5_revolute_ccd_post_contact_final_pose_oracle(
+    geometry: &CcdZeroAngularCorrectionOracle,
+    target_mass: MassProperties,
+    spinner_mass: MassProperties,
+    local_anchor: Point,
+    latest_linear_velocity: Vector,
+    latest_angular_velocity: f32,
+) -> Option<S5RevoluteCcdPostContactFinalPoseOracle> {
+    if !latest_linear_velocity.x().is_finite()
+        || !latest_linear_velocity.y().is_finite()
+        || !latest_angular_velocity.is_finite()
+    {
+        return None;
+    }
+
+    let target_eval =
+        Pose::from_xy_angle(geometry.target_anchor.x(), geometry.target_anchor.y(), 0.0);
+    let mandatory_eval_spinner = Pose::from_xy_angle(
+        geometry.clamped_translation.x(),
+        geometry.clamped_translation.y(),
+        geometry.sampled_eval_angle,
+    );
+    let mandatory = s5_revolute_pose_oracle(
+        target_eval,
+        target_mass,
+        Point::default(),
+        mandatory_eval_spinner,
+        spinner_mass,
+        local_anchor,
+    )?;
+    let initial_sampled_translation_advance = Vector::default();
+    let initial_sampled_angle_advance = geometry.sampled_eval_angle;
+    let mandatory_current_spinner = Pose::from_xy_angle(
+        mandatory.corrected_eval_b.translation().x() - initial_sampled_translation_advance.x(),
+        mandatory.corrected_eval_b.translation().y() - initial_sampled_translation_advance.y(),
+        mandatory.corrected_eval_b.angle() - initial_sampled_angle_advance,
+    );
+
+    let latest_translation_advance = Vector::default();
+    let latest_angle_advance = latest_angular_velocity * DT;
+    let post_eval_spinner = Pose::from_xy_angle(
+        mandatory_current_spinner.translation().x() + latest_translation_advance.x(),
+        mandatory_current_spinner.translation().y() + latest_translation_advance.y(),
+        mandatory_current_spinner.angle() + latest_angle_advance,
+    );
+    let post = s5_revolute_pose_oracle(
+        target_eval,
+        target_mass,
+        Point::default(),
+        post_eval_spinner,
+        spinner_mass,
+        local_anchor,
+    )?;
+    let post_write_current_spinner = Pose::from_xy_angle(
+        post.corrected_eval_b.translation().x() - latest_translation_advance.x(),
+        post.corrected_eval_b.translation().y() - latest_translation_advance.y(),
+        post.corrected_eval_b.angle() - latest_angle_advance,
+    );
+    let expected_final_pose = Pose::from_xy_angle(
+        post_write_current_spinner.translation().x() + latest_translation_advance.x(),
+        post_write_current_spinner.translation().y() + latest_translation_advance.y(),
+        post_write_current_spinner.angle() + latest_angle_advance,
+    );
+    let expected_final_drift =
+        (expected_final_pose.transform_point(local_anchor) - geometry.target_anchor).length();
+    let old_no_post_candidate = post_eval_spinner;
+    let old_no_post_error = s5_pose_distance(old_no_post_candidate, expected_final_pose);
+    let double_advance_candidate = Pose::from_xy_angle(
+        expected_final_pose.translation().x() + latest_translation_advance.x(),
+        expected_final_pose.translation().y() + latest_translation_advance.y(),
+        expected_final_pose.angle() + latest_angle_advance,
+    );
+    let double_advance_error = s5_pose_distance(double_advance_candidate, expected_final_pose);
+    if !s5_pose_is_finite(mandatory_current_spinner)
+        || !s5_pose_is_finite(post_eval_spinner)
+        || !s5_pose_is_finite(post_write_current_spinner)
+        || !s5_pose_is_finite(expected_final_pose)
+        || !expected_final_drift.is_finite()
+        || !old_no_post_error.is_finite()
+        || !double_advance_error.is_finite()
+    {
+        return None;
+    }
+
+    Some(S5RevoluteCcdPostContactFinalPoseOracle {
+        mandatory,
+        mandatory_current_spinner,
+        post_eval_spinner,
+        post,
+        post_write_current_spinner,
+        expected_final_pose,
+        expected_final_drift,
+        old_no_post_candidate,
+        old_no_post_error,
+        double_advance_candidate,
+        double_advance_error,
+    })
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -7421,6 +7594,14 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
 
     let report = step_world(&mut world, 1);
     let spinner_view = world.try_body(spinner).expect("spinner should survive");
+    let final_pose = spinner_view.pose();
+    let latest_linear_velocity = spinner_view.linear_velocity();
+    let latest_angular_velocity = spinner_view.angular_velocity();
+    let spinner_mass = spinner_view.mass_properties();
+    let target_mass = world
+        .try_body(target)
+        .expect("target should survive")
+        .mass_properties();
     let drift = revolute_anchor_drift(&world, target, Point::default(), spinner, local_anchor);
     let ccd_contact = active_contact_events(&report)
         .into_iter()
@@ -7429,21 +7610,40 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
     let actual_trace = ccd_contact
         .ccd_trace
         .expect("S5_HARNESS_BOUNDARY:CCD contact must preserve its trace");
-    let expected_angle =
-        oracle.expected_position_delta_angle + spinner_view.angular_velocity() * DT;
+    let final_pose_oracle = s5_revolute_ccd_post_contact_final_pose_oracle(
+        &oracle,
+        target_mass,
+        spinner_mass,
+        local_anchor,
+        latest_linear_velocity,
+        latest_angular_velocity,
+    )
+    .expect("S5_HARNESS_BOUNDARY:ccd_contact_final_pose_oracle_must_be_finite");
+    let actual_pose_error = s5_pose_distance(final_pose, final_pose_oracle.expected_final_pose);
     println!(
-        "S5_REVOLUTE_FACT:ccd_contact_full_step:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};sampled_eval_angle={:.6};lever={:?};radial_error={:?};position_delta_angle={:.6};initial_omega={:.6};final_omega={:.6};angle={:.6};expected_angle={expected_angle:.6};drift={drift:.6}",
+        "S5_REVOLUTE_REPLAN_FACT:ccd_contact_post_contact_final_pose:clamps={};contacts={};solver_normal_impulse={:.6};clamped_translation={:?};mandatory_sampled_angle={:.6};mandatory_demand={:.6};mandatory_corrected_eval={:?};mandatory_current={:?};latest_linear={:?};initial_omega={:.6};latest_omega={:.6};post_eval={:?};post_demand={:.6};post_write_current={:?};expected_final_pose={:?};actual_final_pose={final_pose:?};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};old_no_post_candidate={:?};old_no_post_error={:.6};double_advance_candidate={:?};double_advance_error={:.6};joint_rows={};numeric_warnings={}",
         report.stats.ccd_clamp_count,
         report.stats.contact_count,
         ccd_contact.solver_normal_impulse,
         oracle.clamped_translation,
         oracle.sampled_eval_angle,
-        oracle.lever,
-        oracle.radial_error,
-        oracle.expected_position_delta_angle,
+        final_pose_oracle.mandatory.constraint_error.length(),
+        final_pose_oracle.mandatory.corrected_eval_b,
+        final_pose_oracle.mandatory_current_spinner,
+        latest_linear_velocity,
         CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
-        spinner_view.angular_velocity(),
-        spinner_view.pose().angle()
+        latest_angular_velocity,
+        final_pose_oracle.post_eval_spinner,
+        final_pose_oracle.post.constraint_error.length(),
+        final_pose_oracle.post_write_current_spinner,
+        final_pose_oracle.expected_final_pose,
+        final_pose_oracle.expected_final_drift,
+        final_pose_oracle.old_no_post_candidate,
+        final_pose_oracle.old_no_post_error,
+        final_pose_oracle.double_advance_candidate,
+        final_pose_oracle.double_advance_error,
+        report.stats.joint_row_count,
+        report.stats.numeric_warnings
     );
     assert_eq!(
         report.stats.ccd_clamp_count, 1,
@@ -7463,15 +7663,31 @@ fn revolute_joint_ccd_clamped_contact_full_step_preserves_pivot() {
     assert_eq!(actual_trace.static_collider, wall_collider);
     assert_same_ccd_geometry(&actual_trace, &control.trace);
     assert!(
-        (spinner_view.angular_velocity() - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
+        (latest_angular_velocity - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
         "S5_HARNESS_BOUNDARY:contact_must_mutate_angular_velocity"
     );
     assert!(
-        (spinner_view.pose().angle() - expected_angle).abs() <= 1.0e-4,
-        "S5_HARNESS_BOUNDARY:ccd_angular_integration_must_use_latest_velocity"
+        final_pose_oracle.post.constraint_error.length().is_finite()
+            && final_pose_oracle.post.constraint_error.length() > 1.0e-4
+            && final_pose_oracle.expected_final_drift <= 0.01,
+        "S5_HARNESS_BOUNDARY:ccd_contact_post_contact_final_pose_oracle"
     );
     assert!(
-        drift <= 0.01,
-        "S5_REVOLUTE_SOLVER_ASSERT:ccd_contact_full_step_pivot_drift:drift={drift:.6};limit=0.01"
+        final_pose_oracle.old_no_post_error > 1.0e-4
+            && final_pose_oracle.double_advance_error > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:ccd_contact_post_contact_final_pose_oracle_must_distinguish_stale_and_double_advance"
+    );
+    assert!(
+        report.stats.joint_row_count == 1
+            && report.stats.numeric_warnings == 0
+            && drift <= 0.01
+            && actual_pose_error <= 1.0e-4,
+        "S5_REVOLUTE_REPLAN_ASSERT:ccd_contact_post_contact_final_pose:joint_rows={};numeric_warnings={};post_demand={:.6};expected_final_drift={:.6};actual_final_drift={drift:.6};pose_error={actual_pose_error:.6};old_no_post_error={:.6};double_advance_error={:.6}",
+        report.stats.joint_row_count,
+        report.stats.numeric_warnings,
+        final_pose_oracle.post.constraint_error.length(),
+        final_pose_oracle.expected_final_drift,
+        final_pose_oracle.old_no_post_error,
+        final_pose_oracle.double_advance_error
     );
 }
