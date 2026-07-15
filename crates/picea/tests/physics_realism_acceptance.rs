@@ -6354,11 +6354,877 @@ fn revolute_joint_awake_sleeping_pair_uses_current_pose_and_wakes_on_correction(
     );
 }
 
+#[derive(Clone, Copy, Debug)]
+struct S5RevolutePoseOracle {
+    determinant: f32,
+    constraint_error: Vector,
+    corrected_eval_a: Pose,
+    corrected_eval_b: Pose,
+    endpoint_a_correction: f32,
+    endpoint_b_correction: f32,
+}
+
+fn s5_pose_is_finite(pose: Pose) -> bool {
+    pose.translation().x().is_finite()
+        && pose.translation().y().is_finite()
+        && pose.angle().is_finite()
+}
+
+fn s5_rebuild_pose_from_world_com(
+    corrected_world_com: Point,
+    corrected_angle: f32,
+    local_center_of_mass: Point,
+) -> Pose {
+    let rotated_local_com =
+        Pose::from_xy_angle(0.0, 0.0, corrected_angle).transform_point(local_center_of_mass);
+    let origin = corrected_world_com - rotated_local_com;
+    Pose::from_xy_angle(origin.x(), origin.y(), corrected_angle)
+}
+
+// Keep this oracle test-side and independent from the planned production helpers. It mirrors the
+// symmetric 2x2 point constraint and COM-to-origin rebuild so the RED does not merely assert a
+// snapshot produced by the same code that S5-SOLVER-2 will implement.
+fn s5_revolute_pose_oracle(
+    eval_pose_a: Pose,
+    mass_a: MassProperties,
+    local_anchor_a: Point,
+    eval_pose_b: Pose,
+    mass_b: MassProperties,
+    local_anchor_b: Point,
+) -> Option<S5RevolutePoseOracle> {
+    let anchor_a = eval_pose_a.transform_point(local_anchor_a);
+    let anchor_b = eval_pose_b.transform_point(local_anchor_b);
+    let world_com_a = eval_pose_a.transform_point(mass_a.local_center_of_mass);
+    let world_com_b = eval_pose_b.transform_point(mass_b.local_center_of_mass);
+    let lever_a = anchor_a - world_com_a;
+    let lever_b = anchor_b - world_com_b;
+    let constraint_error = anchor_b - anchor_a;
+    let k11 = mass_a.inverse_mass
+        + mass_b.inverse_mass
+        + mass_a.inverse_inertia * lever_a.y() * lever_a.y()
+        + mass_b.inverse_inertia * lever_b.y() * lever_b.y();
+    let k12 = -mass_a.inverse_inertia * lever_a.x() * lever_a.y()
+        - mass_b.inverse_inertia * lever_b.x() * lever_b.y();
+    let k22 = mass_a.inverse_mass
+        + mass_b.inverse_mass
+        + mass_a.inverse_inertia * lever_a.x() * lever_a.x()
+        + mass_b.inverse_inertia * lever_b.x() * lever_b.x();
+    let determinant = k11 * k22 - k12 * k12;
+    if !determinant.is_finite() || determinant <= f32::EPSILON {
+        return None;
+    }
+    let lambda = Vector::new(
+        -(k22 * constraint_error.x() - k12 * constraint_error.y()) / determinant,
+        -(-k12 * constraint_error.x() + k11 * constraint_error.y()) / determinant,
+    );
+    let delta_com_a = -lambda * mass_a.inverse_mass;
+    let delta_com_b = lambda * mass_b.inverse_mass;
+    let delta_angle_a = mass_a.inverse_inertia * lever_a.cross(lambda);
+    let delta_angle_b = -mass_b.inverse_inertia * lever_b.cross(lambda);
+    let corrected_eval_a = s5_rebuild_pose_from_world_com(
+        world_com_a + delta_com_a,
+        eval_pose_a.angle() + delta_angle_a,
+        mass_a.local_center_of_mass,
+    );
+    let corrected_eval_b = s5_rebuild_pose_from_world_com(
+        world_com_b + delta_com_b,
+        eval_pose_b.angle() + delta_angle_b,
+        mass_b.local_center_of_mass,
+    );
+    let endpoint_a_correction = delta_com_a.length() + delta_angle_a.abs();
+    let endpoint_b_correction = delta_com_b.length() + delta_angle_b.abs();
+    if !lambda.x().is_finite()
+        || !lambda.y().is_finite()
+        || !s5_pose_is_finite(corrected_eval_a)
+        || !s5_pose_is_finite(corrected_eval_b)
+        || !endpoint_a_correction.is_finite()
+        || !endpoint_b_correction.is_finite()
+    {
+        return None;
+    }
+    Some(S5RevolutePoseOracle {
+        determinant,
+        constraint_error,
+        corrected_eval_a,
+        corrected_eval_b,
+        endpoint_a_correction,
+        endpoint_b_correction,
+    })
+}
+
+fn s5_pose_distance(actual: Pose, expected: Pose) -> f32 {
+    (actual.translation() - expected.translation()).length()
+        + (actual.angle() - expected.angle()).abs()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct S5RevoluteCcdObservation {
+    final_pose: Pose,
+    linear_velocity: Vector,
+    angular_velocity: f32,
+    solver_normal_impulse: f32,
+    contact_count: usize,
+    ccd_clamp_count: usize,
+    numeric_warnings: usize,
+    joint_row_count: usize,
+    actual_final_drift: f32,
+    target_mass: MassProperties,
+    spinner_mass: MassProperties,
+}
+
+fn s5_revolute_ccd_observation(
+    joint_velocity_projection: bool,
+    target_anchor: Point,
+    local_anchor: Point,
+) -> S5RevoluteCcdObservation {
+    let mut world = no_gravity_world();
+    let wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let target = create_body(
+        &mut world,
+        BodyType::Static,
+        target_anchor.x(),
+        target_anchor.y(),
+        Vector::default(),
+    );
+    let spinner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+            linear_velocity: Vector::new(200.0, 0.0),
+            angular_velocity: CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("contact/projection spinner should be created");
+    let material = Material {
+        friction: 1.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, wall, SharedShape::rect(0.1, 10.0), material);
+    attach_shape(&mut world, spinner, SharedShape::circle(0.05), material);
+    create_revolute(&mut world, target, spinner, Point::default(), local_anchor);
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            joint_velocity_projection,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let spinner_view = world.try_body(spinner).expect("Revolute spinner exists");
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("S5_HARNESS_BOUNDARY:Revolute_projection_contact_fact_missing");
+    S5RevoluteCcdObservation {
+        final_pose: spinner_view.pose(),
+        linear_velocity: spinner_view.linear_velocity(),
+        angular_velocity: spinner_view.angular_velocity(),
+        solver_normal_impulse: contact.solver_normal_impulse,
+        contact_count: report.stats.contact_count,
+        ccd_clamp_count: report.stats.ccd_clamp_count,
+        numeric_warnings: report.stats.numeric_warnings,
+        joint_row_count: report.stats.joint_row_count,
+        actual_final_drift: revolute_anchor_drift(
+            &world,
+            target,
+            Point::default(),
+            spinner,
+            local_anchor,
+        ),
+        target_mass: world
+            .try_body(target)
+            .expect("target exists")
+            .mass_properties(),
+        spinner_mass: spinner_view.mass_properties(),
+    }
+}
+
+fn s5_revolute_point_velocity(
+    pose: Pose,
+    mass: MassProperties,
+    local_anchor: Point,
+    linear_velocity: Vector,
+    angular_velocity: f32,
+) -> Vector {
+    let anchor = pose.transform_point(local_anchor);
+    let world_com = pose.transform_point(mass.local_center_of_mass);
+    let lever = anchor - world_com;
+    linear_velocity + Vector::new(angular_velocity * lever.y(), -angular_velocity * lever.x())
+}
+
+#[test]
+fn revolute_joint_post_contact_reconciliation_uses_latest_velocity() {
+    let local_anchor = Point::new(0.0, 0.2);
+    let control = run_ccd_spinner_without_joint(local_anchor);
+    assert_eq!(control.report.stats.ccd_clamp_count, 1);
+    assert!(control.report.stats.contact_count > 0);
+    assert!(
+        (control.final_angular_velocity - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:latest_velocity_control_contact_must_mutate_angular_velocity"
+    );
+    let initial_oracle = ccd_zero_angular_correction_oracle(&control, local_anchor, 0.02);
+    let target_anchor = initial_oracle.target_anchor;
+    let disabled = s5_revolute_ccd_observation(false, target_anchor, local_anchor);
+    let enabled = s5_revolute_ccd_observation(true, target_anchor, local_anchor);
+    assert!(
+        disabled.contact_count > 0
+            && enabled.contact_count > 0
+            && disabled.ccd_clamp_count == 1
+            && enabled.ccd_clamp_count == 1
+            && disabled.solver_normal_impulse.is_finite()
+            && disabled.solver_normal_impulse > 0.0
+            && enabled.solver_normal_impulse.is_finite()
+            && enabled.solver_normal_impulse > 0.0
+            && disabled.numeric_warnings == 0
+            && enabled.numeric_warnings == 0
+            && s5_pose_is_finite(disabled.final_pose)
+            && s5_pose_is_finite(enabled.final_pose)
+            && disabled.linear_velocity.x().is_finite()
+            && disabled.linear_velocity.y().is_finite()
+            && enabled.linear_velocity.x().is_finite()
+            && enabled.linear_velocity.y().is_finite()
+            && disabled.angular_velocity.is_finite()
+            && enabled.angular_velocity.is_finite()
+            && (disabled.linear_velocity - Vector::new(200.0, 0.0)).length() > 1.0e-4
+            && (enabled.linear_velocity - Vector::new(200.0, 0.0)).length() > 1.0e-4
+            && (disabled.angular_velocity - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4
+            && (enabled.angular_velocity - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:Revolute_projection_runs_require_real_finite_CCD_contact_mutation"
+    );
+
+    let initial_eval_spinner = Pose::from_xy_angle(
+        initial_oracle.clamped_translation.x(),
+        initial_oracle.clamped_translation.y(),
+        initial_oracle.sampled_eval_angle,
+    );
+    let mandatory = s5_revolute_pose_oracle(
+        Pose::from_xy_angle(target_anchor.x(), target_anchor.y(), 0.0),
+        disabled.target_mass,
+        Point::default(),
+        initial_eval_spinner,
+        disabled.spinner_mass,
+        local_anchor,
+    )
+    .expect("S5_HARNESS_BOUNDARY:mandatory_pose_oracle_must_be_finite");
+    let mandatory_current_spinner = Pose::from_xy_angle(
+        mandatory.corrected_eval_b.translation().x(),
+        mandatory.corrected_eval_b.translation().y(),
+        mandatory.corrected_eval_b.angle() - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY * DT,
+    );
+    // A CCD-clamped endpoint samples no linear advance in either Revolute pass. Its post-pass
+    // angle must nevertheless use the contact/projection-mutated angular velocity.
+    let disabled_latest_eval = Pose::from_xy_angle(
+        mandatory_current_spinner.translation().x(),
+        mandatory_current_spinner.translation().y(),
+        mandatory_current_spinner.angle() + disabled.angular_velocity * DT,
+    );
+    let enabled_latest_eval = Pose::from_xy_angle(
+        mandatory_current_spinner.translation().x(),
+        mandatory_current_spinner.translation().y(),
+        mandatory_current_spinner.angle() + enabled.angular_velocity * DT,
+    );
+    let disabled_post = s5_revolute_pose_oracle(
+        Pose::from_xy_angle(target_anchor.x(), target_anchor.y(), 0.0),
+        disabled.target_mass,
+        Point::default(),
+        disabled_latest_eval,
+        disabled.spinner_mass,
+        local_anchor,
+    )
+    .expect("S5_HARNESS_BOUNDARY:disabled_latest_velocity_post_oracle_must_be_finite");
+    let enabled_post = s5_revolute_pose_oracle(
+        Pose::from_xy_angle(target_anchor.x(), target_anchor.y(), 0.0),
+        enabled.target_mass,
+        Point::default(),
+        enabled_latest_eval,
+        enabled.spinner_mass,
+        local_anchor,
+    )
+    .expect("S5_HARNESS_BOUNDARY:enabled_latest_velocity_post_oracle_must_be_finite");
+    let disabled_expected_drift =
+        (disabled_post.corrected_eval_b.transform_point(local_anchor) - target_anchor).length();
+    let enabled_expected_drift =
+        (enabled_post.corrected_eval_b.transform_point(local_anchor) - target_anchor).length();
+    let disabled_pose_error = s5_pose_distance(disabled.final_pose, disabled_post.corrected_eval_b);
+    let enabled_pose_error = s5_pose_distance(enabled.final_pose, enabled_post.corrected_eval_b);
+    let disabled_point_speed = s5_revolute_point_velocity(
+        mandatory_current_spinner,
+        disabled.spinner_mass,
+        local_anchor,
+        disabled.linear_velocity,
+        disabled.angular_velocity,
+    )
+    .length();
+    let enabled_point_speed = s5_revolute_point_velocity(
+        mandatory_current_spinner,
+        enabled.spinner_mass,
+        local_anchor,
+        enabled.linear_velocity,
+        enabled.angular_velocity,
+    )
+    .length();
+    let projection_velocity_delta = (enabled.linear_velocity - disabled.linear_velocity).length()
+        + (enabled.angular_velocity - disabled.angular_velocity).abs();
+    assert!(
+        disabled_post.constraint_error.length() > 1.0e-4
+            && enabled_post.constraint_error.length() > 1.0e-4
+            && disabled_post.determinant > f32::EPSILON
+            && enabled_post.determinant > f32::EPSILON
+            && disabled_expected_drift <= 0.01
+            && enabled_expected_drift <= 0.01,
+        "S5_HARNESS_BOUNDARY:latest_velocity_pose_oracle"
+    );
+    println!(
+        "S5_REVOLUTE_REPLAN_FACT:latest_velocity_post_contact:contact_impulse=({:.6},{:.6});latest_linear=({:?},{:?});initial_omega={:.6};latest_omega=({:.6},{:.6});point_speed=({disabled_point_speed:.6},{enabled_point_speed:.6});projection_velocity_delta={projection_velocity_delta:.6};sampled_translation_advance=(0,0);old_sampled_angle={:.6};latest_sampled_angle=({:.6},{:.6});post_demand=({:.6},{:.6});expected_final_drift=({disabled_expected_drift:.6},{enabled_expected_drift:.6});actual_final_drift=({:.6},{:.6});pose_error=({disabled_pose_error:.6},{enabled_pose_error:.6});joint_rows=({},{})",
+        disabled.solver_normal_impulse,
+        enabled.solver_normal_impulse,
+        disabled.linear_velocity,
+        enabled.linear_velocity,
+        CCD_SPINNER_INITIAL_ANGULAR_VELOCITY,
+        disabled.angular_velocity,
+        enabled.angular_velocity,
+        initial_oracle.sampled_eval_angle,
+        disabled_latest_eval.angle(),
+        enabled_latest_eval.angle(),
+        disabled_post.constraint_error.length(),
+        enabled_post.constraint_error.length(),
+        disabled.actual_final_drift,
+        enabled.actual_final_drift,
+        disabled.joint_row_count,
+        enabled.joint_row_count
+    );
+    assert!(
+        disabled.joint_row_count == 1
+            && enabled.joint_row_count == 1
+            && disabled_point_speed > 0.05
+            && enabled_point_speed <= 1.0e-4
+            && projection_velocity_delta > 1.0e-4
+            && disabled.actual_final_drift <= 0.01
+            && enabled.actual_final_drift <= 0.01
+            && disabled_pose_error <= 1.0e-4
+            && enabled_pose_error <= 1.0e-4,
+        "S5_REVOLUTE_REPLAN_ASSERT:latest_velocity_post_contact:joint_rows=({},{});point_speed=({disabled_point_speed:.6},{enabled_point_speed:.6});projection_velocity_delta={projection_velocity_delta:.6};actual_final_drift=({:.6},{:.6});pose_error=({disabled_pose_error:.6},{enabled_pose_error:.6})",
+        disabled.joint_row_count,
+        enabled.joint_row_count,
+        disabled.actual_final_drift,
+        enabled.actual_final_drift
+    );
+}
+
+fn s5_assert_post_contact_sleeping_skip_controls() {
+    for (label, local_anchor_b, attach_mass) in [
+        ("post_zero", Point::new(-1.0, 0.0), true),
+        ("post_singular", Point::default(), false),
+    ] {
+        let mut world = no_gravity_world();
+        let body_a = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                pose: Pose::from_xy_angle(-1.0, 0.0, 0.0),
+                can_sleep: true,
+                ..BodyDesc::default()
+            })
+            .expect("post-pass control body A should be created");
+        let body_b = world
+            .create_body(BodyDesc {
+                body_type: BodyType::Dynamic,
+                pose: Pose::from_xy_angle(1.0, 0.0, 0.0),
+                can_sleep: true,
+                ..BodyDesc::default()
+            })
+            .expect("post-pass control body B should be created");
+        if attach_mass {
+            for body in [body_a, body_b] {
+                attach_shape(
+                    &mut world,
+                    body,
+                    SharedShape::rect(0.5, 0.5),
+                    Material::default(),
+                );
+            }
+        }
+        create_revolute(
+            &mut world,
+            body_a,
+            body_b,
+            Point::new(1.0, 0.0),
+            local_anchor_b,
+        );
+        step_world(&mut world, 31);
+        let report = step_world(&mut world, 1);
+        let has_joint_wake = report.events.iter().any(|event| {
+            matches!(
+                event,
+                WorldEvent::SleepChanged(event)
+                    if !event.is_sleeping
+                        && event.reason == picea::events::SleepTransitionReason::JointCorrection
+            )
+        });
+        println!(
+            "S5_REVOLUTE_REPLAN_BOUNDARY:{label}:sleeping=({},{});joint_correction_wake={has_joint_wake};joint_rows={}",
+            world.try_body(body_a).expect("control body A exists").sleeping(),
+            world.try_body(body_b).expect("control body B exists").sleeping(),
+            report.stats.joint_row_count
+        );
+        assert!(world
+            .try_body(body_a)
+            .expect("control body A exists")
+            .sleeping());
+        assert!(world
+            .try_body(body_b)
+            .expect("control body B exists")
+            .sleeping());
+        assert!(!has_joint_wake);
+    }
+}
+
+fn s5_assert_post_contact_recompute_failure_is_atomic(
+    geometry: &CcdZeroAngularCorrectionOracle,
+    initial_eval_spinner: Pose,
+    local_anchor: Point,
+    mandatory_pivot: Point,
+) {
+    let mut world = no_gravity_world();
+    let wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let sleeper = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(mandatory_pivot.x(), mandatory_pivot.y(), f32::MAX),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("recompute-failure sleeper should be created");
+    let spinner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-2.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("recompute-failure spinner should be created");
+    let no_contact = CollisionFilter {
+        memberships: 2,
+        collides_with: 0,
+    };
+    world
+        .create_collider(
+            sleeper,
+            ColliderDesc {
+                shape: SharedShape::circle(0.1),
+                density: 1.0,
+                filter: no_contact,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("recompute-failure sleeper needs finite mass and inertia");
+    let material = Material {
+        friction: 1.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, wall, SharedShape::rect(0.1, 10.0), material);
+    attach_shape(&mut world, spinner, SharedShape::circle(0.05), material);
+    create_revolute(&mut world, sleeper, spinner, Point::default(), local_anchor);
+
+    // Consume lifecycle events before installing the phase-local control state. The extreme
+    // angular velocity is finite public input; adding its one-step advance to f32::MAX is the
+    // deliberately non-finite operation that the post pass must reject atomically.
+    step_world(&mut world, 1);
+    let sleeper_linear_velocity = Vector::new(0.3, -0.2);
+    let sleeper_angular_velocity = f32::MAX;
+    world
+        .apply_body_patch(
+            sleeper,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(
+                    mandatory_pivot.x(),
+                    mandatory_pivot.y(),
+                    f32::MAX,
+                )),
+                linear_velocity: Some(sleeper_linear_velocity),
+                angular_velocity: Some(sleeper_angular_velocity),
+                sleeping: Some(true),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("recompute-failure sleeper patch should apply");
+    world
+        .apply_body_patch(
+            spinner,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(-1.0, 0.0, 0.0)),
+                linear_velocity: Some(Vector::new(200.0, 0.0)),
+                angular_velocity: Some(CCD_SPINNER_INITIAL_ANGULAR_VELOCITY),
+                can_sleep: Some(true),
+                sleeping: Some(false),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("recompute-failure spinner patch should apply");
+
+    let sleeper_before = world.try_body(sleeper).expect("sleeper exists");
+    let sleeper_pose_before = sleeper_before.pose();
+    let sleeper_mass = sleeper_before.mass_properties();
+    let spinner_mass = world
+        .try_body(spinner)
+        .expect("spinner exists")
+        .mass_properties();
+    assert!(sleeper_before.sleeping());
+    assert_eq!(sleeper_before.linear_velocity(), sleeper_linear_velocity);
+    assert_eq!(sleeper_before.angular_velocity(), sleeper_angular_velocity);
+    let mandatory = s5_revolute_pose_oracle(
+        sleeper_pose_before,
+        sleeper_mass,
+        Point::default(),
+        initial_eval_spinner,
+        spinner_mass,
+        local_anchor,
+    )
+    .expect("S5_HARNESS_BOUNDARY:recompute_failure_mandatory_oracle_finite");
+    assert!(
+        mandatory.constraint_error.length() <= 1.0e-6
+            && mandatory.endpoint_a_correction <= 1.0e-6
+            && mandatory.endpoint_b_correction <= 1.0e-6,
+        "S5_HARNESS_BOUNDARY:recompute_failure_mandatory_correction_must_be_zero"
+    );
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            joint_velocity_projection: false,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let spinner_view = world.try_body(spinner).expect("spinner survives");
+    let sleeper_view = world.try_body(sleeper).expect("sleeper survives");
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("S5_HARNESS_BOUNDARY:recompute_failure_contact_fact_missing");
+    assert!(contact.solver_normal_impulse.is_finite() && contact.solver_normal_impulse > 0.0);
+    let spinner_latest_eval = Pose::from_xy_angle(
+        geometry.clamped_translation.x(),
+        geometry.clamped_translation.y(),
+        spinner_view.angular_velocity() * DT,
+    );
+    let probe = s5_revolute_pose_oracle(
+        sleeper_pose_before,
+        sleeper_mass,
+        Point::default(),
+        spinner_latest_eval,
+        spinner_mass,
+        local_anchor,
+    )
+    .expect("S5_HARNESS_BOUNDARY:recompute_failure_probe_must_be_finite");
+    assert!(
+        probe.constraint_error.length() > 1.0e-5 && probe.endpoint_a_correction > 1.0e-5,
+        "S5_HARNESS_BOUNDARY:recompute_failure_probe_requires_nonzero_sleeper_demand"
+    );
+    let sleeper_latest_eval = Pose::from_xy_angle(
+        sleeper_pose_before.translation().x() + sleeper_linear_velocity.x() * DT,
+        sleeper_pose_before.translation().y() + sleeper_linear_velocity.y() * DT,
+        sleeper_pose_before.angle() + sleeper_angular_velocity * DT,
+    );
+    assert!(
+        !s5_pose_is_finite(sleeper_latest_eval)
+            && s5_revolute_pose_oracle(
+                sleeper_latest_eval,
+                sleeper_mass,
+                Point::default(),
+                spinner_latest_eval,
+                spinner_mass,
+                local_anchor,
+            )
+            .is_none(),
+        "S5_HARNESS_BOUNDARY:latest_velocity_recompute_must_fail_nonfinite"
+    );
+
+    let sleeper_wake_reasons = report
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            WorldEvent::SleepChanged(event) if event.body == sleeper && !event.is_sleeping => {
+                Some(event.reason)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let has_joint_correction_wake = report.events.iter().any(|event| {
+        matches!(
+            event,
+            WorldEvent::SleepChanged(event)
+                if [sleeper, spinner].contains(&event.body)
+                    && !event.is_sleeping
+                    && event.reason
+                        == picea::events::SleepTransitionReason::JointCorrection
+        )
+    });
+    let sleeper_pose_preserved = sleeper_view.pose() == sleeper_pose_before;
+    let sleeper_velocity_preserved = sleeper_view.linear_velocity() == sleeper_linear_velocity
+        && sleeper_view.angular_velocity().to_bits() == sleeper_angular_velocity.to_bits();
+    let spinner_pose_error = s5_pose_distance(spinner_view.pose(), spinner_latest_eval);
+    println!(
+        "S5_REVOLUTE_REPLAN_BOUNDARY:recompute_failure_atomic:probe_demand={:.6};latest_eval_finite={};sleeper_pose_preserved={sleeper_pose_preserved};sleeper_velocity_preserved={sleeper_velocity_preserved};sleeper_post_velocity=({:?},{:.6e});joint_correction_wake={has_joint_correction_wake};terminal_wake_reasons={sleeper_wake_reasons:?};spinner_pose_error={spinner_pose_error:.6};numeric_warnings={};joint_rows={}",
+        probe.constraint_error.length(),
+        s5_pose_is_finite(sleeper_latest_eval),
+        sleeper_view.linear_velocity(),
+        sleeper_view.angular_velocity(),
+        report.stats.numeric_warnings,
+        report.stats.joint_row_count
+    );
+    assert!(
+        sleeper_pose_preserved
+            && sleeper_velocity_preserved
+            && !has_joint_correction_wake
+            && !sleeper_wake_reasons.is_empty()
+            && sleeper_wake_reasons
+                .iter()
+                .all(|reason| { *reason == picea::events::SleepTransitionReason::Unknown })
+            && spinner_pose_error <= 1.0e-4
+            && report.stats.numeric_warnings == 0,
+        "S5_HARNESS_BOUNDARY:recompute_failure_must_be_atomic_and_only_refresh_may_wake:numeric_warnings={}",
+        report.stats.numeric_warnings
+    );
+}
+
+#[test]
+fn revolute_joint_post_contact_reconciliation_would_wake_resamples_latest_velocity() {
+    s5_assert_post_contact_sleeping_skip_controls();
+
+    let local_anchor = Point::new(0.0, 0.2);
+    let control = run_ccd_spinner_without_joint(local_anchor);
+    let geometry = ccd_zero_angular_correction_oracle(&control, local_anchor, 0.02);
+    let initial_eval_spinner = Pose::from_xy_angle(
+        geometry.clamped_translation.x(),
+        geometry.clamped_translation.y(),
+        geometry.sampled_eval_angle,
+    );
+    let mandatory_pivot = initial_eval_spinner.transform_point(local_anchor);
+    s5_assert_post_contact_recompute_failure_is_atomic(
+        &geometry,
+        initial_eval_spinner,
+        local_anchor,
+        mandatory_pivot,
+    );
+
+    let mut world = no_gravity_world();
+    let wall = create_body(&mut world, BodyType::Static, 0.0, 0.0, Vector::default());
+    let sleeper = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(mandatory_pivot.x(), mandatory_pivot.y(), 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("would-wake sleeper should be created");
+    let spinner = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(-2.0, 0.0, 0.0),
+            can_sleep: true,
+            ..BodyDesc::default()
+        })
+        .expect("would-wake spinner should be created");
+    let no_contact = CollisionFilter {
+        memberships: 2,
+        collides_with: 0,
+    };
+    world
+        .create_collider(
+            sleeper,
+            ColliderDesc {
+                shape: SharedShape::circle(0.1),
+                density: 1.0,
+                filter: no_contact,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("would-wake sleeper needs finite mass and inertia");
+    let material = Material {
+        friction: 1.0,
+        restitution: 0.0,
+    };
+    attach_shape(&mut world, wall, SharedShape::rect(0.1, 10.0), material);
+    attach_shape(&mut world, spinner, SharedShape::circle(0.05), material);
+    create_revolute(&mut world, sleeper, spinner, Point::default(), local_anchor);
+    step_world(&mut world, 1);
+    let sleeper_linear_velocity = Vector::new(0.3, -0.2);
+    let sleeper_angular_velocity = 0.7;
+    world
+        .apply_body_patch(
+            sleeper,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(
+                    mandatory_pivot.x(),
+                    mandatory_pivot.y(),
+                    0.0,
+                )),
+                linear_velocity: Some(sleeper_linear_velocity),
+                angular_velocity: Some(sleeper_angular_velocity),
+                sleeping: Some(true),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("would-wake sleeper patch should apply");
+    world
+        .apply_body_patch(
+            spinner,
+            BodyPatch {
+                pose: Some(Pose::from_xy_angle(-1.0, 0.0, 0.0)),
+                linear_velocity: Some(Vector::new(200.0, 0.0)),
+                angular_velocity: Some(CCD_SPINNER_INITIAL_ANGULAR_VELOCITY),
+                can_sleep: Some(false),
+                sleeping: Some(false),
+                ..BodyPatch::default()
+            },
+        )
+        .expect("would-wake spinner patch should apply");
+    assert!(world.try_body(sleeper).expect("sleeper exists").sleeping());
+    let sleeper_current = world.try_body(sleeper).expect("sleeper exists").pose();
+    let sleeper_mass = world
+        .try_body(sleeper)
+        .expect("sleeper exists")
+        .mass_properties();
+    let spinner_mass = world
+        .try_body(spinner)
+        .expect("spinner exists")
+        .mass_properties();
+    let mandatory = s5_revolute_pose_oracle(
+        sleeper_current,
+        sleeper_mass,
+        Point::default(),
+        initial_eval_spinner,
+        spinner_mass,
+        local_anchor,
+    )
+    .expect("S5_HARNESS_BOUNDARY:would_wake_mandatory_oracle_finite");
+    assert!(
+        mandatory.constraint_error.length() <= 1.0e-6
+            && mandatory.endpoint_a_correction <= 1.0e-6
+            && mandatory.endpoint_b_correction <= 1.0e-6,
+        "S5_HARNESS_BOUNDARY:would_wake_mandatory_correction_must_be_zero"
+    );
+
+    let report = step_world_with_config(
+        &mut world,
+        StepConfig {
+            joint_velocity_projection: false,
+            ..fixed_step_config()
+        },
+        1,
+    );
+    let spinner_view = world.try_body(spinner).expect("spinner survives");
+    let sleeper_view = world.try_body(sleeper).expect("sleeper survives");
+    let contact = active_contact_events(&report)
+        .into_iter()
+        .find(|contact| contact.ccd_trace.is_some())
+        .expect("S5_HARNESS_BOUNDARY:would_wake_contact_fact_missing");
+    assert!(
+        contact.solver_normal_impulse.is_finite() && contact.solver_normal_impulse > 0.0,
+        "S5_HARNESS_BOUNDARY:would_wake_contact_must_reach_solver"
+    );
+    assert!(
+        (spinner_view.angular_velocity() - CCD_SPINNER_INITIAL_ANGULAR_VELOCITY).abs() > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:would_wake_contact_must_mutate_spinner_velocity"
+    );
+    assert_eq!(report.stats.numeric_warnings, 0);
+
+    let spinner_latest_eval = Pose::from_xy_angle(
+        geometry.clamped_translation.x(),
+        geometry.clamped_translation.y(),
+        spinner_view.angular_velocity() * DT,
+    );
+    // The sleeper stays at current pose for the read-only probe. Only after that finite nonzero
+    // demand is established may the full row be rebuilt with its stored wake-time advance.
+    let probe = s5_revolute_pose_oracle(
+        sleeper_current,
+        sleeper_mass,
+        Point::default(),
+        spinner_latest_eval,
+        spinner_mass,
+        local_anchor,
+    )
+    .expect("S5_HARNESS_BOUNDARY:would_wake_probe_must_be_finite");
+    assert!(
+        probe.endpoint_a_correction > 1.0e-5 && probe.constraint_error.length() > 1.0e-5,
+        "S5_HARNESS_BOUNDARY:would_wake_probe_requires_nonzero_sleeper_demand"
+    );
+    let sleeper_latest_eval = Pose::from_xy_angle(
+        sleeper_current.translation().x() + sleeper_linear_velocity.x() * DT,
+        sleeper_current.translation().y() + sleeper_linear_velocity.y() * DT,
+        sleeper_current.angle() + sleeper_angular_velocity * DT,
+    );
+    let recompute = s5_revolute_pose_oracle(
+        sleeper_latest_eval,
+        sleeper_mass,
+        Point::default(),
+        spinner_latest_eval,
+        spinner_mass,
+        local_anchor,
+    )
+    .expect("S5_HARNESS_BOUNDARY:would_wake_latest_velocity_recompute_must_be_finite");
+    assert!(
+        recompute.determinant > f32::EPSILON
+            && recompute.constraint_error.length().is_finite()
+            && s5_pose_is_finite(recompute.corrected_eval_a)
+            && s5_pose_is_finite(recompute.corrected_eval_b),
+        "S5_HARNESS_BOUNDARY:would_wake_latest_velocity_recompute_facts"
+    );
+    let expected_final_drift = (recompute.corrected_eval_b.transform_point(local_anchor)
+        - recompute.corrected_eval_a.transform_point(Point::default()))
+    .length();
+    assert!(
+        expected_final_drift <= 0.01,
+        "S5_HARNESS_BOUNDARY:would_wake_oracle_expected_final_drift"
+    );
+    let correction_wake = report.events.iter().any(|event| {
+        matches!(
+            event,
+            WorldEvent::SleepChanged(event)
+                if event.body == sleeper
+                    && !event.is_sleeping
+                    && event.reason == picea::events::SleepTransitionReason::JointCorrection
+        )
+    });
+    let actual_final_drift =
+        revolute_anchor_drift(&world, sleeper, Point::default(), spinner, local_anchor);
+    let sleeper_pose_error = s5_pose_distance(sleeper_view.pose(), recompute.corrected_eval_a);
+    let spinner_pose_error = s5_pose_distance(spinner_view.pose(), recompute.corrected_eval_b);
+    let sleeper_post_linear_velocity = sleeper_view.linear_velocity();
+    let sleeper_post_angular_velocity = sleeper_view.angular_velocity();
+    let sleeper_stored_velocity_preserved = sleeper_post_linear_velocity.x().to_bits()
+        == sleeper_linear_velocity.x().to_bits()
+        && sleeper_post_linear_velocity.y().to_bits() == sleeper_linear_velocity.y().to_bits()
+        && sleeper_post_angular_velocity.to_bits() == sleeper_angular_velocity.to_bits();
+    println!(
+        "S5_REVOLUTE_REPLAN_FACT:would_wake_resample:mandatory_demand={:.6};probe_demand={:.6};probe_sleeper_correction={:.6};recompute_demand={:.6};sleeper_stored_velocity=({sleeper_linear_velocity:?},{sleeper_angular_velocity:.6});sleeper_post_velocity=({sleeper_post_linear_velocity:?},{sleeper_post_angular_velocity:.6});stored_velocity_preserved={sleeper_stored_velocity_preserved};spinner_latest_omega={:.6};expected_final_drift={expected_final_drift:.6};actual_final_drift={actual_final_drift:.6};pose_error=({sleeper_pose_error:.6},{spinner_pose_error:.6});joint_correction_wake={correction_wake};joint_rows={}",
+        mandatory.constraint_error.length(),
+        probe.constraint_error.length(),
+        probe.endpoint_a_correction,
+        recompute.constraint_error.length(),
+        spinner_view.angular_velocity(),
+        report.stats.joint_row_count
+    );
+    assert!(
+        correction_wake
+            && sleeper_stored_velocity_preserved
+            && actual_final_drift <= 0.01
+            && sleeper_pose_error <= 1.0e-4
+            && spinner_pose_error <= 1.0e-4,
+        "S5_REVOLUTE_REPLAN_ASSERT:would_wake_resamples_latest_velocity:wake={correction_wake};stored_velocity_preserved={sleeper_stored_velocity_preserved};sleeper_post_velocity=({sleeper_post_linear_velocity:?},{sleeper_post_angular_velocity:.6});actual_final_drift={actual_final_drift:.6};sleeper_pose_error={sleeper_pose_error:.6};spinner_pose_error={spinner_pose_error:.6}"
+    );
+}
+
 struct RevoluteContactWindow {
     max_drift: f32,
     final_drift: f32,
     contact_frames: usize,
     numeric_warnings: usize,
+    first_contact_count: usize,
+    first_contact_rows: usize,
+    first_solver_normal_impulse: f32,
+    first_joint_rows: usize,
     final_joint_rows: usize,
 }
 
@@ -6367,7 +7233,7 @@ fn run_revolute_contact_window(joint_velocity_projection: bool) -> RevoluteConta
         gravity: Vector::new(0.0, 9.8),
         ..WorldDesc::default()
     });
-    let floor = create_body(&mut world, BodyType::Static, 0.0, 2.5, Vector::default());
+    let floor = create_body(&mut world, BodyType::Static, 0.0, 1.125, Vector::default());
     let pendulum = create_body(
         &mut world,
         BodyType::Dynamic,
@@ -6381,8 +7247,32 @@ fn run_revolute_contact_window(joint_velocity_projection: bool) -> RevoluteConta
     };
     attach_shape(&mut world, floor, SharedShape::rect(8.0, 0.5), material);
     attach_shape(&mut world, pendulum, SharedShape::rect(1.0, 2.0), material);
-    let floor_anchor = Point::new(0.0, -3.5);
+    let floor_anchor = Point::new(0.0, -2.125);
     let pendulum_anchor = Point::new(0.0, -1.0);
+    let initial_floor_pivot = revolute_anchor(&world, floor, floor_anchor);
+    let initial_pendulum_pivot = revolute_anchor(&world, pendulum, pendulum_anchor);
+    let floor_half_width: f32 = 8.0 * 0.5;
+    let floor_half_height: f32 = 0.5 * 0.5;
+    let pendulum_half_width: f32 = 1.0 * 0.5;
+    let pendulum_half_height: f32 = 2.0 * 0.5;
+    let floor_min_y = 1.125 - floor_half_height;
+    let floor_max_y = 1.125 + floor_half_height;
+    let pendulum_min_y = -pendulum_half_height;
+    let pendulum_max_y = pendulum_half_height;
+    let analytic_penetration = pendulum_max_y - floor_min_y;
+    assert_eq!(initial_floor_pivot, Point::new(0.0, -1.0));
+    assert_eq!(initial_pendulum_pivot, Point::new(0.0, -1.0));
+    assert_eq!((floor_half_width, floor_half_height), (4.0, 0.25));
+    assert_eq!((pendulum_half_width, pendulum_half_height), (0.5, 1.0));
+    assert!((floor_min_y - 0.875).abs() <= f32::EPSILON);
+    assert!((floor_max_y - 1.375).abs() <= f32::EPSILON);
+    assert!((pendulum_min_y + 1.0).abs() <= f32::EPSILON);
+    assert!((pendulum_max_y - 1.0).abs() <= f32::EPSILON);
+    assert!((analytic_penetration - 0.125).abs() <= f32::EPSILON);
+    assert!(
+        analytic_penetration > 1.0e-4,
+        "S5_HARNESS_BOUNDARY:positive_penetration_geometry"
+    );
     create_revolute(&mut world, floor, pendulum, floor_anchor, pendulum_anchor);
     let mut pipeline = SimulationPipeline::new(StepConfig {
         joint_velocity_projection,
@@ -6393,10 +7283,24 @@ fn run_revolute_contact_window(joint_velocity_projection: bool) -> RevoluteConta
         final_drift: 0.0,
         contact_frames: 0,
         numeric_warnings: 0,
+        first_contact_count: 0,
+        first_contact_rows: 0,
+        first_solver_normal_impulse: 0.0,
+        first_joint_rows: 0,
         final_joint_rows: 0,
     };
-    for _ in 0..240 {
+    for frame in 0..240 {
         let report = pipeline.step(&mut world);
+        if frame == 0 {
+            facts.first_contact_count = report.stats.contact_count;
+            facts.first_contact_rows = report.stats.contact_row_count;
+            facts.first_solver_normal_impulse = active_contact_events(&report)
+                .iter()
+                .map(|contact| contact.solver_normal_impulse)
+                .fold(0.0_f32, f32::max);
+            facts.first_joint_rows = report.stats.joint_row_count;
+            assert_revolute_body_finite(&world, pendulum, "positive_penetration_pendulum");
+        }
         facts.contact_frames += usize::from(report.stats.contact_count > 0);
         facts.numeric_warnings += report.stats.numeric_warnings;
         facts.final_joint_rows = report.stats.joint_row_count;
@@ -6415,12 +7319,28 @@ fn run_revolute_contact_window(joint_velocity_projection: bool) -> RevoluteConta
 
 fn assert_revolute_contact_window(facts: &RevoluteContactWindow, projection: &str) {
     println!(
-        "S5_REVOLUTE_FACT:contact_window:{projection}:contact_frames={};max_drift={:.6};final_drift={:.6};numeric_warnings={};final_joint_rows={}",
+        "S5_REVOLUTE_FACT:positive_penetration_contact_window:{projection}:analytic_penetration=0.125000;first_contact_count={};first_contact_rows={};first_solver_normal_impulse={:.6};first_joint_rows={};contact_frames={};max_drift={:.6};final_drift={:.6};numeric_warnings={};final_joint_rows={}",
+        facts.first_contact_count,
+        facts.first_contact_rows,
+        facts.first_solver_normal_impulse,
+        facts.first_joint_rows,
         facts.contact_frames,
         facts.max_drift,
         facts.final_drift,
         facts.numeric_warnings,
         facts.final_joint_rows
+    );
+    assert!(
+        facts.first_contact_count > 0,
+        "S5_HARNESS_BOUNDARY:{projection}_positive_penetration_first_contact_missing"
+    );
+    assert!(
+        facts.first_contact_rows > 0,
+        "S5_HARNESS_BOUNDARY:{projection}_positive_penetration_first_contact_row_missing"
+    );
+    assert!(
+        facts.first_solver_normal_impulse.is_finite() && facts.first_solver_normal_impulse > 0.0,
+        "S5_HARNESS_BOUNDARY:{projection}_positive_penetration_normal_impulse"
     );
     assert!(
         facts.contact_frames > 0,
@@ -6429,6 +7349,11 @@ fn assert_revolute_contact_window(facts: &RevoluteContactWindow, projection: &st
     assert_eq!(
         facts.numeric_warnings, 0,
         "S5_HARNESS_BOUNDARY:{projection}_numeric_warnings"
+    );
+    assert_eq!(
+        facts.first_joint_rows, 1,
+        "S5_REVOLUTE_SOLVER_ASSERT:positive_penetration_joint_row:{projection}:baseline_joint_row_count={}",
+        facts.first_joint_rows
     );
     assert!(
         facts.max_drift <= 0.03,

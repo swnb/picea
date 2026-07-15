@@ -1171,6 +1171,138 @@ fn s5_assert_joint_kinds_woke(
 }
 
 #[test]
+fn post_contact_revolute_reconciliation_does_not_repeat_existing_joint_rows() {
+    let config = StepConfig {
+        joint_velocity_projection: false,
+        enable_sleep: false,
+        ..StepConfig::default()
+    };
+    let dt = config.dt;
+
+    let mut distance_world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: false,
+    });
+    let distance_dynamic = distance_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("distance no-repeat dynamic body should be created");
+    let distance_static = distance_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Static,
+            pose: Pose::from_xy_angle(4.0, 0.0, 0.0),
+            ..BodyDesc::default()
+        })
+        .expect("distance no-repeat static body should be created");
+    distance_world
+        .create_joint(JointDesc::Distance(DistanceJointDesc {
+            body_a: distance_dynamic,
+            body_b: distance_static,
+            rest_length: 1.0,
+            stiffness: 1.0,
+            ..DistanceJointDesc::default()
+        }))
+        .expect("distance no-repeat joint should be created");
+    // A static counterpart doubles the existing Distance correction. Re-evaluating that row in a
+    // generic post pass would use the already-corrected distance and land at `distance_repeated`.
+    let distance_single = 2.0 * (4.0 - 1.0) * dt;
+    let distance_repeated = distance_single + 2.0 * ((4.0 - distance_single) - 1.0) * dt;
+    let mut distance_pipeline = SimulationPipeline::new(config);
+    let distance_report = distance_pipeline.step(&mut distance_world);
+    let distance_actual = distance_world
+        .try_body(distance_dynamic)
+        .expect("distance dynamic body survives")
+        .pose()
+        .translation()
+        .x();
+
+    let mut anchor_world = World::new(WorldDesc {
+        gravity: Vector::default(),
+        enable_sleep: false,
+    });
+    let anchor_dynamic = anchor_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            pose: Pose::from_xy_angle(0.0, 0.0, 0.0),
+            linear_velocity: (1.0, 0.0).into(),
+            can_sleep: false,
+            ..BodyDesc::default()
+        })
+        .expect("world-anchor no-repeat body should be created");
+    anchor_world
+        .create_collider(
+            anchor_dynamic,
+            ColliderDesc {
+                shape: SharedShape::circle(0.1),
+                density: 1.0,
+                ..ColliderDesc::default()
+            },
+        )
+        .expect("world-anchor damping control needs finite inverse mass");
+    let anchor_damping = 30.0;
+    anchor_world
+        .create_joint(JointDesc::WorldAnchor(WorldAnchorJointDesc {
+            body: anchor_dynamic,
+            world_anchor: (3.0, 0.0).into(),
+            stiffness: 1.0,
+            damping: anchor_damping,
+            ..WorldAnchorJointDesc::default()
+        }))
+        .expect("world-anchor no-repeat joint should be created");
+    // Each WorldAnchor evaluation predicts with the velocity then applies correction and damping.
+    // A forbidden second solve therefore changes both the current pose and velocity a second time.
+    let damping_strength = (anchor_damping * dt).clamp(0.0, 1.0);
+    let first_eval = dt;
+    let first_correction = (3.0 - first_eval) * dt;
+    let first_velocity = 1.0 * (1.0 - damping_strength);
+    let anchor_single = first_correction + first_velocity * dt;
+    let second_eval = first_correction + first_velocity * dt;
+    let second_correction = (3.0 - second_eval) * dt;
+    let second_velocity = first_velocity * (1.0 - damping_strength);
+    let anchor_repeated = first_correction + second_correction + second_velocity * dt;
+    let mut anchor_pipeline = SimulationPipeline::new(config);
+    let anchor_report = anchor_pipeline.step(&mut anchor_world);
+    let anchor_actual = anchor_world
+        .try_body(anchor_dynamic)
+        .expect("world-anchor body survives")
+        .pose()
+        .translation()
+        .x();
+    let anchor_actual_velocity = anchor_world
+        .try_body(anchor_dynamic)
+        .expect("world-anchor body survives")
+        .linear_velocity()
+        .x();
+
+    println!(
+        "S5_REVOLUTE_REPLAN_BOUNDARY:no_repeat_existing_rows:Distance(actual={distance_actual:.6},single={distance_single:.6},repeated={distance_repeated:.6},rows={});WorldAnchor(actual={anchor_actual:.6},single={anchor_single:.6},repeated={anchor_repeated:.6},velocity={anchor_actual_velocity:.6},single_velocity={first_velocity:.6},repeated_velocity={second_velocity:.6},rows={})",
+        distance_report.stats.joint_row_count,
+        anchor_report.stats.joint_row_count
+    );
+    assert_eq!(distance_report.stats.joint_row_count, 1);
+    assert_eq!(anchor_report.stats.joint_row_count, 1);
+    assert!(
+        (distance_actual - distance_single).abs() <= 1.0e-6
+            && (distance_actual - distance_repeated).abs() > 0.01,
+        "Distance row must run exactly once per step"
+    );
+    assert!(
+        (anchor_actual - anchor_single).abs() <= 1.0e-6
+            && (anchor_actual - anchor_repeated).abs() > 0.01,
+        "WorldAnchor correction must run exactly once per step"
+    );
+    assert!(
+        (anchor_actual_velocity - first_velocity).abs() <= 1.0e-6
+            && (anchor_actual_velocity - second_velocity).abs() > 0.1,
+        "WorldAnchor damping must run exactly once per step"
+    );
+}
+
+#[test]
 fn joint_lifecycle_wake_create_contract() {
     let mut world = s5_lifecycle_world();
     let static_endpoint = s5_static_body(&mut world, "create");
