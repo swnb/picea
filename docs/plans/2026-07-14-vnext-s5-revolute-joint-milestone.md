@@ -1,6 +1,6 @@
 # vNext Handoff §5 Revolute Joint Pin-only V1 Milestone
 
-状态：S5-D/API-RED/API/BEHAVIOR-RED/S5-REPLAN/S5-BEHAVIOR-RED-2均已commit；历史S5-SOLVER immutable Start HEAD=`385c4c350ceee98947c65da5e3f63384804c69e1`，保持`STOPPED / FROZEN CONTRACT CONFLICT / NOT COMMITTED`；S5-SOLVER-2 immutable Start HEAD=`07b2bd6cd3ff4b80d1b6c124a4752e36e8e8d88f`，经production patch与独立review确认accepted ADR-S5-5 full post 2x2 corrected-eval合同和两条旧absolute final-angle oracle互斥，冻结为`STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`；该production patch只保留在主worktree作冲突证据，不属于本隔离RED-3节点；current S5-BEHAVIOR-RED-3 immutable Start HEAD=`07b2bd6cd3ff4b80d1b6c124a4752e36e8e8d88f`，test/spec reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier首轮除§16 stale review状态外，behavior/oracle、16 exact `12 RED / 4 GREEN`、scope/hygiene均PASS，但以`0 High / 1 Medium / 0 Low`裁决`FAIL`；status-only remediation后independent re-verifier=`0 High / 0 Medium / 0 Low`，结论`S5-BEHAVIOR-RED-3 RE-VERIFIER PASS`；S5-SOLVER-3保持`PENDING / NOT STARTED`；Chrome `NOT RUN / BROWSER PENDING`
+状态：S5-D/API-RED/API/BEHAVIOR-RED/S5-REPLAN/S5-BEHAVIOR-RED-2/S5-BEHAVIOR-RED-3均已commit；历史S5-SOLVER保持`STOPPED / FROZEN CONTRACT CONFLICT / NOT COMMITTED`；S5-SOLVER-2与S5-SOLVER-3均保持`STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`。S5-SOLVER-3 immutable Start HEAD=`6ffa1e3f29e902b68708b62e11d5fae160db97ec`，unit=`8/8 GREEN`、16条integration exact=`15 GREEN / 1 FAIL`；唯一FAIL已由independent reviewer以`1 High / 1 Medium / 0 Low`裁决`CONFLICT CONFIRMED`，根因是RED-3 oracle遗漏contact residual correction对authoritative current pose的真实mutation，不是accepted ADR-S5-5 production bug。用户已批准唯一新链`S5-REPLAN-2 -> S5-BEHAVIOR-RED-4 -> S5-SOLVER-4`；current S5-REPLAN-2 immutable Start HEAD=`6ffa1e3f29e902b68708b62e11d5fae160db97ec`，docs worker已完成，independent reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`，结论`S5-REPLAN-2 VERIFIER PASS`；commit待supervisor执行。Chrome `NOT RUN / BROWSER PENDING`
 初始日期：2026-07-14；S5-REPLAN：2026-07-15
 基线：`feat/vnext-s5-revolute-joint@28867b5`
 设计：`docs/design/2026-07-14-revolute-joint-v1-design.md`
@@ -12,7 +12,9 @@ Profiles：architecture-heavy, api-contract, ui-browser
 
 用户已批准 handoff §5 的“完整 Pin-only V1”public API、字段、
 `#[non_exhaustive]` 列表、wake semantics、lab 范围和延期项。不存在 Plan Gate
-阻塞问题；只有本计划列出的 stop condition 可以中断连续执行。
+阻塞问题。2026-07-15用户又明确批准在S5-SOLVER-3 test-contract conflict后保持ADR-S5-5与
+design不变，按`S5-REPLAN-2 -> S5-BEHAVIOR-RED-4 -> S5-SOLVER-4`继续；只有本计划列出的
+stop condition可以中断连续执行。
 
 目标：
 
@@ -127,13 +129,54 @@ Profiles：architecture-heavy, api-contract, ui-browser
   `STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`。Production patch保留在主worktree供
   supervisor复核，但不进入`/tmp/picea-s5-red3`、不属于RED-3 scope，也不得提交为SOLVER-2。
 
+### S5-SOLVER-3 verified test-contract conflict（Fact，2026-07-15）
+
+- Immutable Start HEAD=`6ffa1e3f29e902b68708b62e11d5fae160db97ec`。现有production patch在主
+  worktree复用并运行后，unit=`8/8 GREEN`；16条integration exact全部逐条真实输出
+  `running 1 test`，结果=`15 GREEN / 1 FAIL`。唯一FAIL为
+  `revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle`：full-pose error=
+  `0.011336 > 1e-4`，但row/warning=`1/0`、actual drift=`0.001104 <= 0.01`；另一条CCD
+  full-pose、latest、would-wake、projection enabled/disabled和no-repeat均GREEN。
+- Independent reviewer裁决=`CONFLICT CONFIRMED`、severity=`1 High / 1 Medium / 0 Low`。
+  失败fixture的contact residual correction translation=`0.00194835861`、contact depth=
+  `0.0487089641`、position-correction input contact/body count=`1/1`；GREEN对照fixture的
+  residual correction=`0`。Live phase事实为mandatory Revolute correction -> contact velocity
+  solve + residual authoritative pose mutation -> Revolute post pass重新读取current -> final
+  integration。
+- RED-3 oracle从mandatory current直接拼post eval，遗漏了contact phase已经写入的pose mutation。
+  Production post pass读取contact后的authoritative current，符合ADR-S5-5；强迫production忽略/
+  撤回该mutation才会迎合旧oracle，属于§15禁止路径。该node因此冻结为
+  `STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`；production patch仅保留在主worktree作
+  证据，不得提交为S5-SOLVER-3。
+- `cargo fmt --all --check`还独立报告dirty `pipeline/joints.rs` rustfmt diff；这属于未闭合hygiene
+  gate，不改变physics/test-contract conflict分类，也不得冒充唯一FAIL的根因。
+
+### S5-REPLAN-2 oracle route（Inference，尚待RED-4验真）
+
+- 只读explorer确认当前没有public test hook能直接读取contact-post current。No-joint control缺少
+  mandatory Revolute geometry，不能恢复同一contact输入；从subject final反推又会与待验的post
+  correction形成循环依赖。
+- 推荐的test-side `WorldAnchor shadow` control可在不新增public开关、不改production的前提下
+  复现mandatory后的spinner origin，再让同一contact pipeline产生可观察的post-contact current
+  `P_contact`。这是基于现有WorldAnchor行为与solver facts的合理推断；只有RED-4实际证明shadow/
+  subject contact等价、唯一failure signature和clean baseline分类后，才能升级为已验证事实。
+
+### 2026-07-15 User-approved RED-4 Decision
+
+- 用户批准保持ADR-S5-5、design、production phase与public surface不变；新链只修正
+  acceptance oracle对contact residual pose mutation的遗漏。
+- S5-BEHAVIOR-RED-4必须先在clean `6ffa1e3…`上提交统一的两条CCD full-pose shadow-control
+  oracle和scope state transition，再允许S5-SOLVER-4复用现有production patch。
+- 不授权修改contact solver/CCD/`integrate.rs`、增加production test开关/public config、忽略或
+  撤回contact residual correction，也不授权直接在S5-SOLVER-3继续改tests/production。
+
 ### Unknown
 
-当前无阻塞未知项。RED-3必须在clean `07b2bd6…`、无production patch的隔离worktree证明两条
-superseding final-pose oracle各自只命中批准signature；S5-SOLVER-3 GREEN仍是待验证事项，不是
-设计未决项。若implementation证明新合同只能靠改contact solver/CCD、冻结旧velocity、处理
-existing joint kinds或改变row/stats语义满足，必须暂停、记录证据并先修订design/living spec；
-不得在worker内自行扩大API或算法范围。
+Plan Gate无阻塞未知项；但RED-4尚未运行，以下仍是明确未知而非完成事实：WorldAnchor shadow能否
+使两条fixture的subject/shadow contact solver facts逐项等价、clean baseline能否严格保持
+`12 RED / 4 GREEN`且两条新oracle只命中各自批准signature、S5-SOLVER-4能否在不改tests/contact/
+CCD/integrate的前提下达到16/16与完整broad gates。任一未知被实测否定时必须按§15 STOP，不得
+把推断改写为已验证或由worker自行扩大算法/API范围。
 
 ## 3. 执行不变量与 subagent 合同
 
@@ -150,11 +193,17 @@ S5-D -> S5-API-RED -> S5-API -> S5-BEHAVIOR-RED -> S5-SOLVER
 S5-REPLAN -> S5-BEHAVIOR-RED-2 -> S5-SOLVER-2 [STOPPED]
 ```
 
-当前唯一执行链为：
+RED-3/SOLVER-3链已在第二个test-contract conflict处终止：
 
 ```text
-S5-BEHAVIOR-RED-3 -> S5-SOLVER-3
-                  -> S5-LAB-RED -> S5-LAB -> S5-V -> S5-C
+S5-BEHAVIOR-RED-3 -> S5-SOLVER-3 [STOPPED]
+```
+
+用户批准后的当前唯一执行链为：
+
+```text
+S5-SOLVER-3 [STOPPED] -> S5-REPLAN-2 -> S5-BEHAVIOR-RED-4 -> S5-SOLVER-4
+                                      -> S5-LAB-RED -> S5-LAB -> S5-V -> S5-C
 ```
 
 通用规则：
@@ -171,7 +220,8 @@ S5-BEHAVIOR-RED-3 -> S5-SOLVER-3
   High/Medium，independent verifier 必须完成该 node 的 exact gate。
 - 所有 Cargo/Git/Rust/Web 验证使用 `rtk proxy`。不得把 reviewer判断代替 executable
   receipt。
-- S5-API-RED、S5-BEHAVIOR-RED、S5-LAB-RED 必须先提交 acceptance artifacts 并记录
+- S5-API-RED、S5-BEHAVIOR-RED、S5-BEHAVIOR-RED-2、S5-BEHAVIOR-RED-3、
+  S5-BEHAVIOR-RED-4、S5-LAB-RED必须先提交acceptance artifacts并记录
   真实 RED，再允许后续 implementation worker 开始。
 - 每个node由supervisor在第一处文件改动前运行`rtk proxy git rev-parse HEAD`，把40位
   immutable full start HEAD写入§16该node receipt；未来node保持`PENDING`，不得预填
@@ -184,6 +234,9 @@ S5-BEHAVIOR-RED-3 -> S5-SOLVER-3
   paths做exact allowlist比较。
 - RED 不能通过删除、ignore、放宽断言、改批准阈值、伪造 Rust facts 或把失败改成
   snapshot update 来消除。
+- S5-REPLAN-2因scope script尚不识别new nodes，只使用§9F inline exact-path gate；
+  S5-BEHAVIOR-RED-4在exact-3内提交scope state transition后，RED-4 reviewer/verifier与
+  S5-SOLVER-4才统一使用`receipt-head`/binary scope入口。
 
 角色交付合同：
 
@@ -207,7 +260,10 @@ S5-BEHAVIOR-RED-3 -> S5-SOLVER-3
 | S5-BEHAVIOR-RED-2 | exact 4：`physics_realism_acceptance.rs`、`world_step_review_regressions.rs`、`verify_revolute_scope.rb`、本文 | production solver/lab/Web/design | §9B原13历史分类+3条新增exact+scope self-tests | test/spec review + RED verifier；`test: lock revolute post-contact reconciliation` |
 | S5-SOLVER-2（historical STOPPED） | 曾批准required exact 6与optional unit-only path；production patch保留在主worktree作冲突证据 | tests/scope script、contact solver/CCD algorithm、lab/Web、StepConfig字段/default变化 | §9C implementation使new latest GREEN，但两条stale absolute-angle oracle FAIL | `STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`；不得续写旧node |
 | S5-BEHAVIOR-RED-3 | exact 3：`physics_realism_acceptance.rs`、`verify_revolute_scope.rb`、本文 | production/design/其他tests/lab/Web/Cargo | §9D两条superseding exact + 16条integration分类 + scope/hygiene | test/spec review + RED verifier；`test: supersede stale revolute final-angle oracles` |
-| S5-SOLVER-3 | 继承§9C required exact 6；optional `pipeline/joints/tests.rs`仅unit增强 | committed tests/scope script、contact solver/CCD algorithm、lab/Web、StepConfig字段/default变化 | §9E消费RED-3 superseding tests，原§9C其余GREEN门不变 | math/code review + verifier；`feat: reconcile revolute constraints after contacts` |
+| S5-SOLVER-3（historical STOPPED） | 曾继承§9C required exact 6；production patch保留在主worktree作冲突证据 | tests/scope script、contact solver/CCD algorithm、lab/Web、StepConfig字段/default变化 | unit 8/8、16 exact仅15/16；§9E保留conflict evidence | `STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`；不得续写旧node |
+| S5-REPLAN-2 | exact 1：本文 | design、tests/scope script、production、lab/Web、Cargo | §9F inline exact-path docs gate | docs review + verifier；`docs: replan revolute contact-state oracle` |
+| S5-BEHAVIOR-RED-4 | exact 3：`physics_realism_acceptance.rs`、`verify_revolute_scope.rb`、本文 | production/design/其他tests/lab/Web/Cargo | §9G两条shadow-control oracle、16条integration分类、scope/hygiene | test/spec review + RED verifier；`test: lock revolute contact-state oracle` |
+| S5-SOLVER-4 | 继承§9C required exact 6；optional `pipeline/joints/tests.rs`仅unit增强 | committed tests/scope script、contact solver/CCD algorithm、`integrate.rs`、lab/Web、StepConfig字段/default变化 | §9H消费committed RED-4；unit 8/8、integration 16/16、§9C broad与hygiene全部GREEN | math/code review + verifier；`feat: reconcile revolute constraints after contacts` |
 | S5-LAB-RED | artifact/server/UI/i18n contract tests、本文 RED receipt | lab/Web production implementation、core solver | §10 exact RED set | test/spec review + RED verifier；`test: lock revolute lab contracts` |
 | S5-LAB | scenario/fixture completion、artifact/server evidence、Web type/label/consumers；生成§11固定external browser prompt | live patch、motor/limit UI、Web physics、CLI调用Chrome | §11 Rust/Web/server GREEN + external browser receipt | CLI review/verifier通过后可commit candidate；browser未回填仍是`BROWSER PENDING`且不得进入S5-V；`feat: expose revolute joint in lab` |
 | S5-V | leaf worker只读运行CLI preflight；leaf reviewer只读审查；independent leaf verifier只读复跑；生成§12固定external browser prompt | 三角色均不写文件、不修问题、不调用Chrome；禁止新功能/阈值变更 | §12 full CLI gates + milestone binary scope + external browser receipt | reviewer无High/Medium、CLI verifier PASS且browser receipt PASS；否则不得称full acceptance；不单独commit |
@@ -257,10 +313,10 @@ ownership 补充：
   implementation worker未继续修改scope script。
 - S5-BEHAVIOR-RED保留直接2x2/singular/sign unit contract。若采用
   `pipeline/joints/tests.rs`，`pipeline/joints.rs`除`#[cfg(test)] mod tests;`外production
-  必须zero-diff；reviewer逐行确认。历史S5-SOLVER、STOPPED S5-SOLVER-2与current
-  S5-SOLVER-3都不得修改committed integration阈值/断言；current implementation只按§9E继承
-  §9C实现row/math/reconciliation并让superseding locks转绿。
-- S5-SOLVER-3继承S5-SOLVER-2对`crates/picea/src/pipeline.rs`的窄边界：只允许把
+  必须zero-diff；reviewer逐行确认。历史S5-SOLVER、STOPPED S5-SOLVER-2/S5-SOLVER-3与
+  current S5-SOLVER-4都不得修改committed integration阈值/断言；current implementation只按
+  §9H继承§9C实现row/math/reconciliation并让committed RED-4 locks转绿。
+- S5-SOLVER-4继承S5-SOLVER-2/3对`crates/picea/src/pipeline.rs`的窄边界：只允许把
   `StepConfig::joint_velocity_projection` public doc从distance-only改为joint
   point-velocity semantics，并同步既有配置default/serde行为锁；不得增加字段、改default
   或借机重构pipeline。
@@ -269,13 +325,19 @@ ownership 补充：
 - S5-BEHAVIOR-RED-2拥有scope script state transition与两类core behavior locks：必须加入
   `S5-REPLAN`/`S5-BEHAVIOR-RED-2`/`S5-SOLVER-2` nodes、scopes、self-tests与milestone union，
   同时保持SHA/changed-path/cached判定语义不变。
-- S5-SOLVER-2已因test-contract conflict永久STOPPED。其production patch只留在主worktree作
-  reviewer证据，不能带入RED-3、不能提交、不能在旧node继续修测试或production。
+- S5-SOLVER-2与S5-SOLVER-3均因test-contract conflict永久STOPPED。现有production patch只留在
+  主worktree作reviewer证据，不能带入RED-4、不能提交到旧node、不能在旧node继续修测试或
+  production；只有S5-SOLVER-4可在RED-4 commit后复用该patch。
 - S5-BEHAVIOR-RED-3只拥有exact 3；两条测试保留fixture、test name、CCD/contact identity、
   impulse、latest velocity mutation、warning、row与drift阈值，只把旧absolute-angle equality
   替换为独立full pose oracle。不得修改new latest/would-wake tests、其他integration tests、
   production、design、lab/Web或Cargo。
-- S5-SOLVER-3继承§9C required exact 6与optional unit-only边界；production worker不得修改
+- S5-REPLAN-2严格exact-1且不改scope script；本node只把已验证conflict、用户Plan Gate与未来
+  executable contracts写入本文，不把RED-4/SOLVER-4写成已验证。
+- S5-BEHAVIOR-RED-4严格exact-3；两条CCD tests统一改用test-side WorldAnchor shadow恢复
+  `P_contact`，并在scope script中完成new-node state transition。不得改production、其他tests、
+  design、lab/Web或Cargo。
+- S5-SOLVER-4继承§9C required exact 6与optional unit-only边界；production worker不得修改
   committed tests或scope script。`pipeline/joints/tests.rs`仍只在reviewer提出unit coverage缺口、
   supervisor另派bounded test-only worker时可增强；不得改integration阈值/断言。
 - S5-LAB 只能消费 `DebugSnapshot` / `StepStats` / Rust artifact/server facts；Web 不得
@@ -300,6 +362,9 @@ start HEAD；必须调用`rtk proxy git diff --name-only <start>`与
 | S5-SOLVER-2 | `crates/picea/src/pipeline.rs`, `crates/picea/src/pipeline/step.rs`, `crates/picea/src/pipeline/island.rs`, `crates/picea/src/pipeline/joints.rs`, `crates/picea/src/solver/body_state.rs`, living spec（required exact 6） | `crates/picea/src/pipeline/joints/tests.rs`仅unit增强；production worker不得修改该optional或任何committed integration/lifecycle test |
 | S5-BEHAVIOR-RED-3 | `crates/picea/tests/physics_realism_acceptance.rs`, `crates/picea/tests/verify_revolute_scope.rb`, living spec（exact 3） | 无 |
 | S5-SOLVER-3 | 与S5-SOLVER-2相同的required exact 6 | 与S5-SOLVER-2相同的optional `crates/picea/src/pipeline/joints/tests.rs`，只允许reviewer触发的unit增强 |
+| S5-REPLAN-2 | living spec（exact 1） | 无；本node不改scope script，使用§9F inline exact-path verifier |
+| S5-BEHAVIOR-RED-4 | `crates/picea/tests/physics_realism_acceptance.rs`, `crates/picea/tests/verify_revolute_scope.rb`, living spec（exact 3） | 无 |
+| S5-SOLVER-4 | 与S5-SOLVER-2/3相同的required exact 6 | 与S5-SOLVER-2/3相同的optional `crates/picea/src/pipeline/joints/tests.rs`，只允许reviewer触发的unit增强 |
 | S5-LAB-RED | `artifact_run.rs`, `server_routes.rs`, Web `ui-contract.mjs`, `i18n-contract.mjs`, living spec | fixture compatibility test file仅当API checkpoint尚未锁定对应case |
 | S5-LAB | `scenario/mod.rs`, `scenario/scene_dispatch.rs`, new `scenario/scene_revolute.rs`, Web `i18n.ts`, `types.ts`, `SceneHierarchy.tsx`, `Inspector.tsx`, `Timeline.tsx`, living spec | `artifact.rs`/`server.rs`仅在RED证明generic passthrough不足时；`components/workbench/types.ts`仅在compiler/contract要求时 |
 | S5-C | design、living spec、parent、handoff、AI index/repo-map/catalog、design index、`solver-island-ordering-contract.md` | 无 |
@@ -334,6 +399,34 @@ S5-BEHAVIOR-RED-3在自己的exact-3范围内做第二次state transition：
   handoff写入immutable SHA时不需要删除PENDING hardcode；
 - SHA格式与commit解析、CLI/receipt equality、tracked+untracked path union、cached判定、
   required/optional binary集合与milestone base语义全部保持不变。
+
+S5-REPLAN-2不修改scope script。由于clean `6ffa1e3…`的script尚不认识三个new nodes，本node
+必须以§9F inline verifier对`git diff --name-only <start>`与untracked union做exact-1二元判定；
+不得把`unknown node S5-REPLAN-2`误报成docs失败，也不得为了让本node走binary入口而提前改script。
+
+S5-BEHAVIOR-RED-4在自己的exact-3范围内做第三次state transition：
+
+- `PROGRESS_NODES`保留三个historical STOPPED solver node可解析，并加入`S5-REPLAN-2`、
+  `S5-BEHAVIOR-RED-4`、`S5-SOLVER-4`；
+- `SCOPES`增加上述REPLAN-2 exact 1、RED-4 exact 3与SOLVER-4 required exact 6/optional
+  unit-only path；
+- `PRE_V_NODES`精确包含`S5-API-RED`、`S5-API`、`S5-BEHAVIOR-RED`、`S5-REPLAN`、
+  `S5-BEHAVIOR-RED-2`、`S5-BEHAVIOR-RED-3`、`S5-REPLAN-2`、
+  `S5-BEHAVIOR-RED-4`、`S5-SOLVER-4`、`S5-LAB-RED`、`S5-LAB`；明确排除
+  `S5-SOLVER`、`S5-SOLVER-2`、`S5-SOLVER-3`三个STOPPED/NOT COMMITTED node；
+- self-test覆盖new parser/current S5-REPLAN-2 receipt、RED-4与SOLVER-4 PENDING/SHA双分支、
+  mismatch、missing、unexpected、optional和三个STOPPED node不进入milestone union；
+- SHA格式/commit解析、CLI/receipt equality、tracked+untracked union、cached判定、
+  required/optional binary集合与milestone base语义全部保持zero-diff。
+
+S5-BEHAVIOR-RED-4第一个shell在script尚未支持new node时，必须用与S5-API-RED bootstrap同构的
+inline Ruby从§16读取`S5-BEHAVIOR-RED-4` immutable Start HEAD；script state transition完成后，
+worker后续shell及reviewer/verifier统一切换到：
+
+```text
+S5_NODE_START_HEAD="$(rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb receipt-head S5-BEHAVIOR-RED-4)"
+rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb S5-BEHAVIOR-RED-4 "$S5_NODE_START_HEAD"
+```
 
 表中缩写在scope script中必须展开为repository-relative完整路径。Scope script还必须从
 §16 progress table读取node的full start HEAD：empty/`PENDING`、非40位lowercase hex、
@@ -1383,8 +1476,9 @@ push或运行Chrome。
 首轮因§16 stale review状态以`0 High / 1 Medium / 0 Low`裁决`FAIL`的历史保留。Status-only
 remediation后independent re-verifier=`0 High / 0 Medium / 0 Low`，结论
 `S5-BEHAVIOR-RED-3 RE-VERIFIER PASS`，并确认physics/scope blobs未变化及全部receipt/scope/
-hygiene门PASS。剩余风险只在下一节点：只有S5-SOLVER-3可证明accepted production对两条
-superseding full-pose oracle GREEN。Chrome保持`NOT RUN / BROWSER PENDING`。
+hygiene门PASS。当时剩余风险只在下一节点：只有S5-SOLVER-3可证明accepted production对两条
+superseding full-pose oracle GREEN；后续§9E已证实该node因contact-state oracle conflict STOPPED。
+Chrome保持`NOT RUN / BROWSER PENDING`。
 
 ### S5-BEHAVIOR-RED-3 test/spec review history
 
@@ -1405,7 +1499,9 @@ superseding full-pose oracle GREEN。Chrome保持`NOT RUN / BROWSER PENDING`。
 
 ## 9E. S5-SOLVER-3：消费RED-3 superseding tests
 
-Start HEAD在S5-BEHAVIOR-RED-3 commit后由supervisor写入§16，当前为`PENDING`。本node完整继承
+Immutable Start HEAD=`6ffa1e3f29e902b68708b62e11d5fae160db97ec`。本node已冻结为
+`STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`；以下继承合同只作历史证据，不授权续写。
+本node完整继承
 §9C的physics implementation、required exact 6、optional unit-only path、phase顺序、2x2/COM/
 latest-advance/atomic/wake/one-row/no-stats/no-repeat合同、GREEN gates与stop conditions。唯一变化是
 消费§9D已经提交的两条superseding full-pose tests；S5-SOLVER-3 worker不得修改任何tests或
@@ -1418,9 +1514,271 @@ GREEN，或需要修改contact solver/CCD算法、existing joint kinds、row/sta
 velocity、重排既有phase/stream，立即STOP并回填证据，不得修改tests。目标commit message为
 `feat: reconcile revolute constraints after contacts`。
 
+### S5-SOLVER-3 worker停机验收报告（2026-07-15）
+
+**Start HEAD**：`6ffa1e3f29e902b68708b62e11d5fae160db97ec`。
+
+**成功标准**：required exact 6 production使unit 8条、16条integration exact、§9C broad gates、
+scope与hygiene全部GREEN，同时保持contact后current、latest-advance、one-row/no-stats/no-repeat。
+
+**检查结果**：
+
+- Unit exit `0`，真实输出`running 8 tests`、`8 passed`。16条integration exact全部逐条真实输出
+  `running 1 test`，结果=`15 GREEN / 1 FAIL`；two-dynamic/static-dynamic/off-center/free-angle/
+  nonzero-COM、determinism、mixed rows、awake/sleeping、positive penetration、latest、would-wake、
+  no-repeat均GREEN。
+- 唯一FAIL为`revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle`，只命中
+  `S5_REVOLUTE_REPLAN_ASSERT:ccd_post_contact_final_pose`：full-pose error=`0.011336`；同时
+  clamp/contact=`1/1`、normal impulse=`1.570796`、row/warning=`1/0`、expected/actual drift=
+  `0.000915/0.001104`均满足。另一条CCD full-pose error=`0`。
+- 诊断与review确认失败fixture的contact residual correction translation=`0.00194835861`、depth=
+  `0.0487089641`、position-correction input contact/body count=`1/1`；GREEN对照residual=`0`。
+  Mandatory后spinner current x=`-0.094008304`，post pass前x=`-0.09595666`。RED-3 oracle遗漏
+  这次authoritative pose mutation，而production按ADR-S5-5重新读取contact后的current。
+- Independent reviewer=`1 High / 1 Medium / 0 Low`、裁决`CONFLICT CONFIRMED`；production不是
+  root cause。`cargo fmt --all --check`另因dirty `pipeline/joints.rs` rustfmt diff exit `1`，属于
+  独立hygiene failure。Scope actual仍为required exact 6，tests/lab/Cargo zero-diff、cached/
+  untracked empty；未进入后续broad gates或S5-LAB。
+
+**复跑方式**：复用主worktree现有production patch，逐条运行§9/§9B的unit与16条exact；最小
+复现为`rtk proxy cargo test -p picea --test physics_realism_acceptance revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle -- --exact --nocapture`。
+
+**范围外**：committed tests/scope script、contact solver、CCD、`integrate.rs`、existing joint
+kinds、API/schema/stats/default、Lab/Web/Cargo、Chrome；未stage、commit、push。
+
+**残余风险**：S5-SOLVER-3永久保持`STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`；只有
+用户批准的S5-REPLAN-2 -> RED-4 -> SOLVER-4可修正oracle并重新取证。Chrome保持
+`NOT RUN / BROWSER PENDING`。
+
+## 9F. S5-REPLAN-2：contact-state oracle docs contract
+
+Immutable Start HEAD=`6ffa1e3f29e902b68708b62e11d5fae160db97ec`。用户已明确批准本次Plan Gate；
+ADR-S5-5与design保持不变。本node ownership exact 1：
+
+```text
+docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+```
+
+本node只把§2已验证conflict、新chain、RED-4 shadow oracle、SOLVER-4 gates、scope transition、
+STOP conditions与receipt写成可执行spec；不修改scope script，也不把RED-4/SOLVER-4写成已验证。
+
+Docs gate：
+
+```text
+S5_NODE_START_HEAD=6ffa1e3f29e902b68708b62e11d5fae160db97ec
+rtk proxy git diff --check
+rtk proxy ruby -e 'base=ARGV.fetch(0); expected=[ARGV.fetch(1)]; tracked=IO.popen(["rtk","proxy","git","diff","--name-only",base], &:read).lines.map(&:strip).reject(&:empty?); untracked=IO.popen(["rtk","proxy","git","ls-files","--others","--exclude-standard"], &:read).lines.map(&:strip).reject(&:empty?); actual=(tracked+untracked).uniq.sort; abort("S5-REPLAN-2 scope mismatch: #{actual.inspect}") unless actual==expected; puts "S5_REPLAN_2_SCOPE_PASS=#{actual.join(",")}"' "$S5_NODE_START_HEAD" docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+rtk proxy git diff --exit-code "$S5_NODE_START_HEAD" -- crates Cargo.toml Cargo.lock docs/design
+rtk proxy rg -n 'S5-REPLAN-2|S5-BEHAVIOR-RED-4|S5-SOLVER-4|WorldAnchor shadow|contact residual|P_contact|no_post|double_advance|12 RED / 4 GREEN|TEST CONTRACT CONFLICT|NOT COMMITTED|BROWSER PENDING' docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+rtk proxy ruby -e 'path=ARGV.fetch(0); fences=File.readlines(path).count { |line| line.start_with?("```") }; abort("odd Markdown fence count=#{fences}") unless fences.even?; puts "S5_REPLAN_2_FENCES_PASS=#{fences}"' docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+rtk proxy git diff --cached --exit-code
+rtk proxy git ls-files --others --exclude-standard
+```
+
+### S5-REPLAN-2 docs worker验收报告（2026-07-15）
+
+**Start HEAD**：`6ffa1e3f29e902b68708b62e11d5fae160db97ec`。
+
+**成功标准**：exact-1内完整记录verified conflict、Fact/Inference/Unknown、用户Plan Gate、new
+chain/scopes、WorldAnchor shadow oracle、metrics/gates/STOP和review chain，且所有docs/scope/
+zero-diff/hygiene gates GREEN，不提前声称RED-4/SOLVER-4已验证。
+
+**检查结果**：初始branch=`feat/vnext-s5-revolute-red4`、HEAD为本40位Start HEAD、worktree clean。
+Worker修改后逐条实跑：`git diff --check` exit `0`且无输出；inline exact-path exit `0`并输出
+`S5_REPLAN_2_SCOPE_PASS=docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md`；crates/
+Cargo/design zero-diff exit `0`且无输出；required-term `rg` exit `0`，12个列名全部实际命中；
+Markdown gate exit `0`并输出`S5_REPLAN_2_FENCES_PASS=80`；cached gate exit `0`且无输出；
+untracked gate exit `0`且无输出。本node未调用尚不识别new nodes的scope script，后续仍由
+independent docs verifier复跑确认。
+
+**Independent review**：`0 High / 0 Medium / 0 Low`，裁决`PASS`、允许派verifier。Reviewer确认
+exact-1与范围外zero-diff、WorldAnchor shadow及observable fields合同、new chain/PRE_V、STOP与
+progress状态均无finding；该PASS只批准docs contract，不代表RED-4 shadow或SOLVER-4已经验证。
+
+**Independent verifier**：`0 High / 0 Medium / 0 Low`，结论
+`S5-REPLAN-2 VERIFIER PASS`。Verifier独立复跑§9F exact-1、zero-diff、required terms、fence与
+cached/untracked gates并确认状态一致；commit仍为`PENDING`，由supervisor提交后另行回填。
+
+**复跑方式**：在`/tmp/picea-s5-red4`按本节Docs gate逐条运行；reviewer findings-first核对
+shadow可证伪性、baseline分类、唯一signature、scope transition和STOP边界，verifier独立复跑。
+
+**范围外**：design、tests/scope script、production、lab/Web、Cargo、Chrome；未stage、commit、
+push、merge。
+
+**残余风险**：RED-4与SOLVER-4均为`PENDING / NOT STARTED`；shadow contact equivalence、
+clean baseline `12 RED / 4 GREEN`和最终16/16只能由后续committed acceptance与production gates
+证明。Worker结论：`S5-REPLAN-2 WORKER COMPLETE`；reviewer与verifier均PASS，commit待supervisor。
+
+## 9G. S5-BEHAVIOR-RED-4：WorldAnchor shadow contact-state oracle
+
+Start HEAD只在S5-REPLAN-2 commit后由supervisor写入§16，当前为`PENDING`。Ownership exact 3：
+
+```text
+crates/picea/tests/physics_realism_acceptance.rs
+crates/picea/tests/verify_revolute_scope.rb
+docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+```
+
+本node统一更新以下两条CCD full-pose tests；测试名、fixture几何、CCD/contact identity、positive
+impulse、warning、logical row、drift/pose阈值保持不变：
+
+1. `revolute_joint_ccd_clamped_rotating_endpoint_uses_final_angle`
+2. `revolute_joint_ccd_clamped_contact_full_step_preserves_pivot`
+
+### 9G.1 Oracle构造
+
+两条test必须使用同一test-side helper，按以下顺序恢复contact-post authoritative pose；禁止从
+subject final pose反推或引入production test hook：
+
+1. 先用existing independent symmetric 2x2/COM-to-origin oracle，从initial mandatory eval得到
+   `mandatory_corrected_eval`，撤回mandatory sampled advance得到`mandatory_current`。
+2. 构建test-side `WorldAnchor shadow` world。wall/target/spinner的创建顺序、handles对应关系、
+   colliders、shape/material、初始linear/angular velocity、CCD设置必须与subject一致；不创建
+   Revolute。为spinner创建WorldAnchor：`local_anchor=Point::default()`、`world_anchor=
+   mandatory_current.point()`、`stiffness=1.0/DT`、`damping=0`；spinner initial angle改为
+   `mandatory_current.angle()`。Shadow必须真实跑完整一个step，不得手调contact facts。
+3. Shadow step后读取final pose与latest velocity。CCD-clamped sampled translation advance固定为
+   `Vector::default()`，sampled angle advance=`shadow_latest_omega * DT`；从shadow final pose撤回
+   这份advance，恢复contact solve/residual correction完成、final integration开始前的
+   authoritative pose `P_contact`。Shadow latest linear velocity仍必须finite并打印，但不进入
+   CCD-clamped translation advance。
+4. Subject post eval使用同一个`P_contact`与subject latest advance：CCD-clamped translation
+   advance=`0`，angle advance=`subject_latest_omega * DT`。在target current pose与该post eval上
+   再跑同一test-side symmetric 2x2/COM-to-origin solve；post write撤回subject latest advance，
+   final integration加回同一advance，所以`expected_final=corrected_post_eval`。
+
+必须构造并打印：
+
+```text
+no_post = P_contact + subject_latest_advance
+double_advance = expected_final + subject_latest_advance
+```
+
+`P_contact`、shadow/subject velocities、post demand、expected final、expected drift和两份negative
+error都必须finite；post demand必须`>1e-4`、expected drift必须`<=0.01`，`no_post`与
+`double_advance`相对expected full-pose error都必须`>1e-4`。
+
+### 9G.2 Subject/shadow contact等价锁
+
+Shadow不是snapshot替身。两world必须逐项比较以下可观察solver facts：
+
+- CCD trace的`moving_body`/`static_body`/`moving_collider`/`static_collider` identity对应关系、
+  `target_kind`、`swept_start`/`swept_end`、`target_swept_start`/`target_swept_end`、`toi`、
+  `advancement`、`clamp`/`target_clamp`、`slop`、`toi_point`；
+- `solver_initial_normal_speed`、`solver_initial_tangent_speed`、`solver_final_normal_speed`、
+  `solver_final_tangent_speed`、`solver_position_bias`、`solver_restitution_bias`、
+  `solver_normal_impulse`、`solver_tangent_impulse`；
+- `solver_position_correction_depth`与body A/B correction translation；
+- StepStats的`position_correction_input_contact_count`、`position_correction_input_max_depth`、
+  `position_correction_input_total_depth`、`position_correction_body_count`、
+  `position_correction_max_translation`、`position_correction_total_translation`。
+
+不得比较final exported contact point/normal：两world在final integration后的展示几何允许因
+Revolute post correction不同。Shadow自身必须`joint_row_count==1`、`numeric_warnings==0`，并
+证明真实CCD/contact/positive normal impulse；recovered `P_contact`及全部shadow facts必须finite。
+
+Clean `6ffa1e3…`没有mandatory Revolute row，subject/shadow的`contact_equivalent`预计为`false`。
+因此该bool不得作为提前harness assert；它必须与subject `joint_row_count==1`、warning=`0`、
+drift/pose error一起进入每条test唯一最终RED signature。Oracle recovery、shadow validity、
+negative candidates或finite checks若提前失败，都属于harness failure而非有效RED。批准的新signature：
+
+```text
+S5_REVOLUTE_CONTACT_STATE_ASSERT:ccd_post_contact_final_pose
+S5_REVOLUTE_CONTACT_STATE_ASSERT:ccd_contact_post_contact_final_pose
+```
+
+### 9G.3 RED与scope gates
+
+RED worker必须先用以下inline bootstrap读取本node Start HEAD，再更新scope script；禁止用live
+`git rev-parse HEAD`代替receipt：
+
+```text
+S5_NODE_START_HEAD="$(rtk proxy ruby -e 'node=ARGV.fetch(0); path="docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md"; row=File.readlines(path).find { |line| cells=line.split("|"); cells[2]&.strip==node }; abort("missing node receipt") unless row; sha=row.split("|")[3].strip.delete("`"); abort("invalid receipt SHA") unless sha.match?(/\A[0-9a-f]{40}\z/); abort("unresolvable receipt SHA") unless system("rtk","proxy","git","cat-file","-e","#{sha}^{commit}"); print sha' S5-BEHAVIOR-RED-4)"
+```
+
+随后按§8/§9B逐条运行unit和16条integration exact，禁止aggregate filter或zero-test：
+
+- Unit仍只能有8个planned helper `E0425`，无其他compiler diagnostic；
+- 16条integration clean baseline严格保持`12 RED / 4 GREEN`；两条本节test只能各自命中上述
+  新signature，latest/would-wake保持既有批准signature，free/determinism/connected/no-repeat
+  四条boundary GREEN保持exit `0`；
+- 两条test都必须先打印并证明shadow row=`1`、warning=`0`、真实CCD/contact/positive impulse、
+  recovered `P_contact`、post demand、subject/shadow contact-equivalence facts、`no_post`/
+  `double_advance` errors、actual pose error；clean baseline只允许最终row/contact-equivalent/
+  pose组合assert失败。
+
+Scope/hygiene：
+
+```text
+S5_NODE_START_HEAD="$(rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb receipt-head S5-BEHAVIOR-RED-4)"
+rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb self-test
+rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb S5-BEHAVIOR-RED-4 "$S5_NODE_START_HEAD"
+rtk proxy cargo fmt --all --check
+rtk proxy git diff --check
+rtk proxy git diff --exit-code "$S5_NODE_START_HEAD" -- crates/picea/src crates/picea/tests/world_step_review_regressions.rs crates/picea/tests/core_model_world.rs crates/picea-lab docs/design Cargo.toml Cargo.lock
+rtk proxy git diff --cached --exit-code
+rtk proxy git ls-files --others --exclude-standard
+```
+
+RED-4 receipt必须逐条记录16 exact的exit/`running 1 test`/signature或metrics，以及两条shadow的
+全部关键事实和scope actual。若shadow不能证明contact等价、clean RED不只命中批准signature、
+需要production test开关/public config或任何production改动，立即STOP。本node目标commit=
+`test: lock revolute contact-state oracle`；reviewer/verifier PASS并提交前不得进入SOLVER-4。
+
+## 9H. S5-SOLVER-4：消费committed RED-4
+
+Start HEAD只在S5-BEHAVIOR-RED-4 commit后由supervisor写入§16，当前为`PENDING`。本node完整继承
+§9C的required exact 6、optional unit-only path、phase顺序、2x2/COM/latest-advance/atomic/wake/
+one-row/no-stats/no-repeat合同；required exact 6为：
+
+```text
+crates/picea/src/pipeline.rs
+crates/picea/src/pipeline/step.rs
+crates/picea/src/pipeline/island.rs
+crates/picea/src/pipeline/joints.rs
+crates/picea/src/solver/body_state.rs
+docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+```
+
+Optional仍仅`crates/picea/src/pipeline/joints/tests.rs`，且production worker禁止修改；只有reviewer
+发现unit coverage缺口、supervisor另派bounded test-only worker时才允许。S5-SOLVER-4只消费
+committed RED-4 tests，并复用主worktree保留的production patch；不得修改committed tests/scope
+script、contact solver、CCD、`integrate.rs`、existing joint kinds、API/schema/stats、StepConfig
+字段/default或phase/stream顺序。
+
+GREEN gate必须逐条执行§9原unit/13条integration exact与§9B latest/would-wake/no-repeat exact，
+结果必须unit=`8/8`、integration=`16/16`；两条shadow-control exact必须证明
+`contact_equivalent=true`、shadow/subject row=`1/1`、warning=`0/0`、recovered `P_contact` finite、
+expected/actual full pose error`<=1e-4`、drift`<=0.01`、negative errors`>1e-4`。随后运行：
+
+```text
+S5_NODE_START_HEAD="$(rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb receipt-head S5-SOLVER-4)"
+rtk proxy cargo test -p picea --lib pipeline::tests::default_step_config_matches_single_step_contract -- --exact --nocapture
+rtk proxy cargo test -p picea --lib pipeline::tests::step_config_deserializes_new_solver_policy_with_defaults -- --exact --nocapture
+rtk proxy cargo test -p picea --lib pipeline::island -- --nocapture
+rtk proxy cargo test -p picea --test physics_realism_acceptance stack_4 -- --nocapture
+rtk proxy cargo test -p picea --test world_step_review_regressions
+rtk proxy cargo test -p picea --test core_model_world revolute_joint_ -- --nocapture
+rtk proxy cargo test -p picea --test world_step_review_regressions joint_lifecycle_wake_ -- --nocapture
+rtk proxy cargo fmt --all --check
+rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb self-test
+rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb S5-SOLVER-4 "$S5_NODE_START_HEAD"
+rtk proxy git diff --check
+rtk proxy git diff --exit-code "$S5_NODE_START_HEAD" -- crates/picea/tests crates/picea-lab docs/design Cargo.toml Cargo.lock
+rtk proxy git diff --cached --exit-code
+rtk proxy git ls-files --others --exclude-standard
+```
+
+`cargo fmt --all --check`必须GREEN；S5-SOLVER-3遗留的`joints.rs` rustfmt diff不能豁免。Reviewer
+findings-first逐式审查K/sign/COM、contact后current、shadow等价、latest advance、atomic/wake、
+one-row/no-stats/no-repeat与phase边界；verifier必须报告全部drift/rotation/contact/impulse/residual/
+`P_contact`/row/warning/hash/scope facts。若production必须忽略或撤回contact residual correction，
+或需要修改禁止范围才能16/16，立即STOP。全部门GREEN、reviewer无High/Medium、independent
+verifier PASS后才允许commit `feat: reconcile revolute constraints after contacts`并进入S5-LAB-RED。
+
 ## 10. S5-LAB-RED：跨层 acceptance-as-code
 
-在 S5-SOLVER-3 commit 上新增：
+在 S5-SOLVER-4 commit 上新增：
 
 - `artifact_run` exact test：按字符串选择 `revolute_pendulum`，要求 debug joint kind、
   两个anchors、logical row count、finite/deterministic hash。
@@ -1687,7 +2045,7 @@ Closeout gates：
 ```text
 S5_NODE_START_HEAD="$(rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb receipt-head S5-C)"
 rtk proxy ruby -e 'require "yaml"; YAML.load_file("docs/ai/doc-catalog.yaml"); puts "yaml ok"'
-rtk proxy rg -n 'S5-D|S5-API-RED|S5-API|S5-BEHAVIOR-RED|S5-SOLVER|S5-REPLAN|S5-BEHAVIOR-RED-2|S5-SOLVER-2|ADR-S5-5|S5-LAB-RED|S5-LAB|S5-V|S5-C' docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md docs/design/2026-07-14-revolute-joint-v1-design.md
+rtk proxy rg -n 'S5-D|S5-API-RED|S5-API|S5-BEHAVIOR-RED|S5-SOLVER|S5-REPLAN|S5-BEHAVIOR-RED-2|S5-SOLVER-2|S5-BEHAVIOR-RED-3|S5-SOLVER-3|S5-REPLAN-2|S5-BEHAVIOR-RED-4|S5-SOLVER-4|ADR-S5-5|S5-LAB-RED|S5-LAB|S5-V|S5-C' docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md docs/design/2026-07-14-revolute-joint-v1-design.md
 rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb S5-C "$S5_NODE_START_HEAD"
 rtk proxy git diff --check
 rtk proxy git diff --exit-code -- crates Cargo.toml Cargo.lock
@@ -1734,6 +2092,14 @@ RED receipt额外记录 failure signature，并区分：
   `user_data` wake规则；
 - 需要把一个 revolute 计为两个logical rows；
 - RED只能通过删除/ignore/放宽断言、改阈值或伪造Web facts消除；
+- RED-4的WorldAnchor shadow无法用§9G列出的可观察solver facts证明subject/contact等价，或
+  recovered `P_contact`/post demand/negative candidates存在non-finite、循环依赖或提前harness
+  failure；
+- Clean `6ffa1e3…`的16条integration不是严格`12 RED / 4 GREEN`，两条新CCD exact没有各自只
+  命中批准的`S5_REVOLUTE_CONTACT_STATE_ASSERT:*` signature，或需要把contact mismatch/
+  row-zero改成提前assert才能得到RED；
+- RED-4需要production test hook、public config、fixture-only runtime branch，或SOLVER-4需要
+  production忽略/撤回contact residual correction、冻结mandatory旧pose/velocity才能通过；
 - external ChatGPT App browser receipt不能证明真实Rust facts path、被测full SHA不一致或
   返回FAIL；未回填只保持PENDING，不得写PASS；
 - 发现不属于当前node的dirty写入且无法确认所有权。
@@ -1750,8 +2116,11 @@ RED receipt额外记录 failure signature，并区分：
 | 2026-07-15 | S5-REPLAN | `385c4c350ceee98947c65da5e3f63384804c69e1` | 首轮docs reviewer=`2 High / 3 Medium / 1 Low`、裁决`FAIL`；bounded remediation已完成；final reviewer=`0 High / 0 Medium / 1 Low`、裁决`PASS`，唯一Low `A05-A10d -> A05-A10e`已闭合；independent verifier首轮因stale reviewer status裁决`FAIL`，status-only remediation已完成；re-verifier=`S5-REPLAN RE-VERIFIER PASS`；已commit | `d987d1f7a85964f8c26121bc70b2a96b7f406f6e` | exact-2 design/living spec；逐finding与verifier历史见§9A；保留旧STOPPED历史，新增ADR-S5-5、唯一new chain、RED-2/SOLVER-2 ownership/scope/gates/STOP合同；worker receipt见§9A；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-BEHAVIOR-RED-2 | `d987d1f7a85964f8c26121bc70b2a96b7f406f6e` | 保留两轮reviewer `FAIL`与bounded remediation历史；final reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`S5-BEHAVIOR-RED-2 VERIFIER PASS`；已commit | `2bb9f90efdc373344d1b618b5b1a295a56de54a8`；scope state-aware follow-up=`07b2bd6cd3ff4b80d1b6c124a4752e36e8e8d88f` | exact-4 acceptance与scope follow-up均已落地；unit仅8个批准`E0425`/四helper；16条exact逐条`running 1 test`且`12 RED / 4 GREEN`；API6、row-zero、lifecycle6、world19、scope/fmt/diff/zero-diff/cached/untracked均PASS；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-SOLVER-2 | `07b2bd6cd3ff4b80d1b6c124a4752e36e8e8d88f` | `STOPPED / TEST CONTRACT CONFLICT`；independent reviewer=`CONFLICT CONFIRMED` | `NOT COMMITTED` | accepted full post 2x2 patch使new latest exact pose error=`0/0`、row=`1/1`；两条旧absolute-angle oracle分别angle error=`0.105111/0.095758`但drift=`0.001104/0.000917 <= 0.01`，只败旧angle equality；production patch保留主worktree作证据、不属于RED-3；Chrome `NOT RUN / BROWSER PENDING` |
-| 2026-07-15 | S5-BEHAVIOR-RED-3 | `07b2bd6cd3ff4b80d1b6c124a4752e36e8e8d88f` | test/spec reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier首轮因stale progress review状态以`0 High / 1 Medium / 0 Low`裁决`FAIL`；status-only remediation后re-verifier=`0 High / 0 Medium / 0 Low`，结论`S5-BEHAVIOR-RED-3 RE-VERIFIER PASS` | `PENDING` | exact-3；首轮及re-verifier确认unit仅8个批准`E0425`、16条integration逐条`running 1 test`且严格`12 RED / 4 GREEN`、两条superseding exact signature、scope self-test/exact-3/fmt/diff/全部zero-diff与hygiene均PASS；physics/scope blobs未变化；Chrome `NOT RUN / BROWSER PENDING` |
-| - | S5-SOLVER-3 | `PENDING` | `PENDING / NOT STARTED` | - | 继承§9C exact-6 physics implementation，只消费RED-3 superseding tests且不得修改tests；Chrome `NOT RUN / BROWSER PENDING` |
+| 2026-07-15 | S5-BEHAVIOR-RED-3 | `07b2bd6cd3ff4b80d1b6c124a4752e36e8e8d88f` | test/spec reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier首轮因stale progress review状态以`0 High / 1 Medium / 0 Low`裁决`FAIL`；status-only remediation后re-verifier=`0 High / 0 Medium / 0 Low`，结论`S5-BEHAVIOR-RED-3 RE-VERIFIER PASS`；已commit | `6ffa1e3f29e902b68708b62e11d5fae160db97ec` | exact-3；首轮及re-verifier确认unit仅8个批准`E0425`、16条integration逐条`running 1 test`且严格`12 RED / 4 GREEN`、两条superseding exact signature、scope self-test/exact-3/fmt/diff/全部zero-diff与hygiene均PASS；physics/scope blobs未变化；Chrome `NOT RUN / BROWSER PENDING` |
+| 2026-07-15 | S5-SOLVER-3 | `6ffa1e3f29e902b68708b62e11d5fae160db97ec` | `STOPPED / TEST CONTRACT CONFLICT`；independent reviewer=`1 High / 1 Medium / 0 Low`、`CONFLICT CONFIRMED` | `NOT COMMITTED` | unit=`8/8`、16 exact=`15 GREEN / 1 FAIL`；唯一FAIL full-pose error=`0.011336`，row/warning=`1/0`、drift=`0.001104`；contact residual translation/depth=`0.00194835861/0.0487089641`、input contact/body=`1/1`，RED-3 oracle遗漏authoritative current mutation；另有`joints.rs` fmt hygiene FAIL；production patch仅留主worktree；Chrome `NOT RUN / BROWSER PENDING` |
+| 2026-07-15 | S5-REPLAN-2 | `6ffa1e3f29e902b68708b62e11d5fae160db97ec` | docs worker=`S5-REPLAN-2 WORKER COMPLETE`；independent reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-2 VERIFIER PASS` | `PENDING` | exact-1 living spec；保持ADR-S5-5/design不变，记录new chain、WorldAnchor shadow oracle、RED-4/SOLVER-4 scopes/gates/STOP与worker receipt；review/verifier确认exact-1/zero-diff、shadow observable fields、new chain/PRE_V、STOP/progress与全部docs gates均无finding；不声称future nodes已验证；commit待supervisor；Chrome `NOT RUN / BROWSER PENDING` |
+| - | S5-BEHAVIOR-RED-4 | `PENDING` | `PENDING / NOT STARTED` | - | exact-3；两条CCD full-pose WorldAnchor shadow oracle与scope state transition；必须先证明clean `12 RED / 4 GREEN` |
+| - | S5-SOLVER-4 | `PENDING` | `PENDING / NOT STARTED` | - | required exact-6；只消费committed RED-4并复用accepted production patch；unit 8/8、integration 16/16、broad/fmt/scope全GREEN后才可commit |
 | - | S5-LAB-RED | `PENDING` | 未开始 | - | 必须单独提交cross-layer contracts |
 | - | S5-LAB | `PENDING` | 未开始 | - | CLI candidate commit后external browser receipt未回填则`BROWSER PENDING` |
 | - | S5-V | `PENDING` | 未开始 | - | CLI三角色只读；独立external browser receipt另行回填 |
@@ -1764,13 +2133,20 @@ RED receipt额外记录 failure signature，并区分：
 - ADR-S5-5已完成用户批准、S5-REPLAN与RED-2 acceptance-as-code；S5-SOLVER-2 production
   behavior本身已使new latest oracle GREEN，但两条旧absolute-angle oracle与accepted full post
   corrected-eval合同互斥，因此该node是`STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`，
-  不是production capability失败或可续写的in-progress node。当前只允许RED-3 -> SOLVER-3。
-- RED-3两条superseding oracle使用test-side同一symmetric 2x2公式，仍可能与production helper共享
-  数学盲区；negative no-post/double-advance candidates与完整pose error已通过test/spec reviewer
-  和independent re-verifier。RED-3 gate已闭合，但S5-SOLVER-3仍为`PENDING / NOT STARTED`，不得
-  在本status-only回填中提前声称implementation开始或GREEN。
+  不是production capability失败或可续写的in-progress node。
+- RED-3修正了absolute-angle问题，但其中一条full-pose oracle又遗漏contact residual correction
+  对authoritative current的真实mutation。S5-SOLVER-3因此同样是
+  `STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`；三个历史solver node都不得进入
+  current PRE_V chain或被改写为PASS。
+- WorldAnchor shadow是可证伪的test-side推荐路径，不是已验证事实；S5-REPLAN-2 docs reviewer/
+  verifier PASS只确认该docs合同闭合，不把future behavior升级为事实。RED-4仍可能发现shadow与
+  subject的contact facts不等价、clean baseline分类漂移或negative candidate不具区分力；任一
+  情况都必须STOP并回到spec，不得增加production test开关或放宽assert。
+- S5-SOLVER-3的dirty `pipeline/joints.rs`尚有rustfmt diff。S5-SOLVER-4必须在exact-6内使
+  `cargo fmt --all --check`真正GREEN，不能以physics gate为由豁免独立hygiene失败。
 - post-contact reconciliation增加一次Revolute 2x2 pose evaluation；当前无性能阈值变化，
-  但S5-SOLVER-3 verifier仍需报告warning、row/stats/no-repeat与determinism事实。
+  但S5-SOLVER-4 verifier仍需报告warning、row/stats/no-repeat、contact residual、`P_contact`与
+  determinism事实。
 - singular row fail closed 会跳过该phase；这是防止world污染，不是约束成功保证。
 - 新 `ScenarioId` variant 对仓库外 exhaustive match 有source影响，但本次不改变其
   attribute policy。
