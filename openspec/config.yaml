@@ -1,0 +1,27 @@
+schema: spec-driven
+
+context: |
+  Picea 是 Rust workspace。当前 change 只续作 handoff section 5 的
+  S5-REPLAN-3 -> S5-BEHAVIOR-RED-5 -> S5-SOLVER-5。
+  领域合同与历史证据见
+  docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md；
+  导入基线 HEAD=29bafce59a0913be7b4d37055ab57ed5e5233116，living-spec
+  blob=6bc4dc8ff9f506c5e13bb048afd1da6b0db3b56f，design
+  blob=f945b0f530191b4c1de0921aa930146210e723ce。
+  本 change 的任务 checkbox 与完成进度只以 openspec tasks.md 为准。living spec
+  只追加冻结合同、immutable node Start HEAD/commit receipt 和可执行验收证据；
+  scope verifier只把它当身份/证据注册表，不从中推导任务完成度。
+  所有 Cargo/Git/Rust 验证使用 rtk proxy；先 RED 后实现；不得修改 contact solver、
+  CCD、integrate.rs、public API/schema、既有 joint kinds 或批准阈值。
+
+rules:
+  proposal:
+    - 区分已验证事实、推断和未知项
+    - 明确不改变冻结的 Revolute 架构与 public surface
+  tasks:
+    - 严格保持 REPLAN-3、BEHAVIOR-RED-5、SOLVER-5 的顺序
+    - 每个节点包含 scope、review、verify 与 receipt 更新任务
+  specs:
+    - 只写耐久的可观察行为，不复制历史 receipt 或任务进度
+  design:
+    - 冻结既有 2x2、COM、phase、wake 与 ADR-S5-1 到 ADR-S5-5
