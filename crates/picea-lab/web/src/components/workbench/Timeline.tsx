@@ -8,6 +8,7 @@ import {
   diagnosticMarkerLabel,
   diagnosticSeverityLabel,
   diagnosticSourceLabel,
+  dynamicValueLabel,
   entityLabel,
   layerLabel,
   missingEvidenceLabel,
@@ -438,6 +439,7 @@ export function BottomTimeline({
           sessionId={sessionId}
           runId={runId}
           frameIndex={frameIndex}
+          frame={frame}
           selectedEntity={selectedEntity}
           layers={layers}
           canvasView={canvasView}
@@ -1746,6 +1748,7 @@ function EvidencePanel({
   sessionId,
   runId,
   frameIndex,
+  frame,
   selectedEntity,
   layers,
   canvasView,
@@ -1759,6 +1762,7 @@ function EvidencePanel({
   sessionId: string | null
   runId: string | null
   frameIndex: number
+  frame: FrameRecord | undefined
   selectedEntity: SelectedEntity | null
   layers: LayerState
   canvasView: CanvasDebugView | null
@@ -1788,8 +1792,17 @@ function EvidencePanel({
   const layerList = enabledLayerKeys(layers)
     .map((key) => layerLabel(locale, key))
     .join(", ")
+  const selectedJoint =
+    selectedEntity?.kind === "joint"
+      ? frame?.snapshot.joints.find((joint) => joint.handle === selectedEntity.id)
+      : null
   const selectionLabel = selectedEntity
-    ? entityLabel(locale, selectedEntity.kind, selectedEntity.id)
+    ? [
+        entityLabel(locale, selectedEntity.kind, selectedEntity.id),
+        selectedJoint ? dynamicValueLabel(locale, selectedJoint.kind) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
     : "-"
   return (
     <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">

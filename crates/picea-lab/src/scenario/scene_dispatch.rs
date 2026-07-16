@@ -9,6 +9,7 @@ use super::fixture::{
 use super::scene_lattice::{lattice_grid_fixture, resolve_lattice_runtime_parts};
 use super::scene_newton_cradle::{newton_cradle_world, resolve_newton_cradle_runtime_parts};
 use super::scene_rect_stack::{rect_stack_fixture, resolve_rect_stack_runtime_parts};
+use super::scene_revolute::revolute_pendulum_fixture;
 use super::scene_static::{
     compound_provenance_fixture, concave_decomposition_fixture, falling_box_contact_fixture,
     stack_stability_tower_fixture,
@@ -65,6 +66,9 @@ pub(crate) fn build_scenario(
         ScenarioId::NewtonCradle => {
             let (params, _, _) = resolve_newton_cradle_runtime_parts(&overrides.scene_params)?;
             world = newton_cradle_world(gravity, params)?;
+        }
+        ScenarioId::RevolutePendulum => {
+            world = instantiate_scene_fixture(&revolute_pendulum_fixture())?;
         }
         ScenarioId::JointAnchor => {
             world = World::new(WorldDesc {

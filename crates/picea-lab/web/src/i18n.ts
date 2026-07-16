@@ -1056,6 +1056,10 @@ const scenarioMessages: Record<string, Record<Locale, Pick<ScenarioDescriptor, "
     "zh-CN": { name: "牛顿摆", description: "五球悬挂碰撞场景，用于观察摆绳约束、接触传递和长时间动能包络。" },
     "en-US": { name: "Newton cradle", description: "Five suspended bouncy balls for pendulum constraints, contact transfer, and long-window kinetic retention." },
   },
+  revolute_pendulum: {
+    "zh-CN": { name: "旋转铰链摆", description: "静态枢轴与动态摆体组成的 pin-only 铰链，用于观察锚点重合与自由相对旋转。" },
+    "en-US": { name: "Revolute pendulum", description: "A static/dynamic pin-only hinge for observing coincident anchors and free relative rotation." },
+  },
   joint_anchor: {
     "zh-CN": { name: "世界锚点关节", description: "带约束线的离线关节锚点预览。" },
     "en-US": { name: "World anchor joint", description: "Offline joint anchor preview with a constraint line." },
@@ -1112,6 +1116,10 @@ const scenarioWatchForMessages: Record<string, Record<Locale, string>> = {
   newton_cradle: {
     "zh-CN": "单球摆入,另一端单球等高摆出;长窗口动能不衰减(恢复系数 1、零摩擦)。",
     "en-US": "One ball swings in, exactly one swings out to equal height; kinetic energy holds long-term (restitution 1, zero friction).",
+  },
+  revolute_pendulum: {
+    "zh-CN": "摆体绕重合锚点自由旋转；两个世界锚点应持续重合，关节行恒为 1。",
+    "en-US": "The pendulum rotates freely around coincident anchors; both world anchors stay aligned and the joint row count remains 1.",
   },
   joint_anchor: {
     "zh-CN": "刚体绕固定世界锚点受约束运动,约束距离不被拉长;开轨迹层看轨道收敛。",
@@ -1215,6 +1223,7 @@ const dynamicValueLabels: Record<Locale, Record<string, string>> = {
     query_only: "仅查询",
     distance: "距离关节",
     world_anchor: "世界锚点",
+    revolute: "旋转铰链",
     single_point: "单点",
     clipped: "裁剪",
     duplicate_reduced: "去重归约",
@@ -1285,6 +1294,7 @@ const dynamicValueLabels: Record<Locale, Record<string, string>> = {
     segment: "segment",
     distance: "distance joint",
     world_anchor: "world anchor",
+    revolute: "revolute joint",
     single_point: "single point",
     clipped: "clipped",
     duplicate_reduced: "duplicate reduced",

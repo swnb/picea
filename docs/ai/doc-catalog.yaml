@@ -25,7 +25,7 @@ documents:
   owner: ai-context
   applies_to: [all, triage, routing, progressive-disclosure]
   keywords: [route, question-type, current-facts, status, deprecated, frozen]
-  last_reviewed: 2026-07-14
+  last_reviewed: 2026-07-16
 - path: docs/ai/repo-map.md
   title: Repo Map
   kind: module
@@ -34,7 +34,7 @@ documents:
   owner: ai-context
   applies_to: [architecture, modules, implementation, validation]
   keywords: [world, pipeline, solver, query, picea-lab, picea-lab-web, macro-tools]
-  last_reviewed: 2026-07-14
+  last_reviewed: 2026-07-16
 - path: docs/ai/doc-catalog.yaml
   title: AI Document Catalog
   kind: module
@@ -43,7 +43,7 @@ documents:
   owner: ai-context
   applies_to: [routing, docs, freshness, authority]
   keywords: [catalog, metadata, authority, status, freshness, validation]
-  last_reviewed: 2026-07-14
+  last_reviewed: 2026-07-16
 - path: docs/ai/evals.md
   title: Picea AI Evals
   kind: eval
@@ -533,9 +533,18 @@ documents:
   authority: high
   status: active
   owner: picea-lab
-  applies_to: [lab, scenarios, fixtures, scene-schema, authoring, runtime-config]
-  keywords: [scenario, scene-recipe-fixture, schema-version, parameter-schema, fixture, scene-dispatch]
-  last_reviewed: 2026-07-14
+  applies_to: [lab, scenarios, fixtures, scene-schema, authoring, runtime-config, revolute]
+  keywords: [scenario, scene-recipe-fixture, schema-version, parameter-schema, fixture, scene-dispatch, revolute-pendulum]
+  last_reviewed: 2026-07-16
+- path: crates/picea-lab/src/scenario/scene_revolute.rs
+  title: Revolute Pendulum Lab Scenario
+  kind: module
+  authority: high
+  status: active
+  owner: picea-lab
+  applies_to: [lab, scenarios, fixtures, revolute, browser-acceptance]
+  keywords: [revolute-pendulum, pin-only, joint-row, world-anchor, schema-v1]
+  last_reviewed: 2026-07-16
 - path: crates/picea-lab/src/artifact.rs
   title: Picea Lab Artifact Runner
   kind: module

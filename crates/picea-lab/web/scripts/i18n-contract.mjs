@@ -344,6 +344,8 @@ assert.equal(sourceLabel("en-US", "artifact"), "generate artifact + replay");
 assert.equal(sourceLabel("en-US", "live"), "live session");
 assert.equal(sourceLabel("zh-CN", "artifact"), "生成产物并回放");
 assert.equal(sourceLabel("zh-CN", "live"), "实时会话");
+assert.equal(dynamicValueLabel("zh-CN", "revolute"), "旋转铰链");
+assert.equal(dynamicValueLabel("en-US", "revolute"), "revolute joint");
 assert.equal(layerLabel("zh-CN", "contacts"), "接触点");
 assert.equal(layerLabel("zh-CN", "provenance"), "来源");
 assert.equal(layerLabel("zh-CN", "stackStability"), "稳定性叠加");
@@ -357,6 +359,7 @@ assert.equal(messages["zh-CN"]["evidence.trajectory"], "轨迹（Web 派生）")
 assert.equal(messages["zh-CN"]["evidence.stack"], "堆叠（Web 派生）");
 assert.equal(messages["zh-CN"]["evidence.lattice"], "格点代理（非软体）");
 assert.equal(scenarioGroupForId("falling_box_contact"), "basics");
+assert.equal(scenarioGroupForId("revolute_pendulum"), "basics");
 assert.equal(scenarioGroupForId("stack_stability_tower"), "stack");
 assert.equal(scenarioGroupForId("ccd_fast_convex_walls"), "ccd");
 assert.equal(scenarioGroupForId("compound_provenance"), "compound");
@@ -426,6 +429,19 @@ for (const locale of supportedLocales) {
     );
   }
 }
+assertLocalizedScenario(
+  "zh-CN",
+  {
+    id: "revolute_pendulum",
+    name: "Revolute pendulum",
+    description: "A pin-only hinge with free relative rotation.",
+  },
+  {
+    id: "revolute_pendulum",
+    name: "旋转铰链摆",
+    description: "静态枢轴与动态摆体组成的 pin-only 铰链，用于观察锚点重合与自由相对旋转。",
+  },
+);
 assertLocalizedScenario(
   "zh-CN",
   {
@@ -508,7 +524,7 @@ assertLocalizedScenario(
 // --- Scenario watch-for copy: every backend scenario explains what to watch ---
 const watchForScenarioIds = [
   "falling_box_contact", "stack_4", "stack_stability_tower", "matrix_stack",
-  "matrix_stack_aligned", "newton_cradle", "joint_anchor", "lattice_grid",
+  "matrix_stack_aligned", "newton_cradle", "revolute_pendulum", "joint_anchor", "lattice_grid",
   "broadphase_sparse", "sat_polygon", "compound_provenance", "concave_decomposition",
   "ccd_fast_circle_wall", "ccd_fast_convex_walls", "ccd_dynamic_convex_pair",
   "ccd_dynamic_compound_wall",

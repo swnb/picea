@@ -34,6 +34,124 @@ const FEATURE_CHURN_LOCAL_ANCHOR_DRIFT_THRESHOLD: f32 = 0.05;
 const SOURCE_ROW_NORMAL_DOT_DRY_RUN_THRESHOLD: f32 = 0.98;
 const SOURCE_ROW_PSEUDO_SUPPORT_SKIN: f32 = 0.01;
 
+#[test]
+fn revolute_pendulum_artifact_exposes_authoritative_joint_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let store = ArtifactStore::new(temp.path().join("runs"));
+    let scenario_id: ScenarioId = "revolute_pendulum"
+        .parse()
+        .expect("revolute_pendulum should be a builtin scenario");
+
+    let run_once = |run_id: &str| {
+        run_scenario(
+            &store,
+            RunConfig {
+                scenario_id,
+                frame_count: 240,
+                run_id: Some(run_id.to_owned()),
+                ..RunConfig::default()
+            },
+        )
+        .expect("revolute pendulum run should write artifacts")
+    };
+    let first_run = run_once("revolute-pendulum-first");
+    let second_run = run_once("revolute-pendulum-second");
+
+    assert_eq!(first_run.frames.len(), 240);
+    assert_eq!(first_run.frames.len(), second_run.frames.len());
+    assert_eq!(
+        first_run.manifest.scenario_id.to_string(),
+        "revolute_pendulum"
+    );
+    assert_eq!(
+        first_run
+            .manifest
+            .effective_runtime_config
+            .scene_params
+            .len(),
+        0
+    );
+
+    for (frame, repeated_frame) in first_run.frames.iter().zip(&second_run.frames) {
+        assert_eq!(
+            frame.state_hash, repeated_frame.state_hash,
+            "every revolute pendulum frame must be deterministic"
+        );
+        let revolute_joints = frame
+            .snapshot
+            .joints
+            .iter()
+            .filter(|joint| joint.kind == picea::debug::DebugJointKind::Revolute)
+            .collect::<Vec<_>>();
+        assert_eq!(revolute_joints.len(), 1);
+        let joint = revolute_joints[0];
+        assert_eq!(joint.bodies.len(), 2);
+        assert_eq!(joint.anchors.len(), 2);
+        assert!(joint
+            .anchors
+            .iter()
+            .all(|anchor| { anchor.x().is_finite() && anchor.y().is_finite() }));
+        let pivot_error = (joint.anchors[0] - joint.anchors[1]).length();
+        assert!(
+            pivot_error <= 1.0e-3,
+            "revolute pendulum pivot should remain coincident, got {pivot_error}"
+        );
+        assert_eq!(frame.snapshot.stats.active_joint_count, 1);
+        assert_eq!(frame.snapshot.stats.joint_row_count, 1);
+        assert!(frame.snapshot.contacts.is_empty());
+        for body_handle in &joint.bodies {
+            let body = frame
+                .snapshot
+                .bodies
+                .iter()
+                .find(|body| &body.handle == body_handle)
+                .expect("both revolute endpoints should remain exported");
+            assert!(body.transform.translation.x().is_finite());
+            assert!(body.transform.translation.y().is_finite());
+            assert!(body.transform.rotation.is_finite());
+            assert!(body.linear_velocity.x().is_finite());
+            assert!(body.linear_velocity.y().is_finite());
+            assert!(body.angular_velocity.is_finite());
+        }
+    }
+
+    let dynamic_handle = first_run.frames[0].snapshot.joints[0].bodies[1];
+    let initial_angle = first_run.frames[0]
+        .snapshot
+        .bodies
+        .iter()
+        .find(|body| body.handle == dynamic_handle)
+        .expect("dynamic revolute endpoint should be exported")
+        .transform
+        .rotation;
+    let final_angle = first_run.frames[239]
+        .snapshot
+        .bodies
+        .iter()
+        .find(|body| body.handle == dynamic_handle)
+        .expect("dynamic revolute endpoint should remain exported")
+        .transform
+        .rotation;
+    assert!(
+        (final_angle - initial_angle).abs() >= 0.25,
+        "pin-only joint must leave relative rotation visibly free: initial={initial_angle}, final={final_angle}"
+    );
+}
+
+#[test]
+fn revolute_debug_kind_old_consumer_rejects_unknown_variant() {
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum OldDebugJointKind {
+        Distance,
+        WorldAnchor,
+    }
+
+    let error = serde_json::from_str::<OldDebugJointKind>(r#""revolute""#)
+        .expect_err("old closed debug consumer must reject revolute");
+    assert!(error.to_string().contains("unknown variant `revolute`"));
+}
+
 #[derive(Debug)]
 struct MatrixStackStressReport {
     final_state_hash: String,

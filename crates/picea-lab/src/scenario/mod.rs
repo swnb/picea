@@ -23,6 +23,7 @@ mod scene_lattice;
 mod scene_newton_cradle;
 mod scene_params;
 mod scene_rect_stack;
+mod scene_revolute;
 mod scene_static;
 
 // Kept to preserve the pre-split `crate::scenario::*` path set; no current call site
@@ -63,6 +64,7 @@ pub enum ScenarioId {
     MatrixStack,
     MatrixStackAligned,
     NewtonCradle,
+    RevolutePendulum,
     JointAnchor,
     LatticeGrid,
     BroadphaseSparse,
@@ -76,13 +78,14 @@ pub enum ScenarioId {
 }
 
 impl ScenarioId {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::FallingBoxContact,
         Self::Stack4,
         Self::StackStabilityTower,
         Self::MatrixStack,
         Self::MatrixStackAligned,
         Self::NewtonCradle,
+        Self::RevolutePendulum,
         Self::JointAnchor,
         Self::LatticeGrid,
         Self::BroadphaseSparse,
@@ -103,6 +106,7 @@ impl ScenarioId {
             Self::MatrixStack => "matrix_stack",
             Self::MatrixStackAligned => "matrix_stack_aligned",
             Self::NewtonCradle => "newton_cradle",
+            Self::RevolutePendulum => "revolute_pendulum",
             Self::JointAnchor => "joint_anchor",
             Self::LatticeGrid => "lattice_grid",
             Self::BroadphaseSparse => "broadphase_sparse",
@@ -134,6 +138,7 @@ impl FromStr for ScenarioId {
             "matrix_stack" => Ok(Self::MatrixStack),
             "matrix_stack_aligned" => Ok(Self::MatrixStackAligned),
             "newton_cradle" => Ok(Self::NewtonCradle),
+            "revolute_pendulum" => Ok(Self::RevolutePendulum),
             "joint_anchor" => Ok(Self::JointAnchor),
             "lattice_grid" => Ok(Self::LatticeGrid),
             "broadphase_sparse" => Ok(Self::BroadphaseSparse),
@@ -229,6 +234,7 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 ScenarioId::MatrixStack => "Matrix stack 8x6",
                 ScenarioId::MatrixStackAligned => "Aligned matrix stack 4x3",
                 ScenarioId::NewtonCradle => "Newton cradle",
+                ScenarioId::RevolutePendulum => "Revolute pendulum",
                 ScenarioId::JointAnchor => "World anchor joint",
                 ScenarioId::LatticeGrid => "Rigid-body lattice grid proxy",
                 ScenarioId::BroadphaseSparse => "Sparse broadphase",
@@ -254,6 +260,9 @@ pub fn list_scenarios() -> Vec<ScenarioDescriptor> {
                 }
                 ScenarioId::NewtonCradle => {
                     "Five suspended bouncy balls with a long-window kinetic-energy retention check."
+                }
+                ScenarioId::RevolutePendulum => {
+                    "A deterministic static/dynamic pin-only hinge that preserves its pivot while leaving relative rotation free."
                 }
                 ScenarioId::JointAnchor => "A body constrained toward a fixed world-space anchor.",
                 ScenarioId::LatticeGrid => {
@@ -300,6 +309,7 @@ pub fn default_runtime_config_for_scenario(scenario_id: ScenarioId) -> ScenarioR
             let (params, step, substeps_per_frame) = default_newton_cradle_runtime_parts();
             newton_cradle_runtime_config(params, step, substeps_per_frame)
         }
+        ScenarioId::RevolutePendulum => scene_revolute::revolute_pendulum_runtime_config(),
         ScenarioId::LatticeGrid => {
             let (params, step, substeps_per_frame) = default_lattice_runtime_parts();
             lattice_runtime_config(params, step, substeps_per_frame)

@@ -60,6 +60,33 @@ const worldCanvasSource = fs.readFileSync(
   new URL("../src/components/workbench/WorldCanvas.tsx", import.meta.url),
   "utf8",
 );
+const i18nSource = fs.readFileSync(new URL("../src/i18n.ts", import.meta.url), "utf8");
+
+assert.match(
+  appSource,
+  /kind:\s*"distance"\s*\|\s*"world_anchor"\s*\|\s*"revolute"/,
+  "Web debug joint types must explicitly accept authoritative revolute facts.",
+);
+assert.match(
+  i18nSource,
+  /revolute:\s*"旋转铰链"[\s\S]*revolute:\s*"revolute joint"/,
+  "Both locales must explicitly label revolute joints instead of falling back to a raw kind.",
+);
+assert.match(
+  appSource,
+  /dynamicValueLabel\(locale,\s*joint\.kind\)/,
+  "Scene hierarchy must render the explicit revolute label from Rust joint facts.",
+);
+assert.match(
+  appSource,
+  /selected\.entity\.anchors\.map/,
+  "Inspector must render both authoritative world anchors for a selected revolute joint.",
+);
+assert.match(
+  timelineSource,
+  /selectedEntity\?\.kind === "joint"[\s\S]*frame\?\.snapshot\.joints\.find[\s\S]*dynamicValueLabel\(locale, selectedJoint\.kind\)[\s\S]*join\(" · "\)/,
+  "Timeline evidence must identify a selected joint by its explicit localized kind.",
+);
 
 assert.doesNotMatch(
   appSource,

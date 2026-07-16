@@ -42,6 +42,7 @@ async fn server_exposes_scenarios_sessions_artifacts_and_sse_events() {
             "matrix_stack",
             "matrix_stack_aligned",
             "newton_cradle",
+            "revolute_pendulum",
             "joint_anchor",
             "lattice_grid",
             "broadphase_sparse",
@@ -770,6 +771,71 @@ async fn live_session_step_detail_full_keeps_existing_latest_frame_payload() {
         detailed_step["live_frame_summary"]["kind"], "summary",
         "detail=full should still surface the additive live summary metadata for the web hot path",
     );
+}
+
+#[tokio::test]
+async fn revolute_pendulum_catalog_and_live_frame_preserve_authoritative_facts() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let state = LabServerState::new(ArtifactStore::new(temp.path().join("runs")));
+    let app = app(state);
+
+    let scenarios = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/scenarios")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(scenarios.status(), StatusCode::OK);
+    let scenarios_body = json_body(scenarios).await;
+    let descriptor = scenarios_body["scenarios"]
+        .as_array()
+        .expect("scenarios should be an array")
+        .iter()
+        .find(|scenario| scenario["id"] == "revolute_pendulum")
+        .expect("server catalog should expose revolute_pendulum");
+    assert!(descriptor["name"]
+        .as_str()
+        .expect("scenario name")
+        .to_ascii_lowercase()
+        .contains("revolute"));
+    let description = descriptor["description"]
+        .as_str()
+        .expect("scenario description")
+        .to_ascii_lowercase();
+    assert!(description.contains("pin-only"));
+    assert!(description.contains("free") && description.contains("rotation"));
+    assert_eq!(descriptor["parameter_schema"], json!([]));
+
+    let created = create_live_session(&app, "revolute_pendulum", 240).await;
+    let session_id = created["session"]["id"]
+        .as_str()
+        .expect("live session id")
+        .to_owned();
+    let stepped = control_session(&app, &session_id, "step").await;
+    let frame = &stepped["session"]["latest_frame"];
+    assert_eq!(frame["frame_index"], 0);
+    assert_eq!(frame["snapshot"]["stats"]["active_joint_count"], 1);
+    assert_eq!(frame["snapshot"]["stats"]["joint_row_count"], 1);
+    let joints = frame["snapshot"]["joints"]
+        .as_array()
+        .expect("debug joints should be an array");
+    assert_eq!(joints.len(), 1);
+    assert_eq!(joints[0]["kind"], "revolute");
+    assert_eq!(
+        joints[0]["bodies"].as_array().expect("joint bodies").len(),
+        2
+    );
+    let anchors = joints[0]["anchors"].as_array().expect("joint anchors");
+    assert_eq!(anchors.len(), 2);
+    for anchor in anchors {
+        assert!(anchor["x"].as_f64().expect("finite anchor x").is_finite());
+        assert!(anchor["y"].as_f64().expect("finite anchor y").is_finite());
+    }
 }
 
 #[tokio::test]
