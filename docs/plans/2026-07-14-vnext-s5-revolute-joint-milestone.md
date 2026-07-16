@@ -12,7 +12,9 @@ S5-SOLVER-4 immutable Start HEAD=`29bafce59a0913be7b4d37055ab57ed5e5233116`；un
 未提交production。用户本轮已批准继续
 `S5-REPLAN-3 -> S5-BEHAVIOR-RED-5 -> S5-SOLVER-5`；S5-REPLAN-3以
 `29bafce59a0913be7b4d37055ab57ed5e5233116`为immutable Start HEAD，review/verifier gates已闭合；
-已commit为`195215119a3544e71849f21cb7bdaf245188de13`，当前执行S5-BEHAVIOR-RED-5。
+detached source commit=`195215119a3544e71849f21cb7bdaf245188de13`，main cherry-pick=
+`97839aba5a1cff168e6a2e857f02ab252226cad4`；S5-BEHAVIOR-RED-5 main commit=
+`ec1493a7652b0e6a6b72956c17f4ab000e93bb39`，当前执行S5-SOLVER-5。
 新链唯一task checkbox/完成进度来源为
 `openspec/changes/complete-s5-revolute-solver-5/tasks.md`；本文只保留冻结合同与
 identity/evidence receipt。Chrome `NOT RUN / BROWSER PENDING`
@@ -2225,10 +2227,14 @@ witness前bit-identical、production对Start HEAD zero-diff。Scope self-test/ex
 strict validate、apply=`12/24`、diff/outside/cached/untracked gates均PASS。Final reviewer与independent
 re-verifier均给出`0 High / 0 Medium / 0 Low`、`PASS`；唯一初始Medium（apply进度与§17 stale
 status）已通过status-only remediation闭合，复验确认仍仅exact-5 dirty且未stage/commit。
+Supervisor随后提交detached source=`73e0a19867c8a62efbdcd26c40e3b1704467b4aa`，并以main
+cherry-pick=`ec1493a7652b0e6a6b72956c17f4ab000e93bb39`集成；集成前后五个保留production
+blob逐项不变。
 
 ## 9K. S5-SOLVER-5：消费committed RED-5
 
-Immutable Start HEAD只在S5-BEHAVIOR-RED-5提交后由supervisor写入§16；当前为`PENDING`。
+Immutable Start HEAD=`ec1493a7652b0e6a6b72956c17f4ab000e93bb39`，即实际main RED-5
+commit；由supervisor在production续作前写入§16。
 Required exact 7：
 
 ```text
@@ -2244,6 +2250,15 @@ openspec/changes/complete-s5-revolute-solver-5/tasks.md
 Reviewer已触发唯一optional path=`crates/picea/src/pipeline/joints/tests.rs`，只允许新增sub-EPSILON
 unit locks。SOLVER-5不得修改committed integration/scope/design/OpenSpec其他artifacts、contact/
 narrowphase/CCD/`integrate.rs`、lab/Web、API/schema、StepConfig字段/default或批准阈值。
+
+2026-07-16 strict Clippy继续暴露两个与solver behavior无关的committed baseline lint；用户在看到
+每次原始失败证据后，分别明确授权两个bounded hygiene amendments：
+`crates/picea/src/joint.rs`只把字段逐项等价的手写`Default`改为`#[derive(Default)]`，
+`crates/picea/tests/physics_realism_acceptance.rs`只给既有8参数oracle helper增加局部
+`#[allow(clippy::too_many_arguments)]`与意图注释，不改函数、调用、断言、阈值或runtime行为。
+冻结scope verifier保持zero-diff并如实把这两条报告为unexpected；本candidate以用户批准后的
+supplemental exact-10 binary allowlist取代原exact-8结论，其他committed tests/scope/design仍执行
+zero-diff。该一次性amendment不扩大到其他API/acceptance修改。
 
 ### 9K.1 最小production修复
 
@@ -2309,6 +2324,27 @@ supervisor执行不属于checkbox的外部closeout动作，创建单一
 `feat: reconcile revolute constraints after contacts` commit。Commit后只读复核`diff-tree`、HEAD、
 clean worktree、OpenSpec 4/4、strict validate与`instructions apply=24/24`；最终SHA只写外部报告，
 不amend、不新增receipt commit、不archive/sync/deploy/push/merge/PR，也不进入S5-LAB-RED。
+
+### 9K.3 Final candidate receipt（2026-07-16）
+
+- Start HEAD保持`ec1493a7652b0e6a6b72956c17f4ab000e93bb39`；final candidate实际exact-10为
+  required exact-7、reviewer-triggered unit path及上述两个用户授权hygiene paths。冻结scope
+  verifier按原合同exit=`1`且unexpected恰为这两条；supplemental exact-10为
+  `missing=0 / unexpected=0 / PASS`，scope script与其余forbidden paths zero-diff。
+- 既有8条unit和新增3条sub-EPSILON unit均逐条`running 1 test`、结果`11/11`；16条integration
+  exact均逐条`running 1 test`、结果`16/16`。两条CCD均
+  `pose_effect_equivalent=true`、row/warning=`1/0`、pose error=`0`、drift分别
+  `0.001104/0.000917`；Distance contact-wake projection enabled/disabled径向速度=`0/2`。
+- 定向门结果：StepConfig=`1+1`、island=`3`、stack_4=`3`、world-step=`19`、core Revolute API=`6`
+  （singular checkpoint row=`0`）、lifecycle wake=`6`，全部PASS。Broader结果：`picea --lib`
+  `139/139`、`picea --tests`全部targets、examples no-run、bench no-run、workspace all-targets、
+  workspace check、strict Clippy与fmt全部exit=`0`。
+- OpenSpec status=`4/4`、strict validate PASS；scope self-test、diff-check、amended forbidden
+  zero-diff、cached/untracked hygiene均PASS。分离执行的solver spec review、findings-first code
+  review与fresh verifier结论均为`0 High / 0 Medium / 0 Low`；未发现panic/NaN/stale handle、
+  duplicate stats/rows、existing-kind行为或actual-change wake问题。
+- repo candidate保持`COMMIT PENDING`且不记录自引用SHA；browser/lab未运行且不属于本change，
+  `S5-LAB-RED`及后续链保持`PENDING / NOT AUTHORIZED`。
 
 ## 10. S5-LAB-RED：跨层 acceptance-as-code
 
@@ -2668,9 +2704,9 @@ RED receipt额外记录 failure signature，并区分：
 | 2026-07-15 | S5-REPLAN-2 | `6ffa1e3f29e902b68708b62e11d5fae160db97ec` | docs worker=`S5-REPLAN-2 WORKER COMPLETE`；independent reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-2 VERIFIER PASS`；已commit | `4e8bd4616e1f43e330d75212a74c459e8e693ca7` | exact-1 living spec；保持ADR-S5-5/design不变，记录new chain、WorldAnchor shadow oracle、RED-4/SOLVER-4 scopes/gates/STOP与worker receipt；review/verifier确认exact-1/zero-diff、shadow observable fields、new chain/PRE_V、STOP/progress与全部docs gates均无finding；不声称future nodes已验证；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-BEHAVIOR-RED-4 | `4e8bd4616e1f43e330d75212a74c459e8e693ca7` | 首轮reviewer=`0 High / 1 Medium / 0 Low`、裁决`FAIL`；bit-exact float equality bounded remediation已完成；final re-reviewer=`0 High / 0 Medium / 0 Low`、裁决`PASS`；independent verifier=`0 High / 0 Medium / 0 Low`、`S5-BEHAVIOR-RED-4 VERIFIER PASS`；已commit | `29bafce59a0913be7b4d37055ab57ed5e5233116` | exact-3；显式float comparator=`1e-6 * max(1,abs(a),abs(b))`；两条baseline最大delta/tolerance=`0.048708964/0.000001000`与`0.011979997/0.000001000`；unit仅8个批准`E0425`；16条integration逐条`running 1 test`并严格`12 RED / 4 GREEN`；两条WorldAnchor shadow只命中各自批准CONTACT_STATE signature，scope/self-test/fmt/zero-diff/hygiene均PASS；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-SOLVER-4 | `29bafce59a0913be7b4d37055ab57ed5e5233116` | `STOPPED / TEST CONTRACT CONFLICT`；worker命中§15，supervisor fresh复跑同一唯一FAIL；未派reviewer/verifier | `NOT COMMITTED` | exact-6保留accepted production patch；receipt/scope与unit 8/8 PASS；第一条shadow GREEN，第二条因WorldAnchor shadow 1 ULP under-correction导致tangent impulse delta=`0.000020315 > 0.000001`、`contact_equivalent=false`；row/warning=`1/0`、pose error=`0`、drift=`0.000917`；实验已撤销；完整16条/broad未运行，fmt仍FAIL；Chrome `NOT RUN / BROWSER PENDING` |
-| 2026-07-15 | S5-REPLAN-3 | `29bafce59a0913be7b4d37055ab57ed5e5233116` | 首轮independent spec reviewer=`4 High / 4 Medium / 1 Low`、FAIL；bounded remediation后final re-review=`0 High / 0 Medium`、PASS；independent docs verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-3 DOCS VERIFIER PASS`；已commit | `195215119a3544e71849f21cb7bdaf245188de13` | clean detached exact-8；导入living blob=`6bc4dc8ff9f506c5e13bb048afd1da6b0db3b56f`、design baseline blob=`f945b0f530191b4c1de0921aa930146210e723ce`及6个OpenSpec paths；OpenSpec 4/4、strict validate、apply 6/24、YAML/fences/terms/exact-8/outside-zero-diff/main blobs/diff/cached均PASS；commit paths复核exact-8、提交后worktree clean；Chrome `NOT RUN / BROWSER PENDING` |
-| 2026-07-15 | S5-BEHAVIOR-RED-5 | `195215119a3544e71849f21cb7bdaf245188de13` | worker完成；final reviewer与independent re-verifier均=`0 High / 0 Medium / 0 Low`、`PASS`；commit gate已解锁 | `PENDING` | exact-5；clean unit仅8个批准`E0425`，16 exact逐条`running 1 test`且`12 RED / 4 GREEN`；两条pose-effect self-test/唯一signature有效；Distance clean=`0/2` GREEN、temporary production witness两条CCD GREEN且Distance enabled=`2`精准FAIL；scope/fmt/OpenSpec apply=`12/24`/diff/hygiene PASS；唯一初始Medium status drift已闭合；未stage/commit |
-| - | S5-SOLVER-5 | `PENDING` | 未开始；等待committed RED-5 | `PENDING` | required exact-7 + reviewer-triggered optional unit path；unit+sub-EPS、16/16、targeted/broad/fmt/scope/OpenSpec gates待执行；完成后本change hard-stop，不进入S5-LAB-RED |
+| 2026-07-15 | S5-REPLAN-3 | `29bafce59a0913be7b4d37055ab57ed5e5233116` | 首轮independent spec reviewer=`4 High / 4 Medium / 1 Low`、FAIL；bounded remediation后final re-review=`0 High / 0 Medium`、PASS；independent docs verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-3 DOCS VERIFIER PASS`；已commit | detached `195215119a3544e71849f21cb7bdaf245188de13`；main `97839aba5a1cff168e6a2e857f02ab252226cad4` | clean detached exact-8；导入living blob=`6bc4dc8ff9f506c5e13bb048afd1da6b0db3b56f`、design baseline blob=`f945b0f530191b4c1de0921aa930146210e723ce`及6个OpenSpec paths；OpenSpec 4/4、strict validate、apply 6/24、YAML/fences/terms/exact-8/outside-zero-diff/main blobs/diff/cached均PASS；commit paths复核exact-8、提交后worktree clean；main cherry-pick后production blobs不变；Chrome `NOT RUN / BROWSER PENDING` |
+| 2026-07-15 | S5-BEHAVIOR-RED-5 | `195215119a3544e71849f21cb7bdaf245188de13` | worker完成；final reviewer与independent re-verifier均=`0 High / 0 Medium / 0 Low`、`PASS`；已commit并集成main | main `ec1493a7652b0e6a6b72956c17f4ab000e93bb39`（detached source `73e0a19867c8a62efbdcd26c40e3b1704467b4aa`） | exact-5；clean unit仅8个批准`E0425`，16 exact逐条`running 1 test`且`12 RED / 4 GREEN`；两条pose-effect self-test/唯一signature有效；Distance clean=`0/2` GREEN、temporary production witness两条CCD GREEN且Distance enabled=`2`精准FAIL；scope/fmt/OpenSpec apply=`14/24`/diff/hygiene PASS；唯一初始Medium status drift已闭合；main cherry-pick后production blobs不变 |
+| 2026-07-16 | S5-SOLVER-5 | `ec1493a7652b0e6a6b72956c17f4ab000e93bb39` | final candidate；separate spec/code review与fresh verifier=`0 High / 0 Medium / 0 Low`；等待supervisor commit | `COMMIT PENDING` | unit=`11/11`、integration exact=`16/16`、targeted/broad/workspace/check/strict Clippy/fmt/OpenSpec均PASS；用户授权两条bounded baseline hygiene amendments，冻结scope如实报exact-2 unexpected，supplemental exact-10 `missing=0/unexpected=0/PASS`且其余forbidden zero-diff；tasks=`24/24`后stage/commit；完成后hard-stop，不进入S5-LAB-RED |
 | - | S5-LAB-RED | `PENDING` | 未开始 | - | 必须单独提交cross-layer contracts |
 | - | S5-LAB | `PENDING` | 未开始 | - | CLI candidate commit后external browser receipt未回填则`BROWSER PENDING` |
 | - | S5-V | `PENDING` | 未开始 | - | CLI三角色只读；独立external browser receipt另行回填 |
@@ -2694,16 +2730,18 @@ RED receipt额外记录 failure signature，并区分：
   pose error=`0`、drift=`0.000917`。因此S5-SOLVER-4已按§15停止为
   `STOPPED / TEST CONTRACT CONFLICT / NOT COMMITTED`；不得增加hidden under-relaxation、修改
   committed tests/contact/narrowphase或放宽assert。当前只走用户批准的REPLAN-3/RED-5/SOLVER-5。
-- 主worktree保留的`pipeline/joints.rs`仍有rustfmt diff。S5-SOLVER-5必须在owned Rust范围内使
-  `cargo fmt --all --check`真正GREEN，不能以physics gate为由豁免独立hygiene失败。
+- 历史`pipeline/joints.rs` rustfmt diff已在S5-SOLVER-5收敛，`cargo fmt --all --check`当前
+  exit=`0`；strict Clippy暴露的两个committed baseline lint已按用户逐项授权的bounded hygiene
+  amendments闭合，原始失败与supplemental exact-10 scope证据保留在§9K.3。
 - RED-5 clean已实跑并确认严格`12 RED / 4 GREEN`，两条pose-effect comparator negative
   control均可证伪；contact-woken Distance边界在clean为GREEN，temporary production witness
   稳定检出旧plan复用（enabled径向速度=`2`）。
 - post-contact reconciliation增加一次Revolute 2x2 pose evaluation；当前无性能阈值变化，
   但S5-SOLVER-5 verifier仍需报告warning、row/stats/no-repeat、contact residual、`P_contact`、
   active-plan rebuild与determinism事实。
-- sub-EPSILON实际状态变化目前可能被`>EPSILON`误判为zero；optional unit必须先锁RED，再以
-  committed/current和next/current的真实差异修复，不能把所有tiny delta无条件当wake。
+- sub-EPSILON实际状态变化已由3条optional unit锁定并修复：pose比较committed/current，velocity
+  比较next/current，would-wake接受finite nonzero demand；可表示mutation会wake，加法舍入后实际
+  未变则不虚假wake。
 - 本change只完成到S5-SOLVER-5并hard-stop；S5-LAB-RED及后续browser链仍为
   `PENDING / NOT AUTHORIZED IN THIS CHANGE`。
 - singular row fail closed 会跳过该phase；这是防止world污染，不是约束成功保证。

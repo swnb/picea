@@ -78,7 +78,7 @@ impl Default for WorldAnchorJointDesc {
 ///
 /// The joint constrains the two anchors to the same world-space point while
 /// leaving the bodies' relative rotation unconstrained.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RevoluteJointDesc {
     /// First joint body endpoint.
     pub body_a: BodyHandle,
@@ -90,18 +90,6 @@ pub struct RevoluteJointDesc {
     pub local_anchor_b: Point,
     /// User-owned opaque payload preserved by the core API.
     pub user_data: u64,
-}
-
-impl Default for RevoluteJointDesc {
-    fn default() -> Self {
-        Self {
-            body_a: BodyHandle::default(),
-            body_b: BodyHandle::default(),
-            local_anchor_a: Point::default(),
-            local_anchor_b: Point::default(),
-            user_data: 0,
-        }
-    }
 }
 
 /// Stable joint kind used by read-only views and debug outputs.

@@ -27,14 +27,14 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
         &mut step.numeric_warnings,
     );
     step.pose_clamp = crate::pipeline::ccd::run_pose_clamp_phase(world, config.dt);
-    let joint_solver_stats = crate::pipeline::joints::solve_joint_phase(
+    let mandatory_joint_plan = crate::pipeline::joints::solve_joint_phase(
         world,
         config.dt,
         &step.pose_clamp.clamped_bodies,
         &mut step.wake_reasons,
         &mut step.numeric_warnings,
     );
-    step.record_solver_stats(joint_solver_stats);
+    step.record_solver_stats(mandatory_joint_plan.stats());
     let predicted_body_poses = crate::pipeline::integrate::preintegrated_body_poses(
         world,
         config.dt,
@@ -50,6 +50,13 @@ pub(crate) fn simulate_world_step(world: &mut World, config: &StepConfig) -> Ste
     if config.joint_velocity_projection {
         crate::pipeline::joints::solve_joint_velocity_phase(world, &mut step.wake_reasons);
     }
+    crate::pipeline::joints::reconcile_revolute_post_contact_phase(
+        world,
+        config.dt,
+        &step.pose_clamp.clamped_bodies,
+        &mandatory_joint_plan,
+        &mut step.wake_reasons,
+    );
     crate::pipeline::integrate::run_position_integration_phase(
         world,
         config,

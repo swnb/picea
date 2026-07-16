@@ -86,7 +86,7 @@ pub struct StepConfig {
     /// Residual contact position-correction policy.
     #[serde(default = "default_contact_position_correction_policy")]
     pub contact_position_correction: ContactPositionCorrectionPolicy,
-    /// Enables the final distance-joint radial velocity projection pass.
+    /// Enables the final joint point-velocity projection pass.
     #[serde(default = "default_joint_velocity_projection")]
     pub joint_velocity_projection: bool,
     /// Enables or disables world sleep evaluation for this step.

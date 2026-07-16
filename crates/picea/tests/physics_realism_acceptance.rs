@@ -6902,6 +6902,11 @@ struct S5RevoluteCcdContactStateOracle {
 // The shadow uses a real WorldAnchor row to reproduce the mandatory Revolute current pose, then
 // lets the unmodified contact pipeline produce the otherwise unobservable post-contact current.
 // Comparing only solver-owned facts avoids treating final display geometry as contact truth.
+// The arguments mirror the independently observed subject/shadow state used by
+// this acceptance oracle. Keeping them explicit makes accidental cross-wiring
+// visible at each call site, which is more important here than grouping them
+// solely to satisfy the test-helper argument-count lint.
+#[allow(clippy::too_many_arguments)]
 fn s5_revolute_ccd_contact_state_oracle(
     geometry: &CcdZeroAngularCorrectionOracle,
     target_mass: MassProperties,

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     handles::BodyHandle,
-    joint::{DistanceJointDesc, JointDesc, WorldAnchorJointDesc},
+    joint::{DistanceJointDesc, JointDesc, RevoluteJointDesc, WorldAnchorJointDesc},
     pipeline::sleep::SolverIsland,
 };
 
@@ -75,6 +75,11 @@ pub(crate) enum JointSolvePlanRow {
     WorldAnchor {
         desc: WorldAnchorJointDesc,
         body_slot: usize,
+    },
+    Revolute {
+        desc: RevoluteJointDesc,
+        body_a_slot: usize,
+        body_b_slot: usize,
     },
 }
 
@@ -153,10 +158,23 @@ where
                     .joint_rows
                     .push(JointSolvePlanRow::WorldAnchor { desc, body_slot });
             }
-            // S5-API retains and exposes Revolute descriptors, but the solver row is owned by
-            // S5-SOLVER. Skipping before slot lookup keeps this checkpoint honest: Revolute
-            // contributes neither a hot body slot nor a logical joint row yet.
-            JointDesc::Revolute(_) => continue,
+            JointDesc::Revolute(desc) => {
+                let Some(builder) = contact_target_island(desc.body_a, desc.body_b, &body_islands)
+                    .and_then(|island_id| active_island_ids.get(&island_id).copied())
+                    .and_then(|index| builders.get_mut(index))
+                else {
+                    continue;
+                };
+                let body_a_slot = builder.ensure_slot(desc.body_a);
+                let body_b_slot = builder.ensure_slot(desc.body_b);
+                // A Revolute point constraint solves a 2D vector, but remains one
+                // logical diagnostic row and one deterministic island-plan entry.
+                builder.joint_rows.push(JointSolvePlanRow::Revolute {
+                    desc,
+                    body_a_slot,
+                    body_b_slot,
+                });
+            }
         }
     }
 

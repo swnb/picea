@@ -171,6 +171,151 @@ fn revolute_point_constraint_zero_delta_does_not_wake_sleeping_endpoint() {
 }
 
 #[test]
+fn revolute_point_constraint_sub_epsilon_pose_change_wakes_sleeping_endpoint() {
+    let tiny = f32::from_bits(1);
+    assert!(tiny > 0.0 && tiny < f32::EPSILON);
+
+    let mut world = World::default();
+    let sleeping = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            sleeping: true,
+            ..BodyDesc::default()
+        })
+        .expect("sleeping endpoint should be created");
+    let awake = world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            ..BodyDesc::default()
+        })
+        .expect("awake endpoint should be created");
+    let awake_pose = world
+        .try_body(awake)
+        .expect("awake endpoint should exist")
+        .pose();
+    let mut wake_reasons = BTreeMap::new();
+
+    let applied = super::apply_revolute_pose_pair_atomically(
+        &mut world,
+        sleeping,
+        Pose::from_xy_angle(tiny, 0.0, 0.0),
+        awake,
+        awake_pose,
+        &mut wake_reasons,
+    );
+
+    assert!(applied);
+    let sleeping_view = world
+        .try_body(sleeping)
+        .expect("sleeping endpoint should exist");
+    assert_eq!(
+        sleeping_view.pose().translation().x().to_bits(),
+        tiny.to_bits()
+    );
+    assert!(!sleeping_view.sleeping());
+    assert_eq!(
+        wake_reasons.get(&sleeping),
+        Some(&SleepTransitionReason::JointCorrection)
+    );
+}
+
+#[test]
+fn revolute_point_constraint_sub_epsilon_velocity_wakes_only_for_actual_change() {
+    let tiny = f32::from_bits(1);
+    assert!(tiny > 0.0 && tiny < f32::EPSILON);
+
+    let mut changed_world = World::default();
+    let changed_sleeping = changed_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            sleeping: true,
+            ..BodyDesc::default()
+        })
+        .expect("sleeping endpoint should be created");
+    let changed_peer = changed_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            ..BodyDesc::default()
+        })
+        .expect("peer endpoint should be created");
+    let mut changed_wake_reasons = BTreeMap::new();
+
+    let applied = crate::solver::body_state::apply_revolute_velocity_pair_atomically(
+        &mut changed_world,
+        changed_sleeping,
+        Vector::new(tiny, 0.0),
+        0.0,
+        changed_peer,
+        Vector::default(),
+        0.0,
+        &mut changed_wake_reasons,
+    );
+
+    assert!(applied);
+    let changed_view = changed_world
+        .try_body(changed_sleeping)
+        .expect("sleeping endpoint should exist");
+    assert_eq!(changed_view.linear_velocity().x().to_bits(), tiny.to_bits());
+    assert!(!changed_view.sleeping());
+    assert_eq!(
+        changed_wake_reasons.get(&changed_sleeping),
+        Some(&SleepTransitionReason::JointCorrection)
+    );
+
+    let mut rounded_world = World::default();
+    let rounded_sleeping = rounded_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            linear_velocity: Vector::new(1.0, 0.0),
+            sleeping: true,
+            ..BodyDesc::default()
+        })
+        .expect("sleeping endpoint should be created");
+    let rounded_peer = rounded_world
+        .create_body(BodyDesc {
+            body_type: BodyType::Dynamic,
+            ..BodyDesc::default()
+        })
+        .expect("peer endpoint should be created");
+    let rounded_delta = f32::EPSILON * 0.25;
+    assert_eq!(1.0 + rounded_delta, 1.0);
+    let mut rounded_wake_reasons = BTreeMap::new();
+
+    let applied = crate::solver::body_state::apply_revolute_velocity_pair_atomically(
+        &mut rounded_world,
+        rounded_sleeping,
+        Vector::new(rounded_delta, 0.0),
+        0.0,
+        rounded_peer,
+        Vector::default(),
+        0.0,
+        &mut rounded_wake_reasons,
+    );
+
+    assert!(applied);
+    let rounded_view = rounded_world
+        .try_body(rounded_sleeping)
+        .expect("sleeping endpoint should exist");
+    assert_eq!(rounded_view.linear_velocity(), Vector::new(1.0, 0.0));
+    assert!(rounded_view.sleeping());
+    assert!(!rounded_wake_reasons.contains_key(&rounded_sleeping));
+}
+
+#[test]
+fn revolute_point_constraint_sub_epsilon_post_demand_is_nonzero() {
+    let tiny = f32::from_bits(1);
+    assert!(tiny > 0.0 && tiny < f32::EPSILON);
+
+    assert!(super::correction_is_nonzero(Vector::new(tiny, 0.0), 0.0));
+    assert!(super::correction_is_nonzero(Vector::default(), tiny));
+    assert!(!super::correction_is_nonzero(Vector::default(), 0.0));
+    assert!(!super::correction_is_nonzero(
+        Vector::new(f32::NAN, 0.0),
+        0.0
+    ));
+}
+
+#[test]
 fn revolute_point_constraint_test_fixture_can_restore_sleep_without_user_wake() {
     let mut world = World::default();
     let body = world

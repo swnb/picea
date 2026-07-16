@@ -20,16 +20,16 @@
 
 ## 3. S5-SOLVER-5 production实现
 
-- [ ] 3.1 先移开同内容untracked OpenSpec并恢复已被commits覆盖的local living copy，再把detached REPLAN-3/RED-5 commits cherry-pick到主worktree当前feature branch；复核5个production blobs不变并记录SOLVER-5 immutable Start HEAD
-- [ ] 3.2 复用冻结2x2/COM/atomic/wake/post-contact实现，恢复contact后按最新wake state重建optional velocity plan，并让mandatory plan继续独占stats/post rows
-- [ ] 3.3 撤销WorldAnchor无关helper重构；按reviewer触发的optional unit path先锁住sub-EPSILON actual pose/velocity change与would-wake，再修复exact-change判定；完成owned Rust文件rustfmt，committed integration/scope/design保持zero-diff
-- [ ] 3.4 逐条运行既有8个unit、新增sub-EPSILON unit与16条integration exact，确认全部GREEN、两条pose-effect等价、Distance contact-wake projection、row/warning/full-pose/drift/negative signatures全部通过
-- [ ] 3.5 运行StepConfig、island、stack、world/API/lifecycle定向门，以及`picea --lib`、`picea --tests`、examples、workspace all-targets/clippy等与影响面相称的broader gates
-- [ ] 3.6 运行OpenSpec strict validate、scope self-test/exact/cached、fmt、diff、forbidden zero-diff、untracked/filesystem hygiene gates
-- [ ] 3.7 完成独立solver spec reviewer、code reviewer与verifier，闭合全部High/Medium findings
-- [ ] 3.8 仅stage批准的SOLVER-5 production/living/tasks paths，复核cached exact allowlist并准备单一final commit candidate；此步不写自引用commit SHA，也不在4.2前提交
+- [x] 3.1 先移开同内容untracked OpenSpec并恢复已被commits覆盖的local living copy，再把detached REPLAN-3/RED-5 commits cherry-pick到主worktree当前feature branch；复核5个production blobs不变并记录SOLVER-5 immutable Start HEAD
+- [x] 3.2 复用冻结2x2/COM/atomic/wake/post-contact实现，恢复contact后按最新wake state重建optional velocity plan，并让mandatory plan继续独占stats/post rows
+- [x] 3.3 撤销WorldAnchor无关helper重构；按reviewer触发的optional unit path先锁住sub-EPSILON actual pose/velocity change与would-wake，再修复exact-change判定；完成owned Rust文件rustfmt，committed integration/scope/design保持zero-diff
+- [x] 3.4 逐条运行既有8个unit、新增sub-EPSILON unit与16条integration exact，确认全部GREEN、两条pose-effect等价、Distance contact-wake projection、row/warning/full-pose/drift/negative signatures全部通过
+- [x] 3.5 运行StepConfig、island、stack、world/API/lifecycle定向门，以及`picea --lib`、`picea --tests`、examples、workspace all-targets/clippy等与影响面相称的broader gates；两个strict Clippy baseline lint按用户逐项授权做bounded hygiene amendment后原命令PASS
+- [x] 3.6 运行OpenSpec strict validate、scope self-test/exact/cached、fmt、diff、forbidden zero-diff、untracked/filesystem hygiene gates；冻结scope verifier保留原合同并如实报告两个授权unexpected path，supplemental exact-10与amended forbidden zero-diff PASS
+- [x] 3.7 分离完成solver spec review、findings-first code review与fresh verifier，结论`0 High / 0 Medium / 0 Low`
+- [x] 3.8 仅stage批准的SOLVER-5 production/living/tasks、reviewer unit path及两个用户授权hygiene paths，复核cached supplemental exact-10并准备单一final commit candidate；此步不写自引用commit SHA，也不在4.2前提交
 
 ## 4. Supervisor closeout
 
-- [ ] 4.1 在最终commit前完成所有repo evidence receipt，并准备核对外部报告所需的已验证事实、实际命令输出、未运行项与残余风险；living只保留本node Start HEAD与`COMMIT PENDING`，不记录自引用SHA
-- [ ] 4.2 复核最终pre-commit candidate已是tasks 24/24、cached exact allowlist与全部gate PASS，并授权supervisor执行外部closeout；最终`git commit`及commit后只读审计不属于repo task checkbox，不能再写回或amend receipt
+- [x] 4.1 在最终commit前完成所有repo evidence receipt，并准备核对外部报告所需的已验证事实、实际命令输出、未运行项与残余风险；living只保留本node Start HEAD与`COMMIT PENDING`，不记录自引用SHA
+- [x] 4.2 复核最终pre-commit candidate已是tasks 24/24、cached supplemental exact-10与全部gate PASS，并授权supervisor执行外部closeout；最终`git commit`及commit后只读审计不属于repo task checkbox，不能再写回或amend receipt
