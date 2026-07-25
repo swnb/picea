@@ -1,5 +1,16 @@
 # 交接：vNext §5 Revolute Joint（2026-07-14）
 
+> **状态：§5 已独立完成（CLOSED，2026-07-26）。** 本交接文件描述的是 S5-D 之前的现场，
+> 已作为历史记录保留，不再是下一步路线。当前事实：S5-SOLVER-5=`320f2d3`、
+> S5-LAB=`3680529`（= `origin/main`）、S5-V=`CLI PASS / BROWSER PASS`、S5-C docs closeout
+> 已提交。权威状态与残余风险见 living spec
+> `docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md`（§12.2 browser receipt、
+> §13.1 closeout receipt、§17 残余风险）。
+>
+> 本文只声明 handoff §5 独立完成，**不**代表父计划 E5/E6 或
+> `docs/handoff-2026-07-11-vnext-open-items.md` 的其余开放项已完成；§6 四个 design gate、
+> body damping、`DistanceJointDesc.damping` 与 grab 手感仍未开始。
+
 ## 1. 当前现场
 
 - 仓库：`/Users/asyncrustacean/projects/picea`
@@ -197,7 +208,10 @@ Default与validation：
 
 共同结论：基础pivot使用两端local anchors；limits、motor、softness/damping和runtime warm-start state都是独立能力，不应混入Picea首版public descriptor。
 
-## 6. S5-D 当前状态与下一执行门
+## 6. S5-D 当前状态与下一执行门（历史快照，已被 living spec 取代）
+
+以下为 S5-D commit 前的现场记录，保留作历史。整条链此后已全部执行完毕，实际节点顺序、
+STOP 记录与最终 receipt 以 living spec §16 为准。
 
 S5-D严格只写docs，未写production或tests；design/living spec已通过review/verifier，但尚未commit：
 

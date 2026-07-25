@@ -1,6 +1,15 @@
 # Picea Revolute Joint Pin-only V1 软件架构设计
 
-状态：S5-D/API-RED/API/BEHAVIOR-RED及四轮superseding RED均已commit；历史
+状态：**implemented / verified（2026-07-26）**。Pin-only V1已按本设计实现、验证并收尾：
+S5-SOLVER-5 commit=`320f2d35fce3053cea607f8d434c85ba7997e1c8`，S5-LAB commit=
+`368052975f823bd9cb20c77b50a9daa83b1532c9`；S5-V=`CLI PASS / BROWSER PASS`
+（Chrome `148.0.7778.280`、`1440x900`、`revolute_pendulum`跑到frame 292，
+`kind="revolute"`、两个finite world anchor、`joint_row_count=1`、console error/warning=0）。
+本文§7 public surface、§9.1-§9.8 math/phase、§10 wake与ADR-S5-1..5保持**冻结**；deferred
+scope（motor/limit/damping/`collide_connected`）仍未实现，见执行计划§17残余风险。
+以下为过程中的历史状态记录，不再更新：
+
+原状态：S5-D/API-RED/API/BEHAVIOR-RED及四轮superseding RED均已commit；历史
 S5-SOLVER/S5-SOLVER-2/S5-SOLVER-3/S5-SOLVER-4均已按合同STOP且未commit。
 S5-SOLVER-4已证明Revolute production pose与冻结2x2 oracle一致，但RED-4把
 velocity-only contact response误纳入shadow pose-state等价门。用户已批准唯一新链
@@ -818,7 +827,9 @@ ADR 采用 append-only 语义；若未来变更，新增 superseding ADR，不�
 
 - 本文基于已批准 public/wake/lab/deferred边界，包含字段/default/validation/error/atomicity/compat examples、两张有ownership含义的Mermaid、已通过S5-D review的2x2 apply/pose plan、wake contract、ADR、acceptance mapping和里程碑交接合同。
 - living spec 给每个 mandatory item 指定 primary owner、RED gate、review/verifier和commit边界。
-- 第三轮reviewer结论为`0 High / 0 Medium / 1 Low`，允许进入verifier；唯一Low保留到S5-C处理。
+- 第三轮reviewer结论为`0 High / 0 Medium / 1 Low`，允许进入verifier；唯一Low原计划保留到S5-C
+  处理。S5-C（2026-07-26）核查后确认该finding**只记录了计数、没有记录内容**，实质上无法闭合；
+  终态见执行计划§17。
 - independent docs verifier于`2026-07-14 17:16:23 CST`给出`S5-D VERIFIER PASS`；S5-D已commit为`eecbc331a36bfb694676c979bffb03f5a47202dd`。
 
 ### 实现验收输入

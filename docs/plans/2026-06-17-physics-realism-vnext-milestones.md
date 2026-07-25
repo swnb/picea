@@ -2,9 +2,9 @@
 
 状态：已批准
 计划文档：docs/plans/2026-06-17-physics-realism-vnext-milestones.md
-最后更新：2026-07-14
+最后更新：2026-07-26
 工作目录：/Users/asyncrustacean/projects/picea
-工作区状态：§1-§3 integration记录保留历史base；§4已冻结；handoff §5 S5-D review/verifier已通过、commit待完成，API/solver未开始，Chrome `NOT RUN / BROWSER PENDING`；执行时仍以live `git status`为准
+工作区状态：§1-§3 integration记录保留历史base；§4已冻结；handoff §5已于2026-07-26独立完成收尾（S5-C），S5-V=`CLI PASS / BROWSER PASS`；§6四个design gate未开始；执行时仍以live `git status`为准
 计划重量：heavy
 Goal 协调：planning/execution goal active；用户已明确预授权 Plan Gate
 提交策略：源实现提交已进入本次集成分支；本区块由后续独立 docs closeout commit 承载
@@ -13,7 +13,7 @@ Goal 协调：planning/execution goal active；用户已明确预授权 Plan Gat
 SpecFlow：不使用
 Change root：none
 Profiles：architecture-heavy, api-contract, ui-browser
-完成状态：D0/V0 已验证；handoff §1 velocity-first 正式化、§2 WorldAnchor damping 正确性子切片、§3 Point/Vector equality contract 已实现、复审并完成对应 Rust/lab/web/browser 端到端验收；§4已完成并冻结；§5仅进入独立S5-D文档节点；这不代表整个 E1/E2/E5/E6 或其余执行里程碑已完成；已归档 no；可发布 no
+完成状态：D0/V0 已验证；handoff §1 velocity-first 正式化、§2 WorldAnchor damping 正确性子切片、§3 Point/Vector equality contract 已实现、复审并完成对应 Rust/lab/web/browser 端到端验收；§4已完成并冻结；§5 revolute joint Pin-only V1已按独立living spec完整完成（含browser验收）；这不代表整个 E1/E2/E5/E6 或其余执行里程碑已完成；已归档 no；可发布 no
 
 ## 本次集成收尾
 
@@ -44,7 +44,7 @@ Profiles：architecture-heavy, api-contract, ui-browser
 ### Hygiene 与剩余边界
 
 - Git-visible 仅三份 docs；playwright、`target`、`dist`、`node_modules` 均不 visible；`crates/picea/src/lib.rs` 相对 `247fbda` zero diff。
-- §1-§3 integration closeout与handoff §4均已完成；§4最终实现为`91698b3`，clippy remediation为`57cdb19`，full S4-V通过。§5的S5-D design/living spec已通过review/verifier但commit待完成，全部API/solver/lab节点仍未开始，Chrome `NOT RUN / BROWSER PENDING`；§6未开始。E1其余contact/sleep、E2的body damping与`DistanceJointDesc.damping`、父E5的chain/bridge diagnostics，以及E3/E4/E6/D7/V8/C9仍未整体完成；下文范围外与残余风险继续有效。
+- §1-§3 integration closeout与handoff §4均已完成；§4最终实现为`91698b3`，clippy remediation为`57cdb19`，full S4-V通过。§5已完整完成：solver commit `320f2d3`、lab commit `3680529`（= `origin/main`）、S5-V `CLI PASS / BROWSER PASS`、S5-C docs closeout已提交；§6未开始。E1其余contact/sleep、E2的body damping与`DistanceJointDesc.damping`、父E5的chain/bridge diagnostics，以及E3/E4/E6/D7/V8/C9仍未整体完成；下文范围外与残余风险继续有效。
 
 ### Handoff §4 addendum（已完成）
 
@@ -52,18 +52,18 @@ Profiles：architecture-heavy, api-contract, ui-browser
 - 用户已明确批准 raw SAT feature 保持 final-geometry 语义，并由 history-aware `ContactId` / `ManifoldId` 双射保证跨 reference/incident swap persistence；该裁决 supersede handoff 的 raw-id 字面目标。
 - 用户已批准把shape/local-pose geometry revision invalidation纳入S4。设计、RED、oracle强化、implementation、full verification与closeout均已完成；提交链与完整证据以冻结living spec为准。最终core实现=`91698b3`，clippy remediation=`57cdb19`。
 
-### Handoff §5 addendum（S5-D commit前）
+### Handoff §5 addendum（已完成，2026-07-26收尾）
 
 - Handoff §5 使用独立 architecture package `docs/design/2026-07-14-revolute-joint-v1-design.md` 与 living spec `docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md`；其 `S5-*` 前缀不重命名、替代或推进本计划 E5/E6。
-- 用户已批准完整 Pin-only V1 public字段、六个 `#[non_exhaustive]` enum边界、lifecycle wake、fixture schema v1、lab/browser范围和延期项。S5-D第三轮reviewer结论为`0 High / 0 Medium / 1 Low`，independent docs verifier于`2026-07-14 17:16:23 CST`给出`S5-D VERIFIER PASS`；唯一Low留到S5-C，S5-D commit仍为`PENDING`，S5-API-RED及后续implementation尚未开始，Chrome `NOT RUN / BROWSER PENDING`。
-- 执行顺序固定为 `S5-D -> S5-API-RED -> S5-API -> S5-BEHAVIOR-RED -> S5-SOLVER -> S5-LAB-RED -> S5-LAB -> S5-V -> S5-C`。完整验收、stop conditions和提交边界以living spec为准。
+- 用户已批准完整 Pin-only V1 public字段、六个 `#[non_exhaustive]` enum边界、lifecycle wake、fixture schema v1、lab/browser范围和延期项。全链已实现、验收并收尾：S5-SOLVER-5=`320f2d35fce3053cea607f8d434c85ba7997e1c8`、S5-LAB=`368052975f823bd9cb20c77b50a9daa83b1532c9`、S5-V=`CLI PASS / BROWSER PASS`、S5-C docs closeout已提交。历史S5-SOLVER/2/3/4保持`STOPPED / NOT COMMITTED`。motor/limit/damping/`collide_connected`仍是deferred。
+- 实际执行顺序为 `S5-D -> S5-API-RED -> S5-API -> S5-BEHAVIOR-RED -> S5-SOLVER(STOPPED) -> S5-REPLAN -> RED-2 -> SOLVER-2(STOPPED) -> RED-3 -> SOLVER-3(STOPPED) -> REPLAN-2 -> RED-4 -> SOLVER-4(STOPPED) -> REPLAN-3 -> RED-5 -> SOLVER-5 -> S5-LAB-RED/S5-LAB(合并为一个commit) -> S5-V -> S5-C`。完整验收、stop conditions、提交边界与残余风险以living spec为准。
 - S5-API-RED同时提交baseline-compilable的existing Distance/WorldAnchor lifecycle runtime
   locks；external missing Revolute只算surface RED。S5 solver acceptance还覆盖active island中的
   sleeping endpoint、contact/projection更新velocity后的full-step drift和CCD-clamped final
   integration，不允许借此重排solver streams。
-- 当前CLI不执行Chrome。S5-LAB与S5-V分别由living spec中的固定prompt交给外部ChatGPT App
-  针对40位full commit SHA回填browser receipt；未回填只能PENDING/NOT RUN，不能称full
-  browser acceptance。
+- 原计划由外部ChatGPT App回填browser receipt。实际S5-V的browser验收由同一CLI supervisor在
+  Claude Code内置browser pane执行并已PASS（Chrome `148.0.7778.280`、`1440x900`、
+  `revolute_pendulum`跑到frame 292）；该执行方式偏差与证据落盘范围记录在living spec §12.2。
 
 ## 目标
 
@@ -113,7 +113,7 @@ Profiles：architecture-heavy, api-contract, ui-browser
 - explorer：已运行。7 个方向均已返回；deformable 结论为 RFC/design gate，不进入本轮 production implementation。
 - architecture design：已产出：`docs/design/2026-06-17-physics-realism-vnext-architecture.md`。
 - 关键证据：`docs/ai/repo-map.md`、`docs/ai/index.md`、`docs/plans/2026-04-25-picea-physics-engine-production-milestones.md`、`docs/design/*stability*`、`docs/design/deformable-body-roadmap.md`、`crates/picea/tests/physics_realism_acceptance.rs`、`crates/picea-lab/tests/artifact_run.rs`、`crates/picea-lab/tests/server_routes.rs`。
-- 剩余未知与开放边界：future deformable V1 representation 仍需 RFC 冻结；handoff §5已进入独立S5-D文档门但实现未开始，§6与其余未完成 milestone 仍须各自进入设计、实现和验收门。§4已完成，不再作为开放项。
+- 剩余未知与开放边界：future deformable V1 representation 仍需 RFC 冻结；handoff §5已完整完成（实现+验收+收尾），§6与其余未完成 milestone 仍须各自进入设计、实现和验收门。§4已完成，不再作为开放项。
 
 ## 架构设计输入
 
@@ -604,7 +604,7 @@ Subagent 执行计划：
 #### 范围外
 
 - 未修改 public prelude/events schema、broadphase、narrowphase、CCD 或 Distance joint；未调整既有 warm-start、position-correction、matrix stability 阈值。
-- §3 fuzzy `PartialEq`、revolute joint、narrowphase ignore、其余 vNext design gate 未进入本项；其中§3与narrowphase ignore所属的handoff §4已随后按独立milestone完成，revolute joint public gate也已获批准并进入独立S5-D，但API/solver尚未开始；其他项仍需在各自spec/public API门确认。
+- §3 fuzzy `PartialEq`、revolute joint、narrowphase ignore、其余 vNext design gate 未进入本项；其中§3与narrowphase ignore所属的handoff §4已随后按独立milestone完成，revolute joint public gate已获批准并按独立S5 milestone完成实现与验收；其他项仍需在各自spec/public API门确认。
 - grab stiffness/damping/max-speed 的主观手感调参不在 correctness 修复内；本轮只证明 damping 已接线并通过行为锁与 live soft-spring interaction。
 
 #### 残余风险

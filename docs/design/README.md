@@ -22,7 +22,7 @@ This directory records design intent and future-facing engineering decisions.
 - `scene-runtime-config-and-parameter-ui-design.md`: scene-owned runtime config and parameter UI architecture.
 - `2026-06-17-physics-realism-vnext-architecture.md`: vNext architecture package for seven physics-realism workstreams, including the scenario capability matrix for picea-lab showcase routing.
 - `2026-07-13-sat-manifold-persistence-design.md`: vNext handoff §4 architecture package for raw SAT feature vs persistent lifecycle/warm-start/source-row layering, revision-aware exact-hard residual maximum-cardinality matching, and ignored-test migration.
-- `2026-07-14-revolute-joint-v1-design.md`: S5-D architecture package based on the approved vNext handoff §5 Pin-only public/wake/lab contract; review/verifier passed, commit pending, and implementation/API/solver not started.
+- `2026-07-14-revolute-joint-v1-design.md`: architecture package for the approved vNext handoff §5 Pin-only revolute joint. Implemented and verified (2026-07-26): core API/solver, lab scenario `revolute_pendulum`, and workbench facts all shipped; S5-V is `CLI PASS / BROWSER PASS`. Motor/limit/damping/`collide_connected` remain deferred.
 - `2026-07-10-workbench-interactive-run-model-design.md`: workbench select-to-run model (real physics by default, explicit offline demo watermark, per-scenario watch-for copy) and live-session rigid-body drag interaction (spring / direct grab, zero core changes).
 - `architecture-refactor-requirements.md`: archived legacy `Scene`-path refactor requirements; not current default routing.
 

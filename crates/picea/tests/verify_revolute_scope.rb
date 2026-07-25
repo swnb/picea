@@ -220,15 +220,21 @@ SCOPES = {
       crates/picea-lab/src/scenario/scene_revolute.rs
       crates/picea-lab/web/src/i18n.ts
       crates/picea-lab/web/src/types.ts
-      crates/picea-lab/web/src/components/workbench/SceneHierarchy.tsx
-      crates/picea-lab/web/src/components/workbench/Inspector.tsx
       crates/picea-lab/web/src/components/workbench/Timeline.tsx
       docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md
+      openspec/changes/complete-s5-revolute-lab-browser/.openspec.yaml
+      openspec/changes/complete-s5-revolute-lab-browser/README.md
+      openspec/changes/complete-s5-revolute-lab-browser/design.md
+      openspec/changes/complete-s5-revolute-lab-browser/proposal.md
+      openspec/changes/complete-s5-revolute-lab-browser/specs/revolute-lab-workbench/spec.md
+      openspec/changes/complete-s5-revolute-lab-browser/tasks.md
     ],
     optional: %w[
       crates/picea-lab/src/artifact.rs
       crates/picea-lab/src/server.rs
       crates/picea-lab/web/src/components/workbench/types.ts
+      crates/picea-lab/web/src/components/workbench/SceneHierarchy.tsx
+      crates/picea-lab/web/src/components/workbench/Inspector.tsx
     ]
   },
   "S5-C" => {
@@ -243,7 +249,7 @@ SCOPES = {
       docs/design/README.md
       docs/design/solver-island-ordering-contract.md
     ],
-    optional: []
+    optional: %w[crates/picea/tests/verify_revolute_scope.rb]
   }
 }.freeze
 

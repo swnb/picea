@@ -1,6 +1,15 @@
 # vNext Handoff §5 Revolute Joint Pin-only V1 Milestone
 
-状态：S5-D/API-RED/API/BEHAVIOR-RED/S5-REPLAN/S5-BEHAVIOR-RED-2/
+状态：**已完成（CLOSED，2026-07-26）**。全链S5-D → S5-API-RED → S5-API →
+S5-BEHAVIOR-RED → S5-REPLAN → S5-BEHAVIOR-RED-2 → S5-BEHAVIOR-RED-3 → S5-REPLAN-2 →
+S5-BEHAVIOR-RED-4 → S5-REPLAN-3 → S5-BEHAVIOR-RED-5 → S5-SOLVER-5 → S5-LAB-RED/S5-LAB
+（合并为一个commit）→ S5-V → S5-C 均已落地；S5-LAB commit=
+`368052975f823bd9cb20c77b50a9daa83b1532c9`（= `origin/main`）。S5-V=
+`CLI PASS / BROWSER PASS`，浏览器receipt见§12.1；S5-C closeout receipt见§13.1。
+历史S5-SOLVER/S5-SOLVER-2/3/4保持`STOPPED / NOT COMMITTED`，不得续写。
+残余项见§17。以下为过程中冻结的历史状态记录，不再更新：
+
+原状态：S5-D/API-RED/API/BEHAVIOR-RED/S5-REPLAN/S5-BEHAVIOR-RED-2/
 S5-BEHAVIOR-RED-3/S5-REPLAN-2/S5-BEHAVIOR-RED-4均已commit；RED-4 commit=
 `29bafce59a0913be7b4d37055ab57ed5e5233116`。历史S5-SOLVER保持
 `STOPPED / FROZEN CONTRACT CONFLICT / NOT COMMITTED`；S5-SOLVER-2、S5-SOLVER-3与
@@ -2600,6 +2609,48 @@ S5-LAB receipt。CLI三角色全部PASS但external receipt未回填时，只能�
 receipt缺少full SHA、URL、时间、Chrome版本/viewport、逐项结果、截图路径或
 console/network明细时，一律视为不完整并保持PENDING。
 
+### 12.2 S5-V external browser receipt（已回填，2026-07-26）
+
+执行方式偏差（如实记录）：本轮浏览器验收**不是**由ChatGPT App执行，而是由同一个CLI
+supervisor在Claude Code内置browser pane里执行。因此(a)三个叶子角色未拆分，(b)截图是会话
+transcript内的inline图像，不是`/tmp/picea-s5-browser/<sha>/s5-v`下的PNG文件。可持久化的
+authoritative facts已落盘到该目录。
+
+- status: `PASS`
+- tested_full_commit_sha: `368052975f823bd9cb20c77b50a9daa83b1532c9`
+- branch: `main`（与`origin/main`一致；原prompt写的`feat/vnext-s5-revolute-joint`已在早期
+  合入main，分支名不匹配属已知偏差，SHA匹配）
+- URL: `http://127.0.0.1:5173/?picea-profile=1`（API `http://127.0.0.1:8081`）
+- tested_at: `2026-07-26 01:04:14 GMT+0800 (Asia/Shanghai)`
+- Chrome version: `Chrome/148.0.7778.280`（Electron 42.7.0 宿主）
+- viewport: `1440x900`
+- service: `started-and-stopped`（`just picea-lab-web-start` → `just picea-lab-web-stop`，
+  停止后status=`not running`）
+
+逐项结果：
+
+| 步骤 | 结果 | 观察值 |
+| --- | --- | --- |
+| 1 worktree/SHA核对 | PASS | `## main...origin/main`，无tracked改动；`rev-parse HEAD`=`368052975f823bd9cb20c77b50a9daa83b1532c9` |
+| 2 服务 | PASS | 本轮启动，结束已停止 |
+| 3 Chrome/viewport/profile | PASS | `1440x900`，`?picea-profile=1`生效（console有`[picea-profile]`事件） |
+| 4 运行到frame >= 240 | PASS | live session连续步进到`第 270 帧`后暂停于`第 292 帧`；`步数 1172`，`模拟时间 4.883s` |
+| 4b source badge非demo/fallback | PASS | header badge=`实时会话`；session payload `mode="live_session"`、`scenario_id="revolute_pendulum"`、`session-2` |
+| 5 显式revolute label | PASS | SceneHierarchy `关节 0 / 旋转铰链`；Inspector `类型 = 旋转铰链`、`旋转铰链 · 2 物体`；均无raw kind/unknown fallback |
+| 5b 两个body | PASS | `物体 0` static（圆形枢轴）、`物体 1` dynamic（多边形摆体） |
+| 5c 两个world anchor | PASS | Inspector `锚点 X 0.000 Y 0.000 → X 0.000 Y 0.000` |
+| 5d 自由相对旋转、pivot无分离/跳变 | PASS | 摆体持续摆动，body1 `rotation=0.40642044`、`angular_velocity=0.89113367`；pivot圆环全程贴合锚点 |
+| 6 network/debug facts | PASS | `GET /api/sessions/session-2/frames/292`：`joints[0].kind="revolute"`、`anchors=[{0,0},{0,0}]`（length=2，全finite）、`stats.joint_row_count=1`、`contact_row_count=0`、`joint_count=1`、`numeric_warnings=0`、`state_hash="de898d1937b89cc4"` |
+| 7 console/network | PASS | console error/warning=`0`（仅`[picea-profile]` info/log）；全部请求`200 OK`，无failed request、无非2xx |
+| 8 证据落盘 | PARTIAL | JSON facts已落盘；PNG截图仅在会话transcript内 |
+
+evidence absolute paths：
+
+- `/tmp/picea-s5-browser/368052975f823bd9cb20c77b50a9daa83b1532c9/s5-v/frame-292.json`
+- `/tmp/picea-s5-browser/368052975f823bd9cb20c77b50a9daa83b1532c9/s5-v/scenarios.json`
+
+console warnings/errors：`none`。network异常：`none`。
+
 ## 13. S5-C：closeout、routing 与最终 receipt
 
 只在 S5-V PASS 且 final reviewer 无 High/Medium 后：
@@ -2625,6 +2676,42 @@ rtk proxy git status --short --branch
 
 S5-C commit后，supervisor 必须用 `rtk proxy git show --stat --oneline HEAD` 和
 `rtk proxy git diff-tree --no-commit-id --name-only -r HEAD` 复核docs-only scope。不要push。
+
+### 13.1 S5-C receipt（2026-07-26）
+
+1. **Start HEAD**：`368052975f823bd9cb20c77b50a9daa83b1532c9`。
+2. **成功标准**：§16逐node receipt与git事实一致、design/parent/handoff/routing状态同步、
+   ordering contract反映live phase order、§13 closeout gates全绿、commit为docs+已批准scope
+   asset且不含`crates/**`production/test改动。
+3. **检查结果**：见本node commit后的gate输出；`verify_revolute_scope.rb S5-C
+   368052975f823bd9cb20c77b50a9daa83b1532c9`=`S5_SCOPE_PASS`，`self-test`=
+   `S5_SCOPE_SELF_TEST_PASS`，`milestone 28867b5...`在scope修正后=`S5_SCOPE_PASS`，
+   doc-catalog YAML ok，`git diff --check`=0。
+4. **复跑方式**：`RUBYOPT=-EUTF-8 rtk proxy ruby crates/picea/tests/verify_revolute_scope.rb
+   self-test`（环境无`LANG`时必须带`RUBYOPT=-EUTF-8`，否则Ruby按US-ASCII读UTF-8 spec会
+   误报`expected exactly one "## 16. 进度日志" section`），以及§12/§13的其余命令。
+5. **范围外**：不改production/test、不改solver、不archive OpenSpec change、不push、
+   不补跑S5-LAB-RED独立RED receipt。
+6. **残余风险**：见§17新增三条。
+
+**本node唯一的gate asset改动（用户2026-07-26逐项批准的bounded scope修正）**：
+`crates/picea/tests/verify_revolute_scope.rb`
+
+- `SCOPES["S5-LAB"][:required]`移除
+  `crates/picea-lab/web/src/components/workbench/SceneHierarchy.tsx`与
+  `.../Inspector.tsx`，改列入`:optional`。依据：这两个文件已经通过既有
+  `dynamicValueLabel(locale, joint.kind)`泛型消费authoritative kind，显式revolute label由
+  `i18n.ts`+`types.ts`提供；`ui-contract.mjs:78/83`正是对这两个文件断言显式revolute
+  consumer并在zero-diff下PASS，浏览器验收也确认label真实渲染。因此zero-diff是正确的最小
+  实现，required会强制无谓的production churn。
+- `SCOPES["S5-LAB"][:required]`新增6条
+  `openspec/changes/complete-s5-revolute-lab-browser/*`。依据：S5-LAB确实新建了该OpenSpec
+  change却漏做scope同步（S5-REPLAN-3当时对`complete-s5-revolute-solver-5/*`是同步过的）。
+- `SCOPES["S5-C"][:optional]`新增`crates/picea/tests/verify_revolute_scope.rb`，使本修正
+  本身落在S5-C scope内。
+- parser、CLI dispatch、`PRE_V_NODES`、`S5_D_REQUIRED`、其他node scope与全部self-test逻辑
+  **zero-diff**；`self-test`（含`PRE_V_NODES drift`与
+  `pre-v-excludes-four-stopped-solvers`）仍全PASS。
 
 ## 14. 验收报告格式
 
@@ -2706,11 +2793,11 @@ RED receipt额外记录 failure signature，并区分：
 | 2026-07-15 | S5-SOLVER-4 | `29bafce59a0913be7b4d37055ab57ed5e5233116` | `STOPPED / TEST CONTRACT CONFLICT`；worker命中§15，supervisor fresh复跑同一唯一FAIL；未派reviewer/verifier | `NOT COMMITTED` | exact-6保留accepted production patch；receipt/scope与unit 8/8 PASS；第一条shadow GREEN，第二条因WorldAnchor shadow 1 ULP under-correction导致tangent impulse delta=`0.000020315 > 0.000001`、`contact_equivalent=false`；row/warning=`1/0`、pose error=`0`、drift=`0.000917`；实验已撤销；完整16条/broad未运行，fmt仍FAIL；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-REPLAN-3 | `29bafce59a0913be7b4d37055ab57ed5e5233116` | 首轮independent spec reviewer=`4 High / 4 Medium / 1 Low`、FAIL；bounded remediation后final re-review=`0 High / 0 Medium`、PASS；independent docs verifier=`0 High / 0 Medium / 0 Low`、`S5-REPLAN-3 DOCS VERIFIER PASS`；已commit | detached `195215119a3544e71849f21cb7bdaf245188de13`；main `97839aba5a1cff168e6a2e857f02ab252226cad4` | clean detached exact-8；导入living blob=`6bc4dc8ff9f506c5e13bb048afd1da6b0db3b56f`、design baseline blob=`f945b0f530191b4c1de0921aa930146210e723ce`及6个OpenSpec paths；OpenSpec 4/4、strict validate、apply 6/24、YAML/fences/terms/exact-8/outside-zero-diff/main blobs/diff/cached均PASS；commit paths复核exact-8、提交后worktree clean；main cherry-pick后production blobs不变；Chrome `NOT RUN / BROWSER PENDING` |
 | 2026-07-15 | S5-BEHAVIOR-RED-5 | `195215119a3544e71849f21cb7bdaf245188de13` | worker完成；final reviewer与independent re-verifier均=`0 High / 0 Medium / 0 Low`、`PASS`；已commit并集成main | main `ec1493a7652b0e6a6b72956c17f4ab000e93bb39`（detached source `73e0a19867c8a62efbdcd26c40e3b1704467b4aa`） | exact-5；clean unit仅8个批准`E0425`，16 exact逐条`running 1 test`且`12 RED / 4 GREEN`；两条pose-effect self-test/唯一signature有效；Distance clean=`0/2` GREEN、temporary production witness两条CCD GREEN且Distance enabled=`2`精准FAIL；scope/fmt/OpenSpec apply=`14/24`/diff/hygiene PASS；唯一初始Medium status drift已闭合；main cherry-pick后production blobs不变 |
-| 2026-07-16 | S5-SOLVER-5 | `ec1493a7652b0e6a6b72956c17f4ab000e93bb39` | final candidate；separate spec/code review与fresh verifier=`0 High / 0 Medium / 0 Low`；等待supervisor commit | `COMMIT PENDING` | unit=`11/11`、integration exact=`16/16`、targeted/broad/workspace/check/strict Clippy/fmt/OpenSpec均PASS；用户授权两条bounded baseline hygiene amendments，冻结scope如实报exact-2 unexpected，supplemental exact-10 `missing=0/unexpected=0/PASS`且其余forbidden zero-diff；tasks=`24/24`后stage/commit；完成后hard-stop，不进入S5-LAB-RED |
-| - | S5-LAB-RED | `PENDING` | 未开始 | - | 必须单独提交cross-layer contracts |
-| - | S5-LAB | `PENDING` | 未开始 | - | CLI candidate commit后external browser receipt未回填则`BROWSER PENDING` |
-| - | S5-V | `PENDING` | 未开始 | - | CLI三角色只读；独立external browser receipt另行回填 |
-| - | S5-C | `PENDING` | 未开始 | - | docs-only closeout |
+| 2026-07-16 | S5-SOLVER-5 | `ec1493a7652b0e6a6b72956c17f4ab000e93bb39` | final candidate；separate spec/code review与fresh verifier=`0 High / 0 Medium / 0 Low`；已commit | `320f2d35fce3053cea607f8d434c85ba7997e1c8` | unit=`11/11`、integration exact=`16/16`、targeted/broad/workspace/check/strict Clippy/fmt/OpenSpec均PASS；用户授权两条bounded baseline hygiene amendments，冻结scope如实报exact-2 unexpected，supplemental exact-10 `missing=0/unexpected=0/PASS`且其余forbidden zero-diff；tasks=`24/24`后stage/commit；本行commit列由S5-C按git事实回填，原`COMMIT PENDING`是living spec滞后 |
+| 2026-07-16 | S5-LAB-RED | `320f2d35fce3053cea607f8d434c85ba7997e1c8` | 已实现并合入，但**未按单独node commit**：RED与GREEN被合并进同一个commit | 与S5-LAB共用 `368052975f823bd9cb20c77b50a9daa83b1532c9` | cross-layer contracts已落地：`artifact_run.rs`两条exact（`revolute_pendulum_artifact_exposes_authoritative_joint_facts`、`revolute_debug_kind_old_consumer_rejects_unknown_variant`）、`server_routes.rs`一条exact（`revolute_pendulum_catalog_and_live_frame_preserve_authoritative_facts`）、`ui-contract.mjs`四条revolute断言、`i18n-contract.mjs`两locale断言。因与实现同commit，本node的RED receipt与独立scope gate**没有留下证据**；见§17 |
+| 2026-07-16 | S5-LAB | `320f2d35fce3053cea607f8d434c85ba7997e1c8` | 已commit并push；CLI gates GREEN；browser由S5-V统一回填 | `368052975f823bd9cb20c77b50a9daa83b1532c9`（= `origin/main`） | `ScenarioId::RevolutePendulum` + `scene_revolute.rs` + dispatch/catalog、schema-v1 `SceneRevoluteJointFixture`、generic artifact/server projection、两locale label与Timeline consumer；`Inspector.tsx`/`SceneHierarchy.tsx`保持zero-diff，显式revolute label走既有`dynamicValueLabel(locale, joint.kind)`泛型消费（`ui-contract.mjs:78/83`对这两个文件断言并PASS）。node独立scope gate同样未留证据；见§17 |
+| 2026-07-26 | S5-V | `368052975f823bd9cb20c77b50a9daa83b1532c9` | `CLI PASS（含1处已批准scope修正） / BROWSER PASS`；本轮由单一supervisor执行，未拆三个叶子subagent | 不单独commit | CLI：`cargo fmt --all --check`=0；`picea --lib`=`139 passed`；`picea --tests`=`139/24/3/1/94/26/5/19 passed, 0 failed`；`verify_revolute_public_api.rb expect-green`=`S5_PUBLIC_API_EXPECTED_GREEN`（六enum全`E0004`）；examples/bench `--no-run`=0；`picea-lab`=`40/32(+5 ignored)/21 passed`；`--workspace --all-targets` test/check/`clippy -D warnings`均=0 warnings；Web `test:ui-contract`/`test:i18n`/`test:profile`/`build`/`just picea-lab-web-check`=0；doc-catalog YAML ok；filesystem hygiene ok；`git diff --check`=0，worktree clean。首跑`milestone 28867b5...`=`FAIL`（`MISSING=Inspector.tsx,SceneHierarchy.tsx`；`UNEXPECTED=6×complete-s5-revolute-lab-browser/*`），经用户批准bounded scope修正后=`S5_SCOPE_PASS`、`self-test`=`S5_SCOPE_SELF_TEST_PASS`。附加检查：`#[non_exhaustive]`恰好6个且全是enum、prelude只增`RevoluteJointDesc/Patch`、fixture仍schema v1且无motor/limit/damping/`collide_connected`/cache、`mixed_rows:contact_rows=1;joint_rows=1`分离、单revolute `joint_rows=1`。Browser见§12.1回填 |
+| 2026-07-26 | S5-C | `368052975f823bd9cb20c77b50a9daa83b1532c9` | docs-only closeout + 已批准scope修正 | 见本node commit | 详见§13.1 |
 
 ## 17. 当前残余风险
 
@@ -2742,8 +2829,31 @@ RED receipt额外记录 failure signature，并区分：
 - sub-EPSILON实际状态变化已由3条optional unit锁定并修复：pose比较committed/current，velocity
   比较next/current，would-wake接受finite nonzero demand；可表示mutation会wake，加法舍入后实际
   未变则不虚假wake。
-- 本change只完成到S5-SOLVER-5并hard-stop；S5-LAB-RED及后续browser链仍为
-  `PENDING / NOT AUTHORIZED IN THIS CHANGE`。
+- （已解除）原“本change只完成到S5-SOLVER-5并hard-stop”的限制已在用户后续授权下走完
+  S5-LAB-RED/S5-LAB/S5-V/S5-C；browser链已PASS。
+- **S5-D那条“留到S5-C”的Low无法闭合**：S5-C核查了living spec、design、S5-D commit
+  `eecbc331a36bfb694676c979bffb03f5a47202dd`的全部diff与commit message，该finding**只留下了
+  计数`1 Low`，内容从未被记录**。因此S5-C不能在实质上闭合它，也不假装闭合；本行即为其终态
+  记录。教训：reviewer结论只写计数不写finding正文，等于把issue丢了。
+- **S5-LAB-RED没有独立RED receipt**：该node的acceptance-as-code与S5-LAB实现被合并进同一个
+  commit `3680529`，因此“先RED后GREEN”这一步在git历史里不可复核，两个node的独立
+  `verify_revolute_scope.rb <node> <start>` gate也从未运行过（receipt行当时是`PENDING`，
+  脚本直接拒绝）。当前这些contract是GREEN且逐条可复跑，但**RED阶段的证据已经不可补**；
+  后续node不要沿用这种合并commit的做法。
+- **milestone binary scope曾在HEAD上FAIL**，由S5-V首次发现（`MISSING=Inspector.tsx,
+  SceneHierarchy.tsx`；`UNEXPECTED=6×complete-s5-revolute-lab-browser/*`），已按§13.1的
+  用户批准bounded修正闭合。根因是S5-LAB既没做OpenSpec路径的scope同步，也没有人在该node
+  跑过scope gate。
+- `milestone`并集按设计只覆盖`S5_D_REQUIRED + PRE_V_NODES`，**不含S5-V/S5-C**。因此S5-C
+  commit之后再跑`milestone`会把`docs/design/solver-island-ordering-contract.md`报成
+  unexpected——这是frozen contract的预期行为，不是回归；该gate的有效运行点是S5-C改动前的
+  clean HEAD（本轮已在`3680529`上跑过并PASS）。
+- 两个OpenSpec change（`complete-s5-revolute-solver-5`、`complete-s5-revolute-lab-browser`）
+  **未archive**，仍留在`openspec/changes/`；archive会把路径移出所有已批准scope，故留给后续
+  单独授权处理。
+- 本仓库的Ruby gate脚本在**没有`LANG`/`LC_ALL`的shell里会误报**
+  `expected exactly one "## 16. 进度日志" section`（Ruby默认external encoding退化为
+  US-ASCII）。复跑时用`RUBYOPT=-EUTF-8`或设置UTF-8 locale。这不是spec损坏。
 - singular row fail closed 会跳过该phase；这是防止world污染，不是约束成功保证。
 - 新 `ScenarioId` variant 对仓库外 exhaustive match 有source影响，但本次不改变其
   attribute policy。

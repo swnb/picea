@@ -289,8 +289,8 @@ documents:
   status: active
   owner: architecture
   applies_to: [solver, island, ordering, contacts, joints, sleep]
-  keywords: [island, solver-ordering, contact-rows, joint-rows, dense-slots]
-  last_reviewed: 2026-05-17
+  keywords: [island, solver-ordering, contact-rows, joint-rows, dense-slots, velocity-first, revolute-post-contact]
+  last_reviewed: 2026-07-26
 - path: docs/design/performance-threshold-policy.md
   title: Performance Threshold Policy
   kind: contract
@@ -598,7 +598,7 @@ documents:
   owner: architecture
   applies_to: [physics-realism, joints, revolute, public-api, solver, lifecycle, schema-v1, picea-lab, picea-lab-web]
   keywords: [revolute, pin-only, point-constraint, effective-mass, non-exhaustive, wake, joint-row, schema-v1, browser-acceptance]
-  last_reviewed: 2026-07-14
+  last_reviewed: 2026-07-26
 - path: docs/plans/2026-07-10-workbench-interactive-run-model-plan.md
   title: Workbench Interactive Run Model Plan
   kind: plan
@@ -625,4 +625,4 @@ documents:
   owner: supervisor
   applies_to: [milestone, physics-realism, joints, revolute, public-api, solver, lifecycle, picea-lab, picea-lab-web]
   keywords: [s5-d, s5-api-red, s5-api, s5-behavior-red, s5-solver, s5-lab-red, s5-lab, s5-v, s5-c, living-spec]
-  last_reviewed: 2026-07-14
+  last_reviewed: 2026-07-26

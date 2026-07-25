@@ -95,8 +95,8 @@
 - `docs/plans/2026-06-17-physics-realism-vnext-milestones.md`：物理真实感 vNext 执行计划、subagent 分派边界、E4 direct-concave query gate、E6/V8 lab-web/browser 能力展示验收
 - `docs/design/2026-07-13-sat-manifold-persistence-design.md`：已冻结的handoff §4架构合同，记录SAT raw feature与persistent lifecycle/warm-start/source-row分层、geometry revision invalidation及exact-hard residual最大基数matcher
 - `docs/plans/2026-07-13-vnext-s4-manifold-persistence-milestone.md`：已完成并冻结的handoff §4执行与验收证据；包含full workspace、clippy与matrix long-window gates，不改变父计划E4 complex-shape含义
-- `docs/design/2026-07-14-revolute-joint-v1-design.md`：基于已批准handoff §5 public/wake/lab边界的架构包；覆盖compatibility、2x2 point constraint、COM/CCD pose plan、schema v1和lab/browser验收；当前阶段与验证状态以living spec、OpenSpec和实时仓库事实为准
-- `docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md`：handoff §5 living spec；固定S5-D -> API-RED -> API -> BEHAVIOR-RED -> SOLVER -> LAB-RED -> LAB -> V -> C顺序、ownership、commit gate与stop conditions
+- `docs/design/2026-07-14-revolute-joint-v1-design.md`：handoff §5 Pin-only revolute架构包，**已实现并验证（2026-07-26）**；覆盖compatibility、2x2 point constraint、COM/CCD pose plan、schema v1和lab/browser验收。motor/limit/damping/`collide_connected`仍是deferred，要做先走新design gate
+- `docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md`：handoff §5 living spec，**已CLOSED**；solver commit `320f2d3`、lab commit `3680529`、S5-V `CLI PASS / BROWSER PASS`。碰这块前先读§17残余风险（S5-LAB-RED与S5-LAB合并成一个commit所以没有独立RED receipt；两个OpenSpec change未archive；Ruby gate脚本在无`LANG`的shell需`RUBYOPT=-EUTF-8`）
 - `docs/design/physics-engine-upgrade-technical-plan.md`：Post-M20 baseline、M21 public query 和 M22 authoring boundary 之后的系统升级设计方向
 - `docs/design/matrix-stack-stability-optimization-design.md` 与 `docs/design/matrix-stack-stability-acceptance.md`：matrix stack 稳定性优化顺序和验收窗口
 - `docs/design/dense-pressure-position-row-architecture.md`：dense pressure / pseudo-position / position-row 已落地架构记录
