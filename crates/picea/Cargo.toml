@@ -5,9 +5,10 @@ edition = "2021"
 authors = ["swnb", "async-rustacean"]
 license-file = "LICENSE"
 repository = "https://github.com/swnb/picea"
-# homepage = ""
-# documentation = ""
-categories = ["physic-engine", "graph"]
+homepage = "https://github.com/swnb/picea"
+documentation = "https://docs.rs/picea"
+categories = ["game-development", "simulation"]
+keywords = ["2d", "collision", "game", "physics", "simulation"]
 description = "Picea is a small 2D physics engine written in Rust."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

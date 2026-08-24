@@ -12,6 +12,8 @@ Initial evidence should cover only the high-signal scenarios already present in
 - `sparse_broadphase` and `dense_broadphase`: broadphase traversal/prune cost.
 - `stack_stability`: stacked contact rows and solver island counters.
 - `ccd_bullet` and `ccd_dynamic_pair`: CCD candidate/hit/clamp counters.
+- `many_small_islands` and `one_large_island`: island topology and solver-slot
+  counters.
 - `api_batch_creation`: recipe/world-command authoring throughput.
 
 ## Baseline Collection
@@ -67,3 +69,25 @@ When performance data is noisy or unavailable, run the correctness gates first:
 Do not block physics correctness work on wall-clock data from an unstable
 environment.
 
+## Enforced Repository Mapping (2026-07-29)
+
+`just ci-nightly` is the canonical scheduled/local entry. It:
+
+1. Discovers and exact-runs the 600-frame no-ejection gate and the 1200-frame
+   sleep-convergence gate, rejecting an empty test selection.
+2. Runs all nine Criterion scenarios with the fixed
+   `picea-ci-current` baseline label.
+3. Verifies `scripts/ci/criterion-counters.json` against only
+   `benchmark.json` files written for that baseline after the current run
+   started.
+4. Preserves `target/criterion/` as hosted-CI evidence.
+
+The exact manifest covers `api_batch_creation`, `query_heavy`,
+`sparse_broadphase`, `dense_broadphase`, `many_small_islands`,
+`one_large_island`, `stack_stability`, `ccd_bullet`, and
+`ccd_dynamic_pair`. Step scenarios aggregate full-window `total_*` counters;
+final-state counts remain explicitly named `final_*`.
+
+A changed scenario ID or deterministic counter is a hard failure. Criterion
+median/outlier output remains informational until the five-comparable-baseline
+and review-approved threshold rules above are satisfied.

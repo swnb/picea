@@ -20,6 +20,22 @@ alias logs := picea-lab-web-logs
 default:
     @just --list
 
+# Run the pull-request feedback profile.
+ci-fast:
+    bash scripts/ci/run.sh fast
+
+# Run the complete workspace and Web correctness profile.
+ci-full:
+    bash scripts/ci/run.sh full
+
+# Run long-window stability and Criterion evidence gates.
+ci-nightly:
+    bash scripts/ci/run.sh nightly
+
+# Verify package metadata and package builds without publishing.
+ci-release:
+    bash scripts/ci/run.sh release
+
 # Start the full local workbench: Rust lab API plus the Vite web UI.
 picea-lab-web:
     #!/usr/bin/env bash

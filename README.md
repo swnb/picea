@@ -149,6 +149,35 @@ Milestone work should stay narrow:
 5. Run the targeted tests and then the milestone gate.
 6. Record residual risks instead of silently widening scope.
 
+## Canonical Validation Profiles
+
+Use the repository profiles as the canonical delivery gates:
+
+```bash
+just ci-fast
+just ci-full
+just ci-nightly
+just ci-release
+```
+
+- `ci-fast` checks formatting, core smoke tests, Web contracts, and the
+  production bundle.
+- `ci-full` runs workspace all-target tests, strict Clippy, a high-severity
+  audit of the complete Web build dependency tree, and the complete Web
+  contract suite.
+- `ci-nightly` runs the 600/1200-frame matrix-stack gates and verifies the exact
+  nine-scenario Criterion counter manifest. Criterion wall-clock results remain
+  review evidence, not a one-run correctness threshold.
+- `ci-release` verifies package metadata and builds package archives. It never
+  publishes. A dirty local run is labeled only as a buildable candidate; a
+  clean hosted-CI receipt is required before claiming clean or reproducible
+  packaging.
+
+The thin recipes call `scripts/ci/run.sh`, which uses `rtk proxy` locally and
+the same underlying commands directly on a standard CI runner. GitHub workflow
+results remain unknown until the branch containing them is pushed and actually
+runs.
+
 ## Common Test Gates
 
 Use current repo facts and live command output as the source of truth. When a task is explicitly milestone-scoped, consult the milestone plan only for the still-relevant boundary checks. Archived `Scene`/`Context` / `picea-web` / wasm gates in that file are historical, not current default targets.

@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "test:dev-server": "node scripts/dev-server-contract.mjs",
+    "test:bundle": "node scripts/bundle-contract.mjs",
     "test:i18n": "node scripts/i18n-contract.mjs",
     "test:profile": "node scripts/profile-contract.mjs",
     "test:ui-contract": "node scripts/ui-contract.mjs",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && npm run test:bundle",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -31,7 +32,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
+    "postcss": "^8.5.18",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
     "vite": "^6.4.3"

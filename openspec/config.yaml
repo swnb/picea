@@ -1,27 +1,22 @@
 schema: spec-driven
 
 context: |
-  Picea 是 Rust workspace。当前 change 只续作 handoff section 5 的
-  S5-REPLAN-3 -> S5-BEHAVIOR-RED-5 -> S5-SOLVER-5。
-  领域合同与历史证据见
-  docs/plans/2026-07-14-vnext-s5-revolute-joint-milestone.md；
-  导入基线 HEAD=29bafce59a0913be7b4d37055ab57ed5e5233116，living-spec
-  blob=6bc4dc8ff9f506c5e13bb048afd1da6b0db3b56f，design
-  blob=f945b0f530191b4c1de0921aa930146210e723ce。
-  本 change 的任务 checkbox 与完成进度只以 openspec tasks.md 为准。living spec
-  只追加冻结合同、immutable node Start HEAD/commit receipt 和可执行验收证据；
-  scope verifier只把它当身份/证据注册表，不从中推导任务完成度。
-  所有 Cargo/Git/Rust 验证使用 rtk proxy；先 RED 后实现；不得修改 contact solver、
-  CCD、integrate.rs、public API/schema、既有 joint kinds 或批准阈值。
+  Picea 是 Rust workspace，包含 core physics crate、picea-lab Rust 工具链、
+  React/Vite workbench 和独立 proc-macro crate。当前事实、验证输出与
+  docs/plans/2026-04-25-picea-physics-engine-production-milestones.md 的现行边界
+  优先于历史计划快照；模块路由见 docs/ai/repo-map.md 与 docs/ai/index.md。
+  每个 change 的任务 checkbox 与完成进度只以该 change 的 tasks.md 为准。
+  所有本地 Cargo/Git/Rust/npm 验证使用 rtk proxy；实现先建立可证伪的行为锁，
+  再做最小修改，并保留失败证据、未运行项和残余风险。
 
 rules:
   proposal:
     - 区分已验证事实、推断和未知项
-    - 明确不改变冻结的 Revolute 架构与 public surface
+    - 明确 public API、physics behavior、schema 与发布操作边界
   tasks:
-    - 严格保持 REPLAN-3、BEHAVIOR-RED-5、SOLVER-5 的顺序
-    - 每个节点包含 scope、review、verify 与 receipt 更新任务
+    - 保持规划、行为锁、实现、targeted verification、broader verification、review、closeout 的顺序
+    - 每个实现节点包含明确 scope、成功标准、验证与证据更新
   specs:
-    - 只写耐久的可观察行为，不复制历史 receipt 或任务进度
+    - 只写耐久的可观察行为，不复制易过期的历史 receipt 或任务进度
   design:
-    - 冻结既有 2x2、COM、phase、wake 与 ADR-S5-1 到 ADR-S5-5
+    - 明确事实来源、失败策略、回滚边界以及不采用方案

@@ -2,12 +2,33 @@
 
 > 日期：2026-05-06
 >
-> 状态：D2 设计产出，服务于
-> `docs/plans/2026-05-06-matrix-stack-stability-optimization-milestones.md`。
+> 状态：Active acceptance contract；原始 D2 报告口径作为历史保留，当前
+> 调度语义见下方 2026-07-29 addendum。
 
 本文冻结 matrix stack 稳定性优化的第一版验收门。它补充
 `docs/design/stack-stability-repro-diagnostics.md`，不覆盖既有 performance /
 stability diagnostics 复现文档。
+
+## 2026-07-29 Current Gate Addendum
+
+当前实现不再要求旧故障继续存在：
+
+| Window | Current role | Exact test |
+| --- | --- | --- |
+| 180 frames | 常规 artifact facts / dense stability behavior lock | `matrix_stack_artifacts_capture_nxm_grid_stack_facts` |
+| 240 frames | 默认 suite 的普通 hard gate | `matrix_stack_support_gap_re_evaluation_prevents_current_ejection_window` |
+| 600 frames | nightly exact gate：no ejection / no runaway speed | `matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed` |
+| 1200 frames | nightly exact gate：resting sleep convergence | `matrix_stack_long_run_acceptance_requires_resting_sleep_convergence` |
+
+600/1200 帧测试保留 `#[ignore]` 仅用于调度时长，不再叠加环境变量跳过；
+`scripts/ci/run.sh nightly` 先验证 exact discovery 非空，再逐条执行并聚合结果。
+240 帧测试已从 ignored observation 升级为默认 hard test。
+
+2026-07-29 live 复跑三条正向门均通过：最大穿透 `0.027232`、floor
+ejection `none`、final outside floor bodies `0`、final awake/sleeping
+`0/48`、quiet linear/angular `0/0`。两个断言历史故障必须仍存在的
+observation test 已因其前提被当前修复证伪而删除；其旧失败帧和被拒实验继续保留
+在历史计划中。`first-bad-frame` 仍是红灯诊断格式，不是当前绿门必须制造的输出。
 
 ## 场景分层
 
@@ -19,7 +40,7 @@ stability diagnostics 复现文档。
 
 不在 D2 新增场景。若 `stack_4` 仍然太噪，后续单独开里程碑新增小矩阵 fixture。
 
-## Frame Windows
+## Original D2 Frame Windows (Historical)
 
 | Gate | 场景 | 帧数 | 作用 |
 | --- | --- | --- | --- |
@@ -50,6 +71,10 @@ Quiet window 的第一版定义：
 - 窗口内无 severe penetration / churn / warm-start marker。
 
 ## Stress Gates
+
+> 本节描述第一阶段的报告升级路径。当前 240/600/1200 正向门已全绿时，以
+> 2026-07-29 addendum 的 hard/nightly 调度为准；不要恢复“必须有
+> first-bad-frame”的旧负向断言。
 
 `matrix_stack 8x6` 第一阶段不要求全绿。它必须产出报告，并且报告要可比较。
 
