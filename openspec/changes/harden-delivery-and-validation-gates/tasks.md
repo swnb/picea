@@ -63,3 +63,41 @@
 - 只执行 `npm update nanoid --package-lock-only --ignore-scripts`，将 transitive lock 收敛到兼容的 `nanoid@3.3.18`；未增加 direct dependency、未 force、未 major 升级。随后 live audit 为 0。
 - fresh canonical `full` exit 0：workspace all-targets、strict Clippy、fresh `npm ci`、完整 high-level audit 0、UI/i18n/profile、Web build、bundle contract 和 dev-server contract 全通过；bundle仍为 271,256/143,383/172,191 bytes。
 - OpenSpec `validate --all --strict` 为 3/3 PASS；Shell/Node/YAML syntax、fmt 与 `git diff --check` PASS。remote GitHub CI、clean package receipt、nightly/release 本次未重跑，继续沿用 `NOT RUN / UNKNOWN` 或历史 receipt 边界。
+
+## 7. Delivery continuation (2026-09-03)
+
+- [x] 7.1 核验原交付分支 `a7b3cb42`、远端 main `671a216b`、本地 S6 main `80f08927`，建立独立 worktree；记录用户继续 commit/push/PR/green merge 的授权与真实审批/线性历史约束
+- [x] 7.2 完成本轮 proposal/design/spec 增量并通过 OpenSpec status、strict validate 和 apply instructions
+- [x] 7.3 在实际 Bash 3.2 建立 clean release RED，最小修复并验证 clean/dirty local、clean/dirty CI、metadata/package 失败传播 contract；接入 fast/full
+- [x] 7.3a 保留 stable full 的七条 macro span RED，补 Deref 尾逗号锁；只修复 attribute/meta 诊断跨度，并为 full 显式安装 rust-src，不改旧 stderr/生成 API，在 stable/nightly 上验证
+- [ ] 7.3b 闭合 full dev-server contract 的 just 环境依赖：保留无 just 的 ENOENT RED，workflow 显式安装本地已验证版本，并以远端实际 job 验证
+- [x] 7.4 对 fresh audit 命中的 Browserslist/postcss-selector-parser 做兼容 lock-only 补丁；使用明确 stable Rust/Node 24 重跑 fast/full/nightly，记录测试、长窗口、Criterion、fresh install/audit、Web build/contract 与真实 Rust source 的生产预览浏览器证据
+- [ ] 7.5 完成 scoped commit，并对相同 source commit 执行真实 clean release；复查差异、锁文件、OpenSpec、文档与工作区 custody
+- [ ] 7.6 只推送交付分支、创建 PR，核验最终 exact head 的远端 fast/full，不接受 missing 或旧 head 检查
+- [ ] 7.7 满足真实批准、讨论解决、线性历史和远端检查后合并，核验远端 main 与合并后检查；否则保留明确阻塞，不绕过保护、不修改本地 S6 main
+
+### Current boundary
+
+2026-09-03 的结果在对应任务完成后逐项追加；2026-07-29/2026-08-24 是历史快照。
+本轮不执行 OpenSpec archive/sync、deploy 或 publish。远端夜间/打包门在实际运行前
+仍为 `NOT RUN / UNKNOWN`，不由本地 profile 代替。
+
+### Fresh acceptance receipt (2026-09-03, in progress)
+
+- Planning：OpenSpec 1.6.0 status 4/4、`validate --all --strict` 3/3 PASS，apply state `ready`；没有当前版本可用的独立 `verify` 命令。
+- Release regression RED：`rtk proxy node --test scripts/ci/release-profile.test.mjs` 在实际 Bash `3.2.57(1)-release` 上 exit 1；9 项中 7 PASS、2 FAIL，只有 clean local/CI 报 `package_dirty_flag[@]: unbound variable`。
+- Release regression GREEN：显式 clean/dirty argv 修复后同命令 exit 0，9/9 PASS；metadata 无效/命令失败、Git status 失败、两个 package 失败均能阻断流程。fast/full 已接入该 contract，README 同步说明 fixture 与真实 package 证据的区别。
+- 主机默认 Node 为 `v26.6.0`，即使 `/opt/homebrew/opt/node@24` 也实际指向该版本；为避免误报 Node 24，在本轮临时工具链目录安装并验证 `Node v24.20.0 / npm 11.19.0`，不修改用户全局默认。后续 profile 使用此版本和已安装的 stable `rustc 1.97.1 (8bab26f4f 2026-07-14)`，远端实际工具链另行记录。
+- 首轮 Node 24/stable `fast` exit 0：9 个 runner contracts、139 个 core tests、examples compile、Web UI/i18n/profile/build 和三 chunk budget 通过；但 fresh install 报 1 high/1 low。独立 `npm audit --json` exit 1，确认 Browserslist 两条 high 公告 `GHSA-c83g-rgw3-j3cx`、`GHSA-73wf-gq98-2v4g`，以及 selector parser 的 low `GHSA-w9m9-85wc-3x92`。此 RED 推翻 2026-08-24 的 audit 0 快照；未将 fast 成功当作 full 安全门通过。
+- 安全修复候选：限定 `npm update browserslist postcss-selector-parser --package-lock-only --ignore-scripts` 将两个命中包分别更新到 `4.28.8`、`6.1.4`，连带更新 Browserslist 所需五个传递数据/工具依赖；直接 package.json 未变，lock-only audit 为 0，fresh-install 验收仍由后续 full 完成。
+- 首轮 stable `full` exit 101，在宏 Accessors 的三条旧 `.stderr` span 对比处失败，尚未进入 Clippy/Web 阶段；core/lab 测试已通过但不代表 full GREEN。随后 `cargo test --locked -p picea-macro-tools --no-fail-fast` exit 101，确认 Accessors 3、Builder 1、Deref 3 条同类错误，总计七条。保留原快照，不使用 `TRYBUILD=overwrite`。
+- `rustup check` 确认远端 stable 当前为 `1.98.0 (88d9e12ae 2026-08-18)`，本地原 stable `1.97.1` 较旧；本轮另在临时 RUSTUP_HOME 安装 1.98.0/rustfmt/clippy，随后以它重跑门禁，不改变全局 Rust 默认或已有工具链。
+- 新 Deref 尾逗号 fixture 和全部旧 macro fixtures 在原 `nightly-2026-07-28` 上 exit 0，36 个 trybuild cases 通过；当前 stable 1.98.0 在新增后合计八条 span RED，另有一条 `chained_setter` 缺标准库源码提示。向临时 toolchain 添加 `rust-src` 后，`chained_setter` 无代码/快照修改即转绿，证明 full CI 必须显式提供该组件。
+- Macro GREEN：仅将 Accessors/Builder/Deref 的 attribute/meta 多 token 错误改为 `syn::Error::new_spanned`，保留旧错误文本和全部旧 `.stderr`；当前 stable `1.98.0` 与原 `nightly-2026-07-28` 各自运行 `cargo test --locked -p picea-macro-tools --no-fail-fast` 均 exit 0，12 个顶层测试、36 个 nested trybuild cases 通过，原有 1 个 doctest 仍按设计 ignored。当前 stable `cargo fmt --all -- --check` PASS；full CI 显式安装 `rust-src`，模块 README 同步前置条件。
+- 当前 stable `1.98.0` / Node `24.20.0` 的 fresh `fast`、`full` 均 exit 0；full strict Clippy、fresh install、完整 audit 0、Web contracts/build/dev-server 通过。JS chunks 仍为 `271256 / 143383 / 172191` bytes，均低于 `500000`。
+- CI 环境 RED：full 的 dev-server contract 会实际调用 Justfile；本机 `just 1.45.0` 下通过，而限定 PATH 为 Node 24 与系统工具后同一 contract exit 1，明确报 `spawn just ENOENT`。当前 workflow 未安装 just；GitHub runner image 的公开工具清单/配置也未声明该依赖，因此显式安装固定版本，不依赖镜像偶然携带。
+- Workflow 候选已补 `cargo install just --locked --version 1.45.0` 与版本回显，README 同步；本地 full 的 dev-server contract 已以同版本通过，远端实际安装/job 尚待 7.6 验证，7.3b 不提前勾选。
+- Final local full：417 个顶层 Rust tests、39 个 nested trybuild cases（core 3 + macro 36）和 9 个 benchmark smoke PASS；2 个长窗口门在 full 按设计 ignored，由 nightly 单独执行。另有 9/9 release-runner contracts PASS。
+- Final local nightly：当前 stable `1.98.0` / Node `24.20.0`，`bash scripts/ci/run.sh nightly` exit 0；600 帧门 21.42s、1200 帧门 43.73s，均为 exact ignored test，未修改既有阈值。默认 sample-size 20 的 Criterion 完整运行并通过 9 个 exact counter IDs；wall-clock 只作本机观测，没有可比 ABBA/远端性能结论。
+- Browser production smoke：本轮独立 Rust binary `127.0.0.1:8080` + Vite production preview `127.0.0.1:4173`，默认 1280x720 桌面视口。fresh reload 的 HTML/CSS/三个 JS chunks 与 scenarios/session/control/SSE/frame 请求均为 2xx，捕获窗口未截断；在线 console warning/error 为 0。真实落箱连续三次单步 `3 -> 4 -> 5 -> 6` 且每次 state hash 改变；矩阵场景为 49 个物体；生成 120 帧真实矩阵产物并回放 `0 -> 1`，hash `45b94e1cac24d858 -> 89531527522016b1`；中英文切换往返通过。停掉本轮 API 后刷新，显示“离线演示数据 · 非真实模拟”，demo 单步 `demo-0000 -> demo-0001`，未冒充 Rust source。浏览器/预览进程均在验收后关闭，未修改主工作区服务。
+- 当前本地日志、浏览器结构化记录与截图位于 `/private/tmp/picea-delivery-receipts-20260903/`，Criterion 位于独立 worktree `target/criterion/`；这是本机证据目录，不声称已上传或等价于 hosted CI。

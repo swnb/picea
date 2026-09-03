@@ -3,7 +3,6 @@ use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    spanned::Spanned,
     Attribute, Data, DeriveInput, Fields, Ident, Meta, Token,
 };
 
@@ -188,6 +187,8 @@ fn parse_deref_config(
 }
 
 fn parse_deref_attr(attr: &Attribute) -> syn::Result<DerefConfig> {
+    // Attribute/meta diagnostics use complete nodes so their ranges are the
+    // same on stable and nightly, without relying on unstable span joining.
     match &attr.meta {
         // `#[deref]` means read-only forwarding. Mutable forwarding must be an
         // explicit opt-in because it exposes interior mutation through the
@@ -199,8 +200,8 @@ fn parse_deref_attr(attr: &Attribute) -> syn::Result<DerefConfig> {
                 list.parse_args_with(Punctuated::<DerefOption, Token![,]>::parse_terminated)?;
 
             if options.is_empty() {
-                return Err(syn::Error::new(
-                    list.span(),
+                return Err(syn::Error::new_spanned(
+                    list,
                     "empty `#[deref()]` is invalid; use `#[deref]` or `#[deref(mut)]`",
                 ));
             }
@@ -208,8 +209,8 @@ fn parse_deref_attr(attr: &Attribute) -> syn::Result<DerefConfig> {
             if options.trailing_punct() {
                 // Reject `#[deref(mut,)]` so there is only one accepted spelling
                 // for mutable forwarding in diagnostics and docs.
-                return Err(syn::Error::new(
-                    list.span(),
+                return Err(syn::Error::new_spanned(
+                    list,
                     "`#[deref(...)]` only supports the exact form `#[deref(mut)]`",
                 ));
             }
@@ -218,8 +219,8 @@ fn parse_deref_attr(attr: &Attribute) -> syn::Result<DerefConfig> {
                 match option {
                     DerefOption::Mut => {
                         if config.mutable {
-                            return Err(syn::Error::new(
-                                attr.span(),
+                            return Err(syn::Error::new_spanned(
+                                attr,
                                 "duplicate `mut` in `#[deref(...)]`",
                             ));
                         }
@@ -231,8 +232,8 @@ fn parse_deref_attr(attr: &Attribute) -> syn::Result<DerefConfig> {
 
             Ok(config)
         }
-        Meta::NameValue(meta) => Err(syn::Error::new(
-            meta.span(),
+        Meta::NameValue(meta) => Err(syn::Error::new_spanned(
+            meta,
             "expected `#[deref]` or `#[deref(mut)]`",
         )),
     }

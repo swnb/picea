@@ -66,6 +66,7 @@ run_exact_ignored_test() {
 }
 
 profile_fast() {
+    run node --test "${repo_root}/scripts/ci/release-profile.test.mjs"
     run cargo fmt --all -- --check
     run cargo test --locked -p picea --lib
     run cargo test --locked -p picea --examples --no-run
@@ -78,6 +79,7 @@ profile_fast() {
 }
 
 profile_full() {
+    run node --test "${repo_root}/scripts/ci/release-profile.test.mjs"
     run cargo test --locked --workspace --all-targets
     run cargo clippy --locked --workspace --all-targets -- -D warnings
 
@@ -120,7 +122,6 @@ profile_nightly() {
 profile_release() {
     local git_status
     local metadata_file
-    local -a package_dirty_flag=()
     metadata_file="$(mktemp)"
 
     if [[ -z "${CI:-}" ]] && command -v rtk >/dev/null 2>&1; then
@@ -143,16 +144,18 @@ profile_release() {
         return 1
     fi
 
+    # Bash 3.2 treats an empty array as unset under nounset. Keep the clean and
+    # dirty argv explicit so local macOS and hosted CI enforce the same contract.
     if [[ -n "${git_status}" ]]; then
-        package_dirty_flag=(--allow-dirty)
         printf '%s\n' \
             "Package receipt class: dirty local candidate (buildable, not clean/reproducible)"
+        run cargo package -p picea --locked --allow-dirty
+        run cargo package -p picea-macro-tools --locked --allow-dirty
     else
         printf '%s\n' "Package receipt class: clean checkout candidate"
+        run cargo package -p picea --locked
+        run cargo package -p picea-macro-tools --locked
     fi
-
-    run cargo package -p picea --locked "${package_dirty_flag[@]}"
-    run cargo package -p picea-macro-tools --locked "${package_dirty_flag[@]}"
 }
 
 usage() {
@@ -160,8 +163,8 @@ usage() {
 Usage: scripts/ci/run.sh <profile>
 
 Profiles:
-  fast      Formatting, core smoke, Web contracts and production bundle
-  full      Workspace tests, strict Clippy and complete Web contracts
+  fast      Runner contract, formatting, core smoke, Web contracts and bundle
+  full      Runner contract, workspace tests, strict Clippy and Web contracts
   nightly   Long-window matrix acceptance and Criterion evidence
   release   Package metadata and package build verification (no publish)
 EOF

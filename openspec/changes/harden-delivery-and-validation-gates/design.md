@@ -37,7 +37,7 @@ wall-clock hard threshold。首次 fresh `npm ci` 还报告 9 个 high severity�
 - 不修改 solver、contact、CCD、step cadence、public API、artifact/schema 或 UI 产品行为。
 - 不新增 direct-concave、多线程 solver、deformable、Revolute motor/limit 或 1.0 surface。
 - 不在未验证候选工具链前声明 MSRV；不在没有五轮可比 baseline 前设置绝对时间 hard threshold。
-- 不执行 OpenSpec archive/sync、commit、push、PR、deploy 或 crates.io publish。
+- 初始实施不执行 Git 发布操作；2026-09-03 续办仅允许本 change 的 scoped commit、push、PR 和满足门禁/审批后的 merge，仍不执行 OpenSpec archive/sync、deploy 或 crates.io publish。
 
 ## Decisions
 
@@ -124,3 +124,72 @@ high/critical finding。`fast` 保持有界反馈时间，不重复联网 audit�
 ## Open Questions
 
 无阻塞项。正式 MSRV、semver API diff baseline 与绝对性能阈值均保留为后续独立 change。
+
+## Delivery Continuation (2026-09-03)
+
+本节更新续办阶段的授权和执行决策；上文 2026-07-29 的本地实施、未激活远端与
+工具链叙述是历史快照，不代表本轮已验证事实。用户在询问可否合并、得到
+commit/push/PR/CI/merge 流程后要求继续，授权自主完成该流程，但不授权改变分支
+保护规则或把后续 S6 物理工作混入本 change。
+
+### Scope and custody
+
+独立 worktree 从 `a7b3cb42` 续办原交付分支。当前本地主工作区 main 为
+`80f08927`，包含后续 S6 工作；保持其内容与分支位置不变。只推送本 change 的
+分支，不推送本地 main。远端 main 初始为 `671a216b`，在创建 PR 和合并前分别
+重新核验基线与 exact head，禁止 force push。
+
+### Clean release compatibility
+
+macOS 系统 Bash 3.2 配合 `set -u` 时，空数组展开不能作为可移植的“零个参数”
+实现。release 用显式 clean/dirty 分支传递参数：clean 不传 `--allow-dirty`，
+dirty local 对两个 package 都传递该标志，CI dirty 在任何 package 命令前失败。
+维持 `--locked`、metadata 检查和构建验证，禁止 `--no-verify` 或 publish。
+
+新增 Node contract 在临时目录中运行真实 Bash runner 和真实 metadata verifier，
+只替换 cargo/git/rtk 外部进程，断言 exact argv、receipt 分类和失败传播。临时
+fixture 的假 metadata 仅用于脚本控制流，不作为真实 package 验收；真实 release
+profile 另行运行。fast/full 均执行 contract，本地实际 Bash 3.2 与 hosted Bash
+分别提供平台证据。
+
+### Fresh acceptance and merge gate
+
+本轮使用明确版本的 stable Rust 与 Node 24 跑本地四层 profile；重新安装依赖、
+执行完整 audit 和 strict OpenSpec validate。提交后重跑 clean release，不能把
+提交前的 dirty candidate 重新命名为 clean receipt。远端 PR 必须在最终 head
+完成 fast/full，不以本地成功、检查缺失或旧 head 结果代替。
+
+full 的 Web dev-server contract 会执行真实 Justfile。移除本机 just 的限定 PATH
+实测报 `spawn just ENOENT`，因此 full workflow 显式用 Cargo 安装本地已验的
+`just 1.45.0`，保留 `--locked` 并打印版本。只在 full 安装，其他三个 profile
+直接调用 shell runner，不新增不必要依赖；不引入新的第三方 setup action。
+
+fresh audit 已确认旧 lock 的 `browserslist@4.28.2` 命中 high，
+`postcss-selector-parser@6.1.2` 命中 low。安全修复下限分别为 `4.28.7` 和
+`6.1.3`，都在当前父依赖的 semver 范围内；只对这两个包及其必要传递依赖执行
+lock-only 补丁更新，不增加直接依赖、不 force、不修改 Vite/Tailwind major。
+随后 fresh install、完整 audit、全部 Web contracts/build 必须重新通过。
+
+main 的实测保护要求一个批准、解决全部讨论和线性历史；因此不使用 merge commit，
+也不使用管理员 bypass。若当前身份无法满足独立批准，则停在绿色 PR 待审批，
+保留该阻塞为未完成任务。合并获准并成功后，再核验远端提交与 main 检查；本地
+S6 main 不自动 rebase/reset。无论是否合并，均不执行 archive/sync/deploy/publish。
+
+### Stable proc-macro diagnostic spans
+
+首次真正使用 stable Rust 运行 full gate 时，Accessors/Builder/Deref 合计七条既有
+compile-fail fixture 报 span mismatch：错误文本和拒绝行为未变，但下划线退化为
+语法节点第一个 token。锁定的 `syn 2.0.111` 自带文档明确 `Spanned::span()`
+依赖 nightly-only 的 span join；其推荐 `Error::new_spanned(node, message)`
+能在 stable 上覆盖完整节点。
+
+将上述三个模块的 attribute/meta 级错误切换到 `new_spanned`，不改解析规则、
+生成代码、runtime 或已有 `.stderr`。对同类未覆盖的 `#[deref(mut,)]` 增加一条
+compile-fail fixture，先确认 nightly 的既有完整 span 与 stable 的 RED，再验证
+最小修复能让两者同时 GREEN。单 token identifier 和 parser cursor 的错误保留
+原实现，不做全仓机械替换。该变更仅闭合已承诺的 stable CI 兼容性，不声明 MSRV。
+
+当前 stable 1.98.0 的 minimal 安装还会令 `chained_setter` 的 `$RUST/core/src/cmp.rs`
+提示缺少源码片段。只添加 `rust-src` 后该旧 fixture 已独立转绿，确认是环境前置
+条件，不是需要修改的宏行为。因此 full job 显式安装 `rust-src`，README 与 macro
+crate 的验证说明同步此要求；不覆写该快照，也不依赖开发机偶然已有的组件。

@@ -153,6 +153,12 @@ Milestone work should stay narrow:
 
 Use the repository profiles as the canonical delivery gates:
 
+Use stable Rust with `rustfmt` for fast and `clippy` plus `rust-src` for full.
+The source component is needed for standard-library excerpts in the compile-fail
+diagnostic snapshots; CI installs these components explicitly.
+The full profile also needs `just` for its dev-server recipe contracts. The
+hosted full job installs the locally validated `just 1.45.0` explicitly.
+
 ```bash
 just ci-fast
 just ci-full
@@ -160,11 +166,11 @@ just ci-nightly
 just ci-release
 ```
 
-- `ci-fast` checks formatting, core smoke tests, Web contracts, and the
-  production bundle.
-- `ci-full` runs workspace all-target tests, strict Clippy, a high-severity
-  audit of the complete Web build dependency tree, and the complete Web
-  contract suite.
+- `ci-fast` checks the release runner contract, formatting, core smoke tests,
+  Web contracts, and the production bundle.
+- `ci-full` runs the release runner contract, workspace all-target tests,
+  strict Clippy, a high-severity audit of the complete Web build dependency
+  tree, and the complete Web contract suite.
 - `ci-nightly` runs the 600/1200-frame matrix-stack gates and verifies the exact
   nine-scenario Criterion counter manifest. Criterion wall-clock results remain
   review evidence, not a one-run correctness threshold.
@@ -172,6 +178,10 @@ just ci-release
   publishes. A dirty local run is labeled only as a buildable candidate; a
   clean hosted-CI receipt is required before claiming clean or reproducible
   packaging.
+
+The runner contract exercises clean/dirty local and CI inputs, exact package
+arguments, and failure propagation on the current Bash (including macOS Bash
+3.2). It uses stub external tools and does not replace actual package builds.
 
 The thin recipes call `scripts/ci/run.sh`, which uses `rtk proxy` locally and
 the same underlying commands directly on a standard CI runner. GitHub workflow

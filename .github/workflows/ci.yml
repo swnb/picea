@@ -54,7 +54,12 @@ jobs:
           package-manager-cache: true
       - name: Install stable Rust
         run: |
-          rustup toolchain install stable --profile minimal --component clippy
+          # trybuild snapshots include standard-library diagnostic excerpts.
+          rustup toolchain install stable --profile minimal --component clippy --component rust-src
           rustup default stable
+      - name: Install dev-server contract prerequisites
+        run: |
+          cargo install just --locked --version 1.45.0
+          just --version
       - name: Run full profile
         run: bash scripts/ci/run.sh full

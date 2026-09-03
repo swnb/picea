@@ -4,7 +4,6 @@ use syn::{
     parenthesized,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    spanned::Spanned,
     token, Attribute, Data, DeriveInput, Fields, Ident, Token, Visibility,
 };
 
@@ -261,9 +260,10 @@ fn parse_accessor_config(attrs: &[Attribute], allow_skip: bool) -> syn::Result<A
     {
         // `skip` is intentionally terminal. Allowing `skip, vis(...)` or
         // `skip, get` would make the field contract ambiguous and can hide
-        // refactor mistakes.
-        let error = syn::Error::new(
-            attrs[0].span(),
+        // refactor mistakes. Keep the syntax node intact: Spanned::span only
+        // joins multi-token ranges on nightly, unlike Error::new_spanned.
+        let error = syn::Error::new_spanned(
+            &attrs[0],
             "`skip` cannot be combined with other accessor options",
         );
         if let Some(existing) = &mut errors {
@@ -300,8 +300,8 @@ fn parse_accessor_meta_list(
             }
             AccessorOption::Skip => {
                 if !allow_skip {
-                    return Err(syn::Error::new(
-                        attr.span(),
+                    return Err(syn::Error::new_spanned(
+                        attr,
                         "`skip` is only allowed on fields",
                     ));
                 }

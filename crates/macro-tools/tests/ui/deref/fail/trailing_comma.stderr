@@ -1,0 +1,5 @@
+error: `#[deref(...)]` only supports the exact form `#[deref(mut)]`
+ --> tests/ui/deref/fail/trailing_comma.rs:5:7
+  |
+5 |     #[deref(mut,)]
+  |       ^^^^^^^^^^^

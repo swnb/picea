@@ -18,8 +18,10 @@ fn expand_builder(input: DeriveInput) -> Result<TokenStream2> {
         .iter()
         .find(|attr| attr.path().is_ident("builder"))
     {
-        return Err(syn::Error::new(
-            attr.span(),
+        // Span the complete attribute on stable too; Spanned::span needs
+        // nightly-only span joining for multi-token nodes.
+        return Err(syn::Error::new_spanned(
+            attr,
             "builder attributes are only supported on fields",
         ));
     }
