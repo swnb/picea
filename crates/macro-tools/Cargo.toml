@@ -5,9 +5,10 @@ edition = "2021"
 authors = ["swnb", "async-rustacean"]
 license-file = "LICENSE"
 repository = "https://github.com/swnb/picea"
-# homepage = ""
-# documentation = ""
-categories = ["picea", "macros"]
+homepage = "https://github.com/swnb/picea"
+documentation = "https://docs.rs/picea-macro-tools"
+categories = ["development-tools::procedural-macro-helpers"]
+keywords = ["derive", "macros", "proc-macro"]
 description = """
 standalone derive helpers for named-field Rust structs
 """

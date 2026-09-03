@@ -12,13 +12,18 @@ The crate is intentionally narrow after the reset. Historical `Fields`, `Shape`,
 
 ## Validation
 
-Run the crate-local test suite with:
+Install the source component on the selected toolchain, then run the crate-local
+test suite:
 
 ```sh
+rtk proxy rustup component add rust-src
 rtk proxy cargo test -p picea-macro-tools
 ```
 
-The suite includes `trybuild` fixtures for both accepted macro forms and compile-fail diagnostics.
+The suite includes `trybuild` fixtures for both accepted macro forms and
+compile-fail diagnostics. `rust-src` supplies the standard-library excerpts used
+by those snapshots. Attribute/meta errors span the complete offending syntax on
+both stable and nightly; these ranges do not rely on nightly-only span joining.
 
 ## Accessors
 

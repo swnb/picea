@@ -1,12 +1,24 @@
 # Matrix Stack 物理引擎稳定性重构里程碑计划
 
-状态：进行中
+状态：已冻结（历史执行与失败证据保留）
 计划文档：docs/plans/2026-05-08-matrix-stack-physics-engine-stability-refactor-milestones.md
-最后更新：2026-05-08
+最后更新：2026-07-29
 工作目录：/Users/asyncrustacean/projects/picea
-工作区状态：dirty；已有 `picea-lab` live session、gravity controls、AI routing、matrix-stack 设计文档等未提交改动。本轮 solver stability 执行只触碰明确记录的测试 / solver 文件，不吸收 web/server/AI routing WIP。
+历史工作区状态（2026-05-08）：dirty；当时已有 `picea-lab` live session、gravity controls、AI routing、matrix-stack 设计文档等未提交改动。下文所有 dirty/RED/first-floor-exit 描述均为当时执行证据，不代表当前工作区。
 提交策略：不提交
-执行策略：计划已获用户确认并进入当前工作区执行；执行里程碑开始前必须先完成 V0 工作区 baseline gate。若执行中发现设计假设不成立、dirty 文件重叠、行为锁退化、或需要改变 public API / step cadence / 数据语义，则暂停并回到计划更新。
+执行策略：计划已完成历史使命并冻结；新的回归从当前 acceptance contract 和新的 OpenSpec change 进入，不继续在本文追加 active tasks。
+
+## 2026-07-29 收口
+
+- 当前 240 帧 support-gap 已是默认 hard test；600 帧 no-ejection 与 1200 帧
+  sleep-convergence 是 nightly exact gates。
+- 本轮 live 复跑三门均绿：最大穿透 `0.027232`、no ejection、final outside
+  `0`、`0 awake / 48 sleeping`、quiet linear/angular `0/0`。
+- 两个旧 observation test 的目的曾是保留未修复故障；当前修复使它们因
+  “故障不再出现”而 exit `101`，因此已删除测试本体。下文的失败帧、负向实验和
+  rejected heuristics 不删除，继续作为防止重走旧路的证据。
+- 本次 delivery hardening 不修改 solver、public API、artifact/schema 或既有
+  stability 阈值。
 
 ## 进展记录
 

@@ -2,14 +2,26 @@
 
 > 日期：2026-05-06
 >
-> 状态：D1 设计产出，服务于
-> `docs/plans/2026-05-06-matrix-stack-stability-optimization-milestones.md`。
+> 状态：Frozen historical design。当前可执行验收以
+> `docs/design/matrix-stack-stability-acceptance.md` 的 2026-07-29
+> addendum 为准。
 
 本文把 Matter.js / Box2D 中对堆叠稳定有价值的设计思想，映射为
 `picea` 当前 `World + SimulationPipeline` 架构下可执行的优化边界。
 
 这不是实现文档，也不引入外部物理引擎依赖。它的作用是让后续 E2-E5
 知道先改哪里、为什么改、改到什么程度算验收。
+
+## 2026-07-29 Freeze Decision
+
+后续 contact persistence、position-row 与 dense supported-island sleep 修复已
+使 240/600/1200 帧正向门全部通过；本轮没有再修改 solver 或放宽阈值。本文
+记录的优化顺序、被拒实验和早期 first-bad-frame 分析继续作为历史设计证据，
+但不再是 active implementation backlog。
+
+两个旧 observation test 依赖“历史 ejection / residual risk 必须仍存在”的
+断言，已被当前行为证伪并移除。未来若正向门回归，应从当前 acceptance test
+重新取得 RED，而不是恢复旧故障断言或调宽 penetration/speed/sleep 阈值。
 
 ## 目标
 

@@ -74,6 +74,7 @@ fn ui() {
     tests.compile_fail("tests/ui/deref/fail/multi_target.rs");
     tests.compile_fail("tests/ui/deref/fail/name_value.rs");
     tests.compile_fail("tests/ui/deref/fail/no_target.rs");
+    tests.compile_fail("tests/ui/deref/fail/trailing_comma.rs");
     tests.compile_fail("tests/ui/deref/fail/tuple_struct.rs");
     tests.compile_fail("tests/ui/deref/fail/unsupported_option.rs");
     tests.compile_fail("tests/ui/deref/fail/unit_struct.rs");

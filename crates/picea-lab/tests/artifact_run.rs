@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::{
     collections::{BTreeMap, VecDeque},
-    env, fs,
+    fs,
     path::Path,
 };
 
@@ -5881,96 +5881,6 @@ fn aligned_matrix_stack_artifacts_capture_stable_nxm_behavior_lock() {
 }
 
 #[test]
-#[ignore = "diagnostic baseline for the current matrix-stack instability story"]
-fn matrix_stack_stress_report_repeats_the_current_first_bad_frame_story() {
-    let temp = tempfile::tempdir().expect("temp dir should be created");
-    let store = ArtifactStore::new(temp.path().join("runs"));
-
-    let run = run_scenario(
-        &store,
-        RunConfig {
-            scenario_id: ScenarioId::MatrixStack,
-            frame_count: 180,
-            run_id: Some("matrix-stack-diagnostic-baseline".to_owned()),
-            ..RunConfig::default()
-        },
-    )
-    .expect("matrix stack diagnostic run should write artifacts");
-
-    let report = matrix_stack_stress_report(&run);
-    println!("{}", report.to_markdown(&run));
-    assert!(
-        report.first_bad_frame.is_some(),
-        "the current dense stack issue should surface a comparable first-bad-frame marker"
-    );
-    assert!(
-        report.max_penetration_depth > 0.04,
-        "the current baseline should still reproduce a penetration depth above the clean-gate target"
-    );
-    assert!(
-        report.final_awake_dynamic_body_count > 0,
-        "the current baseline should still expose the unresolved sleep convergence story"
-    );
-}
-
-#[test]
-#[ignore = "long-settle observation for the deferred writeback matrix-stack stability risk"]
-fn matrix_stack_long_settle_observation_reports_residual_e4_risk() {
-    let temp = tempfile::tempdir().expect("temp dir should be created");
-    let store = ArtifactStore::new(temp.path().join("runs"));
-
-    let run = run_scenario(
-        &store,
-        RunConfig {
-            scenario_id: ScenarioId::MatrixStack,
-            frame_count: 600,
-            run_id: Some("matrix-stack-long-settle-observation".to_owned()),
-            ..RunConfig::default()
-        },
-    )
-    .expect("matrix stack long-settle diagnostic run should write artifacts");
-
-    let report = matrix_stack_stress_report(&run);
-    println!("{}", report.to_markdown(&run));
-    assert_eq!(run.frames.len(), 600);
-    assert!(
-        report.first_bad_frame.is_some(),
-        "long-settle observation should preserve that current 8x6 is not yet a stable hard gate; report={report:?}"
-    );
-    assert!(
-        report.final_awake_dynamic_body_count > 0 || report.final_outside_floor_body_count > 0,
-        "long-settle observation should expose either sleep non-convergence or floor-support failure until E4/E5 is complete; report={report:?}"
-    );
-    assert_eq!(
-        report.first_floor_exit_frame,
-        Some(245),
-        "long-settle observation should keep the current first ejection frame explicit until the next stability slice removes it; report={report:?}"
-    );
-    assert_eq!(
-        report.first_floor_exit_body.as_deref(),
-        Some("BodyHandle(41)"),
-        "long-settle observation should identify the current ejected body until E4 removes the failure; report={report:?}"
-    );
-    assert_eq!(
-        report.ejection_support_gap_start_frame,
-        Some(239),
-        "long-settle observation should preserve the pre-ejection dynamic support gap; report={report:?}"
-    );
-    assert_eq!(
-        report
-            .late_linear_spike_trace
-            .support_gap_start_frame,
-        Some(239),
-        "long-settle observation should preserve the post-ejection long support gap story; report={report:?}"
-    );
-    assert!(
-        report.quiet_window_max_linear_speed > 60.0,
-        "long-settle observation should keep the current runaway-speed risk visible; report={report:?}"
-    );
-}
-
-#[test]
-#[ignore = "future support-retention behavior lock; position re-evaluation must remove the current frame-245 ejection"]
 fn matrix_stack_support_gap_re_evaluation_prevents_current_ejection_window() {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let store = ArtifactStore::new(temp.path().join("runs"));
@@ -6131,15 +6041,8 @@ fn matrix_stack_support_gap_re_evaluation_prevents_current_ejection_window() {
 }
 
 #[test]
-#[ignore = "future E4/E5 acceptance gate; set PICEA_MATRIX_STACK_E4_ACCEPTANCE=1 to enforce it"]
+#[ignore = "nightly 600-frame no-ejection and runaway-speed acceptance gate"]
 fn matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed() {
-    if env::var_os("PICEA_MATRIX_STACK_E4_ACCEPTANCE").is_none() {
-        eprintln!(
-            "skipping future matrix-stack acceptance gate; set PICEA_MATRIX_STACK_E4_ACCEPTANCE=1"
-        );
-        return;
-    }
-
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let store = ArtifactStore::new(temp.path().join("runs"));
 
@@ -6180,15 +6083,8 @@ fn matrix_stack_long_settle_acceptance_requires_no_ejection_or_runaway_speed() {
 }
 
 #[test]
-#[ignore = "future E5 sleep convergence gate; set PICEA_MATRIX_STACK_E5_SLEEP_ACCEPTANCE=1 to enforce it"]
+#[ignore = "nightly 1200-frame sleep-convergence acceptance gate"]
 fn matrix_stack_long_run_acceptance_requires_resting_sleep_convergence() {
-    if env::var_os("PICEA_MATRIX_STACK_E5_SLEEP_ACCEPTANCE").is_none() {
-        eprintln!(
-            "skipping future matrix-stack E5 sleep gate; set PICEA_MATRIX_STACK_E5_SLEEP_ACCEPTANCE=1"
-        );
-        return;
-    }
-
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let store = ArtifactStore::new(temp.path().join("runs"));
 

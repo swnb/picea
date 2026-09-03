@@ -4,7 +4,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use picea::prelude::{
     BodyBundle, BodyDesc, BodyType, ColliderBundle, ColliderDesc, CollisionLayerPreset,
     DistanceJointDesc, JointDesc, MaterialPreset, Point, Pose, QueryFilter, QueryPipeline,
-    QueryStats, SharedShape, SimulationPipeline, StepConfig, StepReport, World, WorldCommands,
+    QueryStats, SharedShape, SimulationPipeline, StepConfig, StepStats, World, WorldCommands,
     WorldDesc,
 };
 
@@ -21,13 +21,41 @@ fn step_config() -> StepConfig {
     }
 }
 
-fn run_steps(mut world: World, steps: usize) -> StepReport {
+#[derive(Default)]
+struct StepBenchmarkEvidence {
+    final_stats: StepStats,
+    total_broadphase_candidate_count: usize,
+    total_broadphase_traversal_count: usize,
+    total_broadphase_pruned_count: usize,
+    total_contact_row_count: usize,
+    total_joint_row_count: usize,
+    total_sleeping_island_skip_count: usize,
+    total_solver_body_slot_count: usize,
+    total_ccd_candidate_count: usize,
+    total_ccd_hit_count: usize,
+    total_ccd_miss_count: usize,
+    total_ccd_clamp_count: usize,
+}
+
+fn run_steps(mut world: World, steps: usize) -> StepBenchmarkEvidence {
     let mut pipeline = SimulationPipeline::new(step_config());
-    let mut report = StepReport::default();
+    let mut evidence = StepBenchmarkEvidence::default();
     for _ in 0..steps {
-        report = pipeline.step(&mut world);
+        let stats = pipeline.step(&mut world).stats;
+        evidence.final_stats = stats;
+        evidence.total_broadphase_candidate_count += stats.broadphase_candidate_count;
+        evidence.total_broadphase_traversal_count += stats.broadphase_traversal_count;
+        evidence.total_broadphase_pruned_count += stats.broadphase_pruned_count;
+        evidence.total_contact_row_count += stats.contact_row_count;
+        evidence.total_joint_row_count += stats.joint_row_count;
+        evidence.total_sleeping_island_skip_count += stats.sleeping_island_skip_count;
+        evidence.total_solver_body_slot_count += stats.solver_body_slot_count;
+        evidence.total_ccd_candidate_count += stats.ccd_candidate_count;
+        evidence.total_ccd_hit_count += stats.ccd_hit_count;
+        evidence.total_ccd_miss_count += stats.ccd_miss_count;
+        evidence.total_ccd_clamp_count += stats.ccd_clamp_count;
     }
-    report
+    evidence
 }
 
 fn bench_step_scenario(
@@ -37,7 +65,7 @@ fn bench_step_scenario(
     steps: usize,
 ) {
     let baseline = run_steps(make_world(), steps);
-    let stats = baseline.stats;
+    let stats = baseline.final_stats;
     // Criterion records timing; the benchmark id also records deterministic
     // engine counters so a local baseline explains what the timed step did
     // without turning early numbers into pass/fail thresholds.
@@ -45,26 +73,30 @@ fn bench_step_scenario(
         "steps",
         format!(
             concat!(
-                "n={}/bodies={}/colliders={}/candidates={}/",
-                "broadphase_traversals={}/broadphase_pruned={}/",
-                "contacts={}/contact_rows={}/joint_rows={}/",
-                "islands={}/active_islands={}/sleep_skips={}/solver_slots={}/",
-                "ccd_hits={}"
+                "steps={}/final_bodies={}/final_colliders={}/total_candidates={}/",
+                "total_broadphase_traversals={}/total_broadphase_pruned={}/",
+                "final_contacts={}/total_contact_rows={}/total_joint_rows={}/",
+                "final_islands={}/final_active_islands={}/total_sleep_skips={}/",
+                "total_solver_slots={}/total_ccd_candidates={}/total_ccd_hits={}/",
+                "total_ccd_misses={}/total_ccd_clamps={}"
             ),
             steps,
             stats.body_count,
             stats.collider_count,
-            stats.broadphase_candidate_count,
-            stats.broadphase_traversal_count,
-            stats.broadphase_pruned_count,
+            baseline.total_broadphase_candidate_count,
+            baseline.total_broadphase_traversal_count,
+            baseline.total_broadphase_pruned_count,
             stats.contact_count,
-            stats.contact_row_count,
-            stats.joint_row_count,
+            baseline.total_contact_row_count,
+            baseline.total_joint_row_count,
             stats.island_count,
             stats.active_island_count,
-            stats.sleeping_island_skip_count,
-            stats.solver_body_slot_count,
-            stats.ccd_hit_count
+            baseline.total_sleeping_island_skip_count,
+            baseline.total_solver_body_slot_count,
+            baseline.total_ccd_candidate_count,
+            baseline.total_ccd_hit_count,
+            baseline.total_ccd_miss_count,
+            baseline.total_ccd_clamp_count
         ),
     );
 

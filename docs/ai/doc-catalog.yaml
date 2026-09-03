@@ -16,7 +16,25 @@ documents:
   owner: project
   applies_to: [onboarding, usage, workspace, validation, dependency-graph]
   keywords: [readme, quick-start, public-beta, routing, tests, picea-lab-web]
-  last_reviewed: 2026-05-17
+  last_reviewed: 2026-07-29
+- path: Justfile
+  title: Repository Command Entry
+  kind: runbook
+  authority: high
+  status: active
+  owner: project
+  applies_to: [validation, ci, nightly, release, picea-lab-web]
+  keywords: [just, ci-fast, ci-full, ci-nightly, ci-release]
+  last_reviewed: 2026-07-29
+- path: scripts/ci/run.sh
+  title: Canonical Validation Profile Runner
+  kind: runbook
+  authority: high
+  status: active
+  owner: project
+  applies_to: [validation, ci, nightly, release, criterion, packaging]
+  keywords: [profile, rtk, matrix-stack, criterion, package, npm-audit, dirty-receipt]
+  last_reviewed: 2026-07-29
 - path: docs/ai/index.md
   title: AI Route Index
   kind: module
@@ -25,7 +43,7 @@ documents:
   owner: ai-context
   applies_to: [all, triage, routing, progressive-disclosure]
   keywords: [route, question-type, current-facts, status, deprecated, frozen]
-  last_reviewed: 2026-07-16
+  last_reviewed: 2026-07-29
 - path: docs/ai/repo-map.md
   title: Repo Map
   kind: module
@@ -34,7 +52,7 @@ documents:
   owner: ai-context
   applies_to: [architecture, modules, implementation, validation]
   keywords: [world, pipeline, solver, query, picea-lab, picea-lab-web, macro-tools]
-  last_reviewed: 2026-07-16
+  last_reviewed: 2026-07-29
 - path: docs/ai/doc-catalog.yaml
   title: AI Document Catalog
   kind: module
@@ -43,7 +61,7 @@ documents:
   owner: ai-context
   applies_to: [routing, docs, freshness, authority]
   keywords: [catalog, metadata, authority, status, freshness, validation]
-  last_reviewed: 2026-07-16
+  last_reviewed: 2026-07-29
 - path: docs/ai/evals.md
   title: Picea AI Evals
   kind: eval
@@ -223,11 +241,11 @@ documents:
   title: Matrix Stack Stability Optimization Design
   kind: architecture
   authority: high
-  status: active
+  status: frozen
   owner: architecture
   applies_to: [matrix-stack, stack-stability, solver, contact-persistence]
   keywords: [matrix-stack, warm-start, position-correction, row-ordering, sleep]
-  last_reviewed: 2026-05-17
+  last_reviewed: 2026-07-29
 - path: docs/design/matrix-stack-stability-acceptance.md
   title: Matrix Stack Stability Acceptance
   kind: contract
@@ -236,7 +254,7 @@ documents:
   owner: architecture
   applies_to: [matrix-stack, stack-stability, acceptance, browser-acceptance]
   keywords: [stack_4, matrix_stack, hard-gates, stress-gates, quiet-window]
-  last_reviewed: 2026-05-17
+  last_reviewed: 2026-07-29
 - path: docs/design/stack-4-contact-block-solve-stability-design.md
   title: Stack 4 Contact Block Solve Stability Design
   kind: architecture
@@ -299,7 +317,7 @@ documents:
   owner: architecture
   applies_to: [benchmarks, performance, thresholds, baseline, ci]
   keywords: [performance-threshold, criterion, baseline, warn, fail]
-  last_reviewed: 2026-05-17
+  last_reviewed: 2026-07-29
 - path: docs/design/architecture-refactor-requirements.md
   title: Architecture Refactor Requirements Archive
   kind: architecture
@@ -327,7 +345,7 @@ documents:
   owner: supervisor
   applies_to: [milestone, physics-realism, stack-stability, material, ccd, compound, joints, observability, deformable, picea-lab, picea-lab-web, scenario]
   keywords: [physics-realism, stack, friction, damping, ccd, concave, compound, joint, lab-web, deformable, subagent, scenario, parameter-schema, browser-acceptance, summary-full, lattice-proxy, scene-update]
-  last_reviewed: 2026-07-14
+  last_reviewed: 2026-07-29
 - path: docs/plans/2026-04-18-picea-physics-engine-milestones.md
   title: Picea Physics Engine Milestones Archive
   kind: plan
@@ -404,11 +422,11 @@ documents:
   title: Matrix Stack Physics Engine Stability Refactor Milestones
   kind: plan
   authority: high
-  status: active
+  status: frozen
   owner: supervisor
   applies_to: [matrix-stack, solver, stability-refactor, sleep]
   keywords: [matrix-stack, dense-island, sleep, warm-start, position-row]
-  last_reviewed: 2026-05-17
+  last_reviewed: 2026-07-29
 - path: docs/plans/2026-05-14-dense-pressure-position-row-milestones.md
   title: Dense Pressure Position Row Milestones
   kind: plan
@@ -621,8 +639,8 @@ documents:
   title: vNext Handoff Section 5 Revolute Joint Milestone
   kind: plan
   authority: high
-  status: active
+  status: frozen
   owner: supervisor
   applies_to: [milestone, physics-realism, joints, revolute, public-api, solver, lifecycle, picea-lab, picea-lab-web]
   keywords: [s5-d, s5-api-red, s5-api, s5-behavior-red, s5-solver, s5-lab-red, s5-lab, s5-v, s5-c, living-spec]
-  last_reviewed: 2026-07-26
+  last_reviewed: 2026-07-29

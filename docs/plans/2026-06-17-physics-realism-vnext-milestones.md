@@ -2,16 +2,16 @@
 
 状态：已批准
 计划文档：docs/plans/2026-06-17-physics-realism-vnext-milestones.md
-最后更新：2026-07-26
+最后更新：2026-07-29
 工作目录：/Users/asyncrustacean/projects/picea
-工作区状态：§1-§3 integration记录保留历史base；§4已冻结；handoff §5已于2026-07-26独立完成收尾（S5-C），S5-V=`CLI PASS / BROWSER PASS`；§6四个design gate未开始；执行时仍以live `git status`为准
+工作区状态：§1-§3 integration记录保留历史base；§4已冻结；handoff §5已于2026-07-26独立完成收尾（S5-C），S5-V=`CLI PASS / BROWSER PASS`；§6四个design gate未开始。2026-07-29 的 delivery hardening 是独立 OpenSpec change，不推进本计划未完成里程碑；执行时仍以live `git status`为准
 计划重量：heavy
-Goal 协调：planning/execution goal active；用户已明确预授权 Plan Gate
-提交策略：源实现提交已进入本次集成分支；本区块由后续独立 docs closeout commit 承载
+Goal 协调：本计划当前无 active execution goal；未来继续 §6 或其余未完成里程碑时重新建立授权与 change
+提交策略：历史 source/docs 提交事实保留；2026-07-29 状态同步不代表新的 commit 授权
 执行策略：完整计划预授权后连续执行；遇高风险门、现实冲突、验证阻塞时停
 高风险门：Public API/compatibility break；`SharedShape::ConcavePolygon` hard reject；`Material` public schema；deformable public surface；删除/迁移/部署
-SpecFlow：不使用
-Change root：none
+SpecFlow：父计划形成于 OpenSpec 引入前；当前 delivery hardening 使用 OpenSpec，但不改变本计划 scope
+Change root：`openspec/changes/harden-delivery-and-validation-gates`（仅 delivery/validation，不推进 vNext physics milestones）
 Profiles：architecture-heavy, api-contract, ui-browser
 完成状态：D0/V0 已验证；handoff §1 velocity-first 正式化、§2 WorldAnchor damping 正确性子切片、§3 Point/Vector equality contract 已实现、复审并完成对应 Rust/lab/web/browser 端到端验收；§4已完成并冻结；§5 revolute joint Pin-only V1已按独立living spec完整完成（含browser验收）；这不代表整个 E1/E2/E5/E6 或其余执行里程碑已完成；已归档 no；可发布 no
 

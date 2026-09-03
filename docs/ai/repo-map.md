@@ -74,7 +74,7 @@
 | `artifact` | headless runner、`manifest.json` / `frames.jsonl` / `debug_render.json` / `final_snapshot.json` / `perf.json` 写入；`frames.jsonl` 与 `final_snapshot.json` 保留 core `StepStats` / `DebugStats` CCD counters 和 contact `ccd_trace`，包括 M19 dynamic-target `target_kind` / target sweep facts 和 M26 dynamic compound selected-piece trace facts；M27 generated concave-decomposition pieces 进入 `compound_provenance`；M17 `perf.json.counter_summary` 汇总 deterministic work counters，debug render frames 携带 broadphase traversal/prune 与 island/solver row counters；M24 计划把 broadphase tree、island lifecycle、compound provenance 做成 lab-web 过程可视化；2026-05-06 performance/stability observability 增加 lab-owned `FrameDiagnostics`，用于 per-frame counter delta、penetration、contact churn、warm-start、impulse、sleep/island summary、diagnostic marker、source label 和 missing evidence。 | 不直接服务 HTTP，不把 target 路径暴露给 UI，不从 lab 侧重新计算 CCD，不把 wall-clock timing 当正确性 oracle；`FrameDiagnostics` 是 artifact / lab diagnostics carrier，不代表 solver 已修复。 | `crates/picea-lab/src/artifact.rs` | `rtk proxy cargo test -p picea-lab --test artifact_run` |
 | `server` | 本地 HTTP + SSE protocol、session 状态、artifact 下载；M25-A 下 server 同时拥有 artifact replay session 与 request-driven live session，live session 在 Rust 端持有 authoritative `World + SimulationPipeline`；session 明确暴露 `manifest.json` / `final_snapshot.json` replay provenance，empty SSE 使用 idle event 而不是 failed；M25-B 固定 live patch/transaction 语义文档和拒绝边界；2026-05-07 live session 支持 create-time unbounded stepping、retained ring window，以及窄 `POST /api/sessions/:id/gravity` live gravity apply。 | 不接受 generic live session overrides/patch；除窄 gravity apply 外，body/collider/joint paused transaction 必须另过 milestone；artifact replay reset 仍走 runner；不把空事件队列当成模拟失败；evicted live frames 不由 web 伪造重建。 | `crates/picea-lab/src/server.rs` | `rtk proxy cargo test -p picea-lab --test server_routes` |
 | `cli` | `picea-lab list`、`run`、`serve` 命令。 | 不拥有 artifact schema 或 scenario 构建细节。 | `crates/picea-lab/src/cli.rs`, `main.rs` | `rtk proxy cargo test -p picea-lab` |
-| `web` | React + Canvas 2D replay workbench, hierarchy, inspector, timeline, overlays；joint rows are selectable；source badge 区分 demo / Rust artifact replay / Rust live session；M25-A 的 play 只是前端连续触发 backend step，请求返回后再追加 live buffer。M40 closeout 还把 scenario grouping、overlay presets、copy debug context、stack/trajectory/lattice/perturbation evidence 收口在前端工作台。2026-05-06 diagnostics surface typed 消费 `FrameRecord.diagnostics`，在 timeline rail、Diagnostics tab、Evidence tab 和 copy-debug-context 中展示 performance/stability source 与 missing evidence。2026-05-07 runtime controls 把 header run 固定为新建/重新运行 session，timeline play 固定为当前 session pause/resume；live buffer 使用 retained window；重力轮盘在 artifact replay 写 pending run config，在 live session 通过 Apply 发送窄 runtime gravity patch，并支持 draft reset / undo。 | 不运行 physics，不替代 Rust artifact schema，不发明 server-side autoplay / long-lived tick contract；不把重力轮盘扩大成 arbitrary running-world editor；M40 的 lattice 仍是 rigid-body proxy，不是 true soft-body；缺失 diagnostics 时必须显示 missing，不伪装成 0 成本或 0 风险。 | `crates/picea-lab/web/src/*` | `rtk proxy just picea-lab-web`; `npm run build` from `crates/picea-lab/web`; `npm run test:ui-contract`; `npm run test:i18n`; browser acceptance 优先 `browser-use:browser` |
+| `web` | React + Canvas 2D replay workbench, hierarchy, inspector, timeline, overlays；joint rows are selectable；source badge 区分 demo / Rust artifact replay / Rust live session；M25-A 的 play 只是前端连续触发 backend step，请求返回后再追加 live buffer。M40 closeout 还把 scenario grouping、overlay presets、copy debug context、stack/trajectory/lattice/perturbation evidence 收口在前端工作台。2026-05-06 diagnostics surface typed 消费 `FrameRecord.diagnostics`，在 timeline rail、Diagnostics tab、Evidence tab 和 copy-debug-context 中展示 performance/stability source 与 missing evidence。2026-05-07 runtime controls 把 header run 固定为新建/重新运行 session，timeline play 固定为当前 session pause/resume；live buffer 使用 retained window；重力轮盘在 artifact replay 写 pending run config，在 live session 通过 Apply 发送窄 runtime gravity patch，并支持 draft reset / undo。 | 不运行 physics，不替代 Rust artifact schema，不发明 server-side autoplay / long-lived tick contract；不把重力轮盘扩大成 arbitrary running-world editor；M40 的 lattice 仍是 rigid-body proxy，不是 true soft-body；缺失 diagnostics 时必须显示 missing，不伪装成 0 成本或 0 风险。 | `crates/picea-lab/web/src/*` | `rtk proxy just picea-lab-web`; `npm run build` from `crates/picea-lab/web`; `npm run test:ui-contract`; `npm run test:i18n`; `npm run test:bundle`; browser acceptance 优先 `browser-use:browser` |
 
 ## `crates/macro-tools`
 
@@ -84,6 +84,26 @@
 - dependency_status：作为独立 workspace proc-macro crate 单独验证；不要从历史 milestone gate 推断它仍在 `crates/picea` 当前依赖图上。
 - entrypoints：`accessors.rs`、`builder.rs`、`deref.rs`。
 - tests：`rtk proxy cargo test -p picea-macro-tools`。
+
+## Repository Delivery Gates
+
+### `scripts/ci/run.sh`
+
+- owns：`fast`、`full`、`nightly`、`release` 四档 canonical profile；本地
+  RTK 适配；unknown profile 拒绝；nightly exact-test 非空保护与聚合失败；
+  release dirty/clean receipt 分类；full 的 Web build dependency high-level
+  audit。
+- does_not_own：不发布 crate、不部署、不把本地 dirty package receipt 声称为
+  clean/reproducible，也不把一次 Criterion wall-clock 波动升级成 correctness gate。
+- entrypoints：`Justfile` 的 `ci-fast` / `ci-full` / `ci-nightly` /
+  `ci-release`；`.github/workflows/ci.yml` 与
+  `.github/workflows/nightly.yml`。
+- evidence：`scripts/ci/criterion-counters.json` 固定九场景 exact counter
+  manifest；`scripts/ci/verify-criterion-counters.mjs` 只读取本轮 baseline；
+  `scripts/ci/verify-release-metadata.mjs` 验证 package metadata，
+  `ci-release` 中的 `cargo package` 验证实际内容与构建。
+- remote boundary：workflow 文件存在不等于 hosted CI 已运行；未 push 时必须写
+  `NOT RUN / UNKNOWN`。
 
 ## 文档入口
 

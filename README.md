@@ -149,6 +149,49 @@ Milestone work should stay narrow:
 5. Run the targeted tests and then the milestone gate.
 6. Record residual risks instead of silently widening scope.
 
+## Canonical Validation Profiles
+
+Use the repository profiles as the canonical delivery gates:
+
+Use stable Rust with `rustfmt` for fast and `clippy` plus `rust-src` for full.
+The source component is needed for standard-library excerpts in the compile-fail
+diagnostic snapshots; CI installs these components explicitly.
+The full profile also needs `just` for its dev-server recipe contracts. The
+hosted full job installs the locally validated `just 1.45.0` explicitly.
+RTK is optional for Justfile tool recipes: when available they use `rtk proxy`,
+otherwise they invoke the same tools directly. The dev-server contract also
+runs real Vite with an isolated PATH containing no RTK, so a developer's local
+installation cannot hide this hosted-runner prerequisite boundary.
+
+```bash
+just ci-fast
+just ci-full
+just ci-nightly
+just ci-release
+```
+
+- `ci-fast` checks the release runner contract, formatting, core smoke tests,
+  Web contracts, and the production bundle.
+- `ci-full` runs the release runner contract, workspace all-target tests,
+  strict Clippy, a high-severity audit of the complete Web build dependency
+  tree, and the complete Web contract suite.
+- `ci-nightly` runs the 600/1200-frame matrix-stack gates and verifies the exact
+  nine-scenario Criterion counter manifest. Criterion wall-clock results remain
+  review evidence, not a one-run correctness threshold.
+- `ci-release` verifies package metadata and builds package archives. It never
+  publishes. A dirty local run is labeled only as a buildable candidate; a
+  clean hosted-CI receipt is required before claiming clean or reproducible
+  packaging.
+
+The runner contract exercises clean/dirty local and CI inputs, exact package
+arguments, and failure propagation on the current Bash (including macOS Bash
+3.2). It uses stub external tools and does not replace actual package builds.
+
+The thin recipes call `scripts/ci/run.sh`, which uses `rtk proxy` locally and
+the same underlying commands directly on a standard CI runner. GitHub workflow
+results remain unknown until the branch containing them is pushed and actually
+runs.
+
 ## Common Test Gates
 
 Use current repo facts and live command output as the source of truth. When a task is explicitly milestone-scoped, consult the milestone plan only for the still-relevant boundary checks. Archived `Scene`/`Context` / `picea-web` / wasm gates in that file are historical, not current default targets.
