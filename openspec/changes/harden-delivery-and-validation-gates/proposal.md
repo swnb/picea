@@ -38,6 +38,7 @@ Picea 已具备较完整的 core、lab、Web 与长窗口验收，但这些门�
 
 - 以原交付分支 `feat/harden-delivery-and-validation-gates` 的 `a7b3cb42` 为起点，在独立 worktree 续办；远端 main 为 `671a216b`。保留当前本地主工作区 `80f08927` 及其后续 S6 提交，禁止一并推送或改写。
 - 为 macOS Bash 3.2 的 clean release 参数展开补充可执行回归锁和最小修复；fast/full 持续运行该锁，不借此变更 package 内容或发布策略。
+- 修复首轮 hosted Full 暴露的 Justfile 隐式 RTK 依赖：命令前缀仅在 PATH 有 RTK 时启用；增加隔离 PATH 的真实 Vite 端口回退锁，不给 CI 安装非产品依赖，也不跳过 dev-server contract。
 - 修复 full stable gate 实测发现的 proc-macro 诊断范围差异：只将多 token attribute/meta 错误改用 `syn::Error::new_spanned`，保留既有拒绝规则、错误文本、生成代码和 `.stderr`；补一条 Deref 尾逗号行为锁并核验 stable/nightly。涉及 `crates/macro-tools/src/{accessors,builder,deref}.rs`、crate README 与对应测试。
 - 重跑 fast/full/nightly/release，重新审计依赖和锁文件；对本轮新命中的 Browserslist/postcss-selector-parser 只做兼容补丁更新，不改直接依赖或 major。历史 receipt 不替代本次证据。
 - 创建 PR 并核对 exact head 的远端 fast/full 检查、至少一个批准及讨论解决状态。main 要求线性历史，采用获准的线性合并方式；不得利用管理员权限绕过保护规则。审批未满足时保留 PR 待审批，不宣称已合并。

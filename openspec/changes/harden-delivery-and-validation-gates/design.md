@@ -164,6 +164,14 @@ full 的 Web dev-server contract 会执行真实 Justfile。移除本机 just �
 `just 1.45.0`，保留 `--locked` 并打印版本。只在 full 安装，其他三个 profile
 直接调用 shell runner，不新增不必要依赖；不引入新的第三方 setup action。
 
+首轮 hosted Full 在 `just` 安装成功后，实际执行 `picea-lab-web-ui` 又暴露
+`rtk: command not found`（exit 127）。这是 Justfile 的开发机依赖泄漏，不是
+Vite 或 physics 失败。Justfile 统一检测 PATH 是否有 RTK；存在时保留 `rtk proxy`，
+否则直接调用相同工具，不改变 argv、环境变量或错误传播。既有 RTK fixture 继续
+验证 full-stack orchestration；新增仅暴露 node/npm/just/bash/sh 的隔离 PATH，
+运行真实 Vite 端口占用回退合同，确保装有 RTK 的开发机也能重现该 hosted 边界。
+不增加 CI RTK 安装、不放宽门禁、不修改后台服务或 Web 产品行为。
+
 fresh audit 已确认旧 lock 的 `browserslist@4.28.2` 命中 high，
 `postcss-selector-parser@6.1.2` 命中 low。安全修复下限分别为 `4.28.7` 和
 `6.1.3`，都在当前父依赖的 semver 范围内；只对这两个包及其必要传递依赖执行

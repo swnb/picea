@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -53,6 +54,44 @@ async function findAdjacentPorts() {
 async function main() {
   await assertFullStackApiFallback();
   await assertWebUiPortFallback();
+  await assertWebUiWithoutProxy();
+  console.log("Dev-server contract passed: API routing and Vite fallback with the current and no-RTK PATH");
+}
+
+async function findExecutable(command) {
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    const candidate = path.resolve(directory, command);
+    try {
+      await fs.access(candidate, constants.X_OK);
+      if ((await fs.stat(candidate)).isFile()) {
+        return await fs.realpath(candidate);
+      }
+    } catch {
+      // A missing or inaccessible PATH entry is not an executable candidate.
+    }
+  }
+  throw new Error(`required dev-server contract tool is missing: ${command}`);
+}
+
+async function assertWebUiWithoutProxy() {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "picea-lab-no-rtk-"));
+  try {
+    // Expose real build tools only. Removing one known RTK directory would miss
+    // other installations and could let a developer's PATH hide the CI failure.
+    for (const command of ["node", "npm", "just", "bash", "sh"]) {
+      const executable = command === "node" ? process.execPath : await findExecutable(command);
+      await fs.symlink(executable, path.join(tempDir, command));
+    }
+    const env = { ...process.env, PATH: tempDir };
+    await runCommand("bash", ["-uc", "! command -v rtk"], {
+      cwd: repoRoot,
+      env,
+      timeoutMs: 5_000,
+    });
+    await assertWebUiPortFallback(env);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 async function assertFullStackApiFallback() {
@@ -122,7 +161,7 @@ if (command === "cargo") {
   }
 }
 
-async function assertWebUiPortFallback() {
+async function assertWebUiPortFallback(env = process.env) {
   const { occupied, basePort, fallbackPort } = await findAdjacentPorts();
   const expectedUrl = `http://${host}:${fallbackPort}/`;
 
@@ -131,7 +170,7 @@ async function assertWebUiPortFallback() {
     cwd: repoRoot,
     detached: true,
     env: {
-      ...process.env,
+      ...env,
       CI: "1",
       NO_COLOR: "1",
       PICEA_LAB_WEB_HOST: host,
@@ -140,6 +179,7 @@ async function assertWebUiPortFallback() {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const childClosed = new Promise((resolve) => child.once("close", resolve));
 
   const stopChild = () => {
     if (child.pid && !child.killed) {
@@ -182,6 +222,8 @@ async function assertWebUiPortFallback() {
     });
   } finally {
     stopChild();
+    // Finish process cleanup before removing the isolated executable directory.
+    await childClosed;
     await closeServer(occupied);
   }
 

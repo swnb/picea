@@ -71,6 +71,7 @@
 - [x] 7.3 在实际 Bash 3.2 建立 clean release RED，最小修复并验证 clean/dirty local、clean/dirty CI、metadata/package 失败传播 contract；接入 fast/full
 - [x] 7.3a 保留 stable full 的七条 macro span RED，补 Deref 尾逗号锁；只修复 attribute/meta 诊断跨度，并为 full 显式安装 rust-src，不改旧 stderr/生成 API，在 stable/nightly 上验证
 - [ ] 7.3b 闭合 full dev-server contract 的 just 环境依赖：保留无 just 的 ENOENT RED，workflow 显式安装本地已验证版本，并以远端实际 job 验证
+- [ ] 7.3c 闭合首轮 hosted Full 的 RTK 依赖泄漏：保留远端 exit 127，新增无 RTK 的隔离 PATH 真实 Vite 回归锁；Justfile 仅可选使用代理，重新通过本地 full 和 exact-head hosted Fast/Full
 - [x] 7.4 对 fresh audit 命中的 Browserslist/postcss-selector-parser 做兼容 lock-only 补丁；使用明确 stable Rust/Node 24 重跑 fast/full/nightly，记录测试、长窗口、Criterion、fresh install/audit、Web build/contract 与真实 Rust source 的生产预览浏览器证据
 - [x] 7.5 完成 scoped commit，并对相同 source commit 执行真实 clean release；复查差异、锁文件、OpenSpec、文档与工作区 custody
 - [ ] 7.6 只推送交付分支、创建 PR，核验最终 exact head 的远端 fast/full，不接受 missing 或旧 head 检查
@@ -103,3 +104,7 @@
 - 当前本地日志、浏览器结构化记录与截图位于 `/private/tmp/picea-delivery-receipts-20260903/`，Criterion 位于独立 worktree `target/criterion/`；这是本机证据目录，不声称已上传或等价于 hosted CI。
 - Scoped source commit：`ccaddfddeb8ff14e88a6e2c8a969cc021866a566`，只提交本轮 16 个 allowlisted 文件，原交付提交 `a7b3cb42` 保留。暂存前后 diff hygiene、Shell/Node syntax、四份 YAML parse、full prerequisite contract、OpenSpec strict validate 3/3 PASS；相对远端基线，core/lab/Web 运行时代码与 `Cargo.lock` 未改动。主工作区仍为 clean `main@80f08927`，没有引入后续 S6 commits。
 - Clean local release：在 `ccaddfd` 的空 `git status --porcelain` 上执行当前 stable/Node 24 的 release，exit 0；metadata PASS，`picea` 63 files / 235.0KiB compressed、`picea-macro-tools` 78 files / 17.6KiB compressed，均从 package 重新构建。两个 archive 的 `.cargo_vcs_info.json` 精确指向 `ccaddfddeb8ff14e88a6e2c8a969cc021866a566` 且无 dirty 标记。首次执行仅有 Cargo registry index 缓存写权限 warning，未跳过验证；收据提交后再以最终 head 重跑。此为真实 clean local candidate，不是 hosted release 或 publish 证明。
+- 收据 head `c1e58a42cc2afc959949447d5a23c6325c632ba5` 的真实 clean release 再次 exit 0；许可范围内重跑消除了 registry cache warning，两个 archive 的 VCS SHA 均精确匹配该 head，文件数保持 63/78。
+- PR #3 已从交付分支推送创建；首轮 Actions run `33714447948` 对应 `c1e58a4`。Fast PASS（job `100520548197`）；Full FAIL（job `100520548315`）：stable/rust-src/just 安装、Rust tests/Clippy、audit 0 和 Web build/bundle 均通过，但实际 dev-server recipe 报 `rtk: command not found`，exit 127。原始日志保留为本机 `remote-full-c1e58a4-red.log`；不得将本地 full GREEN 覆盖这条 hosted RED。
+- RTK local RED/GREEN：给现有 dev-server contract 增加只暴露 node/npm/just/bash/sh 的隔离 PATH，真实 Vite 入口先复现相同 exit 127（`no-rtk-dev-server-red.log`）。Justfile 统一可选代理前缀后，同一合同 exit 0（`no-rtk-dev-server-green.log`）；原 RTK orchestration fixture、当前 PATH 和无 RTK PATH 均保留，不跳过门禁。
+- RTK 修复后 fresh local full：当前 stable `1.98.0` / Node `24.20.0`，`bash scripts/ci/run.sh full` exit 0（`full-after-rtk-fix.log`）；workspace/trybuild/Clippy、9/9 release contracts、fresh npm ci/audit 0、全部 Web contracts 和 build PASS，JS chunks 的大小与 hash 不变。npm 对 esbuild/fsevents 的未显式批准 install-script 提示仍可见，没有将其混作 audit vulnerability，也未改变脚本授权策略。远端新 head 尚待复跑，因此 7.3b/7.3c/7.6 继续保持未完成。

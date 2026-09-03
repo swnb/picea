@@ -28,6 +28,10 @@
 - **WHEN** full job 从 minimal Rust 工具链准备环境
 - **THEN** 它显式安装 `rust-src`，使包含标准库源码提示的既有 compile-fail 合同与本地验证一致；本地前置条件在验证文档中可发现
 
+#### Scenario: Development recipes do not require a local output proxy
+- **WHEN** Justfile 的工具入口运行在没有 RTK 的 PATH 中
+- **THEN** 入口直接调用相同工具并保留参数、环境变量和非零退出语义；full 合同在有 RTK 与隔离无 RTK 的环境中均验证真实 Vite 端口回退，不得跳过测试或把 RTK 新增为 CI 构建依赖
+
 ### Requirement: Layered continuous integration
 
 仓库 SHALL 在 pull request 与 main 更新时执行 fast/full correctness profiles，并在 scheduled 或 manual workflow 中执行 nightly/release profiles。Workflow MUST 使用 `pull_request` 而不是 `pull_request_target` 执行 PR code，MUST NOT 向 PR code 注入 secrets，MUST 使用只读仓库权限、不可变 action SHA、取消同 ref 的过期运行，且不得用容错标志吞掉 hard-gate failure。

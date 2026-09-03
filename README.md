@@ -158,6 +158,10 @@ The source component is needed for standard-library excerpts in the compile-fail
 diagnostic snapshots; CI installs these components explicitly.
 The full profile also needs `just` for its dev-server recipe contracts. The
 hosted full job installs the locally validated `just 1.45.0` explicitly.
+RTK is optional for Justfile tool recipes: when available they use `rtk proxy`,
+otherwise they invoke the same tools directly. The dev-server contract also
+runs real Vite with an isolated PATH containing no RTK, so a developer's local
+installation cannot hide this hosted-runner prerequisite boundary.
 
 ```bash
 just ci-fast

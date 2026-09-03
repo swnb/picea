@@ -1,5 +1,9 @@
 set shell := ["bash", "-uc"]
 
+# RTK is an optional local output proxy, not a build dependency. Keep tool argv
+# and exit status unchanged when a clean CI/developer PATH does not provide it.
+rtk_proxy := `if command -v rtk >/dev/null 2>&1; then printf 'rtk proxy'; fi`
+
 picea_lab_bind := env_var_or_default("PICEA_LAB_BIND", "127.0.0.1:8080")
 picea_lab_api_base := "http://" + picea_lab_bind
 picea_lab_web_api_base := env_var_or_default("VITE_PICEA_LAB_API_BASE", picea_lab_api_base)
@@ -47,7 +51,7 @@ picea-lab-web:
     web_api_base="${VITE_PICEA_LAB_API_BASE:-${api_base}}"
 
     echo "Starting picea-lab API on ${api_bind}"
-    rtk proxy cargo run -p picea-lab -- serve --bind "${api_bind}" &
+    {{ rtk_proxy }} cargo run -p picea-lab -- serve --bind "${api_bind}" &
     api_pid=$!
 
     cleanup() {
@@ -57,7 +61,7 @@ picea-lab-web:
     trap cleanup EXIT INT TERM
 
     for attempt in {1..120}; do
-        if rtk proxy curl -fsS "${ready_url}" >/dev/null 2>&1; then
+        if {{ rtk_proxy }} curl -fsS "${ready_url}" >/dev/null 2>&1; then
             echo "picea-lab API is ready at ${api_base}"
             break
         fi
@@ -79,7 +83,7 @@ picea-lab-web:
     # Keep Vite's default non-strict port behavior so local dev can fall through
     # to the next available port when the preferred one is already bound.
     VITE_PICEA_LAB_API_BASE="${web_api_base}" \
-        rtk proxy npm --prefix crates/picea-lab/web run dev -- \
+        {{ rtk_proxy }} npm --prefix crates/picea-lab/web run dev -- \
         --host "{{ picea_lab_web_host }}" \
         --port "{{ picea_lab_web_port }}"
 
@@ -87,12 +91,12 @@ picea-lab-web:
 picea-lab-api:
     api_bind="$(node crates/picea-lab/web/scripts/resolve-dev-bind.mjs "{{ picea_lab_bind }}")"; \
     echo "Starting picea-lab API on ${api_bind}"; \
-    rtk proxy cargo run -p picea-lab -- serve --bind "${api_bind}"
+    {{ rtk_proxy }} cargo run -p picea-lab -- serve --bind "${api_bind}"
 
 # Start only the Vite UI. Set VITE_PICEA_LAB_API_BASE if the API is elsewhere.
 picea-lab-web-ui:
     VITE_PICEA_LAB_API_BASE="{{ picea_lab_web_api_base }}" \
-        rtk proxy npm --prefix crates/picea-lab/web run dev -- \
+        {{ rtk_proxy }} npm --prefix crates/picea-lab/web run dev -- \
         --host "{{ picea_lab_web_host }}" \
         --port "{{ picea_lab_web_port }}"
 
@@ -133,4 +137,4 @@ picea-lab-web-logs:
 
 # Validate the picea-lab-web dev-server orchestration contract.
 picea-lab-web-check:
-    rtk proxy npm --prefix crates/picea-lab/web run test:dev-server
+    {{ rtk_proxy }} npm --prefix crates/picea-lab/web run test:dev-server
