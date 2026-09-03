@@ -72,7 +72,7 @@
 - [x] 7.3a 保留 stable full 的七条 macro span RED，补 Deref 尾逗号锁；只修复 attribute/meta 诊断跨度，并为 full 显式安装 rust-src，不改旧 stderr/生成 API，在 stable/nightly 上验证
 - [ ] 7.3b 闭合 full dev-server contract 的 just 环境依赖：保留无 just 的 ENOENT RED，workflow 显式安装本地已验证版本，并以远端实际 job 验证
 - [x] 7.4 对 fresh audit 命中的 Browserslist/postcss-selector-parser 做兼容 lock-only 补丁；使用明确 stable Rust/Node 24 重跑 fast/full/nightly，记录测试、长窗口、Criterion、fresh install/audit、Web build/contract 与真实 Rust source 的生产预览浏览器证据
-- [ ] 7.5 完成 scoped commit，并对相同 source commit 执行真实 clean release；复查差异、锁文件、OpenSpec、文档与工作区 custody
+- [x] 7.5 完成 scoped commit，并对相同 source commit 执行真实 clean release；复查差异、锁文件、OpenSpec、文档与工作区 custody
 - [ ] 7.6 只推送交付分支、创建 PR，核验最终 exact head 的远端 fast/full，不接受 missing 或旧 head 检查
 - [ ] 7.7 满足真实批准、讨论解决、线性历史和远端检查后合并，核验远端 main 与合并后检查；否则保留明确阻塞，不绕过保护、不修改本地 S6 main
 
@@ -101,3 +101,5 @@
 - Final local nightly：当前 stable `1.98.0` / Node `24.20.0`，`bash scripts/ci/run.sh nightly` exit 0；600 帧门 21.42s、1200 帧门 43.73s，均为 exact ignored test，未修改既有阈值。默认 sample-size 20 的 Criterion 完整运行并通过 9 个 exact counter IDs；wall-clock 只作本机观测，没有可比 ABBA/远端性能结论。
 - Browser production smoke：本轮独立 Rust binary `127.0.0.1:8080` + Vite production preview `127.0.0.1:4173`，默认 1280x720 桌面视口。fresh reload 的 HTML/CSS/三个 JS chunks 与 scenarios/session/control/SSE/frame 请求均为 2xx，捕获窗口未截断；在线 console warning/error 为 0。真实落箱连续三次单步 `3 -> 4 -> 5 -> 6` 且每次 state hash 改变；矩阵场景为 49 个物体；生成 120 帧真实矩阵产物并回放 `0 -> 1`，hash `45b94e1cac24d858 -> 89531527522016b1`；中英文切换往返通过。停掉本轮 API 后刷新，显示“离线演示数据 · 非真实模拟”，demo 单步 `demo-0000 -> demo-0001`，未冒充 Rust source。浏览器/预览进程均在验收后关闭，未修改主工作区服务。
 - 当前本地日志、浏览器结构化记录与截图位于 `/private/tmp/picea-delivery-receipts-20260903/`，Criterion 位于独立 worktree `target/criterion/`；这是本机证据目录，不声称已上传或等价于 hosted CI。
+- Scoped source commit：`ccaddfddeb8ff14e88a6e2c8a969cc021866a566`，只提交本轮 16 个 allowlisted 文件，原交付提交 `a7b3cb42` 保留。暂存前后 diff hygiene、Shell/Node syntax、四份 YAML parse、full prerequisite contract、OpenSpec strict validate 3/3 PASS；相对远端基线，core/lab/Web 运行时代码与 `Cargo.lock` 未改动。主工作区仍为 clean `main@80f08927`，没有引入后续 S6 commits。
+- Clean local release：在 `ccaddfd` 的空 `git status --porcelain` 上执行当前 stable/Node 24 的 release，exit 0；metadata PASS，`picea` 63 files / 235.0KiB compressed、`picea-macro-tools` 78 files / 17.6KiB compressed，均从 package 重新构建。两个 archive 的 `.cargo_vcs_info.json` 精确指向 `ccaddfddeb8ff14e88a6e2c8a969cc021866a566` 且无 dirty 标记。首次执行仅有 Cargo registry index 缓存写权限 warning，未跳过验证；收据提交后再以最终 head 重跑。此为真实 clean local candidate，不是 hosted release 或 publish 证明。
