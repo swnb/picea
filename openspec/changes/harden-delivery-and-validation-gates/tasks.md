@@ -70,11 +70,11 @@
 - [x] 7.2 完成本轮 proposal/design/spec 增量并通过 OpenSpec status、strict validate 和 apply instructions
 - [x] 7.3 在实际 Bash 3.2 建立 clean release RED，最小修复并验证 clean/dirty local、clean/dirty CI、metadata/package 失败传播 contract；接入 fast/full
 - [x] 7.3a 保留 stable full 的七条 macro span RED，补 Deref 尾逗号锁；只修复 attribute/meta 诊断跨度，并为 full 显式安装 rust-src，不改旧 stderr/生成 API，在 stable/nightly 上验证
-- [ ] 7.3b 闭合 full dev-server contract 的 just 环境依赖：保留无 just 的 ENOENT RED，workflow 显式安装本地已验证版本，并以远端实际 job 验证
-- [ ] 7.3c 闭合首轮 hosted Full 的 RTK 依赖泄漏：保留远端 exit 127，新增无 RTK 的隔离 PATH 真实 Vite 回归锁；Justfile 仅可选使用代理，重新通过本地 full 和 exact-head hosted Fast/Full
+- [x] 7.3b 闭合 full dev-server contract 的 just 环境依赖：保留无 just 的 ENOENT RED，workflow 显式安装本地已验证版本，并以远端实际 job 验证
+- [x] 7.3c 闭合首轮 hosted Full 的 RTK 依赖泄漏：保留远端 exit 127，新增无 RTK 的隔离 PATH 真实 Vite 回归锁；Justfile 仅可选使用代理，重新通过本地 full 和 exact-head hosted Fast/Full
 - [x] 7.4 对 fresh audit 命中的 Browserslist/postcss-selector-parser 做兼容 lock-only 补丁；使用明确 stable Rust/Node 24 重跑 fast/full/nightly，记录测试、长窗口、Criterion、fresh install/audit、Web build/contract 与真实 Rust source 的生产预览浏览器证据
 - [x] 7.5 完成 scoped commit，并对相同 source commit 执行真实 clean release；复查差异、锁文件、OpenSpec、文档与工作区 custody
-- [ ] 7.6 只推送交付分支、创建 PR，核验最终 exact head 的远端 fast/full，不接受 missing 或旧 head 检查
+- [x] 7.6 只推送交付分支、创建 PR，核验最终 exact head 的远端 fast/full，不接受 missing 或旧 head 检查
 - [ ] 7.7 满足真实批准、讨论解决、线性历史和远端检查后合并，核验远端 main 与合并后检查；否则保留明确阻塞，不绕过保护、不修改本地 S6 main
 
 ### Current boundary
@@ -83,7 +83,7 @@
 本轮不执行 OpenSpec archive/sync、deploy 或 publish。远端夜间/打包门在实际运行前
 仍为 `NOT RUN / UNKNOWN`，不由本地 profile 代替。
 
-### Fresh acceptance receipt (2026-09-03, in progress)
+### Fresh acceptance receipt (2026-09-03, code/CI accepted; merge awaiting review)
 
 - Planning：OpenSpec 1.6.0 status 4/4、`validate --all --strict` 3/3 PASS，apply state `ready`；没有当前版本可用的独立 `verify` 命令。
 - Release regression RED：`rtk proxy node --test scripts/ci/release-profile.test.mjs` 在实际 Bash `3.2.57(1)-release` 上 exit 1；9 项中 7 PASS、2 FAIL，只有 clean local/CI 报 `package_dirty_flag[@]: unbound variable`。
@@ -108,3 +108,7 @@
 - PR #3 已从交付分支推送创建；首轮 Actions run `33714447948` 对应 `c1e58a4`。Fast PASS（job `100520548197`）；Full FAIL（job `100520548315`）：stable/rust-src/just 安装、Rust tests/Clippy、audit 0 和 Web build/bundle 均通过，但实际 dev-server recipe 报 `rtk: command not found`，exit 127。原始日志保留为本机 `remote-full-c1e58a4-red.log`；不得将本地 full GREEN 覆盖这条 hosted RED。
 - RTK local RED/GREEN：给现有 dev-server contract 增加只暴露 node/npm/just/bash/sh 的隔离 PATH，真实 Vite 入口先复现相同 exit 127（`no-rtk-dev-server-red.log`）。Justfile 统一可选代理前缀后，同一合同 exit 0（`no-rtk-dev-server-green.log`）；原 RTK orchestration fixture、当前 PATH 和无 RTK PATH 均保留，不跳过门禁。
 - RTK 修复后 fresh local full：当前 stable `1.98.0` / Node `24.20.0`，`bash scripts/ci/run.sh full` exit 0（`full-after-rtk-fix.log`）；workspace/trybuild/Clippy、9/9 release contracts、fresh npm ci/audit 0、全部 Web contracts 和 build PASS，JS chunks 的大小与 hash 不变。npm 对 esbuild/fsevents 的未显式批准 install-script 提示仍可见，没有将其混作 audit vulnerability，也未改变脚本授权策略。远端新 head 尚待复跑，因此 7.3b/7.3c/7.6 继续保持未完成。
+- Hosted GREEN：修复 head `d7c69833e12f35f044f79d218a889ff7f49aa95e` 的 Actions run `33715665089` 最终 `completed/success`；Fast job `100524205519` 为 1m05s，Full job `100524205558` 为 4m25s，2026-09-03 04:40:56 UTC 完成。完整 Full 原始日志确认 rust-src/just 准备、workspace/Clippy/audit/build 和无 RTK dev-server contract 全部通过；不只是检查记录存在。对应本机日志 `remote-full-d7c6983-green.log`。这条实际结果关闭 7.3b/7.3c/7.6；收据文档提交后仍须对交付最终 head 再核验 CI，结果写入 PR，不能沿用旧 head 的绿色。
+- Clean source package：`d7c6983` 的 release exit 0（`release-d7c6983.log`），两包均从 archive 重建通过，VCS SHA 精确匹配完整 head，无 dirty 标记或 registry cache warning。
+- Merge readiness：PR #3 无代码冲突（`MERGEABLE`），但 `mergeStateStatus=BLOCKED`、`reviewDecision=REVIEW_REQUIRED`，reviews 为空。现场分支保护要求 1 个有效批准、讨论解决、线性历史；当前具写权限的 collaborator 只有作者 `swnb`，作者不能自批。7.7 保留未完成；没有尝试管理员 bypass、修改保护、伪造批准或合并。
+- 其余边界：`required_status_checks` 当前为 null，本轮不擅自修改仓库规则；这是尚未自动强制 Fast/Full 的管理配置缺口，不影响本次实际 exact-head CI 已验事实。hosted nightly/release 仍为 `NOT RUN / UNKNOWN`，没有 publish/deploy 或 OpenSpec archive/sync。默认分支 4 条 Dependabot 告警尚待合并后重扫；PR lock 的 PostCSS 8.5.25 / selector-parser 6.1.4 覆盖全部对应修复下限，不提前关闭告警。主工作区 main/S6 `80f08927` 与后续提交保持不动。
